@@ -111,26 +111,6 @@ pub(super) fn validate_momentum(momentum: f32) -> Result<(), Error> {
     Ok(())
 }
 
-/// Validates that channel axis is valid (not 0, within bounds)
-pub(super) fn validate_channel_axis(channel_axis: usize, input_ndim: usize) -> Result<(), Error> {
-    if channel_axis == 0 {
-        return Err(Error::invalid_parameter(
-            "channel_axis",
-            "Channel axis cannot be 0 (batch axis)",
-        ));
-    }
-    if channel_axis >= input_ndim {
-        return Err(Error::invalid_parameter(
-            "channel_axis",
-            format!(
-                "Channel axis {} is out of bounds for input with {} dimensions",
-                channel_axis, input_ndim
-            ),
-        ));
-    }
-    Ok(())
-}
-
 /// Validates that num_groups divides num_channels evenly
 pub(super) fn validate_num_groups(num_channels: usize, num_groups: usize) -> Result<(), Error> {
     if !num_channels.is_multiple_of(num_groups) {

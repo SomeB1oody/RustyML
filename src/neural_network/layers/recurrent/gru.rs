@@ -24,7 +24,7 @@ use std::borrow::Cow;
 /// gates to control information flow and mitigate vanishing gradients
 ///
 /// All 3 gates are stored fused: the kernels are packed side by side into single matrices
-/// with column blocks in the order `[reset | update | candidate]` (`[r | z | h]`), so the input
+/// with column blocks in the order `[update | reset | candidate]` (`[z | r | h]`), Keras' layout, so the input
 /// projection and the gradient reductions each run as one GEMM instead of three. Per timestep
 /// the reset and update recurrent projections fuse into one GEMM; only the candidate's recurrent
 /// projection stays separate because its input `r_t .* h_{t-1}` depends on the freshly computed
@@ -63,7 +63,7 @@ pub struct GRU {
     /// Number of GRU units (neurons) in the layer
     units: usize,
 
-    /// Fused gate weights, column blocks in the order `[r | z | h]`
+    /// Fused gate weights, column blocks in the order `[z | r | h]`
     gates: FusedGates,
 
     /// Cached input tensor for backward propagation
@@ -150,7 +150,7 @@ impl GRU {
         self
     }
 
-    /// Initializes the fused `[r | z | h]` gate blocks from the given seed
+    /// Initializes the fused `[z | r | h]` gate blocks from the given seed
     ///
     /// One RNG is threaded through all 3 gate blocks; all biases start at 0.0
     fn init_gates(
@@ -167,7 +167,7 @@ impl GRU {
     /// # Parameters
     ///
     /// - `kernel` - Fused input kernel with shape (input_dim, 3 * units), gate column blocks in
-    ///   the order `[r | z | h]` (reset, update, candidate)
+    ///   the order `[z | r | h]` (update, reset, candidate), matching Keras
     /// - `recurrent_kernel` - Fused recurrent kernel with shape (units, 3 * units), same block order
     /// - `bias` - Fused bias with shape (1, 3 * units), same block order
     ///
@@ -196,11 +196,15 @@ impl GRU {
         Ok(())
     }
 
-    /// Sets the weights gate by gate, packing them into the fused `[r | z | h]` layout
+    /// Sets the weights gate by gate, packing them into the fused `[z | r | h]` layout
     ///
     /// Convenience wrapper over [`GRU::set_weights`] for callers that hold per-gate matrices
     ///
     /// # Parameters
+    ///
+    /// The arguments stay in reset-update-candidate order even though the fused kernel packs
+    /// update first: every one of them is an `Array2<f32>`, so reordering them to match the packing
+    /// would compile at every existing call site and silently swap two gates
     ///
     /// - `reset_kernel` - Input kernel for the reset gate with shape (input_dim, units)
     /// - `reset_recurrent_kernel` - Recurrent kernel for the reset gate with shape (units, units)
@@ -265,8 +269,8 @@ impl GRU {
         let kernel = concatenate(
             Axis(1),
             &[
-                reset_kernel.view(),
                 update_kernel.view(),
+                reset_kernel.view(),
                 candidate_kernel.view(),
             ],
         )
@@ -274,15 +278,15 @@ impl GRU {
         let recurrent_kernel = concatenate(
             Axis(1),
             &[
-                reset_recurrent_kernel.view(),
                 update_recurrent_kernel.view(),
+                reset_recurrent_kernel.view(),
                 candidate_recurrent_kernel.view(),
             ],
         )
         .expect("per-gate recurrent kernels share [units, units]");
         let bias = concatenate(
             Axis(1),
-            &[reset_bias.view(), update_bias.view(), candidate_bias.view()],
+            &[update_bias.view(), reset_bias.view(), candidate_bias.view()],
         )
         .expect("per-gate biases share [1, units]");
 
@@ -350,8 +354,8 @@ impl GRU {
                 Parallelism::Rayon(0),
             );
             let rz = apply_sigmoid(rz);
-            let r_t = rz.slice(s![.., 0..u]).to_owned();
-            let z_t = rz.slice(s![.., u..2 * u]).to_owned();
+            let z_t = rz.slice(s![.., 0..u]).to_owned();
+            let r_t = rz.slice(s![.., u..2 * u]).to_owned();
 
             // r_t .* h_{t-1}, then the candidate hidden state
             let r_h = &r_t * &h_prev;
@@ -373,7 +377,7 @@ impl GRU {
                 .unwrap();
 
             // Hidden state update
-            let h_t = &(1.0 - &z_t) * &h_prev + &z_t * &h_candidate;
+            let h_t = &z_t * &h_prev + &(1.0 - &z_t) * &h_candidate;
 
             if let Some(c) = caches.as_deref_mut() {
                 c.r.push(r_t);
@@ -445,7 +449,7 @@ impl Layer for GRU {
         let feat = x3.shape()[2];
         let u = self.units;
 
-        // Fused pre-activation gradients for every timestep, gate blocks [r | z | h]
+        // Fused pre-activation gradients for every timestep, gate blocks [z | r | h]
         let mut dz3 = Array3::<f32>::zeros((batch, timesteps, 3 * u));
 
         let mut grad_h = grad_h_t;
@@ -457,10 +461,10 @@ impl Layer for GRU {
             let z_t = &z_vals[t];
             let h_candidate = &h_candidate_vals[t];
 
-            // Gradient through h_t = (1 - z_t) .* h_{t-1} + z_t .* h_candidate
-            let grad_z_t = &grad_h * (h_candidate - h_prev);
-            let grad_h_candidate = &grad_h * z_t;
-            let grad_h_prev_from_update = &grad_h * &(1.0 - z_t);
+            // Gradient through h_t = z_t .* h_{t-1} + (1 - z_t) .* h_candidate
+            let grad_z_t = &grad_h * (h_prev - h_candidate);
+            let grad_h_candidate = &grad_h * &(1.0 - z_t);
+            let grad_h_prev_from_update = &grad_h * z_t;
 
             // Gradient through h_candidate = activation(...), via the activation backward
             let grad_h_candidate_raw = act
@@ -483,10 +487,10 @@ impl Layer for GRU {
             let grad_z_raw = &grad_z_t * z_t * &(1.0 - z_t);
             let grad_r_raw = &grad_r_t * r_t * &(1.0 - r_t);
 
-            // Assemble the fused reset+update dz for this timestep
+            // Assemble the fused update+reset dz for this timestep, in kernel block order
             let mut dz_rz_t = Array2::<f32>::zeros((batch, 2 * u));
-            dz_rz_t.slice_mut(s![.., 0..u]).assign(&grad_r_raw);
-            dz_rz_t.slice_mut(s![.., u..2 * u]).assign(&grad_z_raw);
+            dz_rz_t.slice_mut(s![.., 0..u]).assign(&grad_z_raw);
+            dz_rz_t.slice_mut(s![.., u..2 * u]).assign(&grad_r_raw);
 
             // Gradient w.r.t. the previous hidden state
             grad_h = dot(

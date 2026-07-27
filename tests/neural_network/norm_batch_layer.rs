@@ -541,10 +541,13 @@ fn ln_multiple_axes_output_has_mean_zero_and_var_one() {
 }
 
 /// LN Multiple([1]) on a [2, 3, 4] input normalizes the 3 elements of axis=1 for each
-/// (batch, spatial) position, giving mean ~= 0 and var ~= 1 along axis=1
+/// (axis-0, axis-2) position, giving mean ~= 0 and var ~= 1 along axis=1
+///
+/// LayerNormalization reduces over whichever axes it is told to, with no channel notion of its
+/// own, so this test is independent of the channels-last convention
 #[test]
 fn ln_multiple_single_axis_on_3d_input() {
-    // shape [2, 3, 4]: 2 batches, 3 channels, 4 spatial
+    // shape [2, 3, 4]: axis 0 has 2 entries, axis 1 has 3 (the normalized axis), axis 2 has 4
     let data: Vec<f32> = (0..24).map(|i| i as f32 * 0.5 - 5.0).collect();
     let shape = vec![2, 3, 4];
     let input = ArrayD::from_shape_vec(shape.clone(), data).unwrap();
@@ -886,35 +889,40 @@ fn bn_new_scalar_param_branch_forward_1d() {
     assert_allclose(&output, &expected, 1e-5);
 }
 
-/// Spatial batch norm (rank > 2): a [1, 2, 2, 2] input normalizes each channel over its (N, H, W)
-/// values, and the parameters are per-channel (2*C), not per spatial element
+/// Spatial batch norm (rank > 2): a channels-last [N, H, W, C] input normalizes each channel over
+/// its (N, H, W) values, and the parameters are per-channel (2*C), not per spatial element
 #[test]
 fn bn_spatial_4d_normalizes_per_channel() {
     use rustyml::neural_network::Tensor;
     use rustyml::neural_network::layers::TrainingParameters;
 
+    // [N=1, H=2, W=2, C=2]
     let mut bn = BatchNormalization::new(vec![1, 2, 2, 2], 0.9, 1e-5).unwrap();
     // Per-channel (C=2) parameters: gamma[2] + beta[2] = 4 trainable (not 2*C*H*W = 16)
     assert!(matches!(bn.param_count(), TrainingParameters::Trainable(4)));
 
-    // channel 0 = {1,2,3,4}, channel 1 = {5,6,7,8} (row-major [N, C, H, W])
+    // Channels-last row-major order is [h, w, c], so each adjacent pair is one spatial position's
+    // [channel0, channel1]. This lays down channel 0 = {1,2,3,4} and channel 1 = {5,6,7,8}
     let x: Tensor =
-        ArrayD::from_shape_vec(vec![1, 2, 2, 2], vec![1., 2., 3., 4., 5., 6., 7., 8.]).unwrap();
+        ArrayD::from_shape_vec(vec![1, 2, 2, 2], vec![1., 5., 2., 6., 3., 7., 4., 8.]).unwrap();
     let out = bn.forward(&x).unwrap();
     assert_eq!(out.shape(), &[1, 2, 2, 2]);
 
-    // Each channel has variance 1.25, so the normalized values repeat per channel
+    // Channel 0: mean 2.5, population variance ((-1.5)^2+(-0.5)^2+0.5^2+1.5^2)/4 = 1.25
+    // Channel 1: mean 6.5, same spread, so the same variance 1.25 and the same inverse std.
+    // The centered values of both channels are therefore [-1.5, -0.5, 0.5, 1.5], and the
+    // channels-last interleaving puts the same offset side by side at each position
     let inv = 1.0 / (1.25f32 + 1e-5).sqrt();
     let expected: Tensor = ArrayD::from_shape_vec(
         vec![1, 2, 2, 2],
         vec![
             -1.5 * inv,
-            -0.5 * inv,
-            0.5 * inv,
-            1.5 * inv,
             -1.5 * inv,
             -0.5 * inv,
+            -0.5 * inv,
             0.5 * inv,
+            0.5 * inv,
+            1.5 * inv,
             1.5 * inv,
         ],
     )
@@ -926,6 +934,7 @@ fn bn_spatial_4d_normalizes_per_channel() {
 #[test]
 fn bn_spatial_4d_backward_shape() {
     use rustyml::neural_network::Tensor;
+    // [N=2, H=3, W=2, C=2]: the trailing axis is the channel axis
     let mut bn = BatchNormalization::new(vec![2, 3, 2, 2], 0.9, 1e-5).unwrap();
     let x: Tensor =
         ArrayD::from_shape_fn(vec![2, 3, 2, 2], |idx| (idx[1] + idx[2] + idx[3]) as f32);

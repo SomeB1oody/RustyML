@@ -59,7 +59,7 @@ pub use max_pooling_3d::MaxPooling3D;
 /// # Generated Functions
 ///
 /// - `output_shape()`: returns a formatted string of the output dimensions; if the input
-///   shape is available it returns the batch size and channel count as
+///   shape is available it returns the batch size and the trailing channel count as
 ///   `"(batch_size, channels)"`, otherwise `"Unknown"`
 /// - all functions from the `no_trainable_parameters_layer_functions!()` macro
 ///
@@ -71,7 +71,11 @@ macro_rules! layer_functions_global_pooling {
     () => {
         fn output_shape(&self) -> String {
             if !self.input_shape.is_empty() {
-                format!("({}, {})", self.input_shape[0], self.input_shape[1])
+                format!(
+                    "({}, {})",
+                    self.input_shape[0],
+                    self.input_shape[self.input_shape.len() - 1]
+                )
             } else {
                 String::from("Unknown")
             }
@@ -88,8 +92,8 @@ macro_rules! layer_functions_global_pooling {
 /// - the standard functions for layers without trainable parameters
 ///
 /// Designed for pooling layers that operate on 3D tensors with shape
-/// `[batch_size, channels, length]` and produce outputs with shape
-/// `[batch_size, channels, output_length]`
+/// `[batch_size, length, channels]` and produce outputs with shape
+/// `[batch_size, output_length, channels]`
 ///
 /// # Generated Functions
 ///
@@ -134,8 +138,8 @@ macro_rules! layer_functions_1d_pooling {
 /// - the standard functions for layers without trainable parameters
 ///
 /// Designed for pooling layers that operate on 4D tensors with shape
-/// `[batch_size, channels, height, width]` and produce outputs with shape
-/// `[batch_size, channels, output_height, output_width]`
+/// `[batch_size, height, width, channels]` and produce outputs with shape
+/// `[batch_size, output_height, output_width, channels]`
 ///
 /// # Generated Functions
 ///
@@ -180,8 +184,8 @@ macro_rules! layer_functions_2d_pooling {
 /// - the standard functions for layers without trainable parameters
 ///
 /// Designed for pooling layers that operate on 5D tensors with shape
-/// `[batch_size, channels, depth, height, width]` and produce outputs with shape
-/// `[batch_size, channels, output_depth, output_height, output_width]`
+/// `[batch_size, depth, height, width, channels]` and produce outputs with shape
+/// `[batch_size, output_depth, output_height, output_width, channels]`
 ///
 /// # Generated Functions
 ///

@@ -167,7 +167,7 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///     - `LayerWeight::Dense` for Dense layers with weight and bias
     ///     - `LayerWeight::SimpleRNN` for SimpleRNN layers with kernel, recurrent_kernel, and bias
     ///     - `LayerWeight::LSTM` / `LayerWeight::GRU` for recurrent layers with fused kernel,
-    ///       recurrent_kernel, and bias (gate column blocks `[i | f | g | o]` / `[r | z | h]`)
+    ///       recurrent_kernel, and bias (gate column blocks `[i | f | g | o]` / `[z | r | h]`)
     ///     - `LayerWeight::Conv1D`, `LayerWeight::Conv2D`, `LayerWeight::Conv3D` for convolutional layers
     ///     - `LayerWeight::Empty` for layers with no trainable parameters
     fn get_weights(&self) -> LayerWeight<'_>;

@@ -86,9 +86,10 @@ fn dense_input_gradient_matches_finite_difference() {
 
 #[test]
 fn conv2d_input_gradient_matches_finite_difference() {
-    let mut conv = Conv2D::new(2, (2, 2), vec![1, 1, 4, 4], (1, 1), Linear::new()).unwrap();
+    // Channels-last: [batch, height, width, channels]
+    let mut conv = Conv2D::new(2, (2, 2), vec![1, 4, 4, 1], (1, 1), Linear::new()).unwrap();
     let x = Array::from_shape_vec(
-        (1, 1, 4, 4),
+        (1, 4, 4, 1),
         (0..16).map(|v| 0.1 * v as f32 - 0.7).collect(),
     )
     .unwrap()
@@ -99,8 +100,9 @@ fn conv2d_input_gradient_matches_finite_difference() {
 #[test]
 fn conv1d_input_gradient_matches_finite_difference() {
     // Linear activation makes the convolution linear in its input, so finite differences match tightly
-    let mut conv = Conv1D::new(2, 2, vec![1, 1, 5], 1, Linear::new()).unwrap();
-    let x = Array::from_shape_vec((1, 1, 5), (0..5).map(|v| 0.1 * v as f32 - 0.3).collect())
+    // Channels-last: [batch, length, channels]
+    let mut conv = Conv1D::new(2, 2, vec![1, 5, 1], 1, Linear::new()).unwrap();
+    let x = Array::from_shape_vec((1, 5, 1), (0..5).map(|v| 0.1 * v as f32 - 0.3).collect())
         .unwrap()
         .into_dyn();
     check_input_gradient(&mut conv, &x, 1e-3, 1e-2);
@@ -108,10 +110,11 @@ fn conv1d_input_gradient_matches_finite_difference() {
 
 #[test]
 fn conv3d_input_gradient_matches_finite_difference() {
+    // Channels-last: [batch, depth, height, width, channels]
     let mut conv =
-        Conv3D::new(2, (2, 2, 2), vec![1, 1, 3, 3, 3], (1, 1, 1), Linear::new()).unwrap();
+        Conv3D::new(2, (2, 2, 2), vec![1, 3, 3, 3, 1], (1, 1, 1), Linear::new()).unwrap();
     let x = Array::from_shape_vec(
-        (1, 1, 3, 3, 3),
+        (1, 3, 3, 3, 1),
         (0..27).map(|v| 0.05 * v as f32 - 0.4).collect(),
     )
     .unwrap()
@@ -122,9 +125,9 @@ fn conv3d_input_gradient_matches_finite_difference() {
 #[test]
 fn separable_conv2d_input_gradient_matches_finite_difference() {
     let mut conv =
-        SeparableConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), 1, Linear::new()).unwrap();
+        SeparableConv2D::new(2, (2, 2), vec![1, 4, 4, 2], (1, 1), 1, Linear::new()).unwrap();
     let x = Array::from_shape_vec(
-        (1, 2, 4, 4),
+        (1, 4, 4, 2),
         (0..32).map(|v| 0.05 * v as f32 - 0.7).collect(),
     )
     .unwrap()
@@ -136,11 +139,11 @@ fn separable_conv2d_input_gradient_matches_finite_difference() {
 fn separable_conv2d_same_padding_input_gradient_matches_finite_difference() {
     // A 3x3 kernel under `Same` adds leading padding; guards that backward accumulates the input
     // gradient in padded coordinates and strips the padding, matching the padded forward pass
-    let mut conv = SeparableConv2D::new(2, (3, 3), vec![1, 2, 4, 4], (1, 1), 1, Linear::new())
+    let mut conv = SeparableConv2D::new(2, (3, 3), vec![1, 4, 4, 2], (1, 1), 1, Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
     let x = Array::from_shape_vec(
-        (1, 2, 4, 4),
+        (1, 4, 4, 2),
         (0..32).map(|v| 0.05 * v as f32 - 0.7).collect(),
     )
     .unwrap()
@@ -151,10 +154,9 @@ fn separable_conv2d_same_padding_input_gradient_matches_finite_difference() {
 #[test]
 fn depthwise_conv2d_input_gradient_matches_finite_difference() {
     // `new` Xavier-initializes the weights, so the layer is a genuine (non-constant) map
-    let mut conv =
-        DepthwiseConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), Linear::new()).unwrap();
+    let mut conv = DepthwiseConv2D::new((2, 2), vec![1, 4, 4, 2], (1, 1), Linear::new()).unwrap();
     let x = Array::from_shape_vec(
-        (1, 2, 4, 4),
+        (1, 4, 4, 2),
         (0..32).map(|v| 0.05 * v as f32 - 0.7).collect(),
     )
     .unwrap()
@@ -166,11 +168,11 @@ fn depthwise_conv2d_input_gradient_matches_finite_difference() {
 fn depthwise_conv2d_same_padding_input_gradient_matches_finite_difference() {
     // 3x3 `Same` kernel adds leading padding; with depthwise routed through the grouped engine this
     // guards that the engine pads each channel and crops its input gradient back to the input size
-    let mut conv = DepthwiseConv2D::new(2, (3, 3), vec![1, 2, 4, 4], (1, 1), Linear::new())
+    let mut conv = DepthwiseConv2D::new((3, 3), vec![1, 4, 4, 2], (1, 1), Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
     let x = Array::from_shape_vec(
-        (1, 2, 4, 4),
+        (1, 4, 4, 2),
         (0..32).map(|v| 0.05 * v as f32 - 0.7).collect(),
     )
     .unwrap()
@@ -180,11 +182,11 @@ fn depthwise_conv2d_same_padding_input_gradient_matches_finite_difference() {
 
 #[test]
 fn depthwise_conv2d_same_padding_weight_gradient_matches_finite_difference() {
-    let mut conv = DepthwiseConv2D::new(2, (3, 3), vec![1, 2, 4, 4], (1, 1), Linear::new())
+    let mut conv = DepthwiseConv2D::new((3, 3), vec![1, 4, 4, 2], (1, 1), Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
     let x = Array::from_shape_vec(
-        (1, 2, 4, 4),
+        (1, 4, 4, 2),
         (0..32).map(|v| 0.05 * v as f32 - 0.7).collect(),
     )
     .unwrap()
@@ -251,14 +253,15 @@ fn conv1d_same_padding_output_length_is_ceil_of_input() {
         (7, 3, 2, 4),
     ];
     for (len, kernel, stride, expected) in cases {
-        let mut conv = Conv1D::new(2, kernel, vec![1, 1, len], stride, Linear::new())
+        let mut conv = Conv1D::new(2, kernel, vec![1, len, 1], stride, Linear::new())
             .unwrap()
             .with_padding(PaddingType::Same);
-        let x = Array::ones((1, 1, len)).into_dyn();
+        let x = Array::ones((1, len, 1)).into_dyn();
         let out = conv.forward(&x).unwrap();
+        // Channels-last output: [batch, out_len, filters]
         assert_eq!(
             out.shape(),
-            &[1, 2, expected],
+            &[1, expected, 2],
             "Conv1D Same: input_len={}, kernel={}, stride={}",
             len,
             kernel,
@@ -318,8 +321,8 @@ fn dense_weight_gradient_matches_finite_difference() {
 
 #[test]
 fn conv1d_weight_gradient_matches_finite_difference() {
-    let mut conv = Conv1D::new(2, 2, vec![1, 1, 5], 1, Linear::new()).unwrap();
-    let x = Array::from_shape_vec((1, 1, 5), (0..5).map(|v| 0.1 * v as f32 - 0.3).collect())
+    let mut conv = Conv1D::new(2, 2, vec![1, 5, 1], 1, Linear::new()).unwrap();
+    let x = Array::from_shape_vec((1, 5, 1), (0..5).map(|v| 0.1 * v as f32 - 0.3).collect())
         .unwrap()
         .into_dyn();
     check_weight_gradient(&mut conv, &x, 1e-3, 1e-2);
@@ -327,9 +330,9 @@ fn conv1d_weight_gradient_matches_finite_difference() {
 
 #[test]
 fn conv2d_weight_gradient_matches_finite_difference() {
-    let mut conv = Conv2D::new(2, (2, 2), vec![1, 1, 4, 4], (1, 1), Linear::new()).unwrap();
+    let mut conv = Conv2D::new(2, (2, 2), vec![1, 4, 4, 1], (1, 1), Linear::new()).unwrap();
     let x = Array::from_shape_vec(
-        (1, 1, 4, 4),
+        (1, 4, 4, 1),
         (0..16).map(|v| 0.1 * v as f32 - 0.7).collect(),
     )
     .unwrap()
@@ -340,9 +343,9 @@ fn conv2d_weight_gradient_matches_finite_difference() {
 #[test]
 fn conv3d_weight_gradient_matches_finite_difference() {
     let mut conv =
-        Conv3D::new(2, (2, 2, 2), vec![1, 1, 3, 3, 3], (1, 1, 1), Linear::new()).unwrap();
+        Conv3D::new(2, (2, 2, 2), vec![1, 3, 3, 3, 1], (1, 1, 1), Linear::new()).unwrap();
     let x = Array::from_shape_vec(
-        (1, 1, 3, 3, 3),
+        (1, 3, 3, 3, 1),
         (0..27).map(|v| 0.05 * v as f32 - 0.4).collect(),
     )
     .unwrap()
@@ -353,9 +356,9 @@ fn conv3d_weight_gradient_matches_finite_difference() {
 #[test]
 fn separable_conv2d_weight_gradient_matches_finite_difference() {
     let mut conv =
-        SeparableConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), 1, Linear::new()).unwrap();
+        SeparableConv2D::new(2, (2, 2), vec![1, 4, 4, 2], (1, 1), 1, Linear::new()).unwrap();
     let x = Array::from_shape_vec(
-        (1, 2, 4, 4),
+        (1, 4, 4, 2),
         (0..32).map(|v| 0.05 * v as f32 - 0.7).collect(),
     )
     .unwrap()
@@ -367,11 +370,11 @@ fn separable_conv2d_weight_gradient_matches_finite_difference() {
 fn separable_conv2d_same_padding_weight_gradient_matches_finite_difference() {
     // Companion to the `Same` input-gradient check: a 3x3 kernel with leading padding guards that
     // the depthwise weight gradient is accumulated against the padded input
-    let mut conv = SeparableConv2D::new(2, (3, 3), vec![1, 2, 4, 4], (1, 1), 1, Linear::new())
+    let mut conv = SeparableConv2D::new(2, (3, 3), vec![1, 4, 4, 2], (1, 1), 1, Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
     let x = Array::from_shape_vec(
-        (1, 2, 4, 4),
+        (1, 4, 4, 2),
         (0..32).map(|v| 0.05 * v as f32 - 0.7).collect(),
     )
     .unwrap()
@@ -381,10 +384,9 @@ fn separable_conv2d_same_padding_weight_gradient_matches_finite_difference() {
 
 #[test]
 fn depthwise_conv2d_weight_gradient_matches_finite_difference() {
-    let mut conv =
-        DepthwiseConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), Linear::new()).unwrap();
+    let mut conv = DepthwiseConv2D::new((2, 2), vec![1, 4, 4, 2], (1, 1), Linear::new()).unwrap();
     let x = Array::from_shape_vec(
-        (1, 2, 4, 4),
+        (1, 4, 4, 2),
         (0..32).map(|v| 0.05 * v as f32 - 0.7).collect(),
     )
     .unwrap()
@@ -457,57 +459,57 @@ fn softmax_input_gradient_matches_finite_difference() {
 
 #[test]
 fn max_pooling_1d_input_gradient_matches_finite_difference() {
-    let mut pool = MaxPooling1D::new(2, vec![1, 2, 6]).unwrap();
-    let x = ramp(&[1, 2, 6]);
+    let mut pool = MaxPooling1D::new(2, vec![1, 6, 2]).unwrap();
+    let x = ramp(&[1, 6, 2]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
 #[test]
 fn max_pooling_2d_input_gradient_matches_finite_difference() {
-    let mut pool = MaxPooling2D::new((2, 2), vec![1, 2, 4, 4]).unwrap();
-    let x = ramp(&[1, 2, 4, 4]);
+    let mut pool = MaxPooling2D::new((2, 2), vec![1, 4, 4, 2]).unwrap();
+    let x = ramp(&[1, 4, 4, 2]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
 #[test]
 fn max_pooling_3d_input_gradient_matches_finite_difference() {
-    let mut pool = MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4]).unwrap();
-    let x = ramp(&[1, 1, 4, 4, 4]);
+    let mut pool = MaxPooling3D::new((2, 2, 2), vec![1, 4, 4, 4, 1]).unwrap();
+    let x = ramp(&[1, 4, 4, 4, 1]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
 #[test]
 fn average_pooling_1d_input_gradient_matches_finite_difference() {
-    let mut pool = AveragePooling1D::new(2, vec![1, 2, 6]).unwrap();
-    let x = ramp(&[1, 2, 6]);
+    let mut pool = AveragePooling1D::new(2, vec![1, 6, 2]).unwrap();
+    let x = ramp(&[1, 6, 2]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
 #[test]
 fn average_pooling_2d_input_gradient_matches_finite_difference() {
-    let mut pool = AveragePooling2D::new((2, 2), vec![1, 2, 4, 4]).unwrap();
-    let x = ramp(&[1, 2, 4, 4]);
+    let mut pool = AveragePooling2D::new((2, 2), vec![1, 4, 4, 2]).unwrap();
+    let x = ramp(&[1, 4, 4, 2]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
 #[test]
 fn average_pooling_3d_input_gradient_matches_finite_difference() {
-    let mut pool = AveragePooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4]).unwrap();
-    let x = ramp(&[1, 1, 4, 4, 4]);
+    let mut pool = AveragePooling3D::new((2, 2, 2), vec![1, 4, 4, 4, 1]).unwrap();
+    let x = ramp(&[1, 4, 4, 4, 1]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
 #[test]
 fn global_max_pooling_1d_input_gradient_matches_finite_difference() {
     let mut pool = GlobalMaxPooling1D::new();
-    let x = ramp(&[1, 2, 5]);
+    let x = ramp(&[1, 5, 2]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
 #[test]
 fn global_max_pooling_2d_input_gradient_matches_finite_difference() {
     let mut pool = GlobalMaxPooling2D::new();
-    let x = ramp(&[1, 2, 3, 3]);
+    let x = ramp(&[1, 3, 3, 2]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
@@ -521,14 +523,14 @@ fn global_max_pooling_3d_input_gradient_matches_finite_difference() {
 #[test]
 fn global_average_pooling_1d_input_gradient_matches_finite_difference() {
     let mut pool = GlobalAveragePooling1D::new();
-    let x = ramp(&[1, 2, 5]);
+    let x = ramp(&[1, 5, 2]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
 #[test]
 fn global_average_pooling_2d_input_gradient_matches_finite_difference() {
     let mut pool = GlobalAveragePooling2D::new();
-    let x = ramp(&[1, 2, 3, 3]);
+    let x = ramp(&[1, 3, 3, 2]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
@@ -544,10 +546,10 @@ fn global_average_pooling_3d_input_gradient_matches_finite_difference() {
 
 #[test]
 fn conv1d_same_padding_input_gradient_matches_finite_difference() {
-    let mut conv = Conv1D::new(2, 3, vec![1, 1, 6], 1, Linear::new())
+    let mut conv = Conv1D::new(2, 3, vec![1, 6, 1], 1, Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
-    let x = Array::from_shape_vec((1, 1, 6), (0..6).map(|v| 0.1 * v as f32 - 0.3).collect())
+    let x = Array::from_shape_vec((1, 6, 1), (0..6).map(|v| 0.1 * v as f32 - 0.3).collect())
         .unwrap()
         .into_dyn();
     check_input_gradient(&mut conv, &x, 1e-3, 1e-2);
@@ -555,10 +557,10 @@ fn conv1d_same_padding_input_gradient_matches_finite_difference() {
 
 #[test]
 fn conv1d_same_padding_weight_gradient_matches_finite_difference() {
-    let mut conv = Conv1D::new(2, 3, vec![1, 1, 6], 1, Linear::new())
+    let mut conv = Conv1D::new(2, 3, vec![1, 6, 1], 1, Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
-    let x = Array::from_shape_vec((1, 1, 6), (0..6).map(|v| 0.1 * v as f32 - 0.3).collect())
+    let x = Array::from_shape_vec((1, 6, 1), (0..6).map(|v| 0.1 * v as f32 - 0.3).collect())
         .unwrap()
         .into_dyn();
     check_weight_gradient(&mut conv, &x, 1e-3, 1e-2);
@@ -566,11 +568,11 @@ fn conv1d_same_padding_weight_gradient_matches_finite_difference() {
 
 #[test]
 fn conv2d_same_padding_input_gradient_matches_finite_difference() {
-    let mut conv = Conv2D::new(2, (3, 3), vec![1, 1, 5, 5], (1, 1), Linear::new())
+    let mut conv = Conv2D::new(2, (3, 3), vec![1, 5, 5, 1], (1, 1), Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
     let x = Array::from_shape_vec(
-        (1, 1, 5, 5),
+        (1, 5, 5, 1),
         (0..25).map(|v| 0.05 * v as f32 - 0.6).collect(),
     )
     .unwrap()
@@ -580,11 +582,11 @@ fn conv2d_same_padding_input_gradient_matches_finite_difference() {
 
 #[test]
 fn conv2d_same_padding_weight_gradient_matches_finite_difference() {
-    let mut conv = Conv2D::new(2, (3, 3), vec![1, 1, 5, 5], (1, 1), Linear::new())
+    let mut conv = Conv2D::new(2, (3, 3), vec![1, 5, 5, 1], (1, 1), Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
     let x = Array::from_shape_vec(
-        (1, 1, 5, 5),
+        (1, 5, 5, 1),
         (0..25).map(|v| 0.05 * v as f32 - 0.6).collect(),
     )
     .unwrap()
@@ -594,11 +596,11 @@ fn conv2d_same_padding_weight_gradient_matches_finite_difference() {
 
 #[test]
 fn conv3d_same_padding_input_gradient_matches_finite_difference() {
-    let mut conv = Conv3D::new(2, (3, 3, 3), vec![1, 1, 4, 4, 4], (1, 1, 1), Linear::new())
+    let mut conv = Conv3D::new(2, (3, 3, 3), vec![1, 4, 4, 4, 1], (1, 1, 1), Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
     let x = Array::from_shape_vec(
-        (1, 1, 4, 4, 4),
+        (1, 4, 4, 4, 1),
         (0..64).map(|v| 0.03 * v as f32 - 0.9).collect(),
     )
     .unwrap()
@@ -608,11 +610,11 @@ fn conv3d_same_padding_input_gradient_matches_finite_difference() {
 
 #[test]
 fn conv3d_same_padding_weight_gradient_matches_finite_difference() {
-    let mut conv = Conv3D::new(2, (3, 3, 3), vec![1, 1, 4, 4, 4], (1, 1, 1), Linear::new())
+    let mut conv = Conv3D::new(2, (3, 3, 3), vec![1, 4, 4, 4, 1], (1, 1, 1), Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
     let x = Array::from_shape_vec(
-        (1, 1, 4, 4, 4),
+        (1, 4, 4, 4, 1),
         (0..64).map(|v| 0.03 * v as f32 - 0.9).collect(),
     )
     .unwrap()
@@ -620,18 +622,19 @@ fn conv3d_same_padding_weight_gradient_matches_finite_difference() {
     check_weight_gradient(&mut conv, &x, 1e-3, 2e-2);
 }
 
-// SeparableConv2D `Same` padding, depth_multiplier=2, 3x3 (symmetric) kernel. With the 2x2
-// (asymmetric-padding) Same checks above, guards that the depthwise stage zero-pads at the border
+// SeparableConv2D `Same` padding, depth_multiplier=2, 3x3 (symmetric) kernel. Every other `Same`
+// check in this file uses depth_multiplier=1, so this is the only one that guards that the
+// depthwise stage zero-pads at the border while each input channel fans out to several slices
 #[test]
 fn separable_conv2d_same_padding_3x3_dm2_gradients_match_finite_difference() {
     // 3x3 (symmetric padding) + depth_multiplier=2: input and weight gradients together
     let make = || {
-        SeparableConv2D::new(2, (3, 3), vec![1, 2, 5, 5], (1, 1), 2, Linear::new())
+        SeparableConv2D::new(2, (3, 3), vec![1, 5, 5, 2], (1, 1), 2, Linear::new())
             .unwrap()
             .with_padding(PaddingType::Same)
     };
     let x = Array::from_shape_vec(
-        (1, 2, 5, 5),
+        (1, 5, 5, 2),
         (0..50).map(|v| 0.04 * v as f32 - 1.0).collect(),
     )
     .unwrap()
@@ -781,7 +784,7 @@ fn layer_normalization_multiple_permuted_input_gradient_matches_finite_differenc
 
 #[test]
 fn group_normalization_input_gradient_matches_finite_difference() {
-    let mut gn = GroupNormalization::new(vec![1, 4, 4], 2, 1, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(vec![1, 4, 4], 2, 1e-5).unwrap();
     gn.set_training_if_mode_dependent(true);
     let x = ramp(&[1, 4, 4]);
     check_input_gradient_weighted(&mut gn, &x, 1e-3, 5e-2);
@@ -789,16 +792,17 @@ fn group_normalization_input_gradient_matches_finite_difference() {
 
 #[test]
 fn group_normalization_weight_gradient_matches_finite_difference() {
-    let mut gn = GroupNormalization::new(vec![1, 4, 4], 2, 1, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(vec![1, 4, 4], 2, 1e-5).unwrap();
     gn.set_training_if_mode_dependent(true);
     let x = ramp(&[1, 4, 4]);
     check_weight_gradient_weighted(&mut gn, &x, 1e-3, 5e-2);
 }
 
 #[test]
-fn group_normalization_channel_axis2_input_gradient_matches_finite_difference() {
-    // channel_axis != 1 exercises the channels-first permute bracket around the fused row core
-    let mut gn = GroupNormalization::new(vec![2, 4, 4], 2, 2, 1e-5).unwrap();
+fn group_normalization_batched_input_gradient_matches_finite_difference() {
+    // batch > 1: every sample gets its own per-group statistics, so a fold that leaked across
+    // the batch axis shows up here
+    let mut gn = GroupNormalization::new(vec![2, 4, 4], 2, 1e-5).unwrap();
     gn.set_training_if_mode_dependent(true);
     let x = ramp(&[2, 4, 4]);
     check_input_gradient_weighted(&mut gn, &x, 1e-3, 5e-2);
@@ -806,7 +810,7 @@ fn group_normalization_channel_axis2_input_gradient_matches_finite_difference() 
 
 #[test]
 fn instance_normalization_input_gradient_matches_finite_difference() {
-    let mut inn = InstanceNormalization::new(vec![1, 3, 4], 1, 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(vec![1, 3, 4], 1e-5).unwrap();
     inn.set_training_if_mode_dependent(true);
     let x = ramp(&[1, 3, 4]);
     check_input_gradient_weighted(&mut inn, &x, 1e-3, 5e-2);
@@ -814,7 +818,7 @@ fn instance_normalization_input_gradient_matches_finite_difference() {
 
 #[test]
 fn instance_normalization_weight_gradient_matches_finite_difference() {
-    let mut inn = InstanceNormalization::new(vec![1, 3, 4], 1, 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(vec![1, 3, 4], 1e-5).unwrap();
     inn.set_training_if_mode_dependent(true);
     let x = ramp(&[1, 3, 4]);
     check_weight_gradient_weighted(&mut inn, &x, 1e-3, 5e-2);
@@ -838,18 +842,18 @@ fn batch_normalization_weight_gradient_matches_finite_difference() {
 
 #[test]
 fn batch_normalization_spatial_input_gradient_matches_finite_difference() {
-    // Rank-4 input exercises the native-layout plane path (per-channel plane folds plus the
-    // per-plane elementwise passes) instead of the 2-D column path
-    let mut bn = BatchNormalization::new(vec![2, 3, 2, 2], 0.9, 1e-5).unwrap();
+    // Rank-4 [batch, height, width, channels]: the statistics reduce over batch AND both spatial
+    // axes, so each of the 3 channels is normalized over 2*2*2 = 8 elements rather than 2
+    let mut bn = BatchNormalization::new(vec![2, 2, 2, 3], 0.9, 1e-5).unwrap();
     bn.set_training_if_mode_dependent(true);
-    let x = ramp(&[2, 3, 2, 2]);
+    let x = ramp(&[2, 2, 2, 3]);
     check_input_gradient_weighted(&mut bn, &x, 1e-3, 5e-2);
 }
 
 #[test]
 fn batch_normalization_spatial_weight_gradient_matches_finite_difference() {
-    let mut bn = BatchNormalization::new(vec![2, 3, 2, 2], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(vec![2, 2, 2, 3], 0.9, 1e-5).unwrap();
     bn.set_training_if_mode_dependent(true);
-    let x = ramp(&[2, 3, 2, 2]);
+    let x = ramp(&[2, 2, 2, 3]);
     check_weight_gradient_weighted(&mut bn, &x, 1e-3, 5e-2);
 }

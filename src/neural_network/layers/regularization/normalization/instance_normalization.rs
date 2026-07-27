@@ -8,11 +8,10 @@ use crate::neural_network::layers::regularization::mode_dependent_layer_set_trai
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape;
 use crate::neural_network::layers::regularization::normalization::{
-    from_channels_first, group_norm_backward_core, group_norm_forward_core, to_channels_first,
+    group_norm_backward_core, group_norm_forward_core,
 };
 use crate::neural_network::layers::regularization::validation::{
-    validate_channel_axis, validate_epsilon, validate_input_shape, validate_input_shape_not_empty,
-    validate_min_input_ndim,
+    validate_epsilon, validate_input_shape, validate_input_shape_not_empty, validate_min_input_ndim,
 };
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
@@ -24,7 +23,7 @@ use std::borrow::Cow;
 /// style transfer and generative models
 ///
 /// Instance normalization is group normalization with one group per channel, so it shares the
-/// channels-first `group_norm_forward_core` / `group_norm_backward_core` with `num_groups` set to
+/// shared `group_norm_forward_core` / `group_norm_backward_core` with `num_groups` set to
 /// the channel count
 ///
 /// # Examples
@@ -34,12 +33,12 @@ use std::borrow::Cow;
 /// use rustyml::neural_network::traits::Layer;
 /// use ndarray::Array3;
 ///
-/// // Create an InstanceNormalization layer for input shape [batch, channels, spatial]
+/// // Create an InstanceNormalization layer for input shape [batch, spatial, channels]
 /// // with channels at axis 1 (default)
-/// let mut in_layer = InstanceNormalization::new(vec![4, 3, 32], 1, 1e-5).unwrap();
+/// let mut in_layer = InstanceNormalization::new(vec![4, 32, 3], 1e-5).unwrap();
 ///
 /// // Create input tensor
-/// let input = Array3::ones((4, 3, 32)).into_dyn();
+/// let input = Array3::ones((4, 32, 3)).into_dyn();
 ///
 /// // During training, normalizes each channel of each sample independently
 /// let output = in_layer.forward(&input).unwrap();
@@ -48,8 +47,6 @@ use std::borrow::Cow;
 pub struct InstanceNormalization {
     /// Small constant for numerical stability in normalization
     epsilon: f32,
-    /// Axis representing channels (typically 1 for \[batch, channels, spatial...\])
-    channel_axis: usize,
     /// Shape of the input tensor
     input_shape: Vec<usize>,
     /// Scale parameter (trainable)
@@ -58,7 +55,7 @@ pub struct InstanceNormalization {
     beta: Tensor,
     /// Whether the layer is in training mode or inference mode
     training: bool,
-    /// Normalized input (channels-first), cached for the backward pass
+    /// Normalized input, cached for the backward pass
     x_normalized: Option<Tensor>,
     /// Per-instance `1 / sqrt(var + epsilon)` from the forward pass, cached for the backward pass
     inv_std: Option<Tensor>,
@@ -74,7 +71,6 @@ impl InstanceNormalization {
     /// # Parameters
     ///
     /// - `input_shape` - Shape of the input tensor
-    /// - `channel_axis` - Axis representing channels for inputs like \[batch, channels, ...\]
     /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
     ///
     /// # Returns
@@ -84,19 +80,14 @@ impl InstanceNormalization {
     /// # Errors
     ///
     /// - `Error::EmptyInput` - If `input_shape` is empty
-    /// - `Error::InvalidParameter` - If `channel_axis` is out of bounds or is 0 (batch axis)
     /// - `Error::InvalidParameter` - If `epsilon` is not positive or not finite
-    pub fn new(input_shape: Vec<usize>, channel_axis: usize, epsilon: f32) -> Result<Self, Error> {
+    pub fn new(input_shape: Vec<usize>, epsilon: f32) -> Result<Self, Error> {
         validate_input_shape_not_empty(&input_shape)?;
-        validate_channel_axis(channel_axis, input_shape.len())?;
         validate_epsilon(epsilon)?;
 
-        // forward/backward permute the channel axis to position 1 and run a channels-first core,
-        // so both NCHW and NHWC work
-
         // Parameters have the shape of the channel dimension
-        let param_shape = if input_shape.len() > channel_axis {
-            vec![input_shape[channel_axis]]
+        let param_shape = if input_shape.len() > 1 {
+            vec![input_shape[input_shape.len() - 1]]
         } else {
             vec![1]
         };
@@ -105,7 +96,6 @@ impl InstanceNormalization {
 
         Ok(InstanceNormalization {
             epsilon,
-            channel_axis,
             input_shape,
             gamma: Tensor::ones(param_shape_ndarray),
             beta: Tensor::zeros(param_shape_ndarray),
@@ -143,27 +133,16 @@ impl Layer for InstanceNormalization {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;
-        validate_channel_axis(self.channel_axis, input.ndim())?;
-
-        // Permute the channel to axis 1 so the channels-first core supports any channel position;
-        // borrows when channel_axis == 1, and the output is permuted back at the end
-        let cf_input = to_channels_first(input, self.channel_axis);
-        let input_cf = cf_input.as_ref();
         // One group per channel makes group normalization equal to instance normalization
-        let num_channels = input_cf.shape()[1];
+        let num_channels = input.shape()[input.ndim() - 1];
 
-        let (output, x_normalized, inv_std) = group_norm_forward_core(
-            input_cf,
-            num_channels,
-            &self.gamma,
-            &self.beta,
-            self.epsilon,
-        );
+        let (output, x_normalized, inv_std) =
+            group_norm_forward_core(input, num_channels, &self.gamma, &self.beta, self.epsilon);
 
         self.x_normalized = Some(x_normalized);
         self.inv_std = Some(inv_std);
 
-        Ok(from_channels_first(output, self.channel_axis))
+        Ok(output)
     }
 
     /// Inference forward (eval mode, writes no caches), see [`Layer::predict`]
@@ -174,22 +153,12 @@ impl Layer for InstanceNormalization {
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;
-        validate_channel_axis(self.channel_axis, input.ndim())?;
+        let num_channels = input.shape()[input.ndim() - 1];
 
-        // See `forward`: permute channel to axis 1, run the channels-first core, permute back
-        let cf_input = to_channels_first(input, self.channel_axis);
-        let input_cf = cf_input.as_ref();
-        let num_channels = input_cf.shape()[1];
+        let (output, _x_normalized, _inv_std) =
+            group_norm_forward_core(input, num_channels, &self.gamma, &self.beta, self.epsilon);
 
-        let (output, _x_normalized, _inv_std) = group_norm_forward_core(
-            input_cf,
-            num_channels,
-            &self.gamma,
-            &self.beta,
-            self.epsilon,
-        );
-
-        Ok(from_channels_first(output, self.channel_axis))
+        Ok(output)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
@@ -200,9 +169,7 @@ impl Layer for InstanceNormalization {
 
         // Channels-first layout matches the cached forward intermediates; the input-gradient is
         // permuted back at the end
-        let cf_grad = to_channels_first(grad_output, self.channel_axis);
-        let grad_cf = cf_grad.as_ref();
-        let num_channels = grad_cf.shape()[1];
+        let num_channels = grad_output.shape()[grad_output.ndim() - 1];
 
         let x_normalized = self
             .x_normalized
@@ -213,13 +180,18 @@ impl Layer for InstanceNormalization {
             .as_ref()
             .ok_or_else(|| Error::forward_pass_not_run("InstanceNormalization"))?;
 
-        let (grad_input, grad_gamma, grad_beta) =
-            group_norm_backward_core(grad_cf, x_normalized, inv_std, num_channels, &self.gamma);
+        let (grad_input, grad_gamma, grad_beta) = group_norm_backward_core(
+            grad_output,
+            x_normalized,
+            inv_std,
+            num_channels,
+            &self.gamma,
+        );
 
         self.grad_gamma = Some(grad_gamma);
         self.grad_beta = Some(grad_beta);
 
-        Ok(from_channels_first(grad_input, self.channel_axis))
+        Ok(grad_input)
     }
 
     fn layer_type(&self) -> &str {

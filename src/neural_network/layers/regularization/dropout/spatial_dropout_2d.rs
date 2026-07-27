@@ -26,7 +26,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 ///
 /// Drops entire channels instead of individual elements, which is effective for
 /// convolutional layers where adjacent pixels are correlated. Input shape is
-/// `(batch_size, channels, height, width)`
+/// `(batch_size, height, width, channels)`
 ///
 /// # Examples
 ///
@@ -36,10 +36,10 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// use ndarray::Array4;
 ///
 /// // Create a SpatialDropout2D layer with 20% dropout rate
-/// let mut spatial_dropout = SpatialDropout2D::new(0.2, vec![32, 64, 28, 28]).unwrap();
+/// let mut spatial_dropout = SpatialDropout2D::new(0.2, vec![32, 28, 28, 64]).unwrap();
 ///
 /// // Create input tensor (batch_size=32, channels=64, height=28, width=28)
-/// let input = Array4::ones((32, 64, 28, 28)).into_dyn();
+/// let input = Array4::ones((32, 28, 28, 64)).into_dyn();
 ///
 /// // During training, ~20% of channels will be set to 0
 /// let output = spatial_dropout.forward(&input).unwrap();
@@ -64,7 +64,7 @@ impl SpatialDropout2D {
     /// # Parameters
     ///
     /// - `rate` - Dropout rate, fraction of channels to drop (between 0 and 1)
-    /// - `input_shape` - Shape of the input tensor `(batch_size, channels, height, width)`
+    /// - `input_shape` - Shape of the input tensor `(batch_size, height, width, channels)`
     ///
     /// # Returns
     ///
@@ -117,7 +117,7 @@ impl Layer for SpatialDropout2D {
         validate_input_ndim(
             input.ndim(),
             4,
-            "SpatialDropout2D (batch_size, channels, height, width)",
+            "SpatialDropout2D (batch_size, height, width, channels)",
         )?;
 
         if !self.training {
@@ -136,7 +136,7 @@ impl Layer for SpatialDropout2D {
 
         let shape = input.shape();
         let batch_size = shape[0];
-        let channels = shape[1];
+        let channels = shape[shape.len() - 1];
 
         // Per-channel mask of shape (batch_size, channels): one keep/drop value per channel
         let mut mask_2d = Tensor::random_using(
@@ -169,7 +169,7 @@ impl Layer for SpatialDropout2D {
         validate_input_ndim(
             input.ndim(),
             4,
-            "SpatialDropout2D (batch_size, channels, height, width)",
+            "SpatialDropout2D (batch_size, height, width, channels)",
         )?;
 
         // During inference, pass input through unchanged (no mask, no scaling)

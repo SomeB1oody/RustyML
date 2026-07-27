@@ -271,12 +271,12 @@ pub mod norm {
     fwd!(
         set_gn_row => gn::set_gn_row_parallel_min_elems,
         get_gn_row => gn::gn_row_parallel_min_elems,
-        "the GroupNorm per-row fold gate"
+        "the GroupNorm per-instance statistics fold gate"
     );
     fwd!(
-        set_gn_plane_stats => gn::set_gn_plane_stats_parallel_min_elems,
-        get_gn_plane_stats => gn::gn_plane_stats_parallel_min_elems,
-        "the GroupNorm per-channel gradient plane-fold gate"
+        set_gn_param_grad => gn::set_gn_param_grad_parallel_min_elems,
+        get_gn_param_grad => gn::gn_param_grad_parallel_min_elems,
+        "the GroupNorm per-channel gradient column-fold gate"
     );
 }
 

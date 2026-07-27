@@ -21,6 +21,22 @@ use crate::neural_network::traits::ApplyWeights;
 use crate::neural_network::traits::Layer;
 use crate::{Deserialize, Serialize};
 
+/// Magic tag at the head of every saved model (`"RMLM"` in ASCII)
+///
+/// postcard is not self-describing, so without a tag a file from an older release is *parsed*
+/// as layer data rather than refused. A file that does not start with this is either not a
+/// RustyML model or predates the versioned format
+pub const MODEL_MAGIC: u32 = 0x524D_4C4D;
+
+/// On-disk model format version written by this build
+///
+/// Bump this on any change to a weight container's tensor layout, rank, or field order. The load
+/// path's structural checks - layer count, layer type name, weight extents - all pass for a file
+/// whose weights are laid out for a different release whenever the extents happen to coincide, so
+/// this version is what actually makes a stale checkpoint fail instead of silently producing
+/// wrong predictions
+pub const MODEL_FORMAT_VERSION: u32 = 1;
+
 /// Serializable layer metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerInfo {
@@ -48,6 +64,13 @@ pub struct SerializableLayer<'a> {
 /// when loading
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableSequential<'a> {
+    /// Magic tag identifying a RustyML model file; see [`MODEL_MAGIC`]
+    ///
+    /// First so that a file written before the header existed mis-reads its leading layer count
+    /// as the tag and is rejected, rather than parsing far enough to apply weights
+    pub magic: u32,
+    /// On-disk format version of this file; see [`MODEL_FORMAT_VERSION`]
+    pub format_version: u32,
     /// Ordered list of layers with metadata and weights
     pub layers: Vec<SerializableLayer<'a>>,
 }

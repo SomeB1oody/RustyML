@@ -13,7 +13,7 @@ use crate::neural_network::traits::Layer;
 /// Global average pooling layer for 3D inputs
 ///
 /// Computes the mean value across the depth, height, and width dimensions. Input tensor
-/// shape: `[batch_size, channels, depth, height, width]`, output tensor shape:
+/// shape: `[batch_size, depth, height, width, channels]`, output tensor shape:
 /// `[batch_size, channels]`
 ///
 /// # Examples
@@ -32,8 +32,8 @@ use crate::neural_network::traits::Layer;
 /// // Add a GlobalAveragePooling3D layer
 /// model.add(GlobalAveragePooling3D::new());
 ///
-/// // Test input tensor: [batch_size, channels, depth, height, width]
-/// let input_data = Array::from_elem(IxDyn(&[2, 4, 8, 8, 8]), 1.0);
+/// // Test input tensor: [batch_size, depth, height, width, channels]
+/// let input_data = Array::from_elem(IxDyn(&[2, 8, 8, 8, 4]), 1.0);
 ///
 /// // Forward propagation
 /// let output = model.predict(&input_data).unwrap();
@@ -51,7 +51,9 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= 32`
+/// Parallel execution is gated on the estimated element ops of the whole pass
+/// (`batch * positions * channels`) clearing [`tuning::pool`](crate::tuning::pool),
+/// not on any fixed shape
 #[derive(Debug)]
 pub struct GlobalAveragePooling3D {
     /// Shape of the input tensor cached during the forward pass; backward only needs the

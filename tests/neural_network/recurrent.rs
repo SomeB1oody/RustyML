@@ -500,7 +500,9 @@ fn gru_forward_1step_1unit_tanh() {
 
     assert_eq!(out.shape(), &[1, 1]);
 
-    let expected = Array::from_elem((1, 1), 0.28764914_f32).into_dyn();
+    // z = sigmoid(0.5) = 0.62245933, candidate = tanh(0.5) = 0.46211716, h_prev = 0
+    // h = z*h_prev + (1-z)*candidate = 0.37754067 * 0.46211716 = 0.17446802
+    let expected = Array::from_elem((1, 1), 0.174_468_02_f32).into_dyn();
     assert_allclose(&out, &expected, 1e-6);
 }
 
@@ -533,14 +535,20 @@ fn gru_forward_2step_hidden_state_blending() {
 
     assert_eq!(out.shape(), &[1, 1]);
 
-    // (1-z)*h_prev + z*tanh(0.7) ~= 0.055517 + 0.404040 = 0.45935740
-    let expected = Array::from_elem((1, 1), 0.459_357_4_f32).into_dyn();
+    // t0: z = sigmoid(0.3) = 0.57444252, cand = tanh(0.3) = 0.29131261, h_prev = 0
+    //     h = 0.42555748 * 0.29131261 = 0.12397026
+    // t1: z = sigmoid(0.7) = 0.66818777, cand = tanh(0.7) = 0.60436778
+    //     h = 0.66818777 * 0.12397026 + 0.33181223 * 0.60436778 = 0.28337203
+    let expected = Array::from_elem((1, 1), 0.283_372_03_f32).into_dyn();
     assert_allclose(&out, &expected, 1e-5);
 }
 
-/// GRU update gate z~=0 leaves the hidden state at h_prev (here 0)
+/// GRU update gate z~=0 hands the candidate straight through
+///
+/// Keras' convention: `z` weights the *previous* state, so an open update gate takes the
+/// candidate. The candidate kernel is zero here, so that candidate is tanh(0) = 0
 #[test]
-fn gru_update_gate_zero_leaves_hidden_unchanged() {
+fn gru_update_gate_zero_takes_the_candidate() {
     let mut gru = GRU::new(1, 1, Tanh::new()).unwrap();
 
     let k_zero = Array2::zeros((1, 1));
@@ -564,7 +572,7 @@ fn gru_update_gate_zero_leaves_hidden_unchanged() {
     let x = Array::from_elem((1, 1, 1), 1.0_f32).into_dyn();
     let out = gru.forward(&x).unwrap();
 
-    // h_prev=0 and z~=0 means h_t ~= 0
+    // h_prev=0 and the candidate kernel is zero, so h_t = 1 * tanh(0) = 0
     assert_eq!(out.shape(), &[1, 1]);
     assert!(
         out[[0, 0]].abs() < 1e-4,
@@ -573,9 +581,12 @@ fn gru_update_gate_zero_leaves_hidden_unchanged() {
     );
 }
 
-/// GRU update gate z~=1 replaces the hidden state with the candidate tanh(1.0)
+/// GRU update gate z~=1 keeps the previous hidden state, whatever the candidate says
+///
+/// The mirror of the test above, and the one that pins the *direction* of the blend: the
+/// candidate here is a clearly non-zero tanh(1), so a flipped `z` would show 0.76 not 0
 #[test]
-fn gru_update_gate_one_replaces_hidden_with_candidate() {
+fn gru_update_gate_one_keeps_previous_hidden() {
     let mut gru = GRU::new(1, 1, Tanh::new()).unwrap();
 
     let k_one = Array2::from_elem((1, 1), 1.0_f32);
@@ -600,12 +611,41 @@ fn gru_update_gate_one_replaces_hidden_with_candidate() {
     let x = Array::from_elem((1, 1, 1), 1.0_f32).into_dyn();
     let out = gru.forward(&x).unwrap();
 
-    // h_t ~= 0*h_prev + 1*tanh(1.0) ~= 0.76159416
-    let expected_h_cand: f32 = 1.0_f32.tanh();
+    // h_t ~= 1*h_prev + 0*tanh(1.0) ~= 0, even though the candidate is tanh(1) = 0.76159416
     assert_eq!(out.shape(), &[1, 1]);
     assert!(
-        (out[[0, 0]] - expected_h_cand).abs() < 1e-4,
-        "expected h_t≈tanh(1)={expected_h_cand:.8}, got: {}",
+        out[[0, 0]].abs() < 1e-4,
+        "expected h_t≈0 when z≈1 (the previous state is kept), got: {}",
+        out[[0, 0]]
+    );
+}
+
+/// The fused kernel's first column block is the UPDATE gate, second the reset gate
+///
+/// Every other GRU test here sets its weights through `set_gate_weights`, which takes the gates by
+/// name and packs them itself - so none of them can see the packed order at all. This one writes
+/// the fused tensors directly. A driving weight of -20 sits in column block 0; if that block is the
+/// update gate (Keras' `[z | r | h]`) then z is 0, the candidate passes through, and the output is
+/// tanh(1). If the blocks were ordered `[r | z | h]` instead, the -20 would be the reset gate and z
+/// would be sigmoid(0) = 0.5, giving roughly half that
+#[test]
+fn gru_fused_kernel_first_block_is_the_update_gate() {
+    let mut gru = GRU::new(1, 1, Tanh::new()).unwrap();
+
+    // [z | r | h] over one unit: z driven to 0, r left at 0, candidate kernel 1
+    let kernel = Array2::from_shape_vec((1, 3), vec![-20.0_f32, 0.0, 1.0]).unwrap();
+    let recurrent_kernel = Array2::zeros((1, 3));
+    let bias = Array2::zeros((1, 3));
+    gru.set_weights(kernel, recurrent_kernel, bias).unwrap();
+
+    let x = Array::from_elem((1, 1, 1), 1.0_f32).into_dyn();
+    let out = gru.forward(&x).unwrap();
+
+    // z = sigmoid(-20) ~= 0, h_prev = 0, so h = (1 - z) * tanh(1) ~= tanh(1)
+    let expected: f32 = 1.0_f32.tanh();
+    assert!(
+        (out[[0, 0]] - expected).abs() < 1e-4,
+        "expected h_t≈tanh(1)={expected:.8}, got {} - the fused blocks are not [z | r | h]",
         out[[0, 0]]
     );
 }
@@ -816,7 +856,9 @@ fn gru_accepts_activation_enum_tanh() {
     let x = Array::from_elem((1, 1, 1), 0.5_f32).into_dyn();
     let out = gru.forward(&x).unwrap();
 
-    let expected = Array::from_elem((1, 1), 0.28764914_f32).into_dyn();
+    // z = sigmoid(0.5) = 0.62245933, candidate = tanh(0.5) = 0.46211716, h_prev = 0
+    // h = z*h_prev + (1-z)*candidate = 0.37754067 * 0.46211716 = 0.17446802
+    let expected = Array::from_elem((1, 1), 0.174_468_02_f32).into_dyn();
     assert_allclose(&out, &expected, 1e-6);
 }
 

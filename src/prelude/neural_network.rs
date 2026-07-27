@@ -9,3 +9,4 @@ pub use crate::neural_network::layers::regularization::*;
 pub use crate::neural_network::layers::{Dense, Flatten};
 pub use crate::neural_network::losses::*;
 pub use crate::neural_network::optimizers::*;
+pub use crate::neural_network::sequential::Sequential;

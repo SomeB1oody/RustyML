@@ -19,8 +19,8 @@ use crate::neural_network::traits::Layer;
 /// 1D max pooling layer
 ///
 /// Selects the maximum value within each pooling window along the length dimension. Input
-/// tensor shape `[batch_size, channels, length]`, output tensor shape
-/// `[batch_size, channels, pooled_length]` where
+/// tensor shape `[batch_size, length, channels]`, output tensor shape
+/// `[batch_size, pooled_length, channels]` where
 /// `pooled_length = (length - pool_size) / stride + 1`
 ///
 /// # Examples
@@ -33,15 +33,15 @@ use crate::neural_network::traits::Layer;
 /// use ndarray::Array3;
 /// use approx::assert_relative_eq;
 ///
-/// // Create an input tensor: [batch_size, channels, length]
-/// // batch_size=2, 3 input channels, 8 elements per channel
-/// let mut input_data = Array3::zeros((2, 3, 8));
+/// // Create an input tensor: [batch_size, length, channels]
+/// // batch_size=2, 8 elements per channel, 3 input channels
+/// let mut input_data = Array3::zeros((2, 8, 3));
 ///
 /// // Set test data to make max pooling results predictable
 /// for b in 0..2 {
 ///     for c in 0..3 {
 ///         for i in 0..8 {
-///              input_data[[b, c, i]] = i as f32;
+///              input_data[[b, i, c]] = i as f32;
 ///         }
 ///     }
 /// }
@@ -52,32 +52,34 @@ use crate::neural_network::traits::Layer;
 /// let mut model = Sequential::new();
 /// model
 ///     // stride defaults to pool_size (2) and padding defaults to Valid
-///     .add(MaxPooling1D::new(2, vec![2, 3, 8]).unwrap())
+///     .add(MaxPooling1D::new(2, vec![2, 8, 3]).unwrap())
 ///     .compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Output shape should be [2, 3, 4]
+/// // Output shape should be [2, 4, 3]
 /// let output = model.predict(&x).unwrap();
-/// assert_eq!(output.shape(), &[2, 3, 4]);
+/// assert_eq!(output.shape(), &[2, 4, 3]);
 ///
 /// // Verify correctness of pooling results
 /// // For window size 2 and stride 2, the maximum element in each window is selected
 /// for b in 0..2 {
 ///     for c in 0..3 {
 ///         // First window (0,1) -> max value should be 1.0
-///        assert_relative_eq!(output[[b, c, 0]], 1.0);
+///        assert_relative_eq!(output[[b, 0, c]], 1.0);
 ///         // Second window (2,3) -> max value should be 3.0
-///         assert_relative_eq!(output[[b, c, 1]], 3.0);
+///         assert_relative_eq!(output[[b, 1, c]], 3.0);
 ///         // Third window (4,5) -> max value should be 5.0
-///         assert_relative_eq!(output[[b, c, 2]], 5.0);
+///         assert_relative_eq!(output[[b, 2, c]], 5.0);
 ///         // Fourth window (6,7) -> max value should be 7.0
-///         assert_relative_eq!(output[[b, c, 3]], 7.0);
+///         assert_relative_eq!(output[[b, 3, c]], 7.0);
 ///     }
 /// }
 /// ```
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= 32`
+/// Parallel execution is gated on the estimated element ops of the whole pass
+/// (`batch * out_positions * channels * window taps`) clearing
+/// [`tuning::pool`](crate::tuning::pool), not on any fixed shape
 #[derive(Debug)]
 pub struct MaxPooling1D {
     /// Size of the pooling window
@@ -100,7 +102,7 @@ impl MaxPooling1D {
     /// # Parameters
     ///
     /// - `pool_size` - Size of the pooling window
-    /// - `input_shape` - Input tensor shape `[batch_size, channels, length]`
+    /// - `input_shape` - Input tensor shape `[batch_size, length, channels]`
     ///
     /// # Notes
     ///
@@ -119,7 +121,7 @@ impl MaxPooling1D {
     pub fn new(pool_size: usize, input_shape: Vec<usize>) -> Result<Self, Error> {
         validate_input_shape_dims(&input_shape, 3, "MaxPooling1D")?;
         validate_all_dims_positive(&input_shape)?;
-        validate_pool_size_1d(pool_size, input_shape[2])?;
+        validate_pool_size_1d(pool_size, input_shape[1])?;
 
         Ok(MaxPooling1D {
             pool_size,

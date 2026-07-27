@@ -16,7 +16,8 @@ use std::hint::black_box;
 
 pub fn calibrate_conv_forward() -> Section {
     let mut rows = Vec::new();
-    // (cin, filters, img, k) at batch == 1, the case the gate must serve hardest
+    // (cin, filters, img, k) at batch == 1, the case the gate must serve hardest. Tensors are
+    // channels-last and the kernel is [kh, kw, Cin, F], matching the engine
     for &(cin, f, img, k) in &[
         (3usize, 8usize, 16usize, 3usize),
         (3, 16, 32, 3),
@@ -26,7 +27,7 @@ pub fn calibrate_conv_forward() -> Section {
         (32, 64, 64, 3),
         (64, 64, 128, 3),
     ] {
-        let input = Tensor::from_elem(IxDyn(&[1, cin, img, img]), 1.0f32);
+        let input = Tensor::from_elem(IxDyn(&[1, img, img, cin]), 1.0f32);
         let weights = vec![0.5f32; f * cin * k * k];
         let bias = vec![0.0f32; f];
         let out = img - k + 1;
@@ -36,7 +37,7 @@ pub fn calibrate_conv_forward() -> Section {
                 conv_forward_forced(
                     &input,
                     &weights,
-                    &[f, cin, k, k],
+                    &[k, k, cin, f],
                     &bias,
                     &[1, 1],
                     PaddingType::Valid,
@@ -76,27 +77,52 @@ pub fn calibrate_pooling() -> Section {
             Some(force),
         ));
     };
-    // Few large planes (batch 1, 3 channels - the case a plane-count gate starves)
+    // Few large images at 3 channels - the narrow-vector case a channels-last pass serves worst
     for &img in &[32usize, 64, 128, 256, 512, 1024] {
-        let input = Tensor::from_elem(IxDyn(&[1, 3, img, img]), 1.0f32);
-        let work = 3 * (img / 2) * (img / 2) * 4; // bc * plane_out * window taps
+        let input = Tensor::from_elem(IxDyn(&[1, img, img, 3]), 1.0f32);
+        let work = 3 * (img / 2) * (img / 2) * 4; // channels * out_positions * window taps
         let s = time_per_call_ns(|| run(&input, false));
         let p = time_per_call_ns(|| run(&input, true));
         rows.push(Row {
-            label: format!("maxpool 1x3x{img}x{img}"),
+            label: format!("maxpool 1x{img}x{img}x3"),
             work,
             serial_ns: s,
             parallel_ns: p,
         });
     }
-    // Many tiny planes
+    // Many tiny images, single channel
     for &bc in &[16usize, 64, 256, 1024] {
-        let input = Tensor::from_elem(IxDyn(&[bc, 1, 16, 16]), 1.0f32);
+        let input = Tensor::from_elem(IxDyn(&[bc, 16, 16, 1]), 1.0f32);
         let work = bc * 8 * 8 * 4;
         let s = time_per_call_ns(|| run(&input, false));
         let p = time_per_call_ns(|| run(&input, true));
         rows.push(Row {
-            label: format!("maxpool {bc}x1x16x16"),
+            label: format!("maxpool {bc}x16x16x1"),
+            work,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    // Conv-scale channel counts. The two ladders above pin the channel count to 1 or 3, which is
+    // the regime a channels-last layout serves worst: there the channel axis is the vectorization
+    // width, so a length-1 or length-3 pixel vector is its degenerate case. Fitting the gate to
+    // those rows alone would calibrate it entirely on the extreme; these cover the channel counts
+    // a real network spends its time in
+    for &(batch, c, img) in &[
+        (1usize, 32usize, 28usize),
+        (1, 32, 56),
+        (1, 64, 56),
+        (8, 32, 28),
+        (8, 64, 28),
+        (8, 64, 56),
+        (32, 64, 14),
+    ] {
+        let input = Tensor::from_elem(IxDyn(&[batch, img, img, c]), 1.0f32);
+        let work = batch * c * (img / 2) * (img / 2) * 4;
+        let s = time_per_call_ns(|| run(&input, false));
+        let p = time_per_call_ns(|| run(&input, true));
+        rows.push(Row {
+            label: format!("maxpool {batch}x{img}x{img}x{c}"),
             work,
             serial_ns: s,
             parallel_ns: p,

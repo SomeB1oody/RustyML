@@ -14,14 +14,14 @@ fn pool_out_dim(input: usize, pool: usize, stride: usize, padding: PaddingType) 
 ///
 /// # Parameters
 ///
-/// - `input_shape` - Shape of the input tensor, in format `[batch_size, channels, length]`
+/// - `input_shape` - Shape of the input tensor, in format `[batch_size, length, channels]`
 /// - `pool_size` - Size of the pooling window
 /// - `stride` - Step size for sliding the window across the input
 /// - `padding` - Padding strategy (Valid or Same)
 ///
 /// # Returns
 ///
-/// - `Vec<usize>` - Output shape in the format `[batch_size, channels, output_length]`
+/// - `Vec<usize>` - Output shape in the format `[batch_size, output_length, channels]`
 pub(super) fn calculate_output_shape_1d_pooling(
     input_shape: &[usize],
     pool_size: usize,
@@ -29,26 +29,26 @@ pub(super) fn calculate_output_shape_1d_pooling(
     padding: PaddingType,
 ) -> Vec<usize> {
     let batch_size = input_shape[0];
-    let channels = input_shape[1];
-    let length = input_shape[2];
+    let length = input_shape[1];
+    let channels = input_shape[2];
 
     let output_length = pool_out_dim(length, pool_size, stride, padding);
 
-    vec![batch_size, channels, output_length]
+    vec![batch_size, output_length, channels]
 }
 
 /// Calculates the output shape of the 2d pooling layer
 ///
 /// # Parameters
 ///
-/// - `input_shape` - Shape of the input tensor, in format `[batch_size, channels, height, width]`
+/// - `input_shape` - Shape of the input tensor, in format `[batch_size, height, width, channels]`
 /// - `pool_size` - Size of the pooling window as a tuple (height, width)
 /// - `strides` - Step size for the pooling window as a tuple (height_step, width_step)
 /// - `padding` - Padding strategy (Valid or Same)
 ///
 /// # Returns
 ///
-/// - `Vec<usize>` - Output shape in format `[batch_size, channels, output_height, output_width]`
+/// - `Vec<usize>` - Output shape in format `[batch_size, output_height, output_width, channels]`
 pub(super) fn calculate_output_shape_2d_pooling(
     input_shape: &[usize],
     pool_size: (usize, usize),
@@ -56,28 +56,28 @@ pub(super) fn calculate_output_shape_2d_pooling(
     padding: PaddingType,
 ) -> Vec<usize> {
     let batch_size = input_shape[0];
-    let channels = input_shape[1];
-    let input_height = input_shape[2];
-    let input_width = input_shape[3];
+    let input_height = input_shape[1];
+    let input_width = input_shape[2];
+    let channels = input_shape[3];
 
     let output_height = pool_out_dim(input_height, pool_size.0, strides.0, padding);
     let output_width = pool_out_dim(input_width, pool_size.1, strides.1, padding);
 
-    vec![batch_size, channels, output_height, output_width]
+    vec![batch_size, output_height, output_width, channels]
 }
 
 /// Calculates the output shape of the 3D pooling layer
 ///
 /// # Parameters
 ///
-/// - `input_shape` - Shape of the input tensor, in format `[batch_size, channels, depth, height, width]`
+/// - `input_shape` - Shape of the input tensor, in format `[batch_size, depth, height, width, channels]`
 /// - `pool_size` - Size of the pooling window as a tuple (depth, height, width)
 /// - `strides` - Step size for the pooling window as a tuple (depth_step, height_step, width_step)
 /// - `padding` - Padding strategy (Valid or Same)
 ///
 /// # Returns
 ///
-/// - `Vec<usize>` - Output shape in format `[batch_size, channels, output_depth, output_height, output_width]`
+/// - `Vec<usize>` - Output shape in format `[batch_size, output_depth, output_height, output_width, channels]`
 pub(super) fn calculate_output_shape_3d_pooling(
     input_shape: &[usize],
     pool_size: (usize, usize, usize),
@@ -85,10 +85,10 @@ pub(super) fn calculate_output_shape_3d_pooling(
     padding: PaddingType,
 ) -> Vec<usize> {
     let batch_size = input_shape[0];
-    let channels = input_shape[1];
-    let input_depth = input_shape[2];
-    let input_height = input_shape[3];
-    let input_width = input_shape[4];
+    let input_depth = input_shape[1];
+    let input_height = input_shape[2];
+    let input_width = input_shape[3];
+    let channels = input_shape[4];
 
     let output_depth = pool_out_dim(input_depth, pool_size.0, strides.0, padding);
     let output_height = pool_out_dim(input_height, pool_size.1, strides.1, padding);
@@ -96,10 +96,10 @@ pub(super) fn calculate_output_shape_3d_pooling(
 
     vec![
         batch_size,
-        channels,
         output_depth,
         output_height,
         output_width,
+        channels,
     ]
 }
 
@@ -148,14 +148,14 @@ pub(super) fn calculate_output_height_and_weight(
 ///
 /// # Parameters
 ///
-/// - `input_shape` - Input tensor shape as `[batch_size, channels, height, width]`
+/// - `input_shape` - Input tensor shape as `[batch_size, height, width, channels]`
 /// - `kernel_size` - Size of the convolution kernel as (height, width)
 /// - `strides` - Stride of the convolution as (height_stride, width_stride)
 /// - `padding` - Padding strategy (Valid or Same)
 ///
 /// # Returns
 ///
-/// - `Vec<usize>` - Output shape as `[batch_size, channels, output_height, output_width]`
+/// - `Vec<usize>` - Output shape as `[batch_size, output_height, output_width, channels]`
 ///
 /// # Panics
 ///
@@ -172,9 +172,9 @@ pub(super) fn calculate_output_shape_2d(
     );
 
     let batch_size = input_shape[0];
-    let channels = input_shape[1];
-    let input_height = input_shape[2];
-    let input_width = input_shape[3];
+    let input_height = input_shape[1];
+    let input_width = input_shape[2];
+    let channels = input_shape[3];
 
     let (output_height, output_width) = calculate_output_height_and_weight(
         *padding,
@@ -184,7 +184,7 @@ pub(super) fn calculate_output_shape_2d(
         strides,
     );
 
-    vec![batch_size, channels, output_height, output_width]
+    vec![batch_size, output_height, output_width, channels]
 }
 
 #[cfg(test)]
@@ -197,26 +197,33 @@ mod tests {
     /// 1D pooling output length, with batch and channel axes passing through unchanged
     #[test]
     fn test_calculate_output_shape_1d_pooling() {
-        let out = calculate_output_shape_1d_pooling(&[8, 5, 10], 3, 2, PaddingType::Valid);
-        assert_eq!(out, vec![8, 5, 4]);
+        let out = calculate_output_shape_1d_pooling(&[8, 10, 5], 3, 2, PaddingType::Valid);
+        assert_eq!(out, vec![8, 4, 5]);
     }
 
     /// 1D pooling with a window equal to the length yields a single output position
     #[test]
     fn test_calculate_output_shape_1d_pooling_full_window() {
-        let out = calculate_output_shape_1d_pooling(&[2, 3, 6], 6, 1, PaddingType::Valid);
-        assert_eq!(out, vec![2, 3, 1]);
+        let out = calculate_output_shape_1d_pooling(&[2, 6, 3], 6, 1, PaddingType::Valid);
+        assert_eq!(out, vec![2, 1, 3]);
     }
 
     /// 2D pooling output shape for distinct window sizes and strides per axis
+    ///
+    /// Every axis has a different extent, so reading one for another would show up: batch 4,
+    /// height 6, width 7, channels 8 pools to height `(6 - 2) / 2 + 1 = 3` and width
+    /// `(7 - 3) / 1 + 1 = 5`, with the batch and channel axes riding through unchanged
     #[test]
     fn test_calculate_output_shape_2d_pooling() {
         let out =
             calculate_output_shape_2d_pooling(&[4, 6, 7, 8], (2, 3), (2, 1), PaddingType::Valid);
-        assert_eq!(out, vec![4, 6, 3, 6]);
+        assert_eq!(out, vec![4, 3, 5, 8]);
     }
 
     /// 3D pooling output shape across depth, height, and width axes
+    ///
+    /// Batch 2, depth 4, height 5, width 6, channels 9 pools to depth `(4 - 2) / 1 + 1 = 3`,
+    /// height `(5 - 2) / 2 + 1 = 2` and width `(6 - 3) / 3 + 1 = 2`
     #[test]
     fn test_calculate_output_shape_3d_pooling() {
         let out = calculate_output_shape_3d_pooling(
@@ -225,7 +232,7 @@ mod tests {
             (1, 2, 3),
             PaddingType::Valid,
         );
-        assert_eq!(out, vec![2, 4, 4, 3, 3]);
+        assert_eq!(out, vec![2, 3, 2, 2, 9]);
     }
 
     /// `Valid` padding reduces the output dimensions based on kernel size and stride
@@ -250,10 +257,11 @@ mod tests {
     }
 
     /// `calculate_output_shape_2d` passes batch/channels through and delegates spatial extents
-    /// to the formula, here with Valid padding
+    /// to the formula, here with Valid padding. The channel count is the trailing axis and rides
+    /// through untouched, so an asymmetric shape pins that it is not read as a spatial extent
     #[test]
     fn test_calculate_output_shape_2d_valid() {
-        let out = calculate_output_shape_2d(&[2, 4, 5, 5], (3, 3), (1, 1), &PaddingType::Valid);
-        assert_eq!(out, vec![2, 4, 3, 3]);
+        let out = calculate_output_shape_2d(&[2, 5, 5, 4], (3, 3), (1, 1), &PaddingType::Valid);
+        assert_eq!(out, vec![2, 3, 3, 4]);
     }
 }

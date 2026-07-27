@@ -229,6 +229,16 @@ pub enum IoError {
     /// layer's configured shape
     #[error("model structure mismatch: {0}")]
     ModelStructureMismatch(String),
+
+    /// The file is not a RustyML model file, or its on-disk format version is not the one this
+    /// build writes
+    ///
+    /// Weight containers carry no layout tag of their own, and a stale file's shapes can match the
+    /// current model's by coincidence - a square convolution kernel, or a `Flatten` -> `Dense` pair
+    /// whose `Dense` weight shape is the same under either tensor layout - so the format version is
+    /// the only reliable guard against loading weights laid out for a previous release
+    #[error("unsupported model format: {0}")]
+    UnsupportedModelFormat(String),
 }
 
 /// An alias for `Result<T, `[`Error`]`>`

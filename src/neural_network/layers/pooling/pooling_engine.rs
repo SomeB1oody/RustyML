@@ -7,11 +7,18 @@
 //!
 //! # Layout
 //!
-//! Inputs are `[batch, channels, spatial...]`. Work is parallelized over the `batch * channels`
-//! "channel planes". Each plane is processed as a contiguous `&[f32]` (row-major over the spatial
-//! dimensions) and the results are concatenated in `bc` order into the output buffer. This keeps
-//! the hot path allocation-light and builds the output with a single `from_shape_vec` instead of
-//! scalar-indexed writes
+//! Inputs are channels-last, `[batch, spatial..., channels]`. The unit of work is one *output
+//! position*: a window reduction reads `channels` contiguous floats per tap and folds them into a
+//! `channels`-wide accumulator, so all channels of a position are reduced together. That is what
+//! makes the layout pay here - the rank-generic window geometry (bounds checks, index arithmetic,
+//! the in-bounds element count) is computed once per output position instead of once per
+//! `(channel, position)` pair, and is then amortized across every channel.
+//!
+//! Forward work splits over `(batch item, output-position block)`, whose output slabs are disjoint.
+//! Backward splits over `(batch item, channel slab)` instead: a slab owning channels `[j0, j1)`
+//! writes only input addresses congruent to that range modulo `channels`, so the scatter is
+//! conflict-free without a halo, a merge, or atomics - and unlike splitting on batch alone it still
+//! fills the machine at `batch == 1`
 
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::convolution::PaddingType;
@@ -19,13 +26,19 @@ use ndarray::{ArrayD, IxDyn};
 use rayon::prelude::*;
 
 tunable_gate! {
-    /// Estimated total element ops (`bc_total * work_per_plane`) at or above which a pooling pass
-    /// runs in parallel
+    /// Estimated total element ops (`batch * out_positions * channels * window` taps) at or above
+    /// which a pooling pass runs in parallel
     ///
-    /// Counting per-plane work rather than plane count keeps the gate meaningful when a few planes
-    /// carry large spatial dims (e.g. batch == 1 on a big image) and when many planes are tiny. The
-    /// measured crossover bracket is 4.1K-12.3K window taps on both the few-large-planes and
-    /// many-tiny-planes ladders
+    /// Counting element ops rather than task count keeps the gate meaningful when a few positions
+    /// carry many channels and when many positions carry few
+    ///
+    /// Under this layout the tap count alone no longer predicts the crossover, because the serial
+    /// path's speed depends strongly on the channel count: the rank-generic window geometry is
+    /// computed once per output position and amortized across every channel, so a 25K-tap pool at
+    /// 64 channels runs serial in 14 us while a 16K-tap pool at 1 channel takes 77 us. The value
+    /// below is kept where it is deliberately - raising it to the bracket a work-only reading
+    /// suggests would trade a measured 45 us saving on the narrow-channel rung for avoiding a 7 us
+    /// loss on the wide one
     ///
     /// Overridable via [`crate::tuning`]
     pub(crate) POOL_PARALLEL_MIN_OPS => pool_parallel_min_ops / set_pool_parallel_min_ops = 12_000
@@ -96,7 +109,7 @@ fn increment_index(idx: &mut [usize], dims: &[usize]) -> bool {
 }
 
 /// Decomposes a flat row-major index into a multi-index for `dims` (inverse of the flat
-/// counter that `increment_index` advances), so a chunked task can start mid-plane
+/// counter that `increment_index` advances), so a chunked task can start mid-item
 fn decode_index(mut flat: usize, dims: &[usize]) -> Vec<usize> {
     let mut idx = vec![0usize; dims.len()];
     for k in (0..dims.len()).rev() {
@@ -108,31 +121,36 @@ fn decode_index(mut flat: usize, dims: &[usize]) -> Vec<usize> {
     idx
 }
 
-/// Minimum output positions per forward task: small enough that a `batch * channels == 1` plane
-/// still splits across threads, large enough (~12 us of window reduction) to amortize the rayon
-/// task overhead
-const POOL_MIN_CHUNK_OUT: usize = 1024;
+/// Minimum output positions per forward task: small enough that a single-image batch still splits
+/// across threads, large enough to amortize the rayon task overhead
+const POOL_MIN_CHUNK_OUT: usize = 256;
 
-/// Runs `f` for every `bc` in `0..bc_total`, preserving order, in parallel once the estimated
-/// total work (`bc_total * work_per_plane` element ops) clears the gate
+/// Minimum channels per backward task, so a slab is at least a few vector registers wide
+const POOL_MIN_CHUNK_CHANNELS: usize = 16;
+
+/// Positions whose channels the accumulator visits per fold block in [`global_pool_forward`]
 ///
-/// `force_parallel` overrides the gate decision; production passes `None`
-fn map_planes<R, F>(
-    bc_total: usize,
-    work_per_plane: usize,
-    force_parallel: Option<bool>,
-    f: F,
-) -> Vec<R>
-where
-    R: Send,
-    F: Fn(usize) -> R + Sync + Send,
-{
-    let parallel = force_parallel
-        .unwrap_or(bc_total.saturating_mul(work_per_plane) >= pool_parallel_min_ops());
-    if parallel {
-        (0..bc_total).into_par_iter().map(f).collect()
-    } else {
-        (0..bc_total).map(f).collect()
+/// A function of the channel count only, so the block grouping - and with it the summation order -
+/// depends on the input shape and never on how many threads happened to run
+fn rows_per_block(channels: usize) -> usize {
+    (16_384 / channels.max(1)).max(1)
+}
+
+/// Folds one window's element into a running max, matching the serial scan's NaN rule
+///
+/// Once a NaN is seen it wins and sticks: a later NaN does not replace it (so the *first* NaN's
+/// index is kept) and no finite value can displace it, because `v > NaN` is false. A bare
+/// `v > max_val` would silently drop NaNs instead of propagating them
+#[inline]
+fn fold_max(max_val: &mut f32, max_idx: &mut usize, v: f32, idx: usize) {
+    if v.is_nan() {
+        if !max_val.is_nan() {
+            *max_val = v;
+            *max_idx = idx;
+        }
+    } else if v > *max_val {
+        *max_val = v;
+        *max_idx = idx;
     }
 }
 
@@ -142,8 +160,9 @@ where
 ///
 /// # Returns
 ///
-/// The pooled tensor and, for [`PoolKind::Max`], the flat per-output arg-max indices into each
-/// input plane (used by [`windowed_pool_backward`]); `None` for averaging
+/// The pooled tensor and, for [`PoolKind::Max`], one arg-max per output element - a flat element
+/// offset into the batch item, so it already carries the channel and needs no further arithmetic in
+/// [`windowed_pool_backward`]; `None` for averaging
 pub(super) fn windowed_pool_forward(
     input: &Tensor,
     pool: &[usize],
@@ -167,14 +186,14 @@ pub fn windowed_pool_forward_impl(
     force_parallel: Option<bool>,
 ) -> (Tensor, Option<Vec<usize>>) {
     let shape = input.shape();
-    let (batch, channels) = (shape[0], shape[1]);
-    let sp = &shape[2..];
-    let r = sp.len();
+    let r = shape.len() - 2;
+    let batch = shape[0];
+    let sp = &shape[1..1 + r];
+    let channels = shape[1 + r];
     let (out_sp, pad_before) = pool_geometry(sp, pool, strides, padding);
-    let plane_in: usize = sp.iter().product();
     let plane_out: usize = out_sp.iter().product();
     let in_strides = row_major_strides(sp);
-    let bc_total = batch * channels;
+    let item_in: usize = sp.iter().product::<usize>() * channels;
     let track = kind == PoolKind::Max;
 
     let input_std = input.as_standard_layout();
@@ -182,25 +201,36 @@ pub fn windowed_pool_forward_impl(
         .as_slice()
         .expect("standard-layout array is contiguous");
 
-    // One task per (plane, output-position chunk): splitting the output positions lets a single
-    // large plane (e.g. batch == 1 with few channels) use every thread, while many planes get one
-    // chunk apiece. Every output element is reduced by the same serial loop regardless of the
-    // chunk boundaries, so the result matches the serial path and rerunning on the same machine
-    // gives the same result
-    let process_range = |bc: usize, c0: usize, len: usize| -> (Vec<f32>, Vec<usize>) {
-        let plane = &in_flat[bc * plane_in..(bc + 1) * plane_in];
-        let mut out_chunk = vec![0.0f32; len];
-        let mut arg_chunk = if track { vec![0usize; len] } else { Vec::new() };
+    // Reduces output positions `[c0, c0 + len)` of batch item `b`. Every position is folded by the
+    // same serial window loop whatever the block boundaries are, so the result does not depend on
+    // how the work was split
+    let process_range = |b: usize, c0: usize, len: usize| -> (Vec<f32>, Vec<usize>) {
+        let item_base = b * item_in;
+        let mut out_chunk = vec![0.0f32; len * channels];
+        let mut arg_chunk = if track {
+            vec![0usize; len * channels]
+        } else {
+            Vec::new()
+        };
 
         let mut o = decode_index(c0, &out_sp);
         let mut w = vec![0usize; r];
         for i in 0..len {
-            // Reduce the window anchored at output position `o`
+            let acc = &mut out_chunk[i * channels..(i + 1) * channels];
+            let arg = if track {
+                &mut arg_chunk[i * channels..(i + 1) * channels]
+            } else {
+                &mut [][..]
+            };
+            match kind {
+                PoolKind::Max => acc.fill(f32::NEG_INFINITY),
+                PoolKind::Average => acc.fill(0.0),
+            }
+
+            // The window geometry below is evaluated once for the whole position and reused by
+            // every channel - the saving that pays for this layout
             w.iter_mut().for_each(|x| *x = 0);
-            let mut sum = 0.0f32;
             let mut count = 0usize;
-            let mut max_val = f32::NEG_INFINITY;
-            let mut max_idx = 0usize;
             loop {
                 let mut in_idx = 0usize;
                 let mut in_bounds = true;
@@ -214,24 +244,18 @@ pub fn windowed_pool_forward_impl(
                     in_idx += p as usize * in_strides[k];
                 }
                 if in_bounds {
-                    let v = plane[in_idx];
+                    let off = item_base + in_idx * channels;
+                    let x = &in_flat[off..off + channels];
                     match kind {
                         PoolKind::Max => {
-                            // Propagate NaN: once seen it wins and sticks (matches PyTorch/TF and
-                            // the sibling activations); a bare `v > max_val` would silently drop it
-                            // since NaN is never `>` anything
-                            if v.is_nan() {
-                                if !max_val.is_nan() {
-                                    max_val = v;
-                                    max_idx = in_idx;
-                                }
-                            } else if v > max_val {
-                                max_val = v;
-                                max_idx = in_idx;
+                            for c in 0..channels {
+                                fold_max(&mut acc[c], &mut arg[c], x[c], off - item_base + c);
                             }
                         }
                         PoolKind::Average => {
-                            sum += v;
+                            for (a, &v) in acc.iter_mut().zip(x) {
+                                *a += v;
+                            }
                             count += 1;
                         }
                     }
@@ -240,71 +264,68 @@ pub fn windowed_pool_forward_impl(
                     break;
                 }
             }
-            match kind {
-                PoolKind::Max => {
-                    out_chunk[i] = max_val;
-                    arg_chunk[i] = max_idx;
-                }
-                PoolKind::Average => {
-                    out_chunk[i] = if count > 0 { sum / count as f32 } else { 0.0 };
-                }
+            if kind == PoolKind::Average {
+                // The in-bounds count is a property of the window, not of any channel
+                let scale = if count > 0 { 1.0 / count as f32 } else { 0.0 };
+                acc.iter_mut().for_each(|a| *a *= scale);
             }
             increment_index(&mut o, &out_sp);
         }
         (out_chunk, arg_chunk)
     };
 
-    let total_ops = bc_total
+    let total_ops = batch
         .saturating_mul(plane_out)
+        .saturating_mul(channels)
         .saturating_mul(pool.iter().product::<usize>());
     let parallel = force_parallel.unwrap_or(total_ops >= pool_parallel_min_ops());
 
-    // Chunk size: enough chunks to feed every thread once the planes alone cannot, but never so
-    // small the task overhead dominates
-    let chunk_len = if parallel && bc_total > 0 && plane_out > 0 {
-        let chunks_per_plane = rayon::current_num_threads().div_ceil(bc_total);
-        plane_out.div_ceil(chunks_per_plane).max(POOL_MIN_CHUNK_OUT)
+    // Enough blocks to feed every thread once the batch alone cannot, but never so small that the
+    // task overhead dominates
+    let chunk_len = if parallel && batch > 0 && plane_out > 0 {
+        let chunks_per_item = rayon::current_num_threads().div_ceil(batch);
+        plane_out.div_ceil(chunks_per_item).max(POOL_MIN_CHUNK_OUT)
     } else {
         plane_out.max(1)
     };
-    let tasks: Vec<(usize, usize, usize)> = (0..bc_total)
-        .flat_map(|bc| {
+    let tasks: Vec<(usize, usize, usize)> = (0..batch)
+        .flat_map(|b| {
             (0..plane_out)
                 .step_by(chunk_len.max(1))
-                .map(move |c0| (bc, c0, chunk_len.min(plane_out - c0)))
+                .map(move |c0| (b, c0, chunk_len.min(plane_out - c0)))
         })
         .collect();
 
     let results: Vec<(Vec<f32>, Vec<usize>)> = if parallel {
         tasks
             .par_iter()
-            .map(|&(bc, c0, len)| process_range(bc, c0, len))
+            .map(|&(b, c0, len)| process_range(b, c0, len))
             .collect()
     } else {
         tasks
             .iter()
-            .map(|&(bc, c0, len)| process_range(bc, c0, len))
+            .map(|&(b, c0, len)| process_range(b, c0, len))
             .collect()
     };
 
-    let mut out_flat = vec![0.0f32; bc_total * plane_out];
+    let mut out_flat = vec![0.0f32; batch * plane_out * channels];
     let mut argmax = if track {
-        vec![0usize; bc_total * plane_out]
+        vec![0usize; batch * plane_out * channels]
     } else {
         Vec::new()
     };
-    for (&(bc, c0, len), (out_chunk, arg_chunk)) in tasks.iter().zip(results) {
-        let base = bc * plane_out + c0;
-        out_flat[base..base + len].copy_from_slice(&out_chunk);
+    for (&(b, c0, len), (out_chunk, arg_chunk)) in tasks.iter().zip(results) {
+        let base = (b * plane_out + c0) * channels;
+        out_flat[base..base + len * channels].copy_from_slice(&out_chunk);
         if track {
-            argmax[base..base + len].copy_from_slice(&arg_chunk);
+            argmax[base..base + len * channels].copy_from_slice(&arg_chunk);
         }
     }
 
     let mut out_shape = Vec::with_capacity(2 + r);
     out_shape.push(batch);
-    out_shape.push(channels);
     out_shape.extend_from_slice(&out_sp);
+    out_shape.push(channels);
     let output = ArrayD::from_shape_vec(IxDyn(&out_shape), out_flat)
         .expect("pool output length matches its shape");
 
@@ -313,8 +334,8 @@ pub fn windowed_pool_forward_impl(
 
 /// Backward pass for windowed pooling
 ///
-/// `input_shape` is the full forward input shape `[batch, channels, spatial...]`. For
-/// [`PoolKind::Max`], `argmax` must be the indices returned by [`windowed_pool_forward`];
+/// `input_shape` is the full forward input shape `[batch, spatial..., channels]`. For
+/// [`PoolKind::Max`], `argmax` must be the offsets returned by [`windowed_pool_forward`];
 /// averaging redistributes each output gradient evenly over its window and ignores `argmax`
 pub(super) fn windowed_pool_backward(
     grad_output: &Tensor,
@@ -325,32 +346,40 @@ pub(super) fn windowed_pool_backward(
     argmax: Option<&[usize]>,
     padding: PaddingType,
 ) -> Tensor {
-    let (batch, channels) = (input_shape[0], input_shape[1]);
-    let sp = &input_shape[2..];
-    let r = sp.len();
-    let out_sp = &grad_output.shape()[2..];
+    let r = input_shape.len() - 2;
+    let batch = input_shape[0];
+    let sp = &input_shape[1..1 + r];
+    let channels = input_shape[1 + r];
+    let out_sp = &grad_output.shape()[1..1 + r];
     // Leading padding per axis (Max backward uses the recorded arg-max, so only Average needs it)
     let (_, pad_before) = pool_geometry(sp, pool, strides, padding);
     let plane_in: usize = sp.iter().product();
     let plane_out: usize = out_sp.iter().product();
     let in_strides = row_major_strides(sp);
-    let bc_total = batch * channels;
+    let item_in = plane_in * channels;
 
     let grad_std = grad_output.as_standard_layout();
     let grad_flat = grad_std
         .as_slice()
         .expect("standard-layout array is contiguous");
 
-    let process_bc = |bc: usize| -> Vec<f32> {
-        let grad_out_plane = &grad_flat[bc * plane_out..(bc + 1) * plane_out];
-        let mut grad_in_plane = vec![0.0f32; plane_in];
-
+    // Accumulates the gradient for channels `[j0, j1)` of batch item `b` into `out`, a slab of the
+    // item laid out `[plane_in, j1 - j0]`. Two slabs never touch the same address, so this is safe
+    // to run concurrently, and within a slab the accumulation runs in output-position order
+    let process_slab = |b: usize, j0: usize, width: usize, out: &mut [f32]| {
+        let g_item = b * plane_out * channels;
         match kind {
             PoolKind::Max => {
                 let arg = argmax.expect("max pooling backward requires arg-max positions");
-                let arg_plane = &arg[bc * plane_out..(bc + 1) * plane_out];
-                for (o_flat, &g) in grad_out_plane.iter().enumerate() {
-                    grad_in_plane[arg_plane[o_flat]] += g;
+                let arg_item = &arg[g_item..g_item + plane_out * channels];
+                for o_flat in 0..plane_out {
+                    for j in j0..j0 + width {
+                        let g = grad_flat[g_item + o_flat * channels + j];
+                        // The stored offset already carries the channel, so dividing it back out
+                        // gives the position and the remainder is `j` by construction
+                        let target = arg_item[o_flat * channels + j];
+                        out[(target / channels) * width + (j - j0)] += g;
+                    }
                 }
             }
             PoolKind::Average => {
@@ -358,7 +387,8 @@ pub(super) fn windowed_pool_backward(
                 let mut w = vec![0usize; r];
                 let mut o_flat = 0usize;
                 loop {
-                    // Count the in-bounds elements of this window, then spread the gradient evenly
+                    // Count the in-bounds elements of this window, then spread the gradient evenly.
+                    // The count is shared by every channel of the position
                     w.iter_mut().for_each(|x| *x = 0);
                     let mut count = 0usize;
                     loop {
@@ -373,7 +403,7 @@ pub(super) fn windowed_pool_backward(
                         }
                     }
                     if count > 0 {
-                        let grad_per_element = grad_out_plane[o_flat] / count as f32;
+                        let scale = 1.0 / count as f32;
                         w.iter_mut().for_each(|x| *x = 0);
                         loop {
                             let mut in_idx = 0usize;
@@ -388,7 +418,11 @@ pub(super) fn windowed_pool_backward(
                                 in_idx += p as usize * in_strides[k];
                             }
                             if in_bounds {
-                                grad_in_plane[in_idx] += grad_per_element;
+                                let dst = &mut out[in_idx * width..(in_idx + 1) * width];
+                                let src = &grad_flat[g_item + o_flat * channels + j0..][..width];
+                                for (d, &g) in dst.iter_mut().zip(src) {
+                                    *d += g * scale;
+                                }
                             }
                             if !increment_index(&mut w, pool) {
                                 break;
@@ -402,20 +436,51 @@ pub(super) fn windowed_pool_backward(
                 }
             }
         }
-        grad_in_plane
     };
 
-    let planes = map_planes(
-        bc_total,
-        plane_out * pool.iter().product::<usize>(),
-        None,
-        process_bc,
-    );
+    // One task per (batch item, channel slab)
+    let total_ops = batch
+        .saturating_mul(plane_out)
+        .saturating_mul(channels)
+        .saturating_mul(pool.iter().product::<usize>());
+    let parallel = total_ops >= pool_parallel_min_ops();
+    let slab = if parallel && batch > 0 && channels > 0 {
+        let slabs_per_item = rayon::current_num_threads().div_ceil(batch);
+        channels
+            .div_ceil(slabs_per_item)
+            .max(POOL_MIN_CHUNK_CHANNELS)
+            .min(channels)
+    } else {
+        channels.max(1)
+    };
+    let tasks: Vec<(usize, usize, usize)> = (0..batch)
+        .flat_map(|b| {
+            (0..channels)
+                .step_by(slab.max(1))
+                .map(move |j0| (b, j0, slab.min(channels - j0)))
+        })
+        .collect();
 
-    let mut grad_in = Vec::with_capacity(bc_total * plane_in);
-    for plane in planes {
-        grad_in.extend(plane);
+    let run = |&(b, j0, width): &(usize, usize, usize)| {
+        let mut out = vec![0.0f32; plane_in * width];
+        process_slab(b, j0, width, &mut out);
+        out
+    };
+    let slabs: Vec<Vec<f32>> = if parallel {
+        tasks.par_iter().map(run).collect()
+    } else {
+        tasks.iter().map(run).collect()
+    };
+
+    let mut grad_in = vec![0.0f32; batch * item_in];
+    for (&(b, j0, width), slab_data) in tasks.iter().zip(slabs) {
+        let item_base = b * item_in;
+        for p in 0..plane_in {
+            let dst = item_base + p * channels + j0;
+            grad_in[dst..dst + width].copy_from_slice(&slab_data[p * width..(p + 1) * width]);
+        }
     }
+
     ArrayD::from_shape_vec(IxDyn(input_shape), grad_in)
         .expect("grad-input length matches the input shape")
 }
@@ -427,13 +492,15 @@ pub(super) fn windowed_pool_backward(
 ///
 /// # Returns
 ///
-/// The pooled tensor and, for [`PoolKind::Max`], the flat per-channel arg-max index into each
-/// input plane; `None` for averaging
+/// The pooled tensor and, for [`PoolKind::Max`], one arg-max per output element as a flat element
+/// offset into the batch item; `None` for averaging
 pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Option<Vec<usize>>) {
     let shape = input.shape();
-    let (batch, channels) = (shape[0], shape[1]);
-    let plane_in: usize = shape[2..].iter().product();
-    let bc_total = batch * channels;
+    let r = shape.len() - 2;
+    let batch = shape[0];
+    let channels = shape[1 + r];
+    let positions: usize = shape[1..1 + r].iter().product();
+    let item_in = positions * channels;
     let track = kind == PoolKind::Max;
 
     let input_std = input.as_standard_layout();
@@ -441,46 +508,86 @@ pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Op
         .as_slice()
         .expect("standard-layout array is contiguous");
 
-    let process_bc = |bc: usize| -> (f32, usize) {
-        let plane = &in_flat[bc * plane_in..(bc + 1) * plane_in];
-        match kind {
-            PoolKind::Max => {
-                let mut max_val = f32::NEG_INFINITY;
-                let mut max_idx = 0usize;
-                for (i, &v) in plane.iter().enumerate() {
-                    // Propagate NaN (see `windowed_pool_forward`): NaN wins and sticks
-                    if v.is_nan() {
-                        if !max_val.is_nan() {
-                            max_val = v;
-                            max_idx = i;
-                        }
-                    } else if v > max_val {
-                        max_val = v;
-                        max_idx = i;
+    // One task per (batch item, block of positions). Blocks are sized from the channel count
+    // alone, so the fold grouping - and with it the float summation order - is a property of the
+    // input shape, not of the schedule
+    let block = rows_per_block(channels);
+    let tasks: Vec<(usize, usize, usize)> = (0..batch)
+        .flat_map(|b| {
+            (0..positions)
+                .step_by(block.max(1))
+                .map(move |p0| (b, p0, block.min(positions - p0)))
+        })
+        .collect();
+
+    let run = |&(b, p0, len): &(usize, usize, usize)| -> (Vec<f32>, Vec<usize>) {
+        let base = b * item_in + p0 * channels;
+        let mut acc = match kind {
+            PoolKind::Max => vec![f32::NEG_INFINITY; channels],
+            PoolKind::Average => vec![0.0f32; channels],
+        };
+        let mut arg = if track {
+            vec![0usize; channels]
+        } else {
+            Vec::new()
+        };
+        for p in 0..len {
+            let off = base + p * channels;
+            let x = &in_flat[off..off + channels];
+            match kind {
+                PoolKind::Max => {
+                    for c in 0..channels {
+                        fold_max(&mut acc[c], &mut arg[c], x[c], (p0 + p) * channels + c);
                     }
                 }
-                (max_val, max_idx)
-            }
-            PoolKind::Average => {
-                let sum: f32 = plane.iter().sum();
-                (sum / plane_in as f32, 0)
+                PoolKind::Average => {
+                    for (a, &v) in acc.iter_mut().zip(x) {
+                        *a += v;
+                    }
+                }
             }
         }
+        (acc, arg)
     };
 
-    let results = map_planes(bc_total, plane_in, None, process_bc);
+    let parallel = batch.saturating_mul(item_in) >= pool_parallel_min_ops();
+    let partials: Vec<(Vec<f32>, Vec<usize>)> = if parallel {
+        tasks.par_iter().map(run).collect()
+    } else {
+        tasks.iter().map(run).collect()
+    };
 
-    let mut out_flat = Vec::with_capacity(bc_total);
+    // Merge the block partials in block order. Folding them with the same rule the serial scan
+    // uses makes the merged result identical to a single pass: a `Max` block that saw a NaN keeps
+    // it, and ties still resolve to the earliest position
+    let mut out_flat = match kind {
+        PoolKind::Max => vec![f32::NEG_INFINITY; batch * channels],
+        PoolKind::Average => vec![0.0f32; batch * channels],
+    };
     let mut argmax = if track {
-        Vec::with_capacity(bc_total)
+        vec![0usize; batch * channels]
     } else {
         Vec::new()
     };
-    for (val, idx) in results {
-        out_flat.push(val);
-        if track {
-            argmax.push(idx);
+    for (&(b, _, _), (acc, arg)) in tasks.iter().zip(partials) {
+        let out = &mut out_flat[b * channels..(b + 1) * channels];
+        match kind {
+            PoolKind::Max => {
+                let dst_arg = &mut argmax[b * channels..(b + 1) * channels];
+                for c in 0..channels {
+                    fold_max(&mut out[c], &mut dst_arg[c], acc[c], arg[c]);
+                }
+            }
+            PoolKind::Average => {
+                for (o, v) in out.iter_mut().zip(acc) {
+                    *o += v;
+                }
+            }
         }
+    }
+    if kind == PoolKind::Average {
+        let scale = 1.0 / positions as f32;
+        out_flat.iter_mut().for_each(|v| *v *= scale);
     }
 
     let output = ArrayD::from_shape_vec(IxDyn(&[batch, channels]), out_flat)
@@ -490,45 +597,55 @@ pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Op
 
 /// Backward pass for global pooling
 ///
-/// `grad_output` has shape `[batch, channels]`. Averaging spreads each gradient evenly over its
-/// channel plane. [`PoolKind::Max`] routes it to the stored arg-max element
+/// `grad_output` has shape `[batch, channels]`. Averaging spreads each gradient evenly over every
+/// position of its channel. [`PoolKind::Max`] routes it to the stored arg-max element
 pub(super) fn global_pool_backward(
     grad_output: &Tensor,
     input_shape: &[usize],
     kind: PoolKind,
     argmax: Option<&[usize]>,
 ) -> Tensor {
-    let (batch, channels) = (input_shape[0], input_shape[1]);
-    let plane_in: usize = input_shape[2..].iter().product();
-    let bc_total = batch * channels;
+    let r = input_shape.len() - 2;
+    let batch = input_shape[0];
+    let channels = input_shape[1 + r];
+    let positions: usize = input_shape[1..1 + r].iter().product();
+    let item_in = positions * channels;
 
     let grad_std = grad_output.as_standard_layout();
     let grad_flat = grad_std
         .as_slice()
         .expect("standard-layout array is contiguous");
 
-    let process_bc = |bc: usize| -> Vec<f32> {
-        let g = grad_flat[bc];
-        let mut plane = vec![0.0f32; plane_in];
+    let mut grad_in = vec![0.0f32; batch * item_in];
+    for b in 0..batch {
+        let item = &mut grad_in[b * item_in..(b + 1) * item_in];
+        let g = &grad_flat[b * channels..(b + 1) * channels];
         match kind {
             PoolKind::Max => {
                 let arg = argmax.expect("global max pooling backward requires arg-max positions");
-                plane[arg[bc]] += g;
+                let arg_item = &arg[b * channels..(b + 1) * channels];
+                for c in 0..channels {
+                    item[arg_item[c]] += g[c];
+                }
             }
             PoolKind::Average => {
-                let grad_per_element = g / plane_in as f32;
-                plane.iter_mut().for_each(|x| *x = grad_per_element);
+                // Every position of the item gets the same `[channels]` vector, so build one tile
+                // that repeats it up to about a cache line's worth of work and stamp the item out
+                // in tile-sized strides. Writing it row by row instead would emit a `memcpy` call
+                // per position, which is the wrong shape when `channels` is small
+                let scale = 1.0 / positions as f32;
+                let reps = (1024 / channels.max(1)).clamp(1, positions.max(1));
+                let mut tile = Vec::with_capacity(reps * channels);
+                for _ in 0..reps {
+                    tile.extend(g.iter().map(|&v| v * scale));
+                }
+                for chunk in item.chunks_mut(tile.len()) {
+                    chunk.copy_from_slice(&tile[..chunk.len()]);
+                }
             }
         }
-        plane
-    };
-
-    let planes = map_planes(bc_total, plane_in, None, process_bc);
-
-    let mut grad_in = Vec::with_capacity(bc_total * plane_in);
-    for plane in planes {
-        grad_in.extend(plane);
     }
+
     ArrayD::from_shape_vec(IxDyn(input_shape), grad_in)
         .expect("grad-input length matches the input shape")
 }
@@ -562,7 +679,7 @@ mod tests {
         assert_eq!(s, vec![1]);
     }
 
-    /// An empty shape returns an empty stride vector
+    /// An empty shape yields no strides
     #[test]
     fn test_row_major_strides_empty() {
         let s = row_major_strides(&[]);
@@ -571,60 +688,56 @@ mod tests {
 
     // increment_index
 
-    /// Incrementing a non-final index advances the last axis and returns true
+    /// A multi-index advances its last axis first
     #[test]
     fn test_increment_index_normal() {
+        let dims = [2usize, 3];
         let mut idx = vec![0usize, 0];
-        let more = increment_index(&mut idx, &[2, 3]);
-        assert!(more);
+        assert!(increment_index(&mut idx, &dims));
         assert_eq!(idx, vec![0, 1]);
     }
 
-    /// When the last index reaches its bound it wraps to 0 and carries into the next axis
+    /// Overflowing the last axis carries into the previous one
     #[test]
     fn test_increment_index_carry() {
+        let dims = [2usize, 3];
         let mut idx = vec![0usize, 2];
-        let more = increment_index(&mut idx, &[2, 3]);
-        assert!(more);
+        assert!(increment_index(&mut idx, &dims));
         assert_eq!(idx, vec![1, 0]);
     }
 
-    /// At the final position every axis wraps back to zero and false is returned
+    /// The final index wraps to the origin and reports exhaustion
     #[test]
     fn test_increment_index_exhausted() {
+        let dims = [2usize, 3];
         let mut idx = vec![1usize, 2];
-        let more = increment_index(&mut idx, &[2, 3]);
-        assert!(!more);
+        assert!(!increment_index(&mut idx, &dims));
         assert_eq!(idx, vec![0, 0]);
     }
 
-    /// A 1-D index at its last value wraps to zero and returns false
+    // decode_index
+
+    /// A flat index decomposes into the multi-index `increment_index` would have reached
     #[test]
-    fn test_increment_index_1d_last_step() {
-        let mut idx = vec![3usize];
-        let more = increment_index(&mut idx, &[4]);
-        assert!(!more);
-        assert_eq!(idx, vec![0]);
+    fn test_decode_index_matches_increment() {
+        let dims = [2usize, 3, 4];
+        let mut idx = vec![0usize; 3];
+        for flat in 0..24 {
+            assert_eq!(decode_index(flat, &dims), idx, "flat {flat}");
+            increment_index(&mut idx, &dims);
+        }
     }
 
-    /// A mid-range 1-D index advances and returns true
-    #[test]
-    fn test_increment_index_1d_mid() {
-        let mut idx = vec![2usize];
-        let more = increment_index(&mut idx, &[4]);
-        assert!(more);
-        assert_eq!(idx, vec![3]);
-    }
+    // windowed_pool_forward (Max)
 
-    // windowed_pool_forward (Max, 1-D)
-
-    /// 1-D max-pool returns per-window maxima and their flat arg-max indices
+    /// 1-D max-pool returns per-window maxima and their flat arg-max offsets
     #[test]
     fn test_windowed_pool_forward_1d_max() {
-        let data = ArrayD::from_shape_vec(IxDyn(&[1, 1, 4]), vec![3.0f32, 1.0, 4.0, 1.0]).unwrap();
+        // [batch, length, channels] with one channel
+        let data = ArrayD::from_shape_vec(IxDyn(&[1, 4, 1]), vec![3.0f32, 1.0, 4.0, 1.0]).unwrap();
         let (out, argmax) =
             windowed_pool_forward(&data, &[2], &[2], PoolKind::Max, PaddingType::Valid);
-        assert_eq!(out.shape(), &[1, 1, 2]);
+        assert_eq!(out.shape(), &[1, 2, 1]);
         let flat: Vec<f32> = out.iter().copied().collect();
         assert_abs_diff_eq!(flat[0], 3.0, epsilon = 1e-6);
         assert_abs_diff_eq!(flat[1], 4.0, epsilon = 1e-6);
@@ -632,13 +745,11 @@ mod tests {
         assert_eq!(am, vec![0, 2]);
     }
 
-    // windowed_pool_forward (Max, 2-D)
-
-    /// 2-D max-pool over a single window returns the max and its flat arg-max index
+    /// 2-D max-pool over a single window returns the max and its flat arg-max offset
     #[test]
     fn test_windowed_pool_forward_2d_max() {
         let data =
-            ArrayD::from_shape_vec(IxDyn(&[1, 1, 2, 2]), vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
+            ArrayD::from_shape_vec(IxDyn(&[1, 2, 2, 1]), vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
         let (out, argmax) =
             windowed_pool_forward(&data, &[2, 2], &[2, 2], PoolKind::Max, PaddingType::Valid);
         assert_eq!(out.shape(), &[1, 1, 1, 1]);
@@ -648,15 +759,40 @@ mod tests {
         assert_eq!(am, vec![3]);
     }
 
-    // windowed_pool_forward (Average, 1-D)
+    /// Each channel is pooled on its own, and the arg-max offset carries the channel
+    ///
+    /// Channel 0 peaks in the first window position and channel 1 in the last, so a single shared
+    /// arg-max - or channels bleeding into each other - would both show up here
+    #[test]
+    fn test_windowed_pool_forward_1d_max_two_channels() {
+        // [1, 4, 2]: channel 0 is 4, 3, 2, 1 and channel 1 is 1, 2, 3, 4
+        let data = ArrayD::from_shape_vec(
+            IxDyn(&[1, 4, 2]),
+            vec![4.0f32, 1.0, 3.0, 2.0, 2.0, 3.0, 1.0, 4.0],
+        )
+        .unwrap();
+        let (out, argmax) =
+            windowed_pool_forward(&data, &[2], &[2], PoolKind::Max, PaddingType::Valid);
+        assert_eq!(out.shape(), &[1, 2, 2]);
+        // Window 0 covers positions 0-1: max is 4 on channel 0 and 2 on channel 1
+        // Window 1 covers positions 2-3: max is 2 on channel 0 and 4 on channel 1
+        assert_eq!(
+            out.iter().copied().collect::<Vec<f32>>(),
+            vec![4.0, 2.0, 2.0, 4.0]
+        );
+        // Offsets are `position * channels + channel`
+        assert_eq!(argmax.unwrap(), vec![0, 3, 4, 7]);
+    }
+
+    // windowed_pool_forward (Average)
 
     /// 1-D average-pool returns per-window means and no arg-max
     #[test]
     fn test_windowed_pool_forward_1d_avg() {
-        let data = ArrayD::from_shape_vec(IxDyn(&[1, 1, 4]), vec![3.0f32, 1.0, 4.0, 1.0]).unwrap();
+        let data = ArrayD::from_shape_vec(IxDyn(&[1, 4, 1]), vec![3.0f32, 1.0, 4.0, 1.0]).unwrap();
         let (out, argmax) =
             windowed_pool_forward(&data, &[2], &[2], PoolKind::Average, PaddingType::Valid);
-        assert_eq!(out.shape(), &[1, 1, 2]);
+        assert_eq!(out.shape(), &[1, 2, 1]);
         let flat: Vec<f32> = out.iter().copied().collect();
         assert_abs_diff_eq!(flat[0], 2.0, epsilon = 1e-6);
         assert_abs_diff_eq!(flat[1], 2.5, epsilon = 1e-6);
@@ -667,7 +803,7 @@ mod tests {
     #[test]
     fn test_windowed_pool_forward_2d_avg() {
         let data =
-            ArrayD::from_shape_vec(IxDyn(&[1, 1, 2, 2]), vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
+            ArrayD::from_shape_vec(IxDyn(&[1, 2, 2, 1]), vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
         let (out, argmax) = windowed_pool_forward(
             &data,
             &[2, 2],
@@ -681,149 +817,234 @@ mod tests {
         assert!(argmax.is_none(), "Average pool must not return argmax");
     }
 
-    // windowed_pool_backward (Max, non-overlapping)
+    /// `Same` padding divides by the count of real elements, not the window size
+    ///
+    /// The trailing window of a length-3 input under a size-2 stride-2 window holds one real
+    /// element and one padding cell, so its mean is that element itself
+    #[test]
+    fn test_windowed_pool_forward_1d_avg_same_padding_excludes_pad() {
+        let data = ArrayD::from_shape_vec(IxDyn(&[1, 3, 1]), vec![1.0f32, 2.0, 6.0]).unwrap();
+        let (out, _) =
+            windowed_pool_forward(&data, &[2], &[2], PoolKind::Average, PaddingType::Same);
+        assert_eq!(out.shape(), &[1, 2, 1]);
+        let flat: Vec<f32> = out.iter().copied().collect();
+        assert_abs_diff_eq!(flat[0], 1.5, epsilon = 1e-6);
+        assert_abs_diff_eq!(flat[1], 6.0, epsilon = 1e-6);
+    }
+
+    /// Ties resolve to the first position scanned, on every channel
+    #[test]
+    fn test_windowed_pool_forward_2d_max_tie_breaks_to_first() {
+        let data =
+            ArrayD::from_shape_vec(IxDyn(&[1, 2, 2, 1]), vec![5.0f32, 5.0, 5.0, 5.0]).unwrap();
+        let (_, argmax) =
+            windowed_pool_forward(&data, &[2, 2], &[2, 2], PoolKind::Max, PaddingType::Valid);
+        assert_eq!(argmax.unwrap(), vec![0]);
+    }
+
+    // windowed_pool_backward
 
     /// Max-pool backward routes each upstream gradient to its arg-max position
     #[test]
     fn test_windowed_pool_backward_1d_max_nonoverlapping() {
-        let grad_out = ArrayD::from_shape_vec(IxDyn(&[1, 1, 2]), vec![1.0f32, 1.0]).unwrap();
+        let grad_out = ArrayD::from_shape_vec(IxDyn(&[1, 2, 1]), vec![1.0f32, 1.0]).unwrap();
         let argmax = vec![0usize, 2];
         let grad_in = windowed_pool_backward(
             &grad_out,
-            &[1, 1, 4],
+            &[1, 4, 1],
             &[2],
             &[2],
             PoolKind::Max,
             Some(&argmax),
             PaddingType::Valid,
         );
-        assert_eq!(grad_in.shape(), &[1, 1, 4]);
-        let flat: Vec<f32> = grad_in.iter().copied().collect();
-        assert_abs_diff_eq!(flat[0], 1.0, epsilon = 1e-6); // argmax of window 0
-        assert_abs_diff_eq!(flat[1], 0.0, epsilon = 1e-6); // not selected
-        assert_abs_diff_eq!(flat[2], 1.0, epsilon = 1e-6); // argmax of window 1
-        assert_abs_diff_eq!(flat[3], 0.0, epsilon = 1e-6); // not selected
+        assert_eq!(grad_in.shape(), &[1, 4, 1]);
+        assert_eq!(
+            grad_in.iter().copied().collect::<Vec<f32>>(),
+            vec![1.0, 0.0, 1.0, 0.0]
+        );
     }
 
-    /// Distinct upstream gradient values reach their respective arg-max positions
+    /// Max-pool backward keeps each channel's gradient on its own channel
     #[test]
-    fn test_windowed_pool_backward_1d_max_varied_grads() {
-        let grad_out = ArrayD::from_shape_vec(IxDyn(&[1, 1, 2]), vec![2.0f32, 5.0]).unwrap();
-        let argmax = vec![1usize, 3];
+    fn test_windowed_pool_backward_1d_max_two_channels() {
+        // Mirrors `test_windowed_pool_forward_1d_max_two_channels`
+        let grad_out =
+            ArrayD::from_shape_vec(IxDyn(&[1, 2, 2]), vec![10.0f32, 20.0, 30.0, 40.0]).unwrap();
+        let argmax = vec![0usize, 3, 4, 7];
         let grad_in = windowed_pool_backward(
             &grad_out,
-            &[1, 1, 4],
+            &[1, 4, 2],
             &[2],
             &[2],
             PoolKind::Max,
             Some(&argmax),
             PaddingType::Valid,
         );
-        let flat: Vec<f32> = grad_in.iter().copied().collect();
-        assert_abs_diff_eq!(flat[0], 0.0, epsilon = 1e-6);
-        assert_abs_diff_eq!(flat[1], 2.0, epsilon = 1e-6);
-        assert_abs_diff_eq!(flat[2], 0.0, epsilon = 1e-6);
-        assert_abs_diff_eq!(flat[3], 5.0, epsilon = 1e-6);
+        assert_eq!(grad_in.shape(), &[1, 4, 2]);
+        assert_eq!(
+            grad_in.iter().copied().collect::<Vec<f32>>(),
+            vec![10.0, 0.0, 0.0, 20.0, 30.0, 0.0, 0.0, 40.0]
+        );
     }
 
-    // windowed_pool_backward (Average, overlapping)
+    /// Average-pool backward spreads each gradient evenly across its window
+    #[test]
+    fn test_windowed_pool_backward_1d_avg_nonoverlapping() {
+        let grad_out = ArrayD::from_shape_vec(IxDyn(&[1, 2, 1]), vec![2.0f32, 4.0]).unwrap();
+        let grad_in = windowed_pool_backward(
+            &grad_out,
+            &[1, 4, 1],
+            &[2],
+            &[2],
+            PoolKind::Average,
+            None,
+            PaddingType::Valid,
+        );
+        assert_eq!(
+            grad_in.iter().copied().collect::<Vec<f32>>(),
+            vec![1.0, 1.0, 2.0, 2.0]
+        );
+    }
 
-    /// Average-pool backward spreads each gradient over its window and accumulates overlaps
+    /// Overlapping windows accumulate where they overlap
     #[test]
     fn test_windowed_pool_backward_1d_avg_overlapping() {
-        let grad_out = ArrayD::from_shape_vec(IxDyn(&[1, 1, 3]), vec![1.0f32, 1.0, 1.0]).unwrap();
+        let grad_out = ArrayD::from_shape_vec(IxDyn(&[1, 3, 1]), vec![2.0f32, 2.0, 2.0]).unwrap();
         let grad_in = windowed_pool_backward(
             &grad_out,
-            &[1, 1, 4],
+            &[1, 4, 1],
             &[2],
             &[1],
             PoolKind::Average,
             None,
             PaddingType::Valid,
         );
-        assert_eq!(grad_in.shape(), &[1, 1, 4]);
-        let flat: Vec<f32> = grad_in.iter().copied().collect();
-        assert_abs_diff_eq!(flat[0], 0.5, epsilon = 1e-6); // edge
-        assert_abs_diff_eq!(flat[1], 1.0, epsilon = 1e-6); // interior
-        assert_abs_diff_eq!(flat[2], 1.0, epsilon = 1e-6); // interior
-        assert_abs_diff_eq!(flat[3], 0.5, epsilon = 1e-6); // edge
-    }
-
-    /// Non-overlapping average-pool backward spreads each gradient evenly with no overlap
-    #[test]
-    fn test_windowed_pool_backward_1d_avg_nonoverlapping() {
-        let grad_out = ArrayD::from_shape_vec(IxDyn(&[1, 1, 2]), vec![1.0f32, 1.0]).unwrap();
-        let grad_in = windowed_pool_backward(
-            &grad_out,
-            &[1, 1, 4],
-            &[2],
-            &[2],
-            PoolKind::Average,
-            None,
-            PaddingType::Valid,
-        );
-        assert_eq!(grad_in.shape(), &[1, 1, 4]);
-        let flat: Vec<f32> = grad_in.iter().copied().collect();
-        assert_abs_diff_eq!(flat[0], 0.5, epsilon = 1e-6);
-        assert_abs_diff_eq!(flat[1], 0.5, epsilon = 1e-6);
-        assert_abs_diff_eq!(flat[2], 0.5, epsilon = 1e-6);
-        assert_abs_diff_eq!(flat[3], 0.5, epsilon = 1e-6);
-    }
-
-    // output shape checks
-
-    /// 1-D output shape follows (sp - pool) / stride + 1
-    #[test]
-    fn test_windowed_pool_output_shape_1d() {
-        let data = ArrayD::from_shape_vec(IxDyn(&[1, 1, 6]), vec![1.0f32; 6]).unwrap();
-        let (out, _) =
-            windowed_pool_forward(&data, &[3], &[2], PoolKind::Average, PaddingType::Valid);
-        assert_eq!(out.shape(), &[1, 1, 2]);
-    }
-
-    /// 2-D batched output shape follows (sp - pool) / stride + 1 per axis
-    #[test]
-    fn test_windowed_pool_output_shape_2d_batched() {
-        let data =
-            ArrayD::from_shape_vec(IxDyn(&[2, 3, 4, 4]), vec![1.0f32; 2 * 3 * 4 * 4]).unwrap();
-        let (out, _) =
-            windowed_pool_forward(&data, &[2, 2], &[2, 2], PoolKind::Max, PaddingType::Valid);
-        assert_eq!(out.shape(), &[2, 3, 2, 2]);
-    }
-
-    // Max forward tie-breaking (first occurrence wins)
-
-    /// Windowed max-pool tie-break records the first of equal maxima (strict `>`)
-    #[test]
-    fn test_windowed_pool_forward_2d_max_tie_breaks_to_first() {
-        let data =
-            ArrayD::from_shape_vec(IxDyn(&[1, 1, 2, 2]), vec![5.0f32, 5.0, 1.0, 2.0]).unwrap();
-        let (out, argmax) =
-            windowed_pool_forward(&data, &[2, 2], &[2, 2], PoolKind::Max, PaddingType::Valid);
-        assert_eq!(out.shape(), &[1, 1, 1, 1]);
-        let flat: Vec<f32> = out.iter().copied().collect();
-        assert_abs_diff_eq!(flat[0], 5.0, epsilon = 1e-6);
-        let am = argmax.expect("Max pool must return argmax");
+        // Each window contributes 1.0 to both of its positions; the interior is covered twice
         assert_eq!(
-            am,
-            vec![0],
-            "tie must resolve to the FIRST maximum (flat index 0)"
+            grad_in.iter().copied().collect::<Vec<f32>>(),
+            vec![1.0, 2.0, 2.0, 1.0]
         );
     }
 
-    /// Global max-pool tie-break records the first of equal maxima (strict `>`)
+    // global_pool_forward / global_pool_backward
+
+    /// Global average pooling reduces every position and keeps the channels apart
+    #[test]
+    fn test_global_pool_forward_avg_two_channels() {
+        // [1, 4, 2]: channel 0 is 1, 2, 3, 4 and channel 1 is 10, 20, 30, 40
+        let data = ArrayD::from_shape_vec(
+            IxDyn(&[1, 4, 2]),
+            vec![1.0f32, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0],
+        )
+        .unwrap();
+        let (out, argmax) = global_pool_forward(&data, PoolKind::Average);
+        assert_eq!(out.shape(), &[1, 2]);
+        let flat: Vec<f32> = out.iter().copied().collect();
+        assert_abs_diff_eq!(flat[0], 2.5, epsilon = 1e-6);
+        assert_abs_diff_eq!(flat[1], 25.0, epsilon = 1e-6);
+        assert!(argmax.is_none());
+    }
+
+    /// Global max pooling records a per-channel arg-max offset
+    #[test]
+    fn test_global_pool_forward_max_two_channels() {
+        let data = ArrayD::from_shape_vec(
+            IxDyn(&[1, 4, 2]),
+            vec![4.0f32, 1.0, 3.0, 2.0, 2.0, 3.0, 1.0, 4.0],
+        )
+        .unwrap();
+        let (out, argmax) = global_pool_forward(&data, PoolKind::Max);
+        assert_eq!(out.iter().copied().collect::<Vec<f32>>(), vec![4.0, 4.0]);
+        // Channel 0 peaks at position 0, channel 1 at position 3
+        assert_eq!(argmax.unwrap(), vec![0, 7]);
+    }
+
+    /// Global max ties resolve to the first position scanned
     #[test]
     fn test_global_pool_forward_max_tie_breaks_to_first() {
-        let data = ArrayD::from_shape_vec(IxDyn(&[1, 1, 4]), vec![5.0f32, 5.0, 1.0, 2.0]).unwrap();
-        let (out, argmax) = global_pool_forward(&data, PoolKind::Max);
-        assert_eq!(out.shape(), &[1, 1]);
-        let flat: Vec<f32> = out.iter().copied().collect();
-        assert_abs_diff_eq!(flat[0], 5.0, epsilon = 1e-6);
-        let am = argmax.expect("Global max pool must return argmax");
+        let data = ArrayD::from_shape_vec(IxDyn(&[1, 3, 1]), vec![5.0f32, 5.0, 5.0]).unwrap();
+        let (_, argmax) = global_pool_forward(&data, PoolKind::Max);
+        assert_eq!(argmax.unwrap(), vec![0]);
+    }
+
+    /// Global average backward spreads each channel's gradient over every position
+    #[test]
+    fn test_global_pool_backward_avg() {
+        let grad_out = ArrayD::from_shape_vec(IxDyn(&[1, 2]), vec![8.0f32, 40.0]).unwrap();
+        let grad_in = global_pool_backward(&grad_out, &[1, 4, 2], PoolKind::Average, None);
+        assert_eq!(grad_in.shape(), &[1, 4, 2]);
+        // 8 / 4 = 2 on channel 0, 40 / 4 = 10 on channel 1, at every position
         assert_eq!(
-            am,
-            vec![0],
-            "tie must resolve to the FIRST maximum (index 0)"
+            grad_in.iter().copied().collect::<Vec<f32>>(),
+            vec![2.0, 10.0, 2.0, 10.0, 2.0, 10.0, 2.0, 10.0]
         );
+    }
+
+    /// Global max backward routes each channel's gradient to its recorded winner
+    #[test]
+    fn test_global_pool_backward_max() {
+        let grad_out = ArrayD::from_shape_vec(IxDyn(&[1, 2]), vec![7.0f32, 9.0]).unwrap();
+        let argmax = vec![0usize, 7];
+        let grad_in = global_pool_backward(&grad_out, &[1, 4, 2], PoolKind::Max, Some(&argmax));
+        assert_eq!(
+            grad_in.iter().copied().collect::<Vec<f32>>(),
+            vec![7.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 9.0]
+        );
+    }
+
+    /// Output shapes put the channel axis last at every rank
+    #[test]
+    fn test_windowed_pool_output_shapes() {
+        let d1 = ArrayD::<f32>::zeros(IxDyn(&[2, 8, 3]));
+        let (o1, _) = windowed_pool_forward(&d1, &[2], &[2], PoolKind::Max, PaddingType::Valid);
+        assert_eq!(o1.shape(), &[2, 4, 3]);
+
+        let d2 = ArrayD::<f32>::zeros(IxDyn(&[2, 8, 6, 3]));
+        let (o2, _) =
+            windowed_pool_forward(&d2, &[2, 2], &[2, 2], PoolKind::Max, PaddingType::Valid);
+        assert_eq!(o2.shape(), &[2, 4, 3, 3]);
+
+        let d3 = ArrayD::<f32>::zeros(IxDyn(&[2, 8, 6, 4, 3]));
+        let (o3, _) = windowed_pool_forward(
+            &d3,
+            &[2, 2, 2],
+            &[2, 2, 2],
+            PoolKind::Max,
+            PaddingType::Valid,
+        );
+        assert_eq!(o3.shape(), &[2, 4, 3, 2, 3]);
+    }
+
+    /// The parallel and serial forward paths agree bit for bit
+    ///
+    /// Every output position is folded by the same serial window loop whatever the block
+    /// boundaries are, so the gate is a pure performance knob
+    #[test]
+    fn test_windowed_pool_forward_parallel_matches_serial() {
+        let data: Vec<f32> = (0..2 * 20 * 20 * 5)
+            .map(|i| (i % 37) as f32 * 0.5)
+            .collect();
+        let input = ArrayD::from_shape_vec(IxDyn(&[2, 20, 20, 5]), data).unwrap();
+        for kind in [PoolKind::Max, PoolKind::Average] {
+            let (serial, s_arg) = windowed_pool_forward_impl(
+                &input,
+                &[3, 3],
+                &[2, 2],
+                kind,
+                PaddingType::Same,
+                Some(false),
+            );
+            let (par, p_arg) = windowed_pool_forward_impl(
+                &input,
+                &[3, 3],
+                &[2, 2],
+                kind,
+                PaddingType::Same,
+                Some(true),
+            );
+            assert_eq!(serial, par, "{kind:?} values differ across the gate");
+            assert_eq!(s_arg, p_arg, "{kind:?} arg-max differs across the gate");
+        }
     }
 }

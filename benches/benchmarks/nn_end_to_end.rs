@@ -32,10 +32,10 @@ fn dense_forward(c: &mut Criterion) {
 
 /// Conv2D forward at batch == 1 (single-sample inference)
 fn conv2d_forward_batch1(c: &mut Criterion) {
-    let mut layer = Conv2D::new(64, (3, 3), vec![1, 32, 96, 96], (1, 1), Activation::ReLU)
+    let mut layer = Conv2D::new(64, (3, 3), vec![1, 96, 96, 32], (1, 1), Activation::ReLU)
         .unwrap()
         .with_random_state(42);
-    let x = Array::from_elem((1, 32, 96, 96), 0.5f32).into_dyn();
+    let x = Array::from_elem((1, 96, 96, 32), 0.5f32).into_dyn();
     c.bench_function("conv2d_forward_1x32x96x96_64f", |b| {
         b.iter(|| black_box(layer.forward(&x).unwrap()))
     });
@@ -54,14 +54,14 @@ fn conv2d_backward(c: &mut Criterion) {
         let mut layer = Conv2D::new(
             64,
             (3, 3),
-            vec![batch, 32, 64, 64],
+            vec![batch, 64, 64, 32],
             (1, 1),
             Activation::ReLU,
         )
         .unwrap()
         .with_padding(PaddingType::Same)
         .with_random_state(42);
-        let x = Array::from_elem((batch, 32, 64, 64), 0.5f32).into_dyn();
+        let x = Array::from_elem((batch, 64, 64, 32), 0.5f32).into_dyn();
         let grad = Array::from_elem((batch, 64, 64, 64), 0.3f32).into_dyn();
         group.bench_function(format!("conv2d_forward_{batch}x32x64x64_64f"), |b| {
             b.iter(|| black_box(layer.forward(&x).unwrap()))
@@ -91,7 +91,7 @@ fn lstm_forward(c: &mut Criterion) {
 /// per-plane center/normalize passes on the native [B, C, *spatial] layout
 fn batchnorm_forward_spatial(c: &mut Criterion) {
     let mut layer = BatchNormalization::new(vec![32, 64, 64, 64], 0.99, 1e-5).unwrap();
-    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
     .into_dyn();
@@ -104,12 +104,12 @@ fn batchnorm_forward_spatial(c: &mut Criterion) {
 /// per-plane elementwise passes over the cached forward tensors
 fn batchnorm_backward_spatial(c: &mut Criterion) {
     let mut layer = BatchNormalization::new(vec![32, 64, 64, 64], 0.99, 1e-5).unwrap();
-    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
     .into_dyn();
     layer.forward(&x).unwrap();
-    let grad = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+    let grad = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 11 + ch * 5 + h * 7 + w) as f32 * 0.293).sin()
     })
     .into_dyn();
@@ -156,7 +156,7 @@ fn layernorm_forward_multi(c: &mut Criterion) {
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![1, 2, 3]))
         .unwrap();
-    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
     .into_dyn();
@@ -168,8 +168,8 @@ fn layernorm_forward_multi(c: &mut Criterion) {
 /// GroupNorm forward at conv scale (channels-first, 8 groups): per-instance group statistics
 /// over contiguous [channels/groups x spatial] blocks
 fn groupnorm_forward(c: &mut Criterion) {
-    let mut layer = GroupNormalization::new(vec![32, 64, 64, 64], 8, 1, 1e-5).unwrap();
-    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+    let mut layer = GroupNormalization::new(vec![32, 64, 64, 64], 8, 1e-5).unwrap();
+    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
     .into_dyn();
@@ -181,13 +181,13 @@ fn groupnorm_forward(c: &mut Criterion) {
 /// GroupNorm backward at the same scale: per-channel parameter folds plus the per-instance
 /// gradient composition
 fn groupnorm_backward(c: &mut Criterion) {
-    let mut layer = GroupNormalization::new(vec![32, 64, 64, 64], 8, 1, 1e-5).unwrap();
-    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+    let mut layer = GroupNormalization::new(vec![32, 64, 64, 64], 8, 1e-5).unwrap();
+    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
     .into_dyn();
     layer.forward(&x).unwrap();
-    let grad = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+    let grad = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 11 + ch * 5 + h * 7 + w) as f32 * 0.293).sin()
     })
     .into_dyn();
@@ -198,8 +198,8 @@ fn groupnorm_backward(c: &mut Criterion) {
 
 /// InstanceNorm forward at the same scale (one group per channel: many small instances)
 fn instancenorm_forward(c: &mut Criterion) {
-    let mut layer = InstanceNormalization::new(vec![32, 64, 64, 64], 1, 1e-5).unwrap();
-    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+    let mut layer = InstanceNormalization::new(vec![32, 64, 64, 64], 1e-5).unwrap();
+    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
     .into_dyn();
@@ -279,13 +279,12 @@ fn depthwise_separable_conv(c: &mut Criterion) {
 
     // DepthwiseConv2D: groups == channels == filters
     {
-        let mut layer =
-            DepthwiseConv2D::new(64, (3, 3), vec![8, 64, 56, 56], (1, 1), Activation::ReLU)
-                .unwrap()
-                .with_padding(PaddingType::Same)
-                .with_random_state(42);
-        let x = Array::from_elem((8, 64, 56, 56), 0.5f32).into_dyn();
-        let grad = Array::from_elem((8, 64, 56, 56), 0.3f32).into_dyn();
+        let mut layer = DepthwiseConv2D::new((3, 3), vec![8, 56, 56, 64], (1, 1), Activation::ReLU)
+            .unwrap()
+            .with_padding(PaddingType::Same)
+            .with_random_state(42);
+        let x = Array::from_elem((8, 56, 56, 64), 0.5f32).into_dyn();
+        let grad = Array::from_elem((8, 56, 56, 64), 0.3f32).into_dyn();
         group.bench_function("depthwise_forward_8x64x56x56_k3_same", |b| {
             b.iter(|| black_box(layer.forward(&x).unwrap()))
         });
@@ -300,12 +299,12 @@ fn depthwise_separable_conv(c: &mut Criterion) {
     // SeparableConv2D: depthwise (groups == channels) stage then pointwise 1x1, 32 -> 64 filters
     {
         let mut layer =
-            SeparableConv2D::new(64, (3, 3), vec![8, 32, 56, 56], (1, 1), 1, Activation::ReLU)
+            SeparableConv2D::new(64, (3, 3), vec![8, 56, 56, 32], (1, 1), 1, Activation::ReLU)
                 .unwrap()
                 .with_padding(PaddingType::Same)
                 .with_random_state(42);
-        let x = Array::from_elem((8, 32, 56, 56), 0.5f32).into_dyn();
-        let grad = Array::from_elem((8, 64, 56, 56), 0.3f32).into_dyn();
+        let x = Array::from_elem((8, 56, 56, 32), 0.5f32).into_dyn();
+        let grad = Array::from_elem((8, 56, 56, 64), 0.3f32).into_dyn();
         group.bench_function("separable_forward_8x32x56x56_64f_k3_same", |b| {
             b.iter(|| black_box(layer.forward(&x).unwrap()))
         });

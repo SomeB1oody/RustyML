@@ -7,9 +7,8 @@
 use crate::math::reduction::DET_REDUCE_BLOCK;
 use crate::neural_network::Tensor;
 use ndarray::Array1;
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSlice;
-use std::ops::Range;
 
 /// Sums one contiguous segment of scaled terms in 8 independent lanes combined in a fixed
 /// order (the serial kernel the deterministic folds share)
@@ -193,118 +192,4 @@ pub(super) fn par_col_dot(a: &[f32], b: &[f32], c: usize, parallel: bool, scale:
             .collect()
     };
     merge_col_parts(parts, c)
-}
-
-/// Folds the logical element range `[start, end)` of channel `ch` into a scalar partial, where
-/// a channel's logical sequence is its `[P]` planes of the `[B, C, P]` slice in batch order
-///
-/// Plane-crossing ranges chain their per-plane [`segment_sum`] partials in order
-pub(super) fn plane_range_sum(
-    x: &[f32],
-    ch: usize,
-    c: usize,
-    p: usize,
-    range: Range<usize>,
-    scale: f32,
-) -> f32 {
-    let mut acc = 0.0f32;
-    let mut pos = range.start;
-    while pos < range.end {
-        let (bi, off) = (pos / p, pos % p);
-        let take = (p - off).min(range.end - pos);
-        let base = (bi * c + ch) * p + off;
-        acc += segment_sum(&x[base..base + take], scale);
-        pos += take;
-    }
-    acc
-}
-
-/// The product twin of [`plane_range_sum`] over 2 `[B, C, P]` slices of the same shape
-pub(super) fn plane_range_dot(
-    a: &[f32],
-    b: &[f32],
-    ch: usize,
-    c: usize,
-    p: usize,
-    range: Range<usize>,
-    scale: f32,
-) -> f32 {
-    let mut acc = 0.0f32;
-    let mut pos = range.start;
-    while pos < range.end {
-        let (bi, off) = (pos / p, pos % p);
-        let take = (p - off).min(range.end - pos);
-        let base = (bi * c + ch) * p + off;
-        acc += segment_dot(&a[base..base + take], &b[base..base + take], scale);
-        pos += take;
-    }
-    acc
-}
-
-/// Per-channel sums of scaled terms over a standard-layout `[B, C, P]` slice (channel axis 1,
-/// planes contiguous): `out[ch] = sum_{b,i} x[b, ch, i] * scale`, computed without transposing
-/// to channel-last
-///
-/// Each channel's logical sequence (its planes in batch order) folds in
-/// [`DET_REDUCE_BLOCK`]-element blocks whose partials merge in block order, so the grouping
-/// depends only on the shape. The `parallel` flag only decides whether the (channel, block)
-/// tasks run on rayon, not the result
-pub(super) fn par_plane_sum(x: &[f32], c: usize, p: usize, parallel: bool, scale: f32) -> Tensor {
-    if x.is_empty() {
-        return Array1::zeros(c).into_dyn();
-    }
-    let len_per_chan = x.len() / c;
-    let n_blocks = len_per_chan.div_ceil(DET_REDUCE_BLOCK);
-    let fold = |t: usize| {
-        let (ch, blk) = (t / n_blocks, t % n_blocks);
-        let start = blk * DET_REDUCE_BLOCK;
-        let end = (start + DET_REDUCE_BLOCK).min(len_per_chan);
-        plane_range_sum(x, ch, c, p, start..end, scale)
-    };
-    let partials: Vec<f32> = if parallel {
-        (0..c * n_blocks).into_par_iter().map(fold).collect()
-    } else {
-        (0..c * n_blocks).map(fold).collect()
-    };
-    let out: Vec<f32> = partials
-        .chunks(n_blocks)
-        .map(|parts| parts.iter().fold(0.0f32, |acc, &v| acc + v))
-        .collect();
-    Array1::from_vec(out).into_dyn()
-}
-
-/// Per-channel sums of scaled products over 2 standard-layout `[B, C, P]` slices of the same
-/// shape: `out[ch] = sum_{b,i} a[b, ch, i] * b[b, ch, i] * scale`, with the same block
-/// grouping and flag semantics as [`par_plane_sum`]
-///
-/// Fusing the product into the fold avoids materializing the elementwise-product temporary
-pub(super) fn par_plane_dot(
-    a: &[f32],
-    b: &[f32],
-    c: usize,
-    p: usize,
-    parallel: bool,
-    scale: f32,
-) -> Tensor {
-    if a.is_empty() {
-        return Array1::zeros(c).into_dyn();
-    }
-    let len_per_chan = a.len() / c;
-    let n_blocks = len_per_chan.div_ceil(DET_REDUCE_BLOCK);
-    let fold = |t: usize| {
-        let (ch, blk) = (t / n_blocks, t % n_blocks);
-        let start = blk * DET_REDUCE_BLOCK;
-        let end = (start + DET_REDUCE_BLOCK).min(len_per_chan);
-        plane_range_dot(a, b, ch, c, p, start..end, scale)
-    };
-    let partials: Vec<f32> = if parallel {
-        (0..c * n_blocks).into_par_iter().map(fold).collect()
-    } else {
-        (0..c * n_blocks).map(fold).collect()
-    };
-    let out: Vec<f32> = partials
-        .chunks(n_blocks)
-        .map(|parts| parts.iter().fold(0.0f32, |acc, &v| acc + v))
-        .collect();
-    Array1::from_vec(out).into_dyn()
 }

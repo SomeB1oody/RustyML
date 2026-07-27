@@ -121,15 +121,15 @@ pub(super) fn validate_input_shape_1d(
 ) -> Result<(), Error> {
     if input_shape.len() != 3 {
         return Err(Error::invalid_input(
-            "Input shape must be 3D: [batch_size, channels, length]",
+            "Input shape must be 3D: [batch_size, length, channels]",
         ));
     }
-    if input_shape[1] == 0 {
+    if input_shape[2] == 0 {
         return Err(Error::invalid_input(
             "Number of input channels must be greater than 0",
         ));
     }
-    if input_shape[2] < kernel_size {
+    if input_shape[1] < kernel_size {
         return Err(Error::invalid_input(
             "Input length must be at least as large as the kernel size",
         ));
@@ -151,15 +151,15 @@ pub(super) fn validate_input_shape_2d(
 ) -> Result<(), Error> {
     if input_shape.len() != 4 {
         return Err(Error::invalid_input(
-            "Input shape must be 4D: [batch_size, channels, height, width]",
+            "Input shape must be 4D: [batch_size, height, width, channels]",
         ));
     }
-    if input_shape[1] == 0 {
+    if input_shape[3] == 0 {
         return Err(Error::invalid_input(
             "Number of input channels must be greater than 0",
         ));
     }
-    if input_shape[2] < kernel_size.0 || input_shape[3] < kernel_size.1 {
+    if input_shape[1] < kernel_size.0 || input_shape[2] < kernel_size.1 {
         return Err(Error::invalid_input(
             "Input dimensions must be at least as large as the kernel size",
         ));
@@ -181,7 +181,7 @@ pub(super) fn validate_input_shape_3d(
 ) -> Result<(), Error> {
     if input_shape.len() != 5 {
         return Err(Error::invalid_input(
-            "Input shape must be 5-dimensional: [batch, channels, depth, height, width]",
+            "Input shape must be 5-dimensional: [batch, depth, height, width, channels]",
         ));
     }
     if input_shape.contains(&0) {
@@ -189,9 +189,9 @@ pub(super) fn validate_input_shape_3d(
             "All input dimensions must be greater than 0",
         ));
     }
-    if input_shape[2] < kernel_size.0
-        || input_shape[3] < kernel_size.1
-        || input_shape[4] < kernel_size.2
+    if input_shape[1] < kernel_size.0
+        || input_shape[2] < kernel_size.1
+        || input_shape[3] < kernel_size.2
     {
         return Err(Error::invalid_input(
             "Input spatial dimensions must be at least as large as the kernel size",

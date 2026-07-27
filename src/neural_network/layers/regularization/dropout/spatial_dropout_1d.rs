@@ -1,4 +1,4 @@
-//! 1D spatial dropout layer that drops whole channels of `(batch_size, channels, length)` inputs
+//! 1D spatial dropout layer that drops whole channels of `(batch_size, length, channels)` inputs
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -26,7 +26,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 ///
 /// Drops entire channels instead of individual elements, which suits convolutional
 /// layers where adjacent positions are correlated. Input shape is
-/// `(batch_size, channels, length)`
+/// `(batch_size, length, channels)`
 ///
 /// # Examples
 ///
@@ -36,10 +36,10 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// use ndarray::Array3;
 ///
 /// // Create a SpatialDropout1D layer with 20% dropout rate
-/// let mut spatial_dropout = SpatialDropout1D::new(0.2, vec![32, 64, 128]).unwrap();
+/// let mut spatial_dropout = SpatialDropout1D::new(0.2, vec![32, 128, 64]).unwrap();
 ///
 /// // Create input tensor (batch_size=32, channels=64, length=128)
-/// let input = Array3::ones((32, 64, 128)).into_dyn();
+/// let input = Array3::ones((32, 128, 64)).into_dyn();
 ///
 /// // During training, ~20% of channels are set to 0
 /// let output = spatial_dropout.forward(&input).unwrap();
@@ -64,7 +64,7 @@ impl SpatialDropout1D {
     /// # Parameters
     ///
     /// - `rate` - Dropout rate, fraction of channels to drop (between 0 and 1)
-    /// - `input_shape` - Shape of the input tensor `(batch_size, channels, length)`
+    /// - `input_shape` - Shape of the input tensor `(batch_size, length, channels)`
     ///
     /// # Returns
     ///
@@ -117,7 +117,7 @@ impl Layer for SpatialDropout1D {
         validate_input_ndim(
             input.ndim(),
             3,
-            "SpatialDropout1D (batch_size, channels, length)",
+            "SpatialDropout1D (batch_size, length, channels)",
         )?;
 
         if !self.training {
@@ -136,7 +136,7 @@ impl Layer for SpatialDropout1D {
 
         let shape = input.shape();
         let batch_size = shape[0];
-        let channels = shape[1];
+        let channels = shape[shape.len() - 1];
 
         // Per-channel mask of shape (batch_size, channels): one keep/drop value per channel
         let mut mask_2d = Tensor::random_using(
@@ -169,7 +169,7 @@ impl Layer for SpatialDropout1D {
         validate_input_ndim(
             input.ndim(),
             3,
-            "SpatialDropout1D (batch_size, channels, length)",
+            "SpatialDropout1D (batch_size, length, channels)",
         )?;
 
         // During inference, pass input through unchanged

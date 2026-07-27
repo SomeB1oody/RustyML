@@ -251,9 +251,10 @@ fn dropout_backward_before_forward_returns_forward_pass_not_run() {
 fn spatial_dropout_backward_before_forward_reports_concrete_layer_name() {
     // Regression: shared dropout_backward must name the concrete SpatialDropout layer
     // in ForwardPassNotRun, not a hardcoded "Dropout"
-    let mut d1 = SpatialDropout1D::new(0.5, vec![2, 4, 8]).unwrap();
+    // Channels-last: (batch=2, length=8, channels=4)
+    let mut d1 = SpatialDropout1D::new(0.5, vec![2, 8, 4]).unwrap();
     d1.set_training_if_mode_dependent(true);
-    let err1 = d1.backward(&filled(&[2, 4, 8], 1.0)).unwrap_err();
+    let err1 = d1.backward(&filled(&[2, 8, 4], 1.0)).unwrap_err();
     assert!(
         matches!(
             err1,
@@ -263,9 +264,10 @@ fn spatial_dropout_backward_before_forward_reports_concrete_layer_name() {
         err1
     );
 
-    let mut d2 = SpatialDropout2D::new(0.5, vec![2, 3, 4, 4]).unwrap();
+    // Channels-last: (batch=2, height=4, width=4, channels=3)
+    let mut d2 = SpatialDropout2D::new(0.5, vec![2, 4, 4, 3]).unwrap();
     d2.set_training_if_mode_dependent(true);
-    let err2 = d2.backward(&filled(&[2, 3, 4, 4], 1.0)).unwrap_err();
+    let err2 = d2.backward(&filled(&[2, 4, 4, 3], 1.0)).unwrap_err();
     assert!(
         matches!(
             err2,
@@ -275,9 +277,10 @@ fn spatial_dropout_backward_before_forward_reports_concrete_layer_name() {
         err2
     );
 
-    let mut d3 = SpatialDropout3D::new(0.5, vec![1, 2, 3, 3, 3]).unwrap();
+    // Channels-last: (batch=1, depth=3, height=3, width=3, channels=2)
+    let mut d3 = SpatialDropout3D::new(0.5, vec![1, 3, 3, 3, 2]).unwrap();
     d3.set_training_if_mode_dependent(true);
-    let err3 = d3.backward(&filled(&[1, 2, 3, 3, 3], 1.0)).unwrap_err();
+    let err3 = d3.backward(&filled(&[1, 3, 3, 3, 2], 1.0)).unwrap_err();
     assert!(
         matches!(
             err3,
@@ -328,10 +331,11 @@ fn dropout_empty_input_shape_accepts_any_shape() {
 #[test]
 fn spatial_dropout_1d_rate_zero_is_identity() {
     // rate=0 -> identity in training mode
-    let mut layer = SpatialDropout1D::new(0.0, vec![2, 4, 8]).unwrap();
+    // Channels-last: (batch=2, length=8, channels=4)
+    let mut layer = SpatialDropout1D::new(0.0, vec![2, 8, 4]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
-    let input = filled(&[2, 4, 8], 1.5_f32);
+    let input = filled(&[2, 8, 4], 1.5_f32);
     let output = layer.forward(&input).unwrap();
     assert_allclose(&output, &input, 1e-6_f32);
 }
@@ -339,29 +343,32 @@ fn spatial_dropout_1d_rate_zero_is_identity() {
 #[test]
 fn spatial_dropout_1d_rate_one_yields_zeros() {
     // rate=1 -> all zeros
-    let mut layer = SpatialDropout1D::new(1.0, vec![1, 3, 5]).unwrap();
+    // Channels-last: (batch=1, length=5, channels=3)
+    let mut layer = SpatialDropout1D::new(1.0, vec![1, 5, 3]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
-    let input = filled(&[1, 3, 5], 2.0);
+    let input = filled(&[1, 5, 3], 2.0);
     let output = layer.forward(&input).unwrap();
-    let expected = filled(&[1, 3, 5], 0.0);
+    let expected = filled(&[1, 5, 3], 0.0);
     assert_allclose(&output, &expected, 1e-6_f32);
 }
 
 #[test]
 fn spatial_dropout_1d_eval_is_identity() {
-    let mut layer = SpatialDropout1D::new(0.5, vec![2, 4, 6]).unwrap();
+    // Channels-last: (batch=2, length=6, channels=4)
+    let mut layer = SpatialDropout1D::new(0.5, vec![2, 6, 4]).unwrap();
     layer.set_training_if_mode_dependent(false);
 
-    let input = filled(&[2, 4, 6], 3.0);
+    let input = filled(&[2, 6, 4], 3.0);
     let output = layer.forward(&input).unwrap();
     assert_allclose(&output, &input, 1e-6_f32);
 }
 
 #[test]
 fn spatial_dropout_1d_predict_is_identity() {
-    let layer = SpatialDropout1D::new(0.8, vec![1, 4, 6]).unwrap();
-    let input = filled(&[1, 4, 6], 2.0);
+    // Channels-last: (batch=1, length=6, channels=4)
+    let layer = SpatialDropout1D::new(0.8, vec![1, 6, 4]).unwrap();
+    let input = filled(&[1, 6, 4], 2.0);
     let out = layer.predict(&input).unwrap();
     assert_allclose(&out, &input, 1e-6_f32);
 }
@@ -370,30 +377,31 @@ fn spatial_dropout_1d_predict_is_identity() {
 fn spatial_dropout_1d_channel_consistency() {
     // For each (batch, channel), all length positions share one value: either 0 (dropped)
     // or input * scale (kept); all-ones input gives kept value 1/(1-rate), dropped value 0
+    // Channels-last layout: (batch, length, channels)
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate); // = 2.0
 
-    let mut layer = SpatialDropout1D::new(rate, vec![1, 8, 10]).unwrap();
+    let mut layer = SpatialDropout1D::new(rate, vec![1, 10, 8]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
-    let input = ones(&[1, 8, 10]);
+    let input = ones(&[1, 10, 8]);
     let output = layer.forward(&input).unwrap();
 
     let batch_size = 1;
-    let channels = 8;
     let length = 10;
+    let channels = 8;
 
     for b in 0..batch_size {
         for c in 0..channels {
             // State is taken from the first position: must be 0 (dropped) or scale (kept)
-            let first = output[[b, c, 0]];
+            let first = output[[b, 0, c]];
             assert!(
                 first == 0.0 || (first - scale).abs() < 1e-5,
                 "channel ({b},{c}) first element {first} is neither 0 nor {scale}"
             );
             // All other positions in this channel must match
             for l in 1..length {
-                let v = output[[b, c, l]];
+                let v = output[[b, l, c]];
                 assert!(
                     (v - first).abs() < 1e-5,
                     "channel ({b},{c}) position {l}: {v} != first={first}"
@@ -410,27 +418,28 @@ fn spatial_dropout_1d_kept_channel_exact_scale() {
     let rate = 0.4_f32;
     let scale = 1.0 / (1.0 - rate); // ~=1.6667
 
-    let mut layer = SpatialDropout1D::new(rate, vec![1, 10, 4]).unwrap();
+    // Channels-last layout: (batch=1, length=4, channels=10)
+    let mut layer = SpatialDropout1D::new(rate, vec![1, 4, 10]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     // Give each spatial position a distinct value
     let data: Vec<f32> = (0..40).map(|i| i as f32 + 1.0).collect();
-    let input = Tensor::from_shape_vec(ndarray::IxDyn(&[1, 10, 4]), data).unwrap();
+    let input = Tensor::from_shape_vec(ndarray::IxDyn(&[1, 4, 10]), data).unwrap();
 
     let output = layer.forward(&input).unwrap();
 
     let mut found_kept = false;
     for c in 0..10 {
-        let first = output[[0, c, 0]];
+        let first = output[[0, 0, c]];
         if first != 0.0 {
             // Kept channel: every position == input * scale
             found_kept = true;
             for l in 0..4 {
-                let expected = input[[0, c, l]] * scale;
+                let expected = input[[0, l, c]] * scale;
                 assert!(
-                    (output[[0, c, l]] - expected).abs() < 1e-4,
+                    (output[[0, l, c]] - expected).abs() < 1e-4,
                     "channel {c} position {l}: {} != {expected}",
-                    output[[0, c, l]]
+                    output[[0, l, c]]
                 );
             }
         }
@@ -446,29 +455,30 @@ fn spatial_dropout_1d_kept_channel_exact_scale() {
 #[test]
 fn spatial_dropout_1d_backward_channel_consistency() {
     // Backward: gradient zeroed for dropped channels, scaled for kept channels
+    // Channels-last layout: (batch=1, length=4, channels=6)
     let rate = 0.5_f32;
-    let mut layer = SpatialDropout1D::new(rate, vec![1, 6, 4]).unwrap();
+    let mut layer = SpatialDropout1D::new(rate, vec![1, 4, 6]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
-    let input = ones(&[1, 6, 4]);
+    let input = ones(&[1, 4, 6]);
     let output = layer.forward(&input).unwrap();
-    let grad_up = ones(&[1, 6, 4]);
+    let grad_up = ones(&[1, 4, 6]);
     let grad_in = layer.backward(&grad_up).unwrap();
 
     let scale = 1.0 / (1.0 - rate);
     for c in 0..6 {
-        let out_first = output[[0, c, 0]];
-        let grad_first = grad_in[[0, c, 0]];
+        let out_first = output[[0, 0, c]];
+        let grad_first = grad_in[[0, 0, c]];
         // Dropped channel: gradient must be 0
         if out_first == 0.0 {
             for l in 0..4 {
-                approx::assert_abs_diff_eq!(grad_in[[0, c, l]], 0.0_f32, epsilon = 1e-5);
+                approx::assert_abs_diff_eq!(grad_in[[0, l, c]], 0.0_f32, epsilon = 1e-5);
             }
         } else {
             // Kept channel: gradient = upstream * scale
             approx::assert_abs_diff_eq!(grad_first, scale, epsilon = 1e-4);
             for l in 1..4 {
-                approx::assert_abs_diff_eq!(grad_in[[0, c, l]], grad_first, epsilon = 1e-5);
+                approx::assert_abs_diff_eq!(grad_in[[0, l, c]], grad_first, epsilon = 1e-5);
             }
         }
     }
@@ -478,47 +488,49 @@ fn spatial_dropout_1d_backward_channel_consistency() {
 
 #[test]
 fn spatial_dropout_1d_rejects_invalid_rate() {
+    // Channels-last: (batch=1, length=8, channels=4)
     assert!(matches!(
-        SpatialDropout1D::new(-0.1, vec![1, 4, 8]).unwrap_err(),
+        SpatialDropout1D::new(-0.1, vec![1, 8, 4]).unwrap_err(),
         Error::InvalidParameter { .. }
     ));
     assert!(matches!(
-        SpatialDropout1D::new(1.5, vec![1, 4, 8]).unwrap_err(),
+        SpatialDropout1D::new(1.5, vec![1, 8, 4]).unwrap_err(),
         Error::InvalidParameter { .. }
     ));
 }
 
 #[test]
 fn spatial_dropout_1d_accepts_boundary_rates() {
-    assert!(SpatialDropout1D::new(0.0, vec![1, 4, 8]).is_ok());
-    assert!(SpatialDropout1D::new(1.0, vec![1, 4, 8]).is_ok());
+    assert!(SpatialDropout1D::new(0.0, vec![1, 8, 4]).is_ok());
+    assert!(SpatialDropout1D::new(1.0, vec![1, 8, 4]).is_ok());
 }
 
 #[test]
 fn spatial_dropout_1d_rejects_wrong_ndim_forward() {
     // SpatialDropout1D requires 3D input
-    let mut layer = SpatialDropout1D::new(0.5, vec![2, 4, 8]).unwrap();
-    let input_2d = Array::ones((2, 4)).into_dyn();
+    // Channels-last: (batch=2, length=8, channels=4)
+    let mut layer = SpatialDropout1D::new(0.5, vec![2, 8, 4]).unwrap();
+    let input_2d = Array::ones((2, 8)).into_dyn();
     assert!(layer.forward(&input_2d).is_err());
 
-    let input_4d = Array::ones((2, 4, 8, 3)).into_dyn();
+    let input_4d = Array::ones((2, 8, 4, 3)).into_dyn();
     assert!(layer.forward(&input_4d).is_err());
 }
 
 #[test]
 fn spatial_dropout_1d_rejects_wrong_ndim_predict() {
     // predict() also enforces ndim
-    let layer = SpatialDropout1D::new(0.5, vec![2, 4, 8]).unwrap();
-    let input_2d = Array::ones((2, 4)).into_dyn();
+    let layer = SpatialDropout1D::new(0.5, vec![2, 8, 4]).unwrap();
+    let input_2d = Array::ones((2, 8)).into_dyn();
     assert!(layer.predict(&input_2d).is_err());
 }
 
 #[test]
 fn spatial_dropout_1d_backward_before_forward_returns_error() {
-    let mut layer = SpatialDropout1D::new(0.5, vec![1, 4, 8]).unwrap();
+    let mut layer = SpatialDropout1D::new(0.5, vec![1, 8, 4]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
-    let grad = filled(&[1, 4, 8], 1.0);
+    let grad = filled(&[1, 8, 4], 1.0);
     let err = layer.backward(&grad).unwrap_err();
     assert!(
         matches!(err, Error::NeuralNetwork(NnError::ForwardPassNotRun(_))),
@@ -531,38 +543,42 @@ fn spatial_dropout_1d_backward_before_forward_returns_error() {
 
 #[test]
 fn spatial_dropout_2d_rate_zero_is_identity() {
-    let mut layer = SpatialDropout2D::new(0.0, vec![2, 3, 4, 4]).unwrap();
+    // Channels-last: (batch=2, height=4, width=4, channels=3)
+    let mut layer = SpatialDropout2D::new(0.0, vec![2, 4, 4, 3]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
-    let input = filled(&[2, 3, 4, 4], 1.0);
+    let input = filled(&[2, 4, 4, 3], 1.0);
     let output = layer.forward(&input).unwrap();
     assert_allclose(&output, &input, 1e-6_f32);
 }
 
 #[test]
 fn spatial_dropout_2d_rate_one_yields_zeros() {
-    let mut layer = SpatialDropout2D::new(1.0, vec![1, 2, 3, 3]).unwrap();
+    // Channels-last: (batch=1, height=3, width=3, channels=2)
+    let mut layer = SpatialDropout2D::new(1.0, vec![1, 3, 3, 2]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
-    let input = filled(&[1, 2, 3, 3], 5.0);
+    let input = filled(&[1, 3, 3, 2], 5.0);
     let output = layer.forward(&input).unwrap();
-    assert_allclose(&output, &filled(&[1, 2, 3, 3], 0.0), 1e-6_f32);
+    assert_allclose(&output, &filled(&[1, 3, 3, 2], 0.0), 1e-6_f32);
 }
 
 #[test]
 fn spatial_dropout_2d_eval_is_identity() {
-    let mut layer = SpatialDropout2D::new(0.5, vec![1, 2, 4, 4]).unwrap();
+    // Channels-last: (batch=1, height=4, width=4, channels=2)
+    let mut layer = SpatialDropout2D::new(0.5, vec![1, 4, 4, 2]).unwrap();
     layer.set_training_if_mode_dependent(false);
 
-    let input = filled(&[1, 2, 4, 4], 2.0);
+    let input = filled(&[1, 4, 4, 2], 2.0);
     let output = layer.forward(&input).unwrap();
     assert_allclose(&output, &input, 1e-6_f32);
 }
 
 #[test]
 fn spatial_dropout_2d_predict_is_identity() {
-    let layer = SpatialDropout2D::new(0.7, vec![1, 2, 3, 3]).unwrap();
-    let input = filled(&[1, 2, 3, 3], 2.5);
+    // Channels-last: (batch=1, height=3, width=3, channels=2)
+    let layer = SpatialDropout2D::new(0.7, vec![1, 3, 3, 2]).unwrap();
+    let input = filled(&[1, 3, 3, 2], 2.5);
     let out = layer.predict(&input).unwrap();
     assert_allclose(&out, &input, 1e-6_f32);
 }
@@ -570,17 +586,18 @@ fn spatial_dropout_2d_predict_is_identity() {
 #[test]
 fn spatial_dropout_2d_channel_consistency() {
     // For each (batch, channel): all (height, width) positions share the same value
+    // Channels-last layout: (batch=1, height=4, width=4, channels=8)
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate);
 
-    let mut layer = SpatialDropout2D::new(rate, vec![1, 8, 4, 4]).unwrap();
+    let mut layer = SpatialDropout2D::new(rate, vec![1, 4, 4, 8]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
-    let input = ones(&[1, 8, 4, 4]);
+    let input = ones(&[1, 4, 4, 8]);
     let output = layer.forward(&input).unwrap();
 
     for c in 0..8 {
-        let first = output[[0, c, 0, 0]];
+        let first = output[[0, 0, 0, c]];
         assert!(
             first == 0.0 || (first - scale).abs() < 1e-5,
             "channel {c} first = {first}, expected 0 or {scale}"
@@ -588,9 +605,9 @@ fn spatial_dropout_2d_channel_consistency() {
         for h in 0..4 {
             for w in 0..4 {
                 assert!(
-                    (output[[0, c, h, w]] - first).abs() < 1e-5,
+                    (output[[0, h, w, c]] - first).abs() < 1e-5,
                     "channel {c} ({h},{w}): {} != first={first}",
-                    output[[0, c, h, w]]
+                    output[[0, h, w, c]]
                 );
             }
         }
@@ -599,30 +616,31 @@ fn spatial_dropout_2d_channel_consistency() {
 
 #[test]
 fn spatial_dropout_2d_rejects_wrong_ndim() {
-    let mut layer = SpatialDropout2D::new(0.5, vec![1, 2, 4, 4]).unwrap();
-    let input_3d = Array::ones((1, 2, 4)).into_dyn();
+    // Channels-last: (batch=1, height=4, width=4, channels=2)
+    let mut layer = SpatialDropout2D::new(0.5, vec![1, 4, 4, 2]).unwrap();
+    let input_3d = Array::ones((1, 4, 4)).into_dyn();
     assert!(layer.forward(&input_3d).is_err());
 }
 
 #[test]
 fn spatial_dropout_2d_predict_rejects_wrong_ndim() {
-    let layer = SpatialDropout2D::new(0.5, vec![1, 2, 4, 4]).unwrap();
-    let input_3d = Array::ones((1, 2, 4)).into_dyn();
+    let layer = SpatialDropout2D::new(0.5, vec![1, 4, 4, 2]).unwrap();
+    let input_3d = Array::ones((1, 4, 4)).into_dyn();
     assert!(layer.predict(&input_3d).is_err());
 }
 
 #[test]
 fn spatial_dropout_2d_rejects_invalid_rate() {
-    assert!(SpatialDropout2D::new(-0.5, vec![1, 2, 4, 4]).is_err());
-    assert!(SpatialDropout2D::new(1.1, vec![1, 2, 4, 4]).is_err());
+    assert!(SpatialDropout2D::new(-0.5, vec![1, 4, 4, 2]).is_err());
+    assert!(SpatialDropout2D::new(1.1, vec![1, 4, 4, 2]).is_err());
 }
 
 #[test]
 fn spatial_dropout_2d_backward_before_forward_returns_error() {
-    let mut layer = SpatialDropout2D::new(0.5, vec![1, 2, 4, 4]).unwrap();
+    let mut layer = SpatialDropout2D::new(0.5, vec![1, 4, 4, 2]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
-    let grad = filled(&[1, 2, 4, 4], 1.0);
+    let grad = filled(&[1, 4, 4, 2], 1.0);
     let err = layer.backward(&grad).unwrap_err();
     assert!(
         matches!(err, Error::NeuralNetwork(NnError::ForwardPassNotRun(_))),
@@ -635,26 +653,27 @@ fn spatial_dropout_2d_backward_before_forward_returns_error() {
 fn spatial_dropout_2d_backward_channel_consistency() {
     // Backward: dropped-channel gradient == 0 at all (h,w); kept-channel gradient ==
     // upstream * scale at all (h,w)
+    // Channels-last layout: (batch=1, height=3, width=3, channels=6)
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate);
 
-    let mut layer = SpatialDropout2D::new(rate, vec![1, 6, 3, 3]).unwrap();
+    let mut layer = SpatialDropout2D::new(rate, vec![1, 3, 3, 6]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
-    let input = ones(&[1, 6, 3, 3]);
+    let input = ones(&[1, 3, 3, 6]);
     let output = layer.forward(&input).unwrap();
-    let grad_up = ones(&[1, 6, 3, 3]);
+    let grad_up = ones(&[1, 3, 3, 6]);
     let grad_in = layer.backward(&grad_up).unwrap();
 
     for c in 0..6 {
-        let out_first = output[[0, c, 0, 0]];
+        let out_first = output[[0, 0, 0, c]];
         let expected_grad = if out_first == 0.0 { 0.0 } else { scale };
         for h in 0..3 {
             for w in 0..3 {
                 assert!(
-                    (grad_in[[0, c, h, w]] - expected_grad).abs() < 1e-4,
+                    (grad_in[[0, h, w, c]] - expected_grad).abs() < 1e-4,
                     "channel {c} ({h},{w}): grad {} != expected {expected_grad}",
-                    grad_in[[0, c, h, w]]
+                    grad_in[[0, h, w, c]]
                 );
             }
         }
@@ -665,16 +684,18 @@ fn spatial_dropout_2d_backward_channel_consistency() {
 
 #[test]
 fn spatial_dropout_3d_rate_zero_is_identity() {
-    let mut layer = SpatialDropout3D::new(0.0, vec![1, 3, 2, 3, 3]).unwrap();
+    // Channels-last: (batch=1, depth=2, height=3, width=3, channels=3)
+    let mut layer = SpatialDropout3D::new(0.0, vec![1, 2, 3, 3, 3]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
-    let input = filled(&[1, 3, 2, 3, 3], 1.0);
+    let input = filled(&[1, 2, 3, 3, 3], 1.0);
     let output = layer.forward(&input).unwrap();
     assert_allclose(&output, &input, 1e-6_f32);
 }
 
 #[test]
 fn spatial_dropout_3d_rate_one_yields_zeros() {
+    // Channels-last: (batch=1, depth=2, height=2, width=2, channels=2)
     let mut layer = SpatialDropout3D::new(1.0, vec![1, 2, 2, 2, 2]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -685,18 +706,20 @@ fn spatial_dropout_3d_rate_one_yields_zeros() {
 
 #[test]
 fn spatial_dropout_3d_eval_is_identity() {
-    let mut layer = SpatialDropout3D::new(0.5, vec![1, 2, 2, 3, 3]).unwrap();
+    // Channels-last: (batch=1, depth=2, height=3, width=3, channels=2)
+    let mut layer = SpatialDropout3D::new(0.5, vec![1, 2, 3, 3, 2]).unwrap();
     layer.set_training_if_mode_dependent(false);
 
-    let input = filled(&[1, 2, 2, 3, 3], 4.0);
+    let input = filled(&[1, 2, 3, 3, 2], 4.0);
     let output = layer.forward(&input).unwrap();
     assert_allclose(&output, &input, 1e-6_f32);
 }
 
 #[test]
 fn spatial_dropout_3d_predict_is_identity() {
-    let layer = SpatialDropout3D::new(0.6, vec![1, 2, 2, 3, 3]).unwrap();
-    let input = filled(&[1, 2, 2, 3, 3], 1.5);
+    // Channels-last: (batch=1, depth=2, height=3, width=3, channels=2)
+    let layer = SpatialDropout3D::new(0.6, vec![1, 2, 3, 3, 2]).unwrap();
+    let input = filled(&[1, 2, 3, 3, 2], 1.5);
     let out = layer.predict(&input).unwrap();
     assert_allclose(&out, &input, 1e-6_f32);
 }
@@ -704,17 +727,18 @@ fn spatial_dropout_3d_predict_is_identity() {
 #[test]
 fn spatial_dropout_3d_channel_consistency() {
     // For each (batch, channel): all (depth, height, width) voxels share the same value
+    // Channels-last layout: (batch=1, depth=2, height=3, width=3, channels=8)
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate);
 
-    let mut layer = SpatialDropout3D::new(rate, vec![1, 8, 2, 3, 3]).unwrap();
+    let mut layer = SpatialDropout3D::new(rate, vec![1, 2, 3, 3, 8]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
-    let input = ones(&[1, 8, 2, 3, 3]);
+    let input = ones(&[1, 2, 3, 3, 8]);
     let output = layer.forward(&input).unwrap();
 
     for c in 0..8 {
-        let first = output[[0, c, 0, 0, 0]];
+        let first = output[[0, 0, 0, 0, c]];
         assert!(
             first == 0.0 || (first - scale).abs() < 1e-5,
             "channel {c} first = {first}"
@@ -723,9 +747,9 @@ fn spatial_dropout_3d_channel_consistency() {
             for h in 0..3 {
                 for w in 0..3 {
                     assert!(
-                        (output[[0, c, d, h, w]] - first).abs() < 1e-5,
+                        (output[[0, d, h, w, c]] - first).abs() < 1e-5,
                         "channel {c} ({d},{h},{w}): {} != first={first}",
-                        output[[0, c, d, h, w]]
+                        output[[0, d, h, w, c]]
                     );
                 }
             }
@@ -735,30 +759,31 @@ fn spatial_dropout_3d_channel_consistency() {
 
 #[test]
 fn spatial_dropout_3d_rejects_wrong_ndim() {
-    let mut layer = SpatialDropout3D::new(0.5, vec![1, 2, 2, 3, 3]).unwrap();
-    let input_4d = Array::ones((1, 2, 2, 3)).into_dyn();
+    // Channels-last: (batch=1, depth=2, height=3, width=3, channels=2)
+    let mut layer = SpatialDropout3D::new(0.5, vec![1, 2, 3, 3, 2]).unwrap();
+    let input_4d = Array::ones((1, 2, 3, 3)).into_dyn();
     assert!(layer.forward(&input_4d).is_err());
 }
 
 #[test]
 fn spatial_dropout_3d_predict_rejects_wrong_ndim() {
-    let layer = SpatialDropout3D::new(0.5, vec![1, 2, 2, 3, 3]).unwrap();
-    let input_4d = Array::ones((1, 2, 2, 3)).into_dyn();
+    let layer = SpatialDropout3D::new(0.5, vec![1, 2, 3, 3, 2]).unwrap();
+    let input_4d = Array::ones((1, 2, 3, 3)).into_dyn();
     assert!(layer.predict(&input_4d).is_err());
 }
 
 #[test]
 fn spatial_dropout_3d_rejects_invalid_rate() {
-    assert!(SpatialDropout3D::new(-0.1, vec![1, 2, 2, 3, 3]).is_err());
-    assert!(SpatialDropout3D::new(2.0, vec![1, 2, 2, 3, 3]).is_err());
+    assert!(SpatialDropout3D::new(-0.1, vec![1, 2, 3, 3, 2]).is_err());
+    assert!(SpatialDropout3D::new(2.0, vec![1, 2, 3, 3, 2]).is_err());
 }
 
 #[test]
 fn spatial_dropout_3d_backward_before_forward_returns_error() {
-    let mut layer = SpatialDropout3D::new(0.5, vec![1, 2, 2, 3, 3]).unwrap();
+    let mut layer = SpatialDropout3D::new(0.5, vec![1, 2, 3, 3, 2]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
-    let grad = filled(&[1, 2, 2, 3, 3], 1.0);
+    let grad = filled(&[1, 2, 3, 3, 2], 1.0);
     let err = layer.backward(&grad).unwrap_err();
     assert!(
         matches!(err, Error::NeuralNetwork(NnError::ForwardPassNotRun(_))),
@@ -770,27 +795,28 @@ fn spatial_dropout_3d_backward_before_forward_returns_error() {
 #[test]
 fn spatial_dropout_3d_backward_channel_consistency() {
     // Backward: a whole channel's gradient must be uniform (all zero or all scaled)
+    // Channels-last layout: (batch=1, depth=2, height=2, width=2, channels=4)
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate);
 
-    let mut layer = SpatialDropout3D::new(rate, vec![1, 4, 2, 2, 2]).unwrap();
+    let mut layer = SpatialDropout3D::new(rate, vec![1, 2, 2, 2, 4]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
-    let input = ones(&[1, 4, 2, 2, 2]);
+    let input = ones(&[1, 2, 2, 2, 4]);
     let output = layer.forward(&input).unwrap();
-    let grad_up = ones(&[1, 4, 2, 2, 2]);
+    let grad_up = ones(&[1, 2, 2, 2, 4]);
     let grad_in = layer.backward(&grad_up).unwrap();
 
     for c in 0..4 {
-        let out_first = output[[0, c, 0, 0, 0]];
+        let out_first = output[[0, 0, 0, 0, c]];
         let expected_grad = if out_first == 0.0 { 0.0 } else { scale };
         for d in 0..2 {
             for h in 0..2 {
                 for w in 0..2 {
                     assert!(
-                        (grad_in[[0, c, d, h, w]] - expected_grad).abs() < 1e-4,
+                        (grad_in[[0, d, h, w, c]] - expected_grad).abs() < 1e-4,
                         "channel {c} ({d},{h},{w}): grad {} != expected {expected_grad}",
-                        grad_in[[0, c, d, h, w]]
+                        grad_in[[0, d, h, w, c]]
                     );
                 }
             }

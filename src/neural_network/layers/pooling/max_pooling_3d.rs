@@ -19,8 +19,8 @@ use crate::neural_network::traits::Layer;
 /// 3D max pooling layer
 ///
 /// Selects the maximum value within each pooling window across depth, height, and width
-/// Input tensor shape: `[batch_size, channels, depth, height, width]`. Output tensor shape:
-/// `[batch_size, channels, pooled_depth, pooled_height, pooled_width]` where
+/// Input tensor shape: `[batch_size, depth, height, width, channels]`. Output tensor shape:
+/// `[batch_size, pooled_depth, pooled_height, pooled_width, channels]` where
 /// `pooled_depth = (depth - pool_size_d) / stride_d + 1`,
 /// `pooled_height = (height - pool_size_h) / stride_h + 1`, and
 /// `pooled_width = (width - pool_size_w) / stride_w + 1`
@@ -39,7 +39,7 @@ use crate::neural_network::traits::Layer;
 ///
 /// // Add MaxPooling3D layer to the model
 /// // stride defaults to pool_size (2, 2, 2) and padding defaults to Valid
-/// model.add(MaxPooling3D::new((2, 2, 2), vec![1, 16, 32, 32, 32]).unwrap());
+/// model.add(MaxPooling3D::new((2, 2, 2), vec![1, 32, 32, 32, 16]).unwrap());
 ///
 /// // Compile the model with optimizer and loss function
 /// model.compile(
@@ -48,8 +48,8 @@ use crate::neural_network::traits::Layer;
 /// );
 ///
 /// // Create sample 3D input data (e.g., 3D medical images or volumetric data)
-/// // Input: [1 batch, 16 channels, 32x32x32 3D volume]
-/// let input_data = Array5::from_shape_fn((1, 16, 32, 32, 32), |(b, c, d, h, w)| {
+/// // Input: [1 batch, 32x32x32 3D volume, 16 channels]
+/// let input_data = Array5::from_shape_fn((1, 32, 32, 32, 16), |(b, d, h, w, c)| {
 ///     // Generate sample data with spatial patterns
 ///     ((d + h + w) as f32 * 0.1) + (c as f32 * 0.01)
 /// }).into_dyn();
@@ -71,7 +71,9 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= 32`
+/// Parallel execution is gated on the estimated element ops of the whole pass
+/// (`batch * out_positions * channels * window taps`) clearing
+/// [`tuning::pool`](crate::tuning::pool), not on any fixed shape
 #[derive(Debug)]
 pub struct MaxPooling3D {
     /// Size of the pooling window as (depth, height, width)
@@ -94,7 +96,7 @@ impl MaxPooling3D {
     /// # Parameters
     ///
     /// - `pool_size` - Size of the pooling window as (depth, height, width)
-    /// - `input_shape` - Input tensor shape `[batch_size, channels, depth, height, width]`
+    /// - `input_shape` - Input tensor shape `[batch_size, depth, height, width, channels]`
     ///
     /// # Notes
     ///
@@ -114,7 +116,7 @@ impl MaxPooling3D {
     pub fn new(pool_size: (usize, usize, usize), input_shape: Vec<usize>) -> Result<Self, Error> {
         validate_input_shape_dims(&input_shape, 5, "MaxPooling3D")?;
         validate_all_dims_positive(&input_shape)?;
-        validate_pool_size_3d(pool_size, input_shape[2], input_shape[3], input_shape[4])?;
+        validate_pool_size_3d(pool_size, input_shape[1], input_shape[2], input_shape[3])?;
 
         Ok(MaxPooling3D {
             pool_size,

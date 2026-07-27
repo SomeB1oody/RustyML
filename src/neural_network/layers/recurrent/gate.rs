@@ -14,7 +14,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// Fused gate parameters and gradients for recurrent cells
 ///
 /// Packs every gate's weights side by side into single matrices. Column blocks follow a fixed,
-/// layer-defined gate order (LSTM: `[i | f | g | o]`, GRU: `[r | z | h]`), so the batched input
+/// layer-defined gate order (LSTM: `[i | f | g | o]`, GRU: `[z | r | h]`), so the batched input
 /// projection and the per-timestep recurrent projection each run as one large GEMM instead of one
 /// GEMM per gate:
 ///

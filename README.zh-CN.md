@@ -174,7 +174,7 @@ println!("F1 分数: {:.3}", cm.f1_score());
 
 ### `neural_network`
 
-一个完整的框架，通过 Keras 风格的 `Sequential` API 构建、训练并序列化前馈、卷积及循环网络。
+一个完整的框架，通过 Keras 风格的 `Sequential` API 构建、训练并序列化前馈、卷积及循环网络。张量采用 channels-last、卷积核沿用 Keras 的形状，所以你在 Keras 里熟悉的那套布局可以原样搬过来。
 
 - **核心层** - `Dense`、`Flatten`
 - **激活** - `ReLU`、`Sigmoid`、`Tanh`、`Softmax`、`Linear`（可用 `Activation` 枚举或独立的激活层）

@@ -15,15 +15,15 @@ use crate::neural_network::layers::convolution::validation::{
 use crate::neural_network::layers::layer_weight::{Conv2DLayerWeight, LayerWeight};
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use ndarray::{Array2, Array4};
+use ndarray::{Array1, Array4};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use std::borrow::Cow;
 
 /// A 2D convolutional layer for neural networks
 ///
 /// Applies a convolution operation to grid-like data such as images. Input shape is
-/// \[batch_size, channels, height, width\] and output shape is
-/// \[batch_size, filters, output_height, output_width\], where output dimensions depend on
+/// \[batch_size, height, width, channels\] and output shape is
+/// \[batch_size, output_height, output_width, filters\], where output dimensions depend on
 /// input size, kernel size, strides, and padding
 ///
 /// The dimension-generic convolution math lives in
@@ -39,9 +39,9 @@ use std::borrow::Cow;
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array4;
 ///
-/// // Create a simple 4D input tensor: [batch_size, channels, height, width]
-/// // Batch size=2, 1 input channel, 5x5 pixels
-/// let x = Array4::ones((2, 1, 5, 5)).into_dyn();
+/// // Create a simple 4D input tensor: [batch_size, height, width, channels]
+/// // Batch size=2, 5x5 pixels, 1 input channel
+/// let x = Array4::ones((2, 5, 5, 1)).into_dyn();
 ///
 /// // Create target tensor - assuming 3 filters with output size 3x3
 /// let y = Array4::ones((2, 3, 3, 3)).into_dyn();
@@ -52,7 +52,7 @@ use std::borrow::Cow;
 ///     .add(Conv2D::new(
 ///         3,                      // Number of filters
 ///         (3, 3),                 // Kernel size
-///         vec![2, 1, 5, 5],       // Input shape
+///         vec![2, 5, 5, 1],       // Input shape
 ///         (1, 1),                 // Stride
 ///         Activation::ReLU,       // ReLU activation
 ///     ).unwrap())
@@ -81,10 +81,10 @@ pub struct Conv2D {
     strides: (usize, usize),
     /// Type of padding to apply (`Valid` or `Same`)
     padding: PaddingType,
-    /// 4D array of filter weights with shape \[filters, channels, kernel_height, kernel_width\]
+    /// 4D array of filter weights with shape \[kernel_height, kernel_width, channels, filters\]
     weights: Array4<f32>,
-    /// 2D array of bias values with shape \[1, filters\]
-    bias: Array2<f32>,
+    /// 1D array of bias values with shape \[filters\]
+    bias: Array1<f32>,
     /// Activation applied to the convolution output
     activation: Activation,
     /// Cached activated output, used by the activation backward pass
@@ -96,7 +96,7 @@ pub struct Conv2D {
     /// Gradients for the weights, computed during backpropagation
     weight_gradients: Option<Array4<f32>>,
     /// Gradients for the biases, computed during backpropagation
-    bias_gradients: Option<Array2<f32>>,
+    bias_gradients: Option<Array1<f32>>,
 }
 
 impl Conv2D {
@@ -108,7 +108,7 @@ impl Conv2D {
     ///
     /// - `filters` - Number of convolution filters (output channels)
     /// - `kernel_size` - Size of the convolution kernel as (height, width)
-    /// - `input_shape` - Shape of the input tensor as \[batch_size, channels, height, width\]
+    /// - `input_shape` - Shape of the input tensor as \[batch_size, height, width, channels\]
     /// - `strides` - Stride values for the convolution operation as (vertical, horizontal)
     /// - `activation` - Activation layer (ReLU, Sigmoid, Tanh, Softmax)
     ///
@@ -140,10 +140,10 @@ impl Conv2D {
         validate_strides_2d(strides)?;
         validate_input_shape_2d(&input_shape, kernel_size)?;
 
-        // Shape is [batch_size, channels, height, width]
-        let channels = input_shape[1];
+        // Shape is [batch_size, height, width, channels]
+        let channels = input_shape[3];
         let weights = Self::init_weights_array(filters, channels, kernel_size, None);
-        let bias = Array2::zeros((1, filters));
+        let bias = Array1::zeros(filters);
 
         Ok(Conv2D {
             filters,
@@ -189,26 +189,27 @@ impl Conv2D {
     ///
     /// - `Self` - The updated layer
     pub fn with_random_state(mut self, random_state: u64) -> Self {
-        let channels = self.input_shape[1];
+        let channels = self.input_shape[3];
         self.weights =
             Self::init_weights_array(self.filters, channels, self.kernel_size, Some(random_state));
         self
     }
 
-    /// Xavier/Glorot uniform initialization of the \[filters, channels, kh, kw\] weight tensor
+    /// Xavier/Glorot uniform initialization of the \[kh, kw, channels, filters\] weight tensor
     fn init_weights_array(
         filters: usize,
         channels: usize,
         kernel_size: (usize, usize),
         random_state: Option<u64>,
     ) -> Array4<f32> {
-        // Xavier init: bound = sqrt(6 / (fan_in + fan_out))
+        // Xavier init: bound = sqrt(6 / (fan_in + fan_out)). The fans count the same elements
+        // whatever order the axes sit in, so the bound is unchanged by the channels-last layout
         let fan_in = channels * kernel_size.0 * kernel_size.1;
         let fan_out = filters * kernel_size.0 * kernel_size.1;
         let weight_bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
         let mut rng = crate::random::make_rng(random_state);
         Array4::random_using(
-            (filters, channels, kernel_size.0, kernel_size.1),
+            (kernel_size.0, kernel_size.1, channels, filters),
             Uniform::new(-weight_bound, weight_bound).unwrap(),
             &mut rng,
         )
@@ -217,8 +218,8 @@ impl Conv2D {
     /// Calculates the output shape of the convolutional layer based on input dimensions
     fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
         let batch_size = input_shape[0];
-        let input_height = input_shape[2];
-        let input_width = input_shape[3];
+        let input_height = input_shape[1];
+        let input_width = input_shape[2];
 
         let (output_height, output_width) = match self.padding {
             PaddingType::Valid => {
@@ -233,20 +234,20 @@ impl Conv2D {
             }
         };
 
-        vec![batch_size, self.filters, output_height, output_width]
+        vec![batch_size, output_height, output_width, self.filters]
     }
 
     /// Sets the weights and bias for this layer
     ///
     /// # Parameters
     ///
-    /// - `weights` - 4D array of filter weights with shape \[filters, channels, kernel_height, kernel_width\]
-    /// - `bias` - 2D array of bias values with shape \[1, filters\]
+    /// - `weights` - 4D array of filter weights with shape \[kernel_height, kernel_width, channels, filters\]
+    /// - `bias` - 1D array of bias values with shape \[filters\]
     ///
     /// # Errors
     ///
     /// Returns an error if `weights` or `bias` do not match the existing weight or bias shapes
-    pub fn set_weights(&mut self, weights: Array4<f32>, bias: Array2<f32>) -> Result<(), Error> {
+    pub fn set_weights(&mut self, weights: Array4<f32>, bias: Array1<f32>) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
         self.weights = weights;
@@ -324,7 +325,7 @@ impl Layer for Conv2D {
                 .expect("weight gradient shape matches weights"),
         );
         self.bias_gradients = Some(
-            Array2::from_shape_vec(self.bias.raw_dim(), grads.bias_grad)
+            Array1::from_shape_vec(self.bias.raw_dim(), grads.bias_grad)
                 .expect("bias gradient shape matches bias"),
         );
 

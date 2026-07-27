@@ -58,6 +58,13 @@ pub use simple_rnn_weight::*;
 /// [`Cow`](std::borrow::Cow)). Loading deserializes into owned arrays, so the type is used as
 /// `LayerWeight<'static>` on the load path. The enum uses serde's default (externally tagged)
 /// representation, which the non-self-describing postcard binary format requires
+///
+/// The variants differ in size - `BatchNormalization` carries 4 arrays where a convolution carries
+/// 2 - so every value is padded to the largest. That is deliberate: exactly one of these exists per
+/// layer, built at save or load time and never in a hot path or a large collection, so the few
+/// hundred bytes of padding cost nothing. Boxing the wide variant to even them out would add an
+/// allocation to a type whose entire purpose is to borrow the live arrays without copying
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LayerWeight<'a> {
     /// Weights for dense (fully connected) layers

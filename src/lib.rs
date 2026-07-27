@@ -32,7 +32,8 @@
 //!   and predicting `-1` (outlier) / `+1` (inlier)
 //!
 //! ### [`neural_network`]
-//! Complete neural network framework with flexible architecture design:
+//! Complete neural network framework with flexible architecture design. Tensors are channels-last
+//! and kernels use Keras' shapes, so a layout carried over from Keras needs no permutation:
 //! - **Layers**: Dense, RNN, LSTM, Convolution, Pooling, Dropout
 //! - **Optimizers**: SGD, Adam, AdamW, RMSProp, AdaGrad
 //! - **Loss Functions**: MSE, MAE, Binary/Categorical Cross-Entropy

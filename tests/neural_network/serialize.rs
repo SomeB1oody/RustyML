@@ -4,8 +4,9 @@
 //! saves and reloads it into a fresh model of the same architecture, and asserts
 //! that predict output matches element-wise (within ~1e-6) across the round-trip
 //! Error paths cover layer-count, layer-type, and weight-shape mismatches (all
-//! ModelStructureMismatch), a nonexistent file (IoError::Std), and corrupt binary
-//! data (IoError::Serialization)
+//! ModelStructureMismatch), a nonexistent file (IoError::Std), corrupt binary
+//! data (IoError::Serialization), and a wrong magic tag or format version
+//! (IoError::UnsupportedModelFormat)
 
 use crate::common::assert_allclose;
 use ndarray::Array;
@@ -27,6 +28,9 @@ use rustyml::neural_network::layers::regularization::normalization::batch_normal
 use rustyml::neural_network::layers::regularization::normalization::group_normalization::GroupNormalization;
 use rustyml::neural_network::layers::regularization::normalization::instance_normalization::InstanceNormalization;
 use rustyml::neural_network::layers::regularization::normalization::layer_normalization::LayerNormalization;
+use rustyml::neural_network::layers::serialize_model::{
+    MODEL_FORMAT_VERSION, MODEL_MAGIC, SerializableSequential,
+};
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
@@ -220,13 +224,13 @@ fn conv1d_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(Conv1D::new(2, 2, vec![1, 1, 5], 1, Linear::new()).unwrap());
+        m.add(Conv1D::new(2, 2, vec![1, 5, 1], 1, Linear::new()).unwrap());
         m
     };
 
     let model = make_arch();
 
-    let x: Tensor = Array::from_shape_vec((1, 1, 5), vec![0.1f32, 0.3, -0.2, 0.5, -0.4])
+    let x: Tensor = Array::from_shape_vec((1, 5, 1), vec![0.1f32, 0.3, -0.2, 0.5, -0.4])
         .unwrap()
         .into_dyn();
 
@@ -243,14 +247,14 @@ fn conv2d_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(Conv2D::new(2, (2, 2), vec![1, 1, 4, 4], (1, 1), Linear::new()).unwrap());
+        m.add(Conv2D::new(2, (2, 2), vec![1, 4, 4, 1], (1, 1), Linear::new()).unwrap());
         m
     };
 
     let model = make_arch();
 
     let x: Tensor = Array::from_shape_vec(
-        (1, 1, 4, 4),
+        (1, 4, 4, 1),
         (0..16).map(|v| 0.1 * v as f32 - 0.7).collect::<Vec<_>>(),
     )
     .unwrap()
@@ -269,14 +273,14 @@ fn conv3d_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(Conv3D::new(2, (2, 2, 2), vec![1, 1, 3, 3, 3], (1, 1, 1), Linear::new()).unwrap());
+        m.add(Conv3D::new(2, (2, 2, 2), vec![1, 3, 3, 3, 1], (1, 1, 1), Linear::new()).unwrap());
         m
     };
 
     let model = make_arch();
 
     let x: Tensor = Array::from_shape_vec(
-        (1, 1, 3, 3, 3),
+        (1, 3, 3, 3, 1),
         (0..27).map(|v| 0.05 * v as f32 - 0.4).collect::<Vec<_>>(),
     )
     .unwrap()
@@ -295,14 +299,14 @@ fn depthwise_conv2d_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(DepthwiseConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), Linear::new()).unwrap());
+        m.add(DepthwiseConv2D::new((2, 2), vec![1, 4, 4, 2], (1, 1), Linear::new()).unwrap());
         m
     };
 
     let model = make_arch();
 
     let x: Tensor = Array::from_shape_vec(
-        (1, 2, 4, 4),
+        (1, 4, 4, 2),
         (0..32).map(|v| 0.05 * v as f32 - 0.7).collect::<Vec<_>>(),
     )
     .unwrap()
@@ -321,14 +325,14 @@ fn separable_conv2d_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(SeparableConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), 1, Linear::new()).unwrap());
+        m.add(SeparableConv2D::new(2, (2, 2), vec![1, 4, 4, 2], (1, 1), 1, Linear::new()).unwrap());
         m
     };
 
     let model = make_arch();
 
     let x: Tensor = Array::from_shape_vec(
-        (1, 2, 4, 4),
+        (1, 4, 4, 2),
         (0..32).map(|v| 0.05 * v as f32 - 0.7).collect::<Vec<_>>(),
     )
     .unwrap()
@@ -520,7 +524,7 @@ fn group_normalization_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(GroupNormalization::new(vec![1, 4, 4], 2, 1, 1e-5).unwrap());
+        m.add(GroupNormalization::new(vec![1, 4, 4], 2, 1e-5).unwrap());
         m
     };
 
@@ -546,7 +550,7 @@ fn instance_normalization_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(InstanceNormalization::new(vec![1, 3, 4], 1, 1e-5).unwrap());
+        m.add(InstanceNormalization::new(vec![1, 3, 4], 1e-5).unwrap());
         m
     };
 
@@ -643,11 +647,18 @@ fn load_from_nonexistent_file_gives_io_error() {
     }
 }
 
-/// Corrupt binary data gives Error::Io(IoError::Serialization)
+/// A valid header followed by corrupt data gives Error::Io(IoError::Serialization)
+///
+/// The header is checked before the body, so reaching the body deserializer at all now requires a
+/// well-formed magic and version. This pins the failure mode that remains once it does: a
+/// truncated or damaged body. Data that is not a model file at all is rejected earlier, by
+/// `load_wrong_magic_gives_unsupported_format_error`
 #[test]
 fn load_from_invalid_data_gives_serialization_error() {
     let tmp = TempFile::new("invalid_data");
-    std::fs::write(tmp.path(), b"\xff\xff\xff not valid postcard data").unwrap();
+    let mut bytes = postcard::to_allocvec(&(MODEL_MAGIC, MODEL_FORMAT_VERSION)).unwrap();
+    bytes.extend_from_slice(b"\xff\xff\xff not valid postcard data");
+    std::fs::write(tmp.path(), &bytes).unwrap();
 
     let mut model = Sequential::new();
     model.add(Dense::new(2, 2, Linear::new()).unwrap());
@@ -692,7 +703,7 @@ fn load_layer_type_mismatch_gives_structure_error() {
     dense_model.save_to_path(tmp.path()).unwrap();
 
     let mut conv_model = Sequential::new();
-    conv_model.add(Conv1D::new(2, 2, vec![1, 1, 5], 1, Linear::new()).unwrap());
+    conv_model.add(Conv1D::new(2, 2, vec![1, 5, 1], 1, Linear::new()).unwrap());
 
     let result = conv_model.load_from_path(tmp.path());
     match result {
@@ -717,5 +728,60 @@ fn load_weight_shape_mismatch_gives_structure_error() {
     match result {
         Err(Error::Io(IoError::ModelStructureMismatch(_))) => {}
         other => panic!("expected ModelStructureMismatch, got {:?}", other),
+    }
+}
+
+/// A file whose magic tag does not match gives Error::Io(IoError::UnsupportedModelFormat)
+///
+/// This is what stops a model saved before the format carried a header from being read as
+/// current-layout weights: such a file begins with its layer count, so a small integer is exactly
+/// what the loader finds where the tag is now expected
+#[test]
+fn load_wrong_magic_gives_unsupported_format_error() {
+    let tmp = TempFile::new("wrong_magic");
+
+    let headerless = SerializableSequential {
+        magic: 1,
+        format_version: MODEL_FORMAT_VERSION,
+        layers: Vec::new(),
+    };
+    std::fs::write(tmp.path(), postcard::to_allocvec(&headerless).unwrap()).unwrap();
+
+    let mut model = Sequential::new();
+    model.add(Dense::new(2, 2, Linear::new()).unwrap());
+
+    match model.load_from_path(tmp.path()) {
+        Err(Error::Io(IoError::UnsupportedModelFormat(_))) => {}
+        other => panic!("expected UnsupportedModelFormat, got {:?}", other),
+    }
+}
+
+/// A file with the right magic but a different format version gives
+/// Error::Io(IoError::UnsupportedModelFormat)
+///
+/// The saved and target models here are the same architecture, so the layer count, the layer type
+/// name and every weight extent match: the version is the only thing standing between a stale
+/// checkpoint and a silently wrong prediction
+#[test]
+fn load_wrong_format_version_gives_unsupported_format_error() {
+    let tmp = TempFile::new("wrong_version");
+
+    let mut saved = Sequential::new();
+    saved.add(Dense::new(2, 2, Linear::new()).unwrap());
+    saved.save_to_path(tmp.path()).unwrap();
+
+    // Replace only the header, keeping the body byte for byte
+    let bytes = std::fs::read(tmp.path()).unwrap();
+    let (_, body) = postcard::take_from_bytes::<(u32, u32)>(&bytes).unwrap();
+    let mut bumped = postcard::to_allocvec(&(MODEL_MAGIC, MODEL_FORMAT_VERSION + 1)).unwrap();
+    bumped.extend_from_slice(body);
+    std::fs::write(tmp.path(), &bumped).unwrap();
+
+    let mut model = Sequential::new();
+    model.add(Dense::new(2, 2, Linear::new()).unwrap());
+
+    match model.load_from_path(tmp.path()) {
+        Err(Error::Io(IoError::UnsupportedModelFormat(_))) => {}
+        other => panic!("expected UnsupportedModelFormat, got {:?}", other),
     }
 }

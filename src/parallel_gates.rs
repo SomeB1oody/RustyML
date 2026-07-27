@@ -17,10 +17,11 @@
 //! serial result)
 //!
 //! The engine-specific gates stay with their engines, because their work metrics are
-//! engine-specific rather than class-shared: `MatmulElem::{gemm_rayon_min_flops,
-//! gemv_rayon_min_flops}` and the tiling constants (`crate::math::matmul`),
-//! `CONV_PARALLEL_MIN_FLOPS`/`CONV_MIN_CHUNK_COLS` (im2col+GEMM engine),
-//! `POOL_PARALLEL_MIN_OPS`/`POOL_MIN_CHUNK_OUT` (pooling engine), and
+//! engine-specific rather than class-shared: the caller-side tiling constants in
+//! `crate::math::matmul` (the matrix product's own scheduling belongs to the `gemmkit`
+//! backend, whose knobs live there rather than here),
+//! `CONV_PARALLEL_MIN_FLOPS`/`CONV_MIN_CHUNK_POSITIONS` (im2col+GEMM engine),
+//! `POOL_PARALLEL_MIN_OPS`/`POOL_MIN_CHUNK_OUT`/`POOL_MIN_CHUNK_CHANNELS` (pooling engine), and
 //! `BATCH_NORM_PARALLEL_THRESHOLD` (a per-layer analogy mapping). `metrics` keeps its
 //! silhouette gate module-local on purpose - a lightweight leaf module that does not import
 //! crate internals - but documents its value against the same calibration tables

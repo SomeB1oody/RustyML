@@ -13,7 +13,7 @@ use crate::neural_network::traits::Layer;
 /// Global max pooling layer for 3D inputs
 ///
 /// Selects the maximum value across the depth, height, and width dimensions. Input
-/// tensor shape: `[batch_size, channels, depth, height, width]`. Output tensor shape:
+/// tensor shape: `[batch_size, depth, height, width, channels]`. Output tensor shape:
 /// `[batch_size, channels]`
 ///
 /// # Examples
@@ -32,8 +32,8 @@ use crate::neural_network::traits::Layer;
 /// // Add GlobalMaxPooling3D layer
 /// model.add(GlobalMaxPooling3D::new());
 ///
-/// // Create test input tensor: [batch_size, channels, depth, height, width]
-/// let input_data = Array::from_elem(IxDyn(&[2, 3, 4, 5, 5]), 1.0);
+/// // Create test input tensor: [batch_size, depth, height, width, channels]
+/// let input_data = Array::from_elem(IxDyn(&[2, 4, 5, 5, 3]), 1.0);
 ///
 /// // Forward propagation
 /// let output = model.predict(&input_data).unwrap();
@@ -51,7 +51,9 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= 32`
+/// Parallel execution is gated on the estimated element ops of the whole pass
+/// (`batch * positions * channels`) clearing [`tuning::pool`](crate::tuning::pool),
+/// not on any fixed shape
 #[derive(Debug)]
 pub struct GlobalMaxPooling3D {
     /// Shape of the input tensor cached during the forward pass

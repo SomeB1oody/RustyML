@@ -10,7 +10,8 @@ use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::serialize_model::{
-    LayerInfo, SerializableLayer, SerializableSequential, apply_weights_to_layer,
+    LayerInfo, MODEL_FORMAT_VERSION, MODEL_MAGIC, SerializableLayer, SerializableSequential,
+    apply_weights_to_layer,
 };
 use crate::parallel_gates::sq_sum_f32_parallel_min_elems;
 use ndarray::Axis;
@@ -699,6 +700,8 @@ impl Sequential {
             .collect();
 
         let serializable_model = SerializableSequential {
+            magic: MODEL_MAGIC,
+            format_version: MODEL_FORMAT_VERSION,
             layers: serializable_layers,
         };
 
@@ -739,6 +742,8 @@ impl Sequential {
     /// # Errors
     ///
     /// - `Error::Io(IoError::Std)` - File not found or read operation failed
+    /// - `Error::Io(IoError::UnsupportedModelFormat)` - The file is not a RustyML model, or was
+    ///   written by a release whose on-disk format version differs from this one
     /// - `Error::Io(IoError::Serialization)` - Deserialization failed
     /// - `Error::Io(IoError::ModelStructureMismatch)` - The current model's structure (layer count, a layer
     ///   type at some position, or a weight shape) does not match the saved model
@@ -748,6 +753,30 @@ impl Sequential {
     ) -> crate::error::RustymlResult<()> {
         // Read the whole file into memory
         let bytes = std::fs::read(path)?;
+
+        // Validate the header before the body. postcard is sequential and carries no field names,
+        // so a file from an incompatible release otherwise runs off the end of some weight array
+        // and reports an opaque deserialization failure instead of naming the real problem - and
+        // where the extents happen to coincide it does not fail at all
+        let (magic, format_version): (u32, u32) = postcard::take_from_bytes(&bytes)
+            .map(|(header, _rest)| header)
+            .map_err(|_| {
+                Error::Io(IoError::UnsupportedModelFormat(
+                    "file is too short to contain a model header".to_string(),
+                ))
+            })?;
+        if magic != MODEL_MAGIC {
+            return Err(Error::Io(IoError::UnsupportedModelFormat(format!(
+                "not a RustyML model file: expected magic {MODEL_MAGIC:#010x}, found {magic:#010x} \
+                 (a model saved before the format carried a header must be re-saved)"
+            ))));
+        }
+        if format_version != MODEL_FORMAT_VERSION {
+            return Err(Error::Io(IoError::UnsupportedModelFormat(format!(
+                "model file is format version {format_version}, but this build reads version \
+                 {MODEL_FORMAT_VERSION}; re-save the model with this version of RustyML"
+            ))));
+        }
 
         // Deserialize the model from the postcard binary format
         let serializable_model: SerializableSequential<'static> = postcard::from_bytes(&bytes)?;

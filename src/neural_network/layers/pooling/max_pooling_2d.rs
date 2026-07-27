@@ -19,8 +19,8 @@ use crate::neural_network::traits::Layer;
 /// 2D max pooling layer
 ///
 /// Selects the maximum value within each pooling window across height and width
-/// Input tensor shape: `[batch_size, channels, height, width]`. Output tensor shape:
-/// `[batch_size, channels, pooled_height, pooled_width]` where
+/// Input tensor shape: `[batch_size, height, width, channels]`. Output tensor shape:
+/// `[batch_size, pooled_height, pooled_width, channels]` where
 /// `pooled_height = (height - pool_size_h) / stride_h + 1` and
 /// `pooled_width = (width - pool_size_w) / stride_w + 1`
 ///
@@ -33,9 +33,9 @@ use crate::neural_network::traits::Layer;
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array4;
 ///
-/// // 4D input tensor: [batch_size, channels, height, width]
-/// // batch size 2, 3 input channels, 6x6 pixels
-/// let mut input_data = Array4::zeros((2, 3, 6, 6));
+/// // 4D input tensor: [batch_size, height, width, channels]
+/// // batch size 2, 6x6 pixels, 3 input channels
+/// let mut input_data = Array4::zeros((2, 6, 6, 3));
 ///
 /// // Set specific values so the max pooling result is predictable
 /// for b in 0..2 {
@@ -43,7 +43,7 @@ use crate::neural_network::traits::Layer;
 ///         for i in 0..6 {
 ///             for j in 0..6 {
 ///                 // Easily observable pattern
-///                 input_data[[b, c, i, j]] = (i * j) as f32 + b as f32 * 0.1 + c as f32 * 0.01;
+///                 input_data[[b, i, j, c]] = (i * j) as f32 + b as f32 * 0.1 + c as f32 * 0.01;
 ///             }
 ///         }
 ///     }
@@ -54,7 +54,7 @@ use crate::neural_network::traits::Layer;
 /// let mut model = Sequential::new();
 /// model
 ///     // strides default to pool_size (2, 2) and padding defaults to Valid
-///     .add(MaxPooling2D::new((2, 2), vec![2, 3, 6, 6]).unwrap())
+///     .add(MaxPooling2D::new((2, 2), vec![2, 6, 6, 3]).unwrap())
 ///     .compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Target tensor matching the pooled shape
@@ -72,7 +72,9 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= 32`
+/// Parallel execution is gated on the estimated element ops of the whole pass
+/// (`batch * out_positions * channels * window taps`) clearing
+/// [`tuning::pool`](crate::tuning::pool), not on any fixed shape
 #[derive(Debug)]
 pub struct MaxPooling2D {
     /// Size of the pooling window as (height, width)
@@ -95,7 +97,7 @@ impl MaxPooling2D {
     /// # Parameters
     ///
     /// - `pool_size` - Size of the pooling window as (height, width)
-    /// - `input_shape` - Input tensor shape `[batch_size, channels, height, width]`
+    /// - `input_shape` - Input tensor shape `[batch_size, height, width, channels]`
     ///
     /// # Notes
     ///
@@ -113,7 +115,7 @@ impl MaxPooling2D {
     pub fn new(pool_size: (usize, usize), input_shape: Vec<usize>) -> Result<Self, Error> {
         validate_input_shape_dims(&input_shape, 4, "MaxPooling2D")?;
         validate_all_dims_positive(&input_shape)?;
-        validate_pool_size_2d(pool_size, input_shape[2], input_shape[3])?;
+        validate_pool_size_2d(pool_size, input_shape[1], input_shape[2])?;
 
         Ok(MaxPooling2D {
             pool_size,

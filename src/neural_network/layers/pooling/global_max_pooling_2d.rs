@@ -14,7 +14,7 @@ use crate::neural_network::traits::Layer;
 ///
 /// Selects the maximum value across the height and width dimensions
 ///
-/// Input tensor shape: `[batch_size, channels, height, width]`. Output tensor shape:
+/// Input tensor shape: `[batch_size, height, width, channels]`. Output tensor shape:
 /// `[batch_size, channels]`
 ///
 /// # Examples
@@ -33,8 +33,8 @@ use crate::neural_network::traits::Layer;
 /// // Add a GlobalMaxPooling2D layer
 /// model.add(GlobalMaxPooling2D::new());
 ///
-/// // Create a test input tensor: [batch_size, channels, height, width]
-/// let input_data = Array::from_elem(IxDyn(&[3, 4, 5, 5]), 1.0);
+/// // Create a test input tensor: [batch_size, height, width, channels]
+/// let input_data = Array::from_elem(IxDyn(&[3, 5, 5, 4]), 1.0);
 ///
 /// // Forward propagation
 /// let output = model.predict(&input_data).unwrap();
@@ -52,7 +52,9 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= 32`
+/// Parallel execution is gated on the estimated element ops of the whole pass
+/// (`batch * positions * channels`) clearing [`tuning::pool`](crate::tuning::pool),
+/// not on any fixed shape
 #[derive(Debug)]
 pub struct GlobalMaxPooling2D {
     /// Shape of the input tensor cached during the forward pass

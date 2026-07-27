@@ -17,8 +17,8 @@ fn main() {
     let x = array![[1.0], [2.0], [3.0], [4.0]];
     let y = array![3.0, 6.0, 9.0, 12.0];
 
-    // (fit_intercept, learning_rate, max_iter, tolerance)
-    let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6).unwrap();
+    // new(fit_intercept); the default solver is the exact closed form
+    let mut model = LinearRegression::new(true);
     model.fit(&x, &y).unwrap();
 
     let predictions = model.predict(&x).unwrap();

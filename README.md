@@ -181,7 +181,9 @@ preprocessing transformers in `utils`.
 ### `neural_network`
 
 A complete framework for building, training, and serializing feed-forward and
-convolutional/recurrent networks via a Keras-style `Sequential` API.
+convolutional/recurrent networks via a Keras-style `Sequential` API. Tensors are
+channels-last and kernels use Keras' shapes, so a layout you already know from
+Keras carries over unchanged.
 
 - **Core layers** — `Dense`, `Flatten`
 - **Activations** — `ReLU`, `Sigmoid`, `Tanh`, `Softmax`, `Linear` (as the `Activation` enum or standalone layers)

@@ -12,15 +12,15 @@ use crate::neural_network::layers::convolution::validation::{
 use crate::neural_network::layers::layer_weight::{Conv1DLayerWeight, LayerWeight};
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use ndarray::{Array2, Array3};
+use ndarray::{Array1, Array3};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use std::borrow::Cow;
 
 /// A 1D convolutional layer for neural networks
 ///
 /// Applies a convolution operation to sequential data such as time series, audio signals,
-/// or text. Input shape is \[batch_size, channels, length\] and output shape is
-/// \[batch_size, filters, output_length\], where output_length depends on input length,
+/// or text. Input shape is \[batch_size, length, channels\] and output shape is
+/// \[batch_size, output_length, filters\], where output_length depends on input length,
 /// kernel size, stride, and padding
 ///
 /// The dimension-generic convolution math lives in
@@ -36,12 +36,12 @@ use std::borrow::Cow;
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array3;
 ///
-/// // Create a simple 3D input tensor: [batch_size, channels, length]
-/// // Batch size=2, 1 input channel, 10 time steps
-/// let x = Array3::ones((2, 1, 10)).into_dyn();
+/// // Create a simple 3D input tensor: [batch_size, length, channels]
+/// // Batch size=2, 10 time steps, 1 input channel
+/// let x = Array3::ones((2, 10, 1)).into_dyn();
 ///
-/// // Create target tensor - 3 filters with output length 8
-/// let y = Array3::ones((2, 3, 8)).into_dyn();
+/// // Create target tensor - output length 8 with 3 filters
+/// let y = Array3::ones((2, 8, 3)).into_dyn();
 ///
 /// // Build model: add a Conv1D layer with 3 filters and kernel size 3
 /// let mut model = Sequential::new();
@@ -49,7 +49,7 @@ use std::borrow::Cow;
 ///     .add(Conv1D::new(
 ///         3,                      // Number of filters
 ///         3,                      // Kernel size
-///         vec![2, 1, 10],         // Input shape
+///         vec![2, 10, 1],         // Input shape
 ///         1,                      // Stride
 ///         Activation::ReLU,       // ReLU activation
 ///     ).unwrap())
@@ -65,8 +65,8 @@ use std::borrow::Cow;
 /// let prediction = model.predict(&x).unwrap();
 /// println!("Convolution layer prediction results: {:?}", prediction);
 ///
-/// // Check if output shape is correct - should be [2, 3, 8]
-/// assert_eq!(prediction.shape(), &[2, 3, 8]);
+/// // Check if output shape is correct - should be [2, 8, 3]
+/// assert_eq!(prediction.shape(), &[2, 8, 3]);
 /// ```
 #[derive(Debug)]
 pub struct Conv1D {
@@ -78,10 +78,10 @@ pub struct Conv1D {
     stride: usize,
     /// Type of padding to apply (`Valid` or `Same`)
     padding: PaddingType,
-    /// 3D array of filter weights with shape \[filters, channels, kernel_size\]
+    /// 3D array of filter weights with shape \[kernel_size, channels, filters\]
     weights: Array3<f32>,
-    /// 2D array of bias values with shape \[1, filters\]
-    bias: Array2<f32>,
+    /// 1D array of bias values with shape \[filters\]
+    bias: Array1<f32>,
     /// Activation applied to the convolution output
     activation: Activation,
     /// Cached activated output, used by the activation backward pass
@@ -93,7 +93,7 @@ pub struct Conv1D {
     /// Gradients for the weights, computed during backpropagation
     weight_gradients: Option<Array3<f32>>,
     /// Gradients for the biases, computed during backpropagation
-    bias_gradients: Option<Array2<f32>>,
+    bias_gradients: Option<Array1<f32>>,
 }
 
 impl Conv1D {
@@ -103,7 +103,7 @@ impl Conv1D {
     ///
     /// - `filters` - Number of output filters (channels)
     /// - `kernel_size` - Size of the convolution kernel
-    /// - `input_shape` - Shape of input tensor \[batch_size, channels, length\]
+    /// - `input_shape` - Shape of input tensor \[batch_size, length, channels\]
     /// - `stride` - Stride for the convolution operation
     /// - `activation` - Activation function (ReLU, Sigmoid, Tanh, Softmax)
     ///
@@ -134,9 +134,9 @@ impl Conv1D {
         validate_strides_1d(stride)?;
         validate_input_shape_1d(&input_shape, kernel_size)?;
 
-        let input_channels = input_shape[1];
+        let input_channels = input_shape[2];
         let weights = Self::init_weights_array(filters, input_channels, kernel_size, None);
-        let bias = Array2::zeros((1, filters));
+        let bias = Array1::zeros(filters);
 
         Ok(Self {
             filters,
@@ -182,7 +182,7 @@ impl Conv1D {
     ///
     /// - `Self` - The updated layer
     pub fn with_random_state(mut self, random_state: u64) -> Self {
-        let input_channels = self.input_shape[1];
+        let input_channels = self.input_shape[2];
         self.weights = Self::init_weights_array(
             self.filters,
             input_channels,
@@ -192,7 +192,7 @@ impl Conv1D {
         self
     }
 
-    /// Xavier/Glorot uniform initialization of the \[filters, channels, kernel_size\] weight tensor
+    /// Xavier/Glorot uniform initialization of the \[kernel_size, channels, filters\] weight tensor
     fn init_weights_array(
         filters: usize,
         input_channels: usize,
@@ -205,7 +205,7 @@ impl Conv1D {
         let weight_bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
         let mut rng = crate::random::make_rng(random_state);
         Array3::random_using(
-            (filters, input_channels, kernel_size),
+            (kernel_size, input_channels, filters),
             Uniform::new(-weight_bound, weight_bound).unwrap(),
             &mut rng,
         )
@@ -231,14 +231,14 @@ impl Conv1D {
     ///
     /// # Parameters
     ///
-    /// - `weights` - 3D array of filter weights with shape \[filters, channels, kernel_size\]
-    /// - `bias` - 2D array of bias values with shape \[1, filters\]
+    /// - `weights` - 3D array of filter weights with shape \[kernel_size, channels, filters\]
+    /// - `bias` - 1D array of bias values with shape \[filters\]
     ///
     /// # Errors
     ///
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` does not match the
     ///   layer's expected shape
-    pub fn set_weights(&mut self, weights: Array3<f32>, bias: Array2<f32>) -> Result<(), Error> {
+    pub fn set_weights(&mut self, weights: Array3<f32>, bias: Array1<f32>) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
         self.weights = weights;
@@ -316,7 +316,7 @@ impl Layer for Conv1D {
                 .expect("weight gradient shape matches weights"),
         );
         self.bias_gradients = Some(
-            Array2::from_shape_vec(self.bias.raw_dim(), grads.bias_grad)
+            Array1::from_shape_vec(self.bias.raw_dim(), grads.bias_grad)
                 .expect("bias gradient shape matches bias"),
         );
 
@@ -328,11 +328,11 @@ impl Layer for Conv1D {
     }
 
     fn output_shape(&self) -> String {
-        let input_length = self.input_shape[2];
+        let input_length = self.input_shape[1];
         let output_length = self.calculate_output_length(input_length);
         format!(
             "({}, {}, {})",
-            self.input_shape[0], self.filters, output_length
+            self.input_shape[0], output_length, self.filters
         )
     }
 

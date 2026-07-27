@@ -11,8 +11,17 @@ use ndarray::IxDyn;
 /// Flattens a 3D, 4D, or 5D tensor into a 2D tensor
 ///
 /// Reshapes inputs from feature extraction layers into a format suitable for dense layers
-/// Input shapes are \[batch_size, features, length\], \[batch_size, channels, height, width\], or
-/// \[batch_size, channels, depth, height, width\]. Output shape is always \[batch_size, flattened_features\],
+///
+/// The reshape itself is layout-agnostic - it collapses every axis after the batch in C order - but
+/// *which* feature lands at which output index is not. Under the crate's channels-last layout the
+/// channel axis is innermost, so the flattened vector runs position by position with all channels
+/// of a position adjacent, rather than plane by plane. A `Dense` layer trained against the other
+/// ordering therefore reads its inputs permuted, even though its weight shape is unchanged - which
+/// is why saved models carry a format version (see
+/// [`MODEL_FORMAT_VERSION`](crate::neural_network::layers::serialize_model::MODEL_FORMAT_VERSION))
+/// rather than relying on a shape check to catch the mismatch
+/// Input shapes are \[batch_size, length, features\], \[batch_size, height, width, channels\], or
+/// \[batch_size, depth, height, width, channels\]. Output shape is always \[batch_size, flattened_features\],
 /// where flattened_features is the product of all dimensions except batch_size
 ///
 /// # Examples
@@ -24,14 +33,14 @@ use ndarray::IxDyn;
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array4;
 ///
-/// // Create a 4D input tensor: [batch_size, channels, height, width]
-/// // Batch size=2, 3 channels, each 4x4 pixels
-/// let x = Array4::ones((2, 3, 4, 4)).into_dyn();
+/// // Create a 4D input tensor: [batch_size, height, width, channels]
+/// // Batch size=2, 4x4 pixels, 3 channels
+/// let x = Array4::ones((2, 4, 4, 3)).into_dyn();
 ///
 /// // Build a model containing a Flatten layer
 /// let mut model = Sequential::new();
 /// model
-///     .add(Flatten::new(vec![2, 3, 4, 4]).unwrap())
+///     .add(Flatten::new(vec![2, 4, 4, 3]).unwrap())
 ///     .compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // View model structure
@@ -56,8 +65,8 @@ impl Flatten {
     ///
     /// # Parameters
     ///
-    /// - `input_shape` - Input tensor shape, such as [batch_size, features, length],
-    ///   [batch_size, channels, height, width], or [batch_size, channels, depth, height, width]
+    /// - `input_shape` - Input tensor shape, such as [batch_size, length, features],
+    ///   [batch_size, height, width, channels], or [batch_size, depth, height, width, channels]
     ///
     /// # Returns
     ///
