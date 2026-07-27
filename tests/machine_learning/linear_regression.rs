@@ -713,7 +713,7 @@ fn save_load_round_trip_identical_predictions() {
     let preds_before = model.predict(&x_test).unwrap();
 
     // Tmp path unique to this test to avoid collisions
-    let path = "/tmp/rustyml_linear_regression_test_round_trip.json";
+    let path = "/tmp/rustyml_linear_regression_test_round_trip.bin";
     model.save_to_path(path).unwrap();
 
     let loaded = LinearRegression::load_from_path(path).unwrap();
@@ -739,7 +739,7 @@ fn save_load_preserves_model_state() {
         .unwrap();
     model.fit(&x_train, &y_train).unwrap();
 
-    let path = "/tmp/rustyml_linear_regression_test_state.json";
+    let path = "/tmp/rustyml_linear_regression_test_state.bin";
     model.save_to_path(path).unwrap();
     let loaded = LinearRegression::load_from_path(path).unwrap();
 

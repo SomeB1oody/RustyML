@@ -891,7 +891,7 @@ fn test_save_load_round_trip_identical_predictions() {
     let preds_before = original.predict(&x_train).unwrap();
 
     // Temp file path unique per process
-    let path = format!("/tmp/rustyml_dt_test_{}.json", std::process::id());
+    let path = format!("/tmp/rustyml_dt_test_{}.bin", std::process::id());
     original.save_to_path(&path).expect("save_to_path failed");
 
     let loaded = DecisionTree::load_from_path(&path).expect("load_from_path failed");
@@ -924,7 +924,7 @@ fn test_save_load_c45_classifier_round_trip() {
 
     let preds_before = original.predict(&x).unwrap();
 
-    let path = format!("/tmp/rustyml_c45_dt_test_{}.json", std::process::id());
+    let path = format!("/tmp/rustyml_c45_dt_test_{}.bin", std::process::id());
     original.save_to_path(&path).expect("save_to_path failed");
 
     let loaded = DecisionTree::load_from_path(&path).expect("load_from_path failed");
@@ -953,7 +953,7 @@ fn test_save_load_cart_regressor_round_trip() {
 
     let preds_before = original.predict(&x).unwrap();
 
-    let path = format!("/tmp/rustyml_cart_reg_dt_test_{}.json", std::process::id());
+    let path = format!("/tmp/rustyml_cart_reg_dt_test_{}.bin", std::process::id());
     original.save_to_path(&path).expect("save_to_path failed");
 
     let loaded = DecisionTree::load_from_path(&path).expect("load_from_path failed");
@@ -1338,7 +1338,7 @@ fn test_save_load_categorical_multiway_round_trip_identical_predictions() {
     let x_eval = array![[0.0_f64], [1.0_f64], [2.0_f64], [99.0_f64],];
     let preds_before = original.predict(&x_eval).unwrap();
 
-    let path = format!("/tmp/rustyml_dt_cat_test_{}.json", std::process::id());
+    let path = format!("/tmp/rustyml_dt_cat_test_{}.bin", std::process::id());
     original.save_to_path(&path).expect("save_to_path failed");
 
     let loaded = DecisionTree::load_from_path(&path).expect("load_from_path failed");

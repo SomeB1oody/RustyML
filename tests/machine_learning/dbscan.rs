@@ -665,7 +665,7 @@ fn save_load_round_trip_preserves_state_and_predictions() {
         .unwrap();
     original.fit(&data).unwrap();
 
-    let path = "/tmp/rustyml_dbscan_test_roundtrip.json";
+    let path = "/tmp/rustyml_dbscan_test_roundtrip.bin";
     original
         .save_to_path(path)
         .expect("save_to_path must succeed");

@@ -43,7 +43,7 @@ struct TempFile(std::path::PathBuf);
 
 impl TempFile {
     fn new(name: &str) -> Self {
-        let path = env::temp_dir().join(format!("rustyml_serialize_test_{}.json", name));
+        let path = env::temp_dir().join(format!("rustyml_serialize_test_{}.bin", name));
         TempFile(path)
     }
     fn path(&self) -> &std::path::Path {
@@ -639,8 +639,7 @@ fn load_from_nonexistent_file_gives_io_error() {
     let mut model = Sequential::new();
     model.add(Dense::new(2, 2, Linear::new()).unwrap());
 
-    let result =
-        model.load_from_path("/tmp/this_file_definitely_does_not_exist_rustyml_99999.json");
+    let result = model.load_from_path("/tmp/this_file_definitely_does_not_exist_rustyml_99999.bin");
     match result {
         Err(Error::Io(IoError::Std(_))) => {}
         other => panic!("expected IoError::Std, got {:?}", other),

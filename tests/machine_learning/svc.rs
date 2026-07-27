@@ -619,7 +619,7 @@ fn save_load_round_trip_yields_identical_predictions() {
         .expect("df must succeed before save");
 
     // write to a temporary path
-    let path = "/tmp/rustyml_svc_test_roundtrip.json";
+    let path = "/tmp/rustyml_svc_test_roundtrip.bin";
     svc.save_to_path(path).expect("save_to_path must succeed");
 
     let loaded = SVC::load_from_path(path).expect("load_from_path must succeed");
@@ -663,7 +663,7 @@ fn save_load_round_trip_linear_kernel() {
         .with_random_state(42);
     svc.fit(&x, &y).expect("fit must succeed");
 
-    let path = "/tmp/rustyml_svc_test_linear_roundtrip.json";
+    let path = "/tmp/rustyml_svc_test_linear_roundtrip.bin";
     svc.save_to_path(path).expect("save_to_path must succeed");
     let loaded = SVC::load_from_path(path).expect("load_from_path must succeed");
 

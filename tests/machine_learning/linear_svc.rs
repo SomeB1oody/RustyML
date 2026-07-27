@@ -472,7 +472,7 @@ fn l1_sparsity_irrelevant_feature_closer_to_zero() {
 
 #[test]
 fn save_load_round_trip_yields_identical_predictions() {
-    let path = "/tmp/rustyml_linear_svc_roundtrip_test.json";
+    let path = "/tmp/rustyml_linear_svc_roundtrip_test.bin";
 
     let model = fit_separable_model();
     model.save_to_path(path).unwrap();
@@ -505,7 +505,7 @@ fn save_load_round_trip_yields_identical_predictions() {
 
 #[test]
 fn load_from_nonexistent_path_returns_io_error() {
-    let result = LinearSVC::load_from_path("/tmp/this_file_does_not_exist_rustyml_svc.json");
+    let result = LinearSVC::load_from_path("/tmp/this_file_does_not_exist_rustyml_svc.bin");
     assert!(
         matches!(result, Err(Error::Io(_))),
         "loading from non-existent path must return Err(Io(...))"
@@ -514,7 +514,7 @@ fn load_from_nonexistent_path_returns_io_error() {
 
 #[test]
 fn save_load_preserves_hyperparameters() {
-    let path = "/tmp/rustyml_linear_svc_hparams_test.json";
+    let path = "/tmp/rustyml_linear_svc_hparams_test.bin";
 
     let model = fit_separable_model();
     model.save_to_path(path).unwrap();

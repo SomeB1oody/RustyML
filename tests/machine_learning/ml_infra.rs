@@ -156,7 +156,7 @@ fn kmeans_save_load_preserves_hyperparameters() {
     let mut km = KMeans::new(3, 200, 1e-5).unwrap().with_random_state(7);
     km.fit(&data).unwrap();
 
-    let path = "/tmp/rustyml_ml_infra_kmeans_hyperparams.json";
+    let path = "/tmp/rustyml_ml_infra_kmeans_hyperparams.bin";
     km.save_to_path(path).unwrap();
     let loaded = KMeans::load_from_path(path).unwrap();
 

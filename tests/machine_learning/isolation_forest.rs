@@ -562,7 +562,7 @@ fn test_save_load_roundtrip_yields_identical_predictions() {
     model.fit(&data).unwrap();
     let scores_before = model.predict(&data).unwrap();
 
-    let path = "/tmp/rustyml_isolation_forest_test.json";
+    let path = "/tmp/rustyml_isolation_forest_test.bin";
     model.save_to_path(path).unwrap();
 
     let loaded = IsolationForest::load_from_path(path).unwrap();
@@ -585,7 +585,7 @@ fn test_save_load_roundtrip_yields_identical_predictions() {
 #[test]
 fn test_load_from_nonexistent_path_returns_io_error() {
     let err =
-        IsolationForest::load_from_path("/tmp/this_file_does_not_exist_rustyml.json").unwrap_err();
+        IsolationForest::load_from_path("/tmp/this_file_does_not_exist_rustyml.bin").unwrap_err();
     assert!(
         matches!(err, Error::Io(_)),
         "expected Io error when loading from missing file, got: {err:?}"

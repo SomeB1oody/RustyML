@@ -536,7 +536,7 @@ fn test_save_load_roundtrip_preserves_transform() {
     use std::fs;
 
     let x = collinear_data();
-    let path = "/tmp/rustyml_pca_test_roundtrip.json";
+    let path = "/tmp/rustyml_pca_test_roundtrip.bin";
 
     let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&x).unwrap();
@@ -555,7 +555,7 @@ fn test_save_load_roundtrip_preserves_transform() {
 /// load_from_path on a non-existent file returns Err (IoError)
 #[test]
 fn test_load_nonexistent_path_is_error() {
-    let result = PCA::load_from_path("/tmp/rustyml_pca_no_such_file_xyz.json");
+    let result = PCA::load_from_path("/tmp/rustyml_pca_no_such_file_xyz.bin");
     assert!(result.is_err(), "loading a missing file should fail");
 }
 

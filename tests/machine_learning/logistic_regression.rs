@@ -516,7 +516,7 @@ fn save_load_round_trip_identical_predictions() {
     let mut model = LogisticRegression::new(true, 0.05, 1000, 1e-7).expect("valid params");
     model.fit(&x_train, &y_train).expect("fit should succeed");
 
-    let path = "/tmp/rustyml_test_logistic_regression.json";
+    let path = "/tmp/rustyml_test_logistic_regression.bin";
     model.save_to_path(path).expect("save should succeed");
 
     let loaded = LogisticRegression::load_from_path(path).expect("load should succeed");
@@ -553,7 +553,7 @@ fn save_load_preserves_hyperparameters() {
         .unwrap();
     model.fit(&x, &y).expect("fit should succeed");
 
-    let path = "/tmp/rustyml_test_logistic_regression_hparams.json";
+    let path = "/tmp/rustyml_test_logistic_regression_hparams.bin";
     model.save_to_path(path).expect("save should succeed");
     let loaded = LogisticRegression::load_from_path(path).expect("load should succeed");
 

@@ -1,7 +1,7 @@
 //! Normalization layers (batch, group, instance, layer) and the shared group-normalization core
 //!
 //! Group and instance normalization are the same operation at different group counts, so both
-//! delegate to [`group_norm_forward_core`] / [`group_norm_backward_core`] here. Everything works
+//! delegate to `group_norm_forward_core` / `group_norm_backward_core` here. Everything works
 //! directly on the channels-last buffer: a channel group is a contiguous sub-run of each position's
 //! channel vector, never a plane that has to be gathered out
 

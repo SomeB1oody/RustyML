@@ -724,7 +724,7 @@ fn save_and_load_produces_identical_predictions() {
     let x_test = array![[0.5, 0.0], [5.0, 0.0], [10.5, 0.0]];
     let preds_before = knn.predict(&x_test).unwrap();
 
-    let path = "/tmp/rustyml_knn_save_load_test.json";
+    let path = "/tmp/rustyml_knn_save_load_test.bin";
     knn.save_to_path(path).unwrap();
 
     let knn_loaded = KNN::<i32>::load_from_path(path).unwrap();
@@ -757,7 +757,7 @@ fn save_and_load_preserves_model_metadata() {
     let y_train = array![0, 0, 0, 1, 1, 1, 1];
     knn.fit(&x_train, &y_train).unwrap();
 
-    let path = "/tmp/rustyml_knn_metadata_test.json";
+    let path = "/tmp/rustyml_knn_metadata_test.bin";
     knn.save_to_path(path).unwrap();
 
     let knn_loaded = KNN::<i32>::load_from_path(path).unwrap();

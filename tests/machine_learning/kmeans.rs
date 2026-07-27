@@ -527,7 +527,7 @@ fn actual_iterations_is_in_valid_range_after_fit() {
 
 // Save / load round-trip
 
-/// Saving a fitted model to JSON and loading it back yields identical predictions
+/// Saving a fitted model to disk and loading it back yields identical predictions
 /// and bit-for-bit equal centroids
 #[test]
 fn save_load_round_trip_preserves_predictions() {
@@ -535,7 +535,7 @@ fn save_load_round_trip_preserves_predictions() {
     let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     km.fit(&data).unwrap();
 
-    let path = "/tmp/rustyml_test_kmeans_round_trip.json";
+    let path = "/tmp/rustyml_test_kmeans_round_trip.bin";
     km.save_to_path(path).expect("save_to_path should succeed");
 
     let km_loaded = KMeans::load_from_path(path).expect("load_from_path should succeed");
@@ -559,7 +559,7 @@ fn save_load_round_trip_preserves_predictions() {
 #[test]
 fn load_from_nonexistent_path_is_io_error() {
     let err =
-        KMeans::load_from_path("/tmp/this_path_does_not_exist_rustyml_kmeans.json").unwrap_err();
+        KMeans::load_from_path("/tmp/this_path_does_not_exist_rustyml_kmeans.bin").unwrap_err();
     assert!(
         matches!(err, Error::Io(_)),
         "expected Error::Io, got {err:?}"

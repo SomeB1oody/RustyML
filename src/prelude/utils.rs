@@ -5,9 +5,9 @@ pub use crate::traits::{Fit, FitTransform, Predict, Transform};
 pub use crate::utils::label_encoding::{
     to_categorical, to_categorical_with_mapping, to_sparse_categorical,
 };
-pub use crate::utils::normalize::{normalize, NormalizationAxis, NormalizationOrder};
+pub use crate::utils::normalize::{NormalizationAxis, NormalizationOrder, normalize};
 pub use crate::utils::scaler::{
     MaxAbsScaler, MinMaxScaler, Normalizer, RobustScaler, StandardScaler,
 };
-pub use crate::utils::standardize::{standardize, StandardizationAxis};
+pub use crate::utils::standardize::{StandardizationAxis, standardize};
 pub use crate::utils::train_test_split::{train_test_split, train_test_split_stratified};

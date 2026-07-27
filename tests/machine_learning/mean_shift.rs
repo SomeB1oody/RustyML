@@ -627,7 +627,7 @@ fn test_save_load_round_trip_identical_predictions() {
         .with_cluster_all(true);
     ms.fit(&data).unwrap();
 
-    let path = "/tmp/rustyml_mean_shift_test.json";
+    let path = "/tmp/rustyml_mean_shift_test.bin";
     ms.save_to_path(path).expect("save_to_path should succeed");
 
     let loaded = MeanShift::load_from_path(path).expect("load_from_path should succeed");

@@ -763,7 +763,7 @@ fn test_save_load_round_trip() {
     let preds_before = lda.predict(&x).unwrap();
     let proj_before = lda.transform(&x).unwrap();
 
-    let path = "/tmp/rustyml_lda_roundtrip_test.json";
+    let path = "/tmp/rustyml_lda_roundtrip_test.bin";
     lda.save_to_path(path).expect("save must succeed");
 
     let lda_loaded = LDA::load_from_path(path).expect("load must succeed");
@@ -773,7 +773,7 @@ fn test_save_load_round_trip() {
 
     assert_eq!(
         preds_before, preds_after,
-        "predictions must survive JSON round-trip"
+        "predictions must survive the save/load round-trip"
     );
     // Projections must survive the round-trip to within floating-point tolerance
     assert_allclose(&proj_before, &proj_after, 1e-12);
@@ -789,7 +789,7 @@ fn test_save_load_preserves_hyperparameters() {
     let (x, y) = make_two_class_1d();
     lda.fit(&x, &y).unwrap();
 
-    let path = "/tmp/rustyml_lda_hp_roundtrip_test.json";
+    let path = "/tmp/rustyml_lda_hp_roundtrip_test.bin";
     lda.save_to_path(path).unwrap();
     let loaded = LDA::load_from_path(path).unwrap();
 
@@ -806,7 +806,7 @@ fn test_load_preserves_fit_state() {
     let mut lda = LDA::new(2).unwrap();
     lda.fit(&x, &y).unwrap();
 
-    let path = "/tmp/rustyml_lda_state_roundtrip_test.json";
+    let path = "/tmp/rustyml_lda_state_roundtrip_test.bin";
     lda.save_to_path(path).unwrap();
     let loaded = LDA::load_from_path(path).unwrap();
 

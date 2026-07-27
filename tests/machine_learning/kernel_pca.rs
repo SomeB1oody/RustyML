@@ -825,7 +825,7 @@ fn test_save_load_round_trip() {
     kpca.fit(&x).unwrap();
     let proj_before = kpca.transform(&x).unwrap();
 
-    let path = "/tmp/rustyml_test_kpca_round_trip.json";
+    let path = "/tmp/rustyml_test_kpca_round_trip.bin";
     kpca.save_to_path(path).unwrap();
     let kpca_loaded = KernelPCA::load_from_path(path).unwrap();
     let proj_after = kpca_loaded.transform(&x).unwrap();
@@ -840,7 +840,7 @@ fn test_save_load_round_trip() {
 #[test]
 fn test_load_from_nonexistent_path_returns_io_error() {
     let err =
-        KernelPCA::load_from_path("/tmp/rustyml_this_path_does_not_exist_42.json").unwrap_err();
+        KernelPCA::load_from_path("/tmp/rustyml_this_path_does_not_exist_42.bin").unwrap_err();
     assert!(
         matches!(err, Error::Io(_)),
         "expected Io error, got {err:?}"
