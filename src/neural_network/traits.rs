@@ -263,7 +263,10 @@ pub trait Optimizer {
     /// Called exactly once per batch (before the per-layer [`update`](Optimizer::update) calls)
     /// Step-dependent optimizers such as Adam use this to advance their bias-correction timestep
     /// once per training step rather than once per layer. The default implementation is a no-op,
-    /// which is correct for step-independent optimizers (SGD, RMSprop, AdaGrad)
+    /// but every optimizer in this crate overrides it: SGD, RMSprop and AdaGrad rewind the cursor
+    /// that walks their per-parameter state buffers, and Adam / AdamW additionally advance the
+    /// timestep. Any optimizer carrying per-parameter state has to do the same, or the cursor
+    /// keeps climbing into the next batch and every layer reads the wrong slot
     fn step(&mut self) {}
 
     /// The global gradient-norm clip threshold, or `None` (the default) to disable clipping
@@ -286,16 +289,25 @@ pub trait Optimizer {
     ///   training loop to implement clip-by-global-norm. Pass `1.0` for an unscaled update
     fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32);
 
+    /// The current learning rate
+    ///
+    /// The read half of the scheduling pair. A schedule that derives the next step size from the
+    /// current one - exponential decay, cosine annealing, warmup restarts - needs this rather
+    /// than a copy of the rate kept alongside the model, which drifts the moment anything else
+    /// retunes the optimizer. Reports whatever was last set: unlike the constructors,
+    /// [`set_learning_rate`](Optimizer::set_learning_rate) does not validate, so a rate that was
+    /// set to zero or to a negative value comes back unchanged
+    fn learning_rate(&self) -> f32;
+
     /// Sets the learning rate, the hook for external learning-rate scheduling
     ///
     /// Call between batches or epochs (e.g. for step decay or warmup) to retune the step size
-    /// without rebuilding the optimizer, preserving its accumulated state. The default
-    /// implementation is a no-op; every built-in optimizer overrides it
+    /// without rebuilding the optimizer, preserving its accumulated state
     ///
     /// # Parameters
     ///
-    /// - `_learning_rate` - The new learning rate to use for subsequent updates
-    fn set_learning_rate(&mut self, _learning_rate: f32) {}
+    /// - `learning_rate` - The new learning rate to use for subsequent updates
+    fn set_learning_rate(&mut self, learning_rate: f32);
 }
 
 /// Trait for applying serialized weights to a specific layer type

@@ -84,6 +84,10 @@ impl Optimizer for Adam {
         self.core.clip_norm()
     }
 
+    fn learning_rate(&self) -> f32 {
+        self.core.learning_rate()
+    }
+
     fn set_learning_rate(&mut self, learning_rate: f32) {
         self.core.set_learning_rate(learning_rate);
     }

@@ -96,7 +96,6 @@ let restored = LinearRegression::load_from_path("linear_regression.bin").unwrap(
 ### 神经网络
 
 ```rust
-use rustyml::neural_network::sequential::Sequential;
 use rustyml::prelude::neural_network::*;
 use ndarray::Array;
 
@@ -115,7 +114,13 @@ model
     );
 
 model.summary(); // 打印网络结构
-model.fit(&x, &y, 10).unwrap();
+
+// 每个 epoch 一个损失，测的都是这个 epoch 运行当中的权重，而不是它结束时的
+let history = model.fit(&x, &y, 10).unwrap();
+println!("逐 epoch 损失: {:?}", history.loss());
+
+// 给模型此刻持有的权重打分：推理模式，什么都不更新
+println!("训练后的损失: {}", model.evaluate(&x, &y).unwrap());
 
 let predictions = model.predict(&x).unwrap();
 println!("预测结果形状: {:?}", predictions.shape());
@@ -188,6 +193,12 @@ println!("F1 分数: {:.3}", cm.f1_score());
 
 训练支持全批量（`fit`）与小批量（`fit_with_batches`）循环、权重查看（`get_weights`），
 以及二进制序列化（`save_to_path` / `load_from_path`）。
+两个循环都返回 `History`：每个 epoch 一个损失值，且都是在该 epoch *进行中*测得的——取自每个
+批次自身权重更新之前的那次前向传播，与 Keras 的口径一致——所以每一项描述的是该 epoch 运行时
+所持有的权重，而绝不是它结束时的权重。要给手上这个模型打分，得用 `evaluate`：它以推理模式
+跑一遍，梯度、参数、批归一化的滑动统计量一概不动。`train_batch`（即 Keras 的 `train_on_batch`）
+也已公开，自定义循环因此可以自己掌控 epoch 结构，而无需重新实现前向 / 损失 / 反向 / 裁剪 /
+更新这一整套流程。
 
 ### `utils`
 
@@ -227,7 +238,7 @@ println!("F1 分数: {:.3}", cm.f1_score());
 
 ```rust
 use rustyml::prelude::machine_learning::*; // 机器学习模型（含 PCA/KernelPCA/t-SNE）、trait、配置枚举
-use rustyml::prelude::neural_network::*;   // 层、优化器、损失函数
+use rustyml::prelude::neural_network::*;   // Sequential 与 History、层、优化器、损失函数
 use rustyml::prelude::utils::*;            // 缩放、标签编码、数据划分
 use rustyml::prelude::metrics::*;          // 评估指标
 ```

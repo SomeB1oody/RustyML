@@ -976,3 +976,26 @@ fn new_rejects_negative_momentum_and_weight_decay() {
         Err(Error::InvalidParameter { .. })
     ));
 }
+
+// learning rate: readable as well as writable
+
+/// Every optimizer reports the rate it was built with and the rate it was last set to. This is
+/// the read half a schedule needs: without it, `lr *= 0.5` has to be computed against a copy the
+/// caller keeps, which silently goes stale the moment anything else retunes the optimizer
+#[test]
+fn every_optimizer_reports_its_current_learning_rate() {
+    fn round_trip(mut opt: impl Optimizer, configured: f32) {
+        assert_abs_diff_eq!(opt.learning_rate(), configured, epsilon = 0.0_f32);
+
+        // The decay a scheduler writes: derived from the current value, not from a copy
+        let decayed = opt.learning_rate() * 0.1;
+        opt.set_learning_rate(decayed);
+        assert_abs_diff_eq!(opt.learning_rate(), configured * 0.1, epsilon = 1e-9);
+    }
+
+    round_trip(SGD::new(0.05, 0.9, false, 0.0).unwrap(), 0.05);
+    round_trip(Adam::new(0.003, 0.9, 0.999, 1e-8, 0.0).unwrap(), 0.003);
+    round_trip(AdamW::new(0.003, 0.9, 0.999, 1e-8, 0.01).unwrap(), 0.003);
+    round_trip(RMSprop::new(0.002, 0.9, 1e-8, 0.0).unwrap(), 0.002);
+    round_trip(AdaGrad::new(0.02, 1e-8, 0.0).unwrap(), 0.02);
+}

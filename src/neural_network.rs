@@ -33,7 +33,10 @@
 //!
 //! ## Model
 //! - [`Sequential`](crate::neural_network::sequential::Sequential): a linear stack of layers with an
-//!   integrated training loop, prediction, and weight save/load
+//!   integrated training loop, prediction, and weight save/load. `fit` / `fit_with_batches` hand
+//!   back a [`History`](crate::neural_network::sequential::History) of one loss per epoch, the
+//!   single step they are built from is public as `train_batch`, and `evaluate` scores a model
+//!   without training it
 //!
 //! # Examples
 //!

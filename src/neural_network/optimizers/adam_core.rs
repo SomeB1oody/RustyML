@@ -93,6 +93,11 @@ impl AdamCore {
         self.clip_norm
     }
 
+    /// The current step size
+    pub(super) fn learning_rate(&self) -> f32 {
+        self.learning_rate
+    }
+
     /// Retunes the step size, preserving all accumulated moment state
     pub(super) fn set_learning_rate(&mut self, learning_rate: f32) {
         self.learning_rate = learning_rate;

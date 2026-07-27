@@ -92,6 +92,10 @@ impl Optimizer for AdaGrad {
         self.clip_norm
     }
 
+    fn learning_rate(&self) -> f32 {
+        self.learning_rate
+    }
+
     fn set_learning_rate(&mut self, learning_rate: f32) {
         self.learning_rate = learning_rate;
     }

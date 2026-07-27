@@ -4,13 +4,15 @@
 //! never by running the layer and recording its output
 
 use approx::assert_abs_diff_eq;
-use ndarray::{Array, Array2};
+use ndarray::{Array, Array2, IxDyn};
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::Activation;
 use rustyml::neural_network::layers::dense::Dense;
+use rustyml::neural_network::layers::regularization::dropout::dropout::Dropout;
 use rustyml::neural_network::losses::{CategoricalCrossEntropy, MeanSquaredError};
 use rustyml::neural_network::optimizers::{Adam, SGD};
 use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::traits::Loss;
 use rustyml::{error::Error, neural_network::NnError};
 
 // helpers
@@ -513,11 +515,41 @@ fn test_predict_deterministic_after_training() {
     crate::common::assert_allclose(&p1, &p2, 0.0_f32);
 }
 
-// fit returns &mut Self (method chaining)
+// fit returns a History of per-epoch losses
 
-/// fit() returns Ok(&mut Self) so calls can be chained
+/// fit() records exactly one loss per epoch, in epoch order, and training drives them down
 #[test]
-fn test_fit_returns_mutable_self() {
+fn test_fit_history_has_one_loss_per_epoch() {
+    let mut model = Sequential::new();
+    model
+        .add(Dense::new(1, 1, Activation::Linear).unwrap())
+        .compile(
+            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+            MeanSquaredError::new(),
+        );
+
+    let x = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
+    let y = t2(4, 1, vec![3.0, 5.0, 7.0, 9.0]);
+
+    let history = model.fit(&x, &y, 25).unwrap();
+
+    assert_eq!(history.loss().len(), 25, "one entry per epoch");
+    assert!(
+        history.loss().iter().all(|l| l.is_finite()),
+        "every recorded loss is finite: {:?}",
+        history.loss()
+    );
+    assert!(
+        history.loss()[24] < history.loss()[0],
+        "25 epochs of gradient descent must reduce the loss: {} -> {}",
+        history.loss()[0],
+        history.loss()[24]
+    );
+}
+
+/// fit() over zero epochs still validates, and returns a history with no entries
+#[test]
+fn test_fit_zero_epochs_yields_empty_history() {
     let mut model = Sequential::new();
     model
         .add(Dense::new(1, 1, Activation::Linear).unwrap())
@@ -529,7 +561,99 @@ fn test_fit_returns_mutable_self() {
     let x = t2(2, 1, vec![1.0, 2.0]);
     let y = t2(2, 1, vec![1.0, 2.0]);
 
-    model.fit(&x, &y, 1).unwrap();
+    assert!(model.fit(&x, &y, 0).unwrap().loss().is_empty());
+}
+
+/// Each entry is the loss measured *before* that epoch's own update, so the first one is the
+/// untrained model's loss - Keras' convention, and the reason the last entry overstates the
+/// loss of the model you end up holding
+#[test]
+fn test_fit_history_records_the_pre_update_loss() {
+    let mut model = Sequential::new();
+    model
+        .add(Dense::new(1, 1, Activation::Linear).unwrap())
+        .compile(
+            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+            MeanSquaredError::new(),
+        );
+
+    let x = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
+    let y = t2(4, 1, vec![3.0, 5.0, 7.0, 9.0]);
+
+    let before = model.evaluate(&x, &y).unwrap();
+    let history = model.fit(&x, &y, 10).unwrap();
+    let after = model.evaluate(&x, &y).unwrap();
+
+    assert_abs_diff_eq!(history.loss()[0], before, epsilon = 1e-5);
+    assert!(
+        after < history.loss()[9],
+        "the trained model's loss ({}) is below the last recorded epoch loss ({}), which was \
+         measured one update earlier",
+        after,
+        history.loss()[9]
+    );
+}
+
+/// `fit_with_batches` weights each batch by the number of samples in it, so a short trailing
+/// batch counts for less and the epoch figure is the dataset-wide mean per-sample loss - the
+/// same value for every shuffle. This is Keras' rule (its loss metric accumulates with
+/// `sample_weight = batch_size`); a plain mean over batches would not be shuffle-invariant
+#[test]
+fn test_fit_with_batches_weights_batches_by_sample_count() {
+    // 5 samples in batches of 2 leaves one sample alone in the trailing batch. Writing the
+    // per-sample losses as l_0..l_4 with total S, a plain mean over the three batches is
+    // ((S - l_s)/2 + l_s)/3 = (S + l_s)/6 for whichever sample s lands alone, whatever the
+    // pairing; weighting by sample count gives S/5 regardless. The two agree only when
+    // l_s == S/5, which the assertion below rules out for every sample
+    let x = t2(5, 1, vec![1.0, 1.0, 1.0, 1.0, 1.0]);
+    let y = t2(5, 1, vec![0.0, 1.0, 4.0, 9.0, 100.0]);
+
+    for seed in 0..5_u64 {
+        let mut model = Sequential::new_with_seed(seed);
+        model
+            .add(
+                Dense::new(1, 1, Activation::Linear)
+                    .unwrap()
+                    .with_random_state(7),
+            )
+            // A step this small is below the f32 resolution of the weights it would move, so
+            // the model is frozen and the per-sample losses stay fixed across the epoch
+            .compile(
+                SGD::new(1e-30, 0.0, false, 0.0).unwrap(),
+                MeanSquaredError::new(),
+            );
+
+        let predictions = model.predict(&x).unwrap();
+        let per_sample: Vec<f32> = predictions
+            .iter()
+            .zip(y.iter())
+            .map(|(p, t)| (p - t) * (p - t))
+            .collect();
+        let total: f32 = per_sample.iter().sum();
+        let weighted = total / 5.0;
+
+        for (i, &l) in per_sample.iter().enumerate() {
+            assert!(
+                (l - weighted).abs() > 1.0,
+                "sample {i}'s loss ({l}) must differ from the mean ({weighted}), or the two \
+                 aggregation rules would coincide and the test would prove nothing"
+            );
+        }
+
+        let history = model.fit_with_batches(&x, &y, 1, 2).unwrap();
+
+        assert_abs_diff_eq!(model.evaluate(&x, &y).unwrap(), weighted, epsilon = 1e-3);
+        assert_abs_diff_eq!(history.loss()[0], weighted, epsilon = 1e-3);
+        for &l in &per_sample {
+            let unweighted = (total + l) / 6.0;
+            assert!(
+                (history.loss()[0] - unweighted).abs() > 1e-2,
+                "seed {seed}: the epoch loss ({}) must not be a plain mean over batches ({})",
+                history.loss()[0],
+                unweighted
+            );
+        }
+    }
 }
 
 // multi-batch convergence with fit_with_batches, full validation
@@ -555,4 +679,291 @@ fn test_fit_with_batches_full_batch_equivalent() {
     let pred = model.predict(&x_test).unwrap();
     // true value: 2*4 + 1 = 9
     assert_abs_diff_eq!(pred[[0, 0]], 9.0_f32, epsilon = 1.0);
+}
+
+// train_batch: the public single-step primitive
+
+/// `fit` is exactly a loop over `train_batch`: the same data through either path leaves the same
+/// weights, and the history holds precisely the per-step losses
+#[test]
+fn test_train_batch_reproduces_fit() {
+    let x = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
+    let y = t2(4, 1, vec![3.0, 5.0, 7.0, 9.0]);
+
+    let build = || {
+        let mut model = Sequential::new();
+        model
+            .add(
+                Dense::new(1, 1, Activation::Linear)
+                    .unwrap()
+                    .with_random_state(11),
+            )
+            .compile(
+                SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+                MeanSquaredError::new(),
+            );
+        model
+    };
+
+    let mut looped = build();
+    let history = looped.fit(&x, &y, 3).unwrap();
+
+    let mut stepped = build();
+    let manual: Vec<f32> = (0..3)
+        .map(|_| stepped.train_batch(&x, &y).unwrap())
+        .collect();
+
+    assert_eq!(history.loss(), manual.as_slice());
+    crate::common::assert_allclose(
+        &looped.predict(&x).unwrap(),
+        &stepped.predict(&x).unwrap(),
+        0.0_f32,
+    );
+}
+
+/// `train_batch` returns the loss from the forward pass that precedes its own update, so it
+/// equals the loss of the model as it stood on entry
+#[test]
+fn test_train_batch_returns_the_pre_update_loss() {
+    let mut model = Sequential::new();
+    model
+        .add(Dense::new(1, 1, Activation::Linear).unwrap())
+        .compile(
+            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+            MeanSquaredError::new(),
+        );
+
+    let x = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
+    let y = t2(4, 1, vec![3.0, 5.0, 7.0, 9.0]);
+
+    let before = model.evaluate(&x, &y).unwrap();
+    let reported = model.train_batch(&x, &y).unwrap();
+    let after = model.evaluate(&x, &y).unwrap();
+
+    assert_abs_diff_eq!(reported, before, epsilon = 1e-5);
+    assert!(
+        after < reported,
+        "the update the call performed must lower the loss it reported: {reported} -> {after}"
+    );
+}
+
+/// Being public, `train_batch` has to validate for itself rather than lean on `fit` having done
+/// it: an uncompiled model is an error, not a panic
+#[test]
+fn test_train_batch_on_uncompiled_model_is_an_error() {
+    let mut model = Sequential::new();
+    model.add(Dense::new(1, 1, Activation::Linear).unwrap());
+
+    let x = t2(2, 1, vec![1.0, 2.0]);
+    let y = t2(2, 1, vec![1.0, 2.0]);
+
+    assert!(
+        matches!(
+            model.train_batch(&x, &y),
+            Err(Error::NeuralNetwork(NnError::NotCompiled(_)))
+        ),
+        "expected NotCompiled"
+    );
+}
+
+// evaluate: scoring without training
+
+/// `evaluate` is `predict` scored with the compiled loss, and leaves the model untouched
+#[test]
+fn test_evaluate_matches_predict_then_compute_loss() {
+    let mut model = Sequential::new();
+    model
+        .add(Dense::new(2, 3, Activation::ReLU).unwrap())
+        .add(Dense::new(3, 1, Activation::Linear).unwrap())
+        .compile(
+            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+            MeanSquaredError::new(),
+        );
+
+    let x = t2(3, 2, vec![1.0, -0.5, 0.25, 2.0, -1.0, 0.5]);
+    let y = t2(3, 1, vec![1.0, -2.0, 0.5]);
+
+    let manual = MeanSquaredError::new()
+        .compute_loss(&y, &model.predict(&x).unwrap())
+        .unwrap();
+
+    assert_abs_diff_eq!(model.evaluate(&x, &y).unwrap(), manual, epsilon = 1e-6);
+    // Scoring is not training: a second call sees exactly the same model
+    assert_abs_diff_eq!(model.evaluate(&x, &y).unwrap(), manual, epsilon = 0.0_f32);
+}
+
+/// `evaluate` runs the inference path, so dropout is the identity and repeated calls agree; the
+/// training path on the same frozen model samples a fresh mask every time and does not
+#[test]
+fn test_evaluate_runs_in_inference_mode() {
+    let mut model = Sequential::new();
+    model
+        .add(Dense::new(4, 32, Activation::Linear).unwrap())
+        .add(Dropout::new(0.5, vec![16, 32]).unwrap())
+        .add(Dense::new(32, 1, Activation::Linear).unwrap())
+        // Frozen: with a step this far below the weights' f32 resolution, every difference
+        // observed below comes from the dropout mask alone
+        .compile(
+            SGD::new(1e-30, 0.0, false, 0.0).unwrap(),
+            MeanSquaredError::new(),
+        );
+
+    let x = Array::linspace(-1.0, 1.0, 64)
+        .into_shape_with_order((16, 4))
+        .unwrap()
+        .into_dyn();
+    let y = Array::linspace(0.0, 1.0, 16)
+        .into_shape_with_order((16, 1))
+        .unwrap()
+        .into_dyn();
+
+    let eval_first = model.evaluate(&x, &y).unwrap();
+    let eval_second = model.evaluate(&x, &y).unwrap();
+    assert_abs_diff_eq!(eval_first, eval_second, epsilon = 0.0_f32);
+
+    let train_first = model.train_batch(&x, &y).unwrap();
+    let train_second = model.train_batch(&x, &y).unwrap();
+    assert!(
+        (train_first - train_second).abs() > 1e-6,
+        "training mode must resample the dropout mask, but two passes agreed: \
+         {train_first} and {train_second}"
+    );
+    assert!(
+        (train_first - eval_first).abs() > 1e-6,
+        "a dropout model's training loss ({train_first}) must not match its inference loss \
+         ({eval_first})"
+    );
+}
+
+/// `evaluate` needs a loss but no optimizer, so an uncompiled model is told what is actually
+/// missing for the call it made
+#[test]
+fn test_evaluate_on_uncompiled_model_reports_the_missing_loss() {
+    let mut model = Sequential::new();
+    model.add(Dense::new(1, 1, Activation::Linear).unwrap());
+
+    let x = t2(2, 1, vec![1.0, 2.0]);
+    let y = t2(2, 1, vec![1.0, 2.0]);
+
+    assert!(
+        matches!(
+            model.evaluate(&x, &y),
+            Err(Error::NeuralNetwork(NnError::NotCompiled("loss function")))
+        ),
+        "expected NotCompiled(\"loss function\")"
+    );
+}
+
+/// A rank-0 tensor holds one element, so it is not "empty", but it has no batch axis to compare;
+/// the training and scoring paths reject it rather than panicking on the index
+#[test]
+fn test_rank_zero_inputs_are_rejected() {
+    let mut model = Sequential::new();
+    model
+        .add(Dense::new(1, 1, Activation::Linear).unwrap())
+        .compile(
+            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+            MeanSquaredError::new(),
+        );
+
+    let scalar: Tensor = Array::from_elem(IxDyn(&[]), 1.0_f32);
+    let y = t2(1, 1, vec![1.0]);
+
+    assert!(matches!(
+        model.fit(&scalar, &y, 1),
+        Err(Error::InvalidInput(_))
+    ));
+    assert!(matches!(
+        model.evaluate(&y, &scalar),
+        Err(Error::InvalidInput(_))
+    ));
+}
+
+// learning rate: readable, not just writable
+
+/// The model reports the optimizer's current rate, so a schedule can derive the next step from
+/// it; an uncompiled model has no rate to report
+#[test]
+fn test_learning_rate_reads_back_through_the_model() {
+    let mut model = Sequential::new();
+    assert_eq!(model.learning_rate(), None);
+
+    model
+        .add(Dense::new(1, 1, Activation::Linear).unwrap())
+        .compile(
+            Adam::new(0.003, 0.9, 0.999, 1e-8, 0.0).unwrap(),
+            MeanSquaredError::new(),
+        );
+
+    assert_eq!(model.learning_rate(), Some(0.003));
+
+    // A halving schedule written the way it should be: read, scale, write
+    let halved = model.learning_rate().unwrap() * 0.5;
+    model.set_learning_rate(halved);
+    assert_eq!(model.learning_rate(), Some(0.0015));
+}
+
+/// Cross-checked against Keras 3.15 (jax backend). Same weights, same data, same optimizer:
+/// `Dense(1)` with `w = 0.5`, `b = 0`, `SGD(0.1)`, `mse`, on `y = 2x` for `x = 0..4` split into
+/// batches of 2 (so the third batch holds a single sample). Every literal below is what
+/// `keras.Model.evaluate` / `train_on_batch` / `fit(shuffle=False).history` produced
+#[test]
+fn test_batch_losses_and_epoch_mean_match_keras() {
+    let mut dense = Dense::new(1, 1, Activation::Linear).unwrap();
+    dense
+        .set_weights(
+            Array2::from_shape_vec((1, 1), vec![0.5_f32]).unwrap(),
+            Array2::from_shape_vec((1, 1), vec![0.0_f32]).unwrap(),
+        )
+        .unwrap();
+
+    let mut model = Sequential::new();
+    model.add(dense).compile(
+        SGD::new(0.1, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
+
+    let x = t2(5, 1, vec![0.0, 1.0, 2.0, 3.0, 4.0]);
+    let y = t2(5, 1, vec![0.0, 2.0, 4.0, 6.0, 8.0]);
+
+    // keras: model.evaluate(x, y) == 13.5
+    assert_abs_diff_eq!(model.evaluate(&x, &y).unwrap(), 13.5_f32, epsilon = 1e-5);
+
+    // keras: three successive train_on_batch calls, in this order
+    let batches = [
+        (
+            t2(2, 1, vec![0.0, 1.0]),
+            t2(2, 1, vec![0.0, 2.0]),
+            1.125_f32,
+        ),
+        (
+            t2(2, 1, vec![2.0, 3.0]),
+            t2(2, 1, vec![4.0, 6.0]),
+            10.856_251_f32,
+        ),
+        (t2(1, 1, vec![4.0]), t2(1, 1, vec![8.0]), 4.473_228_f32),
+    ];
+
+    let mut weighted = 0.0_f64;
+    let mut samples = 0_usize;
+    for (batch_x, batch_y, expected) in &batches {
+        let loss = model.train_batch(batch_x, batch_y).unwrap();
+        assert_abs_diff_eq!(loss, *expected, epsilon = 1e-4);
+        weighted += loss as f64 * batch_x.shape()[0] as f64;
+        samples += batch_x.shape()[0];
+    }
+
+    // keras: history.history['loss'][0] == 5.687146186828613 for the same epoch. Weighting each
+    // batch by its sample count reproduces it; a plain mean over the three batches gives
+    // 5.4848262, which is not what Keras reports
+    assert_abs_diff_eq!(
+        (weighted / samples as f64) as f32,
+        5.687_146_f32,
+        epsilon = 1e-4
+    );
+
+    // keras: model.evaluate(x, y) after the epoch == 9.241999626159668. Note it is *above* the
+    // epoch figure here - this learning rate overshoots - which is exactly why the recorded
+    // loss cannot be read as the trained model's loss
+    assert_abs_diff_eq!(model.evaluate(&x, &y).unwrap(), 9.242_0_f32, epsilon = 1e-4);
 }

@@ -98,7 +98,6 @@ let restored = LinearRegression::load_from_path("linear_regression.bin").unwrap(
 ### Neural Networks
 
 ```rust
-use rustyml::neural_network::sequential::Sequential;
 use rustyml::prelude::neural_network::*;
 use ndarray::Array;
 
@@ -117,7 +116,13 @@ model
     );
 
 model.summary(); // print the architecture
-model.fit(&x, &y, 10).unwrap();
+
+// One loss per epoch, each measured while that epoch ran rather than after it
+let history = model.fit(&x, &y, 10).unwrap();
+println!("Per-epoch loss: {:?}", history.loss());
+
+// Score the weights the model holds now: inference mode, updates nothing
+println!("Loss after training: {}", model.evaluate(&x, &y).unwrap());
 
 let predictions = model.predict(&x).unwrap();
 println!("Predictions shape: {:?}", predictions.shape());
@@ -197,6 +202,12 @@ Keras carries over unchanged.
 
 Training supports full-batch (`fit`) and mini-batch (`fit_with_batches`) loops, weight
 inspection (`get_weights`), and binary serialization (`save_to_path` / `load_from_path`).
+Both loops return a `History`: one loss per epoch, each measured *during* that epoch — from the
+forward pass preceding every batch's own update, as Keras reports it — so an entry describes the
+weights the epoch ran with, never the ones it ends with. `evaluate` is what scores the model you
+are holding now: one inference-mode pass that touches no gradients, no parameters, and no
+batch-norm running statistics. `train_batch` (Keras' `train_on_batch`) is public too, so a custom
+loop can own the epoch structure without reimplementing forward / loss / backward / clip / update.
 
 ### `utils`
 
@@ -240,7 +251,7 @@ One-stop imports, split by domain so you only pull in what you need:
 
 ```rust
 use rustyml::prelude::machine_learning::*; // ML models (incl. PCA/KernelPCA/t-SNE), traits, config enums
-use rustyml::prelude::neural_network::*;   // layers, optimizers, losses
+use rustyml::prelude::neural_network::*;   // Sequential + History, layers, optimizers, losses
 use rustyml::prelude::utils::*;            // scaling, label encoding, splitting
 use rustyml::prelude::metrics::*;          // evaluation metrics
 ```

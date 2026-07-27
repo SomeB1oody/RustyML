@@ -37,7 +37,9 @@
 //! - **Layers**: Dense, RNN, LSTM, Convolution, Pooling, Dropout
 //! - **Optimizers**: SGD, Adam, AdamW, RMSProp, AdaGrad
 //! - **Loss Functions**: MSE, MAE, Binary/Categorical Cross-Entropy
-//! - **Models**: Sequential architecture for feed-forward networks
+//! - **Models**: Sequential architecture for feed-forward networks, trained by `fit` /
+//!   `fit_with_batches` - which return a `History` of one loss per epoch - or by a hand-written
+//!   loop over the public `train_batch`, and scored without training by `evaluate`
 //!
 //! ### [`utils`]
 //! Data preprocessing and dataset-splitting utilities:
@@ -75,7 +77,7 @@
 //! ```
 //!
 //! In your Rust code, write:
-//! ```ignored
+//! ```rust,no_run
 //! use rustyml::machine_learning::LinearRegression;
 //! use rustyml::machine_learning::linear_model::LeastSquaresSolver;
 //! use ndarray::{Array1, Array2};
@@ -126,10 +128,10 @@
 //! ```
 //!
 //! In your Rust code, write:
-//! ```ignored
+//! ```rust,no_run
 //! use rustyml::neural_network::{
 //!     sequential::Sequential,
-//!     layers::{Dense, ReLU, Softmax},
+//!     layers::{Activation, Dense},
 //!     optimizers::Adam,
 //!     losses::CategoricalCrossEntropy,
 //! };
@@ -142,16 +144,21 @@
 //! // Build a neural network
 //! let mut model = Sequential::new();
 //! model
-//!     .add(Dense::new(784, 128, ReLU::new()).unwrap())
-//!     .add(Dense::new(128, 64, ReLU::new()).unwrap())
-//!     .add(Dense::new(64, 10, Softmax::new()).unwrap())
+//!     .add(Dense::new(784, 128, Activation::ReLU).unwrap())
+//!     .add(Dense::new(128, 64, Activation::ReLU).unwrap())
+//!     .add(Dense::new(64, 10, Activation::Softmax).unwrap())
 //!     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 //!
 //! // Display model structure
 //! model.summary();
 //!
-//! // Train the model
-//! model.fit(&x, &y, 10).unwrap();
+//! // Train the model; the returned History holds one loss per epoch, each measured while that
+//! // epoch ran rather than after it
+//! let history = model.fit(&x, &y, 10).unwrap();
+//! println!("Per-epoch loss: {:?}", history.loss());
+//!
+//! // Score the weights the model is holding now - an inference-mode pass that updates nothing
+//! println!("Loss after training: {}", model.evaluate(&x, &y).unwrap());
 //!
 //! // Save model weights to file
 //! model.save_to_path("model.bin").unwrap();
@@ -159,9 +166,9 @@
 //! // Create a new model with the same architecture
 //! let mut new_model = Sequential::new();
 //! new_model
-//!     .add(Dense::new(784, 128, ReLU::new()).unwrap())
-//!     .add(Dense::new(128, 64, ReLU::new()).unwrap())
-//!     .add(Dense::new(64, 10, Softmax::new()).unwrap());
+//!     .add(Dense::new(784, 128, Activation::ReLU).unwrap())
+//!     .add(Dense::new(128, 64, Activation::ReLU).unwrap())
+//!     .add(Dense::new(64, 10, Activation::Softmax).unwrap());
 //!
 //! // Load weights from file
 //! new_model.load_from_path("model.bin").unwrap();
