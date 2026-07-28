@@ -10,7 +10,7 @@
 use crate::error::Error;
 use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
-    validate_clip_norm, validate_decay_rate, validate_epsilon, validate_learning_rate,
+    validate_decay_rate, validate_epsilon, validate_global_clipnorm, validate_learning_rate,
     validate_non_negative_finite,
 };
 use crate::neural_network::traits::Layer;
@@ -44,7 +44,7 @@ pub(super) struct AdamCore {
     /// Position within `states` for the parameter currently being updated; reset each `step`
     cursor: usize,
     /// Optional clip-by-global-norm threshold; `None` disables gradient clipping
-    clip_norm: Option<f32>,
+    global_clipnorm: Option<f32>,
     /// Weight decay coefficient; `0.0` disables it
     weight_decay: f32,
     /// `true` for AdamW (decoupled decay), `false` for classic Adam (coupled L2 decay)
@@ -75,22 +75,22 @@ impl AdamCore {
             t: 0,
             states: Vec::new(),
             cursor: 0,
-            clip_norm: None,
+            global_clipnorm: None,
             weight_decay,
             decoupled,
         })
     }
 
     /// Enables clip-by-global-norm gradient clipping (consuming builder)
-    pub(super) fn with_clip_norm(mut self, clip_norm: f32) -> Result<Self, Error> {
-        validate_clip_norm(Some(clip_norm))?;
-        self.clip_norm = Some(clip_norm);
+    pub(super) fn with_global_clipnorm(mut self, global_clipnorm: f32) -> Result<Self, Error> {
+        validate_global_clipnorm(Some(global_clipnorm))?;
+        self.global_clipnorm = Some(global_clipnorm);
         Ok(self)
     }
 
     /// The configured clip-by-global-norm threshold, or `None` when disabled
-    pub(super) fn clip_norm(&self) -> Option<f32> {
-        self.clip_norm
+    pub(super) fn global_clipnorm(&self) -> Option<f32> {
+        self.global_clipnorm
     }
 
     /// The current step size

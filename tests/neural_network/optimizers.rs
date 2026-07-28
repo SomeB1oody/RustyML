@@ -545,7 +545,7 @@ fn sgd_one_step_weight_update_matches_hand_calculation() {
     assert_abs_diff_eq!(val_after, 2.40_f32, epsilon = 1e-4);
 }
 
-// Clip-by-global-norm (opt-in via the `clip_norm` constructor argument)
+// Clip-by-global-norm (opt-in via the `with_global_clipnorm` builder)
 
 /// Reads the (weight, bias) scalars of a model whose first layer is a 1x1 Dense
 fn dense_wb(model: &Sequential) -> (f32, f32) {
@@ -578,7 +578,7 @@ fn clip_by_global_norm_scales_sgd_step() {
     model.add(layer).compile(
         SGD::new(0.01, 0.0, false, 0.0)
             .unwrap()
-            .with_clip_norm(max_norm)
+            .with_global_clipnorm(max_norm)
             .unwrap(),
         MeanSquaredError::new(),
     );
@@ -614,7 +614,7 @@ fn clip_by_global_norm_above_norm_is_noop() {
     model.add(layer).compile(
         SGD::new(0.01, 0.0, false, 0.0)
             .unwrap()
-            .with_clip_norm(100.0)
+            .with_global_clipnorm(100.0)
             .unwrap(),
         MeanSquaredError::new(),
     );
@@ -626,23 +626,25 @@ fn clip_by_global_norm_above_norm_is_noop() {
     assert_abs_diff_eq!(b_new, 0.08_f32, epsilon = 1e-5);
 }
 
-/// `with_clip_norm` rejects non-positive or non-finite thresholds and accepts a valid positive one;
+/// `with_global_clipnorm` rejects non-positive or non-finite thresholds and accepts a valid positive one;
 /// constructing without it leaves clipping disabled
 #[test]
-fn new_rejects_invalid_clip_norm() {
+fn new_rejects_invalid_global_clipnorm() {
     for bad in [0.0_f32, -1.0, f32::NAN, f32::INFINITY] {
         assert!(
             matches!(
-                SGD::new(0.01, 0.0, false, 0.0).unwrap().with_clip_norm(bad),
+                SGD::new(0.01, 0.0, false, 0.0)
+                    .unwrap()
+                    .with_global_clipnorm(bad),
                 Err(Error::InvalidParameter { .. })
             ),
-            "clip_norm {bad} should be rejected"
+            "global_clipnorm {bad} should be rejected"
         );
     }
     assert!(
         SGD::new(0.01, 0.0, false, 0.0)
             .unwrap()
-            .with_clip_norm(5.0)
+            .with_global_clipnorm(5.0)
             .is_ok()
     );
     assert!(SGD::new(0.01, 0.0, false, 0.0).is_ok());
@@ -937,7 +939,7 @@ fn adamw_validates_hyperparameters() {
     assert!(
         AdamW::new(0.001, 0.9, 0.999, 1e-8, 0.0)
             .unwrap()
-            .with_clip_norm(1.0)
+            .with_global_clipnorm(1.0)
             .is_ok()
     );
 }

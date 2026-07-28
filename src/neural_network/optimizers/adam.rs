@@ -37,7 +37,7 @@ impl Adam {
     ///
     /// # Notes
     ///
-    /// Gradient clipping is disabled by default. Enable it with [`Adam::with_clip_norm`]
+    /// Gradient clipping is disabled by default. Enable it with [`Adam::with_global_clipnorm`]
     ///
     /// # Returns
     ///
@@ -66,22 +66,22 @@ impl Adam {
     ///
     /// # Parameters
     ///
-    /// - `clip_norm` - Clip-by-global-norm threshold; must be positive and finite
+    /// - `global_clipnorm` - Clip-by-global-norm threshold; must be positive and finite
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - The updated optimizer, or an error if `clip_norm` is not positive
+    /// - `Result<Self, Error>` - The updated optimizer, or an error if `global_clipnorm` is not positive
     ///   and finite
-    pub fn with_clip_norm(self, clip_norm: f32) -> Result<Self, Error> {
+    pub fn with_global_clipnorm(self, global_clipnorm: f32) -> Result<Self, Error> {
         Ok(Self {
-            core: self.core.with_clip_norm(clip_norm)?,
+            core: self.core.with_global_clipnorm(global_clipnorm)?,
         })
     }
 }
 
 impl Optimizer for Adam {
-    fn clip_norm(&self) -> Option<f32> {
-        self.core.clip_norm()
+    fn global_clipnorm(&self) -> Option<f32> {
+        self.core.global_clipnorm()
     }
 
     fn learning_rate(&self) -> f32 {

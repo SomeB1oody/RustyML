@@ -107,10 +107,10 @@ pub(super) fn validate_non_negative_finite(value: f32, param_name: &str) -> Resu
 ///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if `clip_norm` is `Some` value that is not positive and finite
-pub(super) fn validate_clip_norm(clip_norm: Option<f32>) -> Result<(), Error> {
-    if let Some(max_norm) = clip_norm {
-        validate_positive_finite(max_norm, "clip_norm")?;
+/// Returns `Error::InvalidParameter` if `global_clipnorm` is `Some` value that is not positive and finite
+pub(super) fn validate_global_clipnorm(global_clipnorm: Option<f32>) -> Result<(), Error> {
+    if let Some(max_norm) = global_clipnorm {
+        validate_positive_finite(max_norm, "global_clipnorm")?;
     }
     Ok(())
 }

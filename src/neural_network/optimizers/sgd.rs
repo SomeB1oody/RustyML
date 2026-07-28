@@ -3,7 +3,7 @@
 use crate::error::Error;
 use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
-    validate_clip_norm, validate_learning_rate, validate_non_negative_finite,
+    validate_global_clipnorm, validate_learning_rate, validate_non_negative_finite,
 };
 use crate::neural_network::traits::{Layer, Optimizer};
 
@@ -22,7 +22,7 @@ pub struct SGD {
     /// Decoupled (SGDW-style) weight decay coefficient; `0.0` disables it
     weight_decay: f32,
     /// Optional clip-by-global-norm threshold; `None` disables gradient clipping
-    clip_norm: Option<f32>,
+    global_clipnorm: Option<f32>,
     /// Per-parameter momentum buffers, allocated lazily when `momentum > 0`, indexed by the order
     /// layers yield parameters each step
     velocities: Vec<Vec<f32>>,
@@ -43,7 +43,7 @@ impl SGD {
     ///
     /// # Notes
     ///
-    /// Gradient clipping is disabled by default. Enable it with [`SGD::with_clip_norm`]
+    /// Gradient clipping is disabled by default. Enable it with [`SGD::with_global_clipnorm`]
     ///
     /// # Returns
     ///
@@ -68,7 +68,7 @@ impl SGD {
             momentum,
             nesterov,
             weight_decay,
-            clip_norm: None,
+            global_clipnorm: None,
             velocities: Vec::new(),
             cursor: 0,
         })
@@ -76,20 +76,20 @@ impl SGD {
 
     /// Enables clip-by-global-norm gradient clipping (disabled by default)
     ///
-    /// Scales every gradient so the global L2 norm never exceeds `clip_norm`, preserving the
+    /// Scales every gradient so the global L2 norm never exceeds `global_clipnorm`, preserving the
     /// gradient direction
     ///
     /// # Parameters
     ///
-    /// - `clip_norm` - Clip-by-global-norm threshold; must be positive and finite
+    /// - `global_clipnorm` - Clip-by-global-norm threshold; must be positive and finite
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - The updated optimizer, or an error if `clip_norm` is not positive
+    /// - `Result<Self, Error>` - The updated optimizer, or an error if `global_clipnorm` is not positive
     ///   and finite
-    pub fn with_clip_norm(mut self, clip_norm: f32) -> Result<Self, Error> {
-        validate_clip_norm(Some(clip_norm))?;
-        self.clip_norm = Some(clip_norm);
+    pub fn with_global_clipnorm(mut self, global_clipnorm: f32) -> Result<Self, Error> {
+        validate_global_clipnorm(Some(global_clipnorm))?;
+        self.global_clipnorm = Some(global_clipnorm);
         Ok(self)
     }
 }
@@ -100,8 +100,8 @@ impl Optimizer for SGD {
         self.cursor = 0;
     }
 
-    fn clip_norm(&self) -> Option<f32> {
-        self.clip_norm
+    fn global_clipnorm(&self) -> Option<f32> {
+        self.global_clipnorm
     }
 
     fn learning_rate(&self) -> f32 {

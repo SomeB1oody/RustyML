@@ -99,7 +99,7 @@ pub trait Layer: std::any::Any + Send + Sync {
     /// clamping). Such values are propagated, not masked, and surface loudly at the
     /// next forward pass (which rejects non-finite input) or as a NaN loss. To tame large-but-finite
     /// gradients, enable clip-by-global-norm on the optimizer
-    /// ([`Optimizer::clip_norm`]) rather than
+    /// ([`Optimizer::global_clipnorm`]) rather than
     /// clamping inside a layer, since global-norm scaling preserves gradient direction
     ///
     /// # Parameters
@@ -276,7 +276,12 @@ pub trait Optimizer {
     /// `max_norm / global_norm` before [`update`](Optimizer::update). This single uniform factor
     /// preserves gradient direction (unlike per-element clamping). A non-finite global norm is left
     /// unscaled so divergence still surfaces rather than being masked
-    fn clip_norm(&self) -> Option<f32> {
+    ///
+    /// The name is Keras' `global_clipnorm`, and it is deliberate: Keras also has a `clipnorm`,
+    /// which renormalizes each variable's gradient *independently* against the threshold. The two
+    /// give different directions whenever more than one tensor is over the limit, so a threshold
+    /// tuned for one is not a threshold for the other. Only the global form exists here
+    fn global_clipnorm(&self) -> Option<f32> {
         None
     }
 

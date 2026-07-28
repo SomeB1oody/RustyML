@@ -412,8 +412,11 @@ impl Sequential {
         }
 
         // Clip-by-global-norm
-        let clip_norm = self.optimizer.as_ref().and_then(|opt| opt.clip_norm());
-        let grad_scale = match clip_norm {
+        let global_clipnorm = self
+            .optimizer
+            .as_ref()
+            .and_then(|opt| opt.global_clipnorm());
+        let grad_scale = match global_clipnorm {
             Some(max_norm) => {
                 let norm = global_grad_norm(&mut self.layers);
                 if norm.is_finite() && norm > max_norm {

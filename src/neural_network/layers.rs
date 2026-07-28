@@ -33,6 +33,11 @@ pub enum TrainingParameters {
     /// Layer has trainable parameters updated during optimization; the `usize` is the count
     Trainable(usize),
     /// Layer has parameters but they are frozen; the `usize` is the count of non-trainable parameters
+    ///
+    /// No layer returns this yet, so `summary()`'s non-trainable column always reads 0. It is kept
+    /// deliberately rather than deleted as dead: per-layer `trainable` freezing is the planned
+    /// producer, and `summary()` already accounts for the variant, so the arm is the half of that
+    /// feature that is already correct
     NonTrainable(usize),
     /// Layer has no trainable parameters whatsoever
     NoTrainable,
