@@ -1,6 +1,6 @@
 # Introduction
 
-RustyML is a machine learning and deep learning library written entirely in Rust. It needs no external library to link against, no Python interpreter, and no FFI boundary to move arrays across. This guide is the hands-on companion to the library. It takes you from a fresh `cargo new` to training neural networks. It also covers tuning the parallel and serial thresholds inside the hot kernels, and shows what lands on disk when you serialize a model. This guide tracks RustyML **0.13**. Every complete example compiles against that version with the `full` and `show_progress` features on, so what you read is what the compiler accepts.
+RustyML is a machine learning and deep learning library written entirely in Rust. It needs no external library to link against, no Python interpreter, and no FFI boundary to move arrays across. This guide is the hands-on companion to the library. It takes you from a fresh `cargo new` to training neural networks. It also covers tuning the parallel and serial thresholds inside the hot kernels, and shows what lands on disk when you serialize a model. This guide tracks RustyML **0.14**. Every complete example compiles against that version with the `full` and `show_progress` features on, so what you read is what the compiler accepts.
 
 ## What this guide is
 
@@ -56,6 +56,6 @@ Read [Getting Started](./Chapter-01/1.0._Getting_Started.md) once, in order, fro
 
 ## Versions, feedback, and conventions
 
-This edition tracks the current crate version, **0.13**. RustyML is pre-1.0 and under active development. The API is stabilizing, but breaking changes can still land in minor releases. If a signature in this guide differs from what the compiler accepts, trust [docs.rs for the exact version](https://docs.rs/rustyml) in use. Send bug reports, feature requests, and corrections to this guide to the [GitHub repository](https://github.com/SomeB1oody/RustyML). Issues and pull requests are welcome there.
+This edition tracks the current crate version, **0.14**. RustyML is pre-1.0 and under active development. The API is stabilizing, but breaking changes can still land in minor releases. If a signature in this guide differs from what the compiler accepts, trust [docs.rs for the exact version](https://docs.rs/rustyml) in use. Send bug reports, feature requests, and corrections to this guide to the [GitHub repository](https://github.com/SomeB1oody/RustyML). Issues and pull requests are welcome there.
 
 This guide follows 2 conventions. First, a complete example is a self-contained program with a `main` function, a tiny inline dataset, and few iterations. Paste a complete example into a `full`-feature project and run it as written. A fragment or a signature is marked as such. Second, outside the leaf `metrics` and `math` modules, every fallible call returns `RustymlResult<T>`, an alias for `Result<T, rustyml::error::Error>` over a structured, matchable error enum. The examples reach for `.unwrap()` only to stay short. [Error Handling](./Chapter-01/1.6._Error_Handling.md) shows what to write instead in real code.
