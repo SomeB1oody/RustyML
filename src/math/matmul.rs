@@ -6,7 +6,7 @@
 //! use `gemmkit_ndarray::gemm` or `gemm_fused` where the caller owns the output buffer or fuses
 //! an epilogue. This module holds only what the adapter does not provide.
 //!
-//! - `dot_par`: the allocating product with an explicit [`gemmkit::Parallelism`]. `dot` always
+//! - `dot_par`: the allocating product with an explicit [`gemmkit_ndarray::Parallelism`]. `dot` always
 //!   uses the automatic default. Callers inside an already-parallel rayon region pass
 //!   `Parallelism::Serial` so the product does not fork again.
 //! - `matvec`: the matvec with `Array1` operands. The adapter is matrix-shaped, so this wraps
@@ -34,7 +34,7 @@ use ndarray::{Array1, Ix1};
 #[cfg(any(feature = "machine_learning", feature = "neural_network"))]
 use ndarray::{Array2, ArrayBase, Data, Ix2};
 
-/// `A @ B` into a fresh standard-layout array, with an explicit [`gemmkit::Parallelism`].
+/// `A @ B` into a fresh standard-layout array, with an explicit [`gemmkit_ndarray::Parallelism`].
 ///
 /// The allocating twin of `gemmkit_ndarray::dot`, for callers that must control the
 /// parallelism. Pass `Parallelism::Serial` from inside an already-parallel rayon region so the
@@ -49,10 +49,10 @@ use ndarray::{Array2, ArrayBase, Data, Ix2};
 pub(crate) fn dot_par<T, S1, S2>(
     a: &ArrayBase<S1, Ix2>,
     b: &ArrayBase<S2, Ix2>,
-    par: gemmkit::Parallelism,
+    par: gemmkit_ndarray::Parallelism,
 ) -> Array2<T>
 where
-    T: gemmkit::GemmScalar,
+    T: gemmkit_ndarray::GemmScalar,
     S1: Data<Elem = T>,
     S2: Data<Elem = T>,
 {
@@ -68,14 +68,14 @@ where
     c
 }
 
-/// `y = A @ x` for `Array1` operands, with an explicit [`gemmkit::Parallelism`].
+/// `y = A @ x` for `Array1` operands, with an explicit [`gemmkit_ndarray::Parallelism`].
 ///
 /// The backend's adapter is matrix-shaped, so this wraps `x` as a `[k, 1]` column and unwraps
 /// the `[m, 1]` result. gemmkit detects the `n == 1` shape and runs its bandwidth-bound GEMV
-/// path. This path stays serial below an LLC-derived byte floor and then splits across the
-/// memory-bandwidth worker cap. The result is bit-identical at any worker count. `A` is
-/// `(m, k)` and `x` has length `k`. Pass `Parallelism::Rayon(0)` for the automatic scheduling,
-/// or `Parallelism::Serial` from inside an already-parallel region.
+/// path. This path stays serial below a byte floor derived from 1 core's private L2, then climbs
+/// a worker ladder as the bytes it touches grow. The result is bit-identical at any worker count.
+/// `A` is `(m, k)` and `x` has length `k`. Pass `Parallelism::Rayon(0)` for the automatic
+/// scheduling, or `Parallelism::Serial` from inside an already-parallel region.
 ///
 /// # Panics
 ///
@@ -84,10 +84,10 @@ where
 pub(crate) fn matvec<T, S1, S2>(
     a: &ArrayBase<S1, Ix2>,
     x: &ArrayBase<S2, Ix1>,
-    par: gemmkit::Parallelism,
+    par: gemmkit_ndarray::Parallelism,
 ) -> Array1<T>
 where
-    T: gemmkit::GemmScalar,
+    T: gemmkit_ndarray::GemmScalar,
     S1: Data<Elem = T>,
     S2: Data<Elem = T>,
 {
@@ -157,7 +157,7 @@ pub fn cache_resident<T>(rows: usize, cols: usize) -> bool {
 #[cfg(all(test, any(feature = "machine_learning", feature = "neural_network")))]
 mod tests {
     use super::*;
-    use gemmkit::Parallelism;
+    use gemmkit_ndarray::Parallelism;
     use gemmkit_ndarray::dot;
     #[cfg(feature = "machine_learning")]
     use ndarray::Array1;

@@ -317,9 +317,9 @@ dependencies = [
 
 [[package]]
 name = "gemmkit"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1285fc22d2797efbd006d71ec30a61430c9816966ec8380f0bd7707f9f0b40a0"
+checksum = "c1c60d744ae15eaa781acc4ecf41780579bc7e7f4575dda141b92567d022af31"
 dependencies = [
  "raw-cpuid",
  "rayon",
@@ -327,9 +327,9 @@ dependencies = [
 
 [[package]]
 name = "gemmkit-ndarray"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5565a2c37af83e7667df4e27c1988f41a12a620ae50e1ab8f88eefccbd492310"
+checksum = "a7705508317b35dfd7ee8618119b0387365d9dab9de3054734dccbe2dfd41dc5"
 dependencies = [
  "gemmkit",
  "ndarray",
@@ -831,7 +831,6 @@ dependencies = [
  "ahash",
  "approx",
  "criterion",
- "gemmkit",
  "gemmkit-ndarray",
  "indicatif",
  "nalgebra",

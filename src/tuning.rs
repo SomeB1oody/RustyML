@@ -95,9 +95,14 @@ macro_rules! fwd {
 pub mod matmul {
     use crate::math::matmul as b;
 
-    /// gemmkit's own tuning module, re-exported so backend knobs are reachable without adding a
-    /// direct `gemmkit` dependency. Every `GEMMKIT_*` env var has a `set_*`/getter pair here.
-    pub use gemmkit::tuning as backend;
+    /// gemmkit's own tuning module, forwarded through the adapter so backend knobs are reachable
+    /// without a direct `gemmkit` dependency. Every `GEMMKIT_*` env var has a `set_*`/getter pair
+    /// here.
+    ///
+    /// The path goes through `gemmkit_ndarray` on purpose. The knobs are process-global atomics,
+    /// so a setter called on a separately resolved second `gemmkit` would write a copy that the
+    /// adapter in use never reads.
+    pub use gemmkit_ndarray::tuning as backend;
 
     fwd!(
         set_chunk_elems => b::set_gemm_chunk_elems,

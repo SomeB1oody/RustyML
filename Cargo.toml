@@ -25,7 +25,7 @@ utils = ["math", "dep:ndarray", "dep:rayon", "dep:ahash", "dep:serde", "dep:post
 # Comprehensive evaluation metrics for model performance assessment
 metrics = ["math", "dep:ndarray", "dep:ahash"]
 # Mathematical utilities and statistical functions
-math = ["dep:ndarray", "dep:ahash", "dep:rayon", "dep:gemmkit", "dep:gemmkit-ndarray"]
+math = ["dep:ndarray", "dep:ahash", "dep:rayon", "dep:gemmkit-ndarray"]
 # Enables every module, so `cargo add rustyml` gives a complete workflow out of the box
 default = ["full"]
 # full access to all modules in the crate
@@ -43,8 +43,7 @@ indicatif = { version = "0.18.6", optional = true }
 serde = { version = "1.0.229", features = ["derive"], optional = true }
 postcard = { version = "1.1.3", features = ["use-std"], optional = true }
 thiserror = { version = "2.0.19", optional = true }
-gemmkit = { version = "0.1.1", optional = true }
-gemmkit-ndarray = { version = "0.1.1", features = ["epilogue"], optional = true }
+gemmkit-ndarray = { version = "0.1.2", features = ["epilogue"], optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"
