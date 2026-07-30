@@ -1,15 +1,15 @@
-//! Regression metrics comparing ground-truth and predicted values
+//! Regression metrics comparing ground-truth and predicted values.
 //!
-//! Provides MSE, RMSE, MAE, R^2, explained variance, median absolute error, and MAPE
+//! Provides MSE, RMSE, MAE, R^2, explained variance, median absolute error, and MAPE.
 
 use ndarray::{Array1, ArrayBase, ArrayView1, Data, Ix1};
 
 use super::validate_pair;
 
-/// Calculates the Mean Squared Error (MSE) between ground-truth and predicted values
+/// Calculates the Mean Squared Error (MSE) between ground-truth and predicted values.
 ///
-/// MSE is the average of the squared differences between predictions and ground truth. Because the
-/// per-sample error is squared, the order of the two arguments does not affect the result
+/// MSE is the average of the squared differences between predictions and ground truth. Because
+/// the per-sample error is squared, the order of the 2 arguments does not affect the result.
 ///
 /// # Parameters
 ///
@@ -19,11 +19,6 @@ use super::validate_pair;
 /// # Returns
 ///
 /// - `f64` - Mean squared error
-///
-/// # Panics
-///
-/// - Panics if `y_true` and `y_pred` have different lengths
-/// - Panics if the inputs are empty
 ///
 /// # Examples
 ///
@@ -38,6 +33,11 @@ use super::validate_pair;
 /// //     = (0.25 + 0.25 + 0.01 + 0.64) / 4 = 0.2875
 /// assert!((mse - 0.2875).abs() < 1e-10);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `y_true` and `y_pred` have different lengths.
+/// - Panics if the inputs are empty.
 pub fn mean_squared_error<S1, S2>(y_true: &ArrayBase<S1, Ix1>, y_pred: &ArrayBase<S2, Ix1>) -> f64
 where
     S1: Data<Elem = f64>,
@@ -53,10 +53,10 @@ where
     sum_squared_error / y_true.len() as f64
 }
 
-/// Calculates the Root Mean Squared Error (RMSE) between ground-truth and predicted values
+/// Calculates the Root Mean Squared Error (RMSE) between ground-truth and predicted values.
 ///
-/// RMSE is the square root of the [`mean_squared_error`], giving an error in the same units as the
-/// original data. As MSE is non-negative, the square root is always well-defined
+/// RMSE is the square root of the [`mean_squared_error`], giving an error in the same units as
+/// the original data. Because MSE is non-negative, the square root is always well-defined.
 ///
 /// # Parameters
 ///
@@ -66,11 +66,6 @@ where
 /// # Returns
 ///
 /// - `f64` - Root mean squared error
-///
-/// # Panics
-///
-/// - Panics if `y_true` and `y_pred` have different lengths
-/// - Panics if the inputs are empty
 ///
 /// # Examples
 ///
@@ -84,6 +79,11 @@ where
 /// // RMSE = sqrt(((2 - 1)^2 + (3 - 2)^2 + (4 - 3)^2) / 3) = sqrt(3/3) = 1.0
 /// assert!((rmse - 1.0).abs() < 1e-6);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `y_true` and `y_pred` have different lengths.
+/// - Panics if the inputs are empty.
 pub fn root_mean_squared_error<S1, S2>(
     y_true: &ArrayBase<S1, Ix1>,
     y_pred: &ArrayBase<S2, Ix1>,
@@ -95,10 +95,10 @@ where
     mean_squared_error(y_true, y_pred).sqrt()
 }
 
-/// Calculates the Mean Absolute Error (MAE) between ground-truth and predicted values
+/// Calculates the Mean Absolute Error (MAE) between ground-truth and predicted values.
 ///
 /// MAE is the average absolute difference between predictions and ground truth, ignoring the
-/// direction of the error. The order of the two arguments does not affect the result
+/// direction of the error. The order of the 2 arguments does not affect the result.
 ///
 /// # Parameters
 ///
@@ -108,11 +108,6 @@ where
 /// # Returns
 ///
 /// - `f64` - Mean absolute error
-///
-/// # Panics
-///
-/// - Panics if `y_true` and `y_pred` have different lengths
-/// - Panics if the inputs are empty
 ///
 /// # Examples
 ///
@@ -126,6 +121,11 @@ where
 /// // MAE = (|2 - 1| + |3 - 2| + |4 - 3|) / 3 = (1 + 1 + 1) / 3 = 1.0
 /// assert!((mae - 1.0).abs() < 1e-6);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `y_true` and `y_pred` have different lengths.
+/// - Panics if the inputs are empty.
 pub fn mean_absolute_error<S1, S2>(y_true: &ArrayBase<S1, Ix1>, y_pred: &ArrayBase<S2, Ix1>) -> f64
 where
     S1: Data<Elem = f64>,
@@ -141,23 +141,18 @@ where
     sum_absolute_error / y_true.len() as f64
 }
 
-/// Calculates the R-squared (coefficient of determination) score
+/// Calculates the R-squared (coefficient of determination) score.
 ///
-/// R^2 measures how well predictions explain the variance in the ground truth, using
-/// `R^2 = 1 - SSE / SST` where `SSE = sum(y_pred - y_true)^2` and `SST = sum(y_true - mean(y_true))^2`,
-/// and since SST is computed from `y_true` alone, the argument order is significant
+/// R^2 measures how well predictions explain the variance in the ground truth. The formula is
+/// `R^2 = 1 - SSE / SST`. Here `SSE = sum(y_pred - y_true)^2` and
+/// `SST = sum(y_true - mean(y_true))^2`. SST comes from `y_true` alone, so the argument order
+/// changes the result.
 ///
-/// When every entry of `y_true` is identical the score is undefined; by convention, this returns
+/// When every entry of `y_true` is identical, the score is undefined. By convention, this returns
 /// `1.0` for an exact fit (`SSE == 0`) and `0.0` otherwise, matching scikit-learn's `r2_score`.
-/// The constant case is recognised from the values themselves, so a target that varies only
-/// slightly (say `[1e-6, 2e-6, 3e-6]`) is scored normally rather than being mistaken for a constant
-///
-/// # NaN handling
-///
-/// Unlike [`explained_variance_score`], this does **not** skip non-finite samples: `SSE` and `SST`
-/// are plain sums, so a single `NaN`/`inf` in `y_true` or `y_pred` propagates and makes the result
-/// `NaN`. That surfaces bad data rather than hiding it. Prefer it when you want corruption to be
-/// visible, and clean the inputs beforehand if you do not
+/// The function recognizes the constant case from the values themselves. A target that varies
+/// only slightly (for example `[1e-6, 2e-6, 3e-6]`) is scored normally, not mistaken for a
+/// constant.
 ///
 /// # Parameters
 ///
@@ -168,10 +163,12 @@ where
 ///
 /// - `f64` - R-squared value (typically in `(-inf, 1.0]`)
 ///
-/// # Panics
+/// # NaN Handling
 ///
-/// - Panics if `y_true` and `y_pred` have different lengths
-/// - Panics if the inputs are empty
+/// Unlike [`explained_variance_score`], this does **not** skip non-finite samples. `SSE` and
+/// `SST` are plain sums, so a single `NaN`/`inf` in `y_true` or `y_pred` propagates and makes the
+/// result `NaN`. That surfaces bad data rather than hiding it. Prefer it when you want corruption
+/// to be visible. Clean the inputs beforehand if you do not.
 ///
 /// # Examples
 ///
@@ -185,6 +182,11 @@ where
 /// // mean(y_true) = 3, SST = 4 + 0 + 4 = 8, SSE = 1 + 0 + 1 = 2, so R^2 = 1 - 2/8 = 0.75
 /// assert!((r2 - 0.75).abs() < 1e-6);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `y_true` and `y_pred` have different lengths.
+/// - Panics if the inputs are empty.
 pub fn r2_score<S1, S2>(y_true: &ArrayBase<S1, Ix1>, y_pred: &ArrayBase<S2, Ix1>) -> f64
 where
     S1: Data<Elem = f64>,
@@ -199,13 +201,12 @@ where
         .map(|(p, a)| (p - a).powi(2))
         .sum();
 
-    // A constant `y_true` leaves R^2 undefined: a perfect fit scores 1.0, anything else 0.0.
+    // A constant `y_true` leaves R^2 undefined. By convention, a perfect fit scores 1.0 and
+    // anything else scores 0.0.
     //
-    // Constancy is decided from the values themselves rather than from a threshold on SST. `sum / n`
-    // does not round-trip every constant - three copies of `0.1` leave SST at 5.8e-34 rather than at
-    // zero - so an exact `sst == 0.0` test would miss real constants, while the absolute threshold
-    // this replaced went wrong in the other direction and reported a perfect 1.0 for genuinely
-    // varying targets whose spread happened to be small (`[1e-6, 2e-6, 3e-6]` has SST 2e-12)
+    // The check compares the raw values instead of testing `sst == 0.0`. Floating-point sums do
+    // not round-trip every constant. 3 copies of `0.1` leave `sst` at 5.8e-34, not zero.
+    // A threshold on `sst` could miss real constants or flag a low-variance target as constant.
     let mut values = y_true.iter();
     let first = *values.next().expect("validate_pair rejects an empty input");
     if values.all(|&v| v == first) {
@@ -217,20 +218,12 @@ where
     1.0 - sse / sst
 }
 
-/// Calculates the explained variance score
+/// Calculates the explained variance score.
 ///
-/// `1 - Var(y_true - y_pred) / Var(y_true)`. Unlike [`r2_score`], the numerator is the variance of
-/// the residuals rather than their mean square, so a constant prediction bias does not lower the
-/// score. The best possible value is 1.0; when `y_true` has zero variance the score is undefined
-/// and returns 1.0 for residuals of zero variance, otherwise 0.0
-///
-/// # NaN handling
-///
-/// This uses a NaN-skipping variance that **silently skips** non-finite samples and averages over
-/// the finite subset. So unlike [`r2_score`] (where a `NaN` propagates to a `NaN`
-/// result), a few `NaN`/`inf` entries here leave a normal-looking score computed from the rest,
-/// which is convenient but can mask corrupt data. Validate the inputs if a silently dropped sample
-/// would be a problem
+/// Uses `1 - Var(y_true - y_pred) / Var(y_true)`. Unlike [`r2_score`], the numerator is the
+/// variance of the residuals rather than their mean square, so a constant prediction bias does
+/// not lower the score. The best possible value is 1.0. When `y_true` has zero variance, the
+/// score is undefined: it returns 1.0 for residuals of zero variance, and 0.0 otherwise.
 ///
 /// # Parameters
 ///
@@ -241,10 +234,13 @@ where
 ///
 /// - `f64` - Explained variance score (typically in `(-inf, 1.0]`)
 ///
-/// # Panics
+/// # NaN Handling
 ///
-/// - Panics if `y_true` and `y_pred` have different lengths
-/// - Panics if the inputs are empty
+/// This uses a NaN-skipping variance. It **silently skips** non-finite samples and averages over
+/// the finite subset. Unlike [`r2_score`], where a `NaN` propagates to a `NaN` result, a few
+/// `NaN`/`inf` entries here leave a normal-looking score computed from the rest. This is
+/// convenient but can mask corrupt data. Validate the inputs first if a silently dropped sample
+/// would be a problem.
 ///
 /// # Examples
 ///
@@ -255,9 +251,14 @@ where
 /// let y_true = array![1.0, 2.0, 3.0];
 /// let y_pred = array![2.0, 3.0, 4.0]; // a constant +1 bias
 /// // The residuals are all -1, so their variance is 0 and the score is 1.0, even though the
-/// // predictions are biased (r2_score would be lower here)
+/// // predictions are biased (r2_score would be lower here).
 /// assert!((explained_variance_score(&y_true, &y_pred) - 1.0).abs() < 1e-12);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `y_true` and `y_pred` have different lengths.
+/// - Panics if the inputs are empty.
 pub fn explained_variance_score<S1, S2>(
     y_true: &ArrayBase<S1, Ix1>,
     y_pred: &ArrayBase<S2, Ix1>,
@@ -274,10 +275,10 @@ where
         .map(|(&t, &p)| t - p)
         .collect();
 
-    // Population variance over the finite subset. A constant (or empty) finite subset has zero
-    // spread by definition, so it is detected directly from the values rather than inferred from a
-    // near-zero sum of squares: `sum / count` does not round-trip every constant (eight copies of
-    // `0.1` do not), and the exact-zero guard below must not read that rounding as real spread
+    // Computes population variance over the finite subset. A constant (or empty) subset has zero
+    // spread by definition. The check compares the raw values instead of testing the computed
+    // sum of squares for zero. Floating-point sums do not round-trip every constant (8 copies
+    // of `0.1` do not), so a near-zero threshold could misjudge real data.
     let variance = |v: ArrayView1<f64>| -> f64 {
         let mut sum = 0.0_f64;
         let mut count = 0_usize;
@@ -311,8 +312,8 @@ where
     let residual_variance = variance(residuals.view());
     let true_variance = variance(y_true.view());
 
-    // Same convention as [`r2_score`]: a constant `y_true` leaves the ratio undefined, so residuals
-    // of zero variance score 1.0 and anything else 0.0, both decided by exact comparisons
+    // Same convention as [`r2_score`]. A constant `y_true` leaves the ratio undefined: residuals
+    // of zero variance score 1.0, anything else scores 0.0. Both checks use exact comparisons.
     if true_variance == 0.0 {
         return if residual_variance == 0.0 { 1.0 } else { 0.0 };
     }
@@ -320,10 +321,10 @@ where
     1.0 - residual_variance / true_variance
 }
 
-/// Calculates the median absolute error between ground-truth and predicted values
+/// Calculates the median absolute error between ground-truth and predicted values.
 ///
 /// The median of the absolute errors is robust to outliers, so a few large mistakes do not
-/// dominate it the way they do [`mean_absolute_error`]
+/// dominate it the way they do in [`mean_absolute_error`].
 ///
 /// # Parameters
 ///
@@ -334,11 +335,6 @@ where
 ///
 /// - `f64` - Median absolute error (>= 0.0)
 ///
-/// # Panics
-///
-/// - Panics if `y_true` and `y_pred` have different lengths
-/// - Panics if the inputs are empty
-///
 /// # Examples
 ///
 /// ```rust
@@ -347,9 +343,14 @@ where
 ///
 /// let y_true = array![1.0, 2.0, 3.0, 4.0];
 /// let y_pred = array![1.0, 2.0, 3.0, 10.0]; // one large outlier error of 6
-/// // Sorted absolute errors are [0, 0, 0, 6]; the median is 0.0, unmoved by the outlier
+/// // Sorted absolute errors are [0, 0, 0, 6]. The median is 0.0, unmoved by the outlier.
 /// assert!((median_absolute_error(&y_true, &y_pred) - 0.0).abs() < 1e-12);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `y_true` and `y_pred` have different lengths.
+/// - Panics if the inputs are empty.
 pub fn median_absolute_error<S1, S2>(
     y_true: &ArrayBase<S1, Ix1>,
     y_pred: &ArrayBase<S2, Ix1>,
@@ -375,11 +376,13 @@ where
     }
 }
 
-/// Calculates the mean absolute percentage error (MAPE) between ground-truth and predicted values
+/// Calculates the mean absolute percentage error (MAPE) between ground-truth and predicted
+/// values.
 ///
-/// `mean(|y_true - y_pred| / max(|y_true|, eps))`. The result is a fraction (multiply by 100 for a
-/// percentage). Each denominator is floored at a tiny epsilon, so samples whose true value is zero
-/// do not cause a division by zero but can still inflate the score
+/// Uses `mean(|y_true - y_pred| / max(|y_true|, eps))`. The result is a fraction. Multiply by
+/// 100 for a percentage. Each denominator is floored at a tiny epsilon. This keeps a zero true
+/// value from causing a division by zero. The score can still be inflated when the true value
+/// is near zero.
 ///
 /// # Parameters
 ///
@@ -389,11 +392,6 @@ where
 /// # Returns
 ///
 /// - `f64` - Mean absolute percentage error as a fraction (>= 0.0)
-///
-/// # Panics
-///
-/// - Panics if `y_true` and `y_pred` have different lengths
-/// - Panics if the inputs are empty
 ///
 /// # Examples
 ///
@@ -406,6 +404,11 @@ where
 /// // Per-sample ratios are 0.5, 0, 0, so MAPE = 0.5 / 3 = 0.1666...
 /// assert!((mean_absolute_percentage_error(&y_true, &y_pred) - 0.166666667).abs() < 1e-6);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `y_true` and `y_pred` have different lengths.
+/// - Panics if the inputs are empty.
 pub fn mean_absolute_percentage_error<S1, S2>(
     y_true: &ArrayBase<S1, Ix1>,
     y_pred: &ArrayBase<S2, Ix1>,

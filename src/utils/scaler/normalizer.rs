@@ -1,12 +1,11 @@
-//! Per-sample unit-norm scaling behind the estimator contract
+//! Per-sample unit-norm scaling behind the fit/transform estimator pattern
 //!
 //! Provides [`Normalizer`], the `fit`/`transform` face of the stateless
 //! [`normalize`](crate::utils::normalize::normalize) function restricted to rows. It is the one
-//! transformer in this module that learns nothing statistical - a sample's norm comes from that
-//! sample alone - so it exists to let row normalization take part in the same
-//! [`Fit`](crate::traits::Fit) / [`Transform`](crate::traits::Transform) contract as the
-//! per-feature scalers, and to pin the feature count so a mis-shaped batch is an error rather
-//! than a silent wrong answer
+//! transformer in this module that learns nothing statistical, since a sample's norm comes
+//! from that sample alone. It still takes part in the same [`Fit`](crate::traits::Fit) and
+//! [`Transform`](crate::traits::Transform) contract as the per-feature scalers. It also pins
+//! the feature count, so a mis-shaped batch is an error rather than a silent wrong answer
 
 use super::{validate_matrix, validate_transform_matrix};
 use crate::error::Error;
@@ -18,11 +17,11 @@ use ndarray::{Array2, ArrayBase, Data, Ix2};
 ///
 /// Rows are samples and columns are features. [`transform`](Self::transform) divides every row
 /// by its own norm under the configured [`NormalizationOrder`], so only a sample's *direction*
-/// survives - the transform a cosine-similarity or dot-product model wants. A row whose norm is
-/// below `10 * f64::EPSILON` has no direction to rescale and is left exactly as it is
+/// survives. This is the transform a cosine-similarity or dot-product model wants. A row whose
+/// norm is below `10 * f64::EPSILON` has no direction to rescale and is left exactly as it is
 ///
 /// Because each row is scaled by its own norm, there is no cross-sample statistic to leak
-/// across a train/test boundary: fitting is a formality that records the feature count.
+/// across a train/test boundary. Fitting is a formality that records the feature count.
 /// Mirrors scikit-learn's `Normalizer`, whose `fit` is likewise a no-op
 ///
 /// This is the row-wise counterpart to the per-feature scalers in this module. For column or
@@ -94,9 +93,9 @@ impl Normalizer {
 
     /// Validates `x` and records its feature count
     ///
-    /// Nothing statistical is learned: a sample's norm depends only on that sample, so this
-    /// exists to complete the estimator contract and to fix the width that later
-    /// [`transform`](Self::transform) calls are checked against
+    /// Nothing statistical is learned, since a sample's norm depends only on that sample. This
+    /// method exists to complete the `fit` / `transform` pattern and to fix the width that
+    /// later [`transform`](Self::transform) calls are checked against
     ///
     /// # Parameters
     ///
@@ -128,7 +127,7 @@ impl Normalizer {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, Error>` - A new normalized matrix; `x` is not modified
+    /// - `Result<Array2<f64>, Error>` - A new normalized matrix (`x` is not modified)
     ///
     /// # Errors
     ///
@@ -161,7 +160,7 @@ impl Normalizer {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, Error>` - A new normalized matrix; `x` is not modified
+    /// - `Result<Array2<f64>, Error>` - A new normalized matrix (`x` is not modified)
     ///
     /// # Errors
     ///
@@ -178,6 +177,7 @@ impl Normalizer {
     model_save_and_load_methods!(Normalizer);
 }
 
+/// Unit tests for [`Normalizer`]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,7 +195,7 @@ mod tests {
         assert_eq!(normalizer.get_n_features(), Some(2));
     }
 
-    /// The norm order is honoured
+    /// The norm order is honored
     #[test]
     fn honours_the_configured_order() {
         let x = array![[3.0, 4.0]];

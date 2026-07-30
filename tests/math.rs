@@ -1,8 +1,8 @@
 //! Integration tests for the public `math` surface: the pairwise distance metrics
 //!
-//! Everything else that used to live in `math` (variance/std-dev, impurity, losses, sigmoid,
-//! SST/SSE, the isolation-forest path-length factor) has been inlined or down-sunk into its
-//! consumer and is tested there or via that consumer's public API
+//! Everything else that once lived in `math` (variance, std-dev, impurity, losses, sigmoid,
+//! SST/SSE, the isolation-forest path-length factor) is now inlined into its consumer. It is
+//! tested there, or through that consumer's public API
 #![cfg(feature = "math")]
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
@@ -99,7 +99,7 @@ fn test_manhattan_from_origin() {
 
 // minkowski_distance_row
 
-/// p=1 recovers the L1 (manhattan) distance
+/// p=1 recovers the L1 (Manhattan) distance
 #[test]
 fn test_minkowski_p1_equals_manhattan() {
     let v1 = array![1.0_f64, 2.0];

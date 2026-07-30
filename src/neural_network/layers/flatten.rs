@@ -12,17 +12,19 @@ use ndarray::IxDyn;
 ///
 /// Reshapes inputs from feature extraction layers into a format suitable for dense layers
 ///
-/// The reshape itself is layout-agnostic - it collapses every axis after the batch in C order - but
-/// *which* feature lands at which output index is not. Under the crate's channels-last layout the
-/// channel axis is innermost, so the flattened vector runs position by position with all channels
-/// of a position adjacent, rather than plane by plane. A `Dense` layer trained against the other
-/// ordering therefore reads its inputs permuted, even though its weight shape is unchanged - which
-/// is why saved models carry a format version (see
+/// The reshape itself is layout-agnostic. It collapses every axis after the batch axis in C
+/// order, without regard to which feature lands at which output index. Under the crate's
+/// channels-last layout, the channel axis is innermost. The flattened vector then runs position
+/// by position, with all channels of one position adjacent, rather than plane by plane. A
+/// `Dense` layer trained against the other ordering then reads its inputs permuted, even though
+/// its weight shape stays the same. This is why saved models carry a format version (see
 /// [`MODEL_FORMAT_VERSION`](crate::neural_network::layers::serialize_model::MODEL_FORMAT_VERSION))
-/// rather than relying on a shape check to catch the mismatch
-/// Input shapes are \[batch_size, length, features\], \[batch_size, height, width, channels\], or
-/// \[batch_size, depth, height, width, channels\]. Output shape is always \[batch_size, flattened_features\],
-/// where flattened_features is the product of all dimensions except batch_size
+/// instead of relying on a shape check to catch the mismatch
+///
+/// Input shapes are `[batch_size, length, features]`, `[batch_size, height, width, channels]`,
+/// or `[batch_size, depth, height, width, channels]`. The output shape is always
+/// `[batch_size, flattened_features]`, where `flattened_features` is the product of all
+/// dimensions except the batch size
 ///
 /// # Examples
 ///
@@ -49,7 +51,7 @@ use ndarray::IxDyn;
 /// // Forward propagation
 /// let flattened = model.predict(&x).unwrap();
 ///
-/// // Check output shape - should be [2, 48]
+/// // The output shape should be [2, 48]
 /// assert_eq!(flattened.shape(), &[2, 48]);
 /// ```
 #[derive(Debug)]
@@ -65,8 +67,9 @@ impl Flatten {
     ///
     /// # Parameters
     ///
-    /// - `input_shape` - Input tensor shape, such as [batch_size, length, features],
-    ///   [batch_size, height, width, channels], or [batch_size, depth, height, width, channels]
+    /// - `input_shape` - Input tensor shape, such as `[batch_size, length, features]`,
+    ///   `[batch_size, height, width, channels]`, or
+    ///   `[batch_size, depth, height, width, channels]`
     ///
     /// # Returns
     ///

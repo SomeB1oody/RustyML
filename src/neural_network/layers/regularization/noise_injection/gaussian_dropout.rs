@@ -1,4 +1,4 @@
-//! Gaussian Dropout layer: multiplicative Gaussian noise applied during training
+//! Gaussian Dropout layer that applies multiplicative Gaussian noise during training
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -18,7 +18,7 @@ use ndarray_rand::rand_distr::Normal;
 /// Gaussian Dropout layer for neural networks
 ///
 /// Multiplies inputs with random samples drawn from a Gaussian distribution during
-/// training. Each input value x is transformed as x' = x * N(1, stddev^2), where the
+/// training. The layer transforms each input value x as x' = x * N(1, stddev^2), where the
 /// standard deviation is sqrt(rate / (1 - rate)). During inference, inputs pass through
 /// unchanged
 ///
@@ -32,10 +32,9 @@ use ndarray_rand::rand_distr::Normal;
 /// // Create a GaussianDropout layer with dropout rate of 0.3
 /// let mut gaussian_dropout = GaussianDropout::new(0.3, vec![32, 128]).unwrap();
 ///
-/// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
-/// // During training, values are multiplied by Gaussian noise N(1, sqrt(rate/(1-rate)))
+/// // The forward pass multiplies values by Gaussian noise (mean 1, variance rate/(1 - rate))
 /// let output = gaussian_dropout.forward(&input).unwrap();
 /// ```
 #[derive(Debug)]
@@ -61,14 +60,14 @@ impl GaussianDropout {
     /// - `rate` - Dropout rate, must be in range [0, 1)
     /// - `input_shape` - Shape of the input tensor
     ///
-    /// # Notes
-    ///
-    /// The noise RNG is seeded from the global seed or entropy by default. For reproducible noise,
-    /// set a seed with [`GaussianDropout::with_random_state`]
-    ///
     /// # Returns
     ///
     /// - `Result<Self, Error>` - New GaussianDropout layer instance or a validation error
+    ///
+    /// # Notes
+    ///
+    /// By default, `new` seeds the noise RNG from the global seed or entropy. For reproducible
+    /// noise, set a seed with [`GaussianDropout::with_random_state`]
     ///
     /// # Errors
     ///
@@ -89,8 +88,8 @@ impl GaussianDropout {
 
     /// Sets the seed for reproducible noise sampling
     ///
-    /// By default the RNG is seeded from the global seed or entropy (see [`crate::random`]). This
-    /// re-seeds it deterministically from `random_state`
+    /// By default, `new` seeds the RNG from the global seed or entropy (see [`crate::random`]).
+    /// This method re-seeds it deterministically from `random_state`
     ///
     /// # Parameters
     ///
@@ -109,7 +108,7 @@ impl GaussianDropout {
 
 impl Layer for GaussianDropout {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` is immutable and already validated in `new()`; only validate the runtime input
+        // `rate` was already validated in `new()`
         validate_input_shape(input.shape(), &self.input_shape)?;
 
         // During inference or when rate is 0, pass input through unchanged
@@ -137,7 +136,7 @@ impl Layer for GaussianDropout {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` is immutable and already validated in `new()`; only validate the runtime input
+        // `rate` was already validated in `new()`
         validate_input_shape(input.shape(), &self.input_shape)?;
 
         // Inference is identity: pass input through unchanged (no noise sampling)

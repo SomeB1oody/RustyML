@@ -1,11 +1,11 @@
-//! Integration tests for the reproducibility / RNG API
+//! Integration tests for the reproducibility / RNG API.
 //!
-//! Exercises the public seeding surface: per-layer seeding via `with_random_state` on
-//! layers, the thread-local global seed (`set_global_seed` / `clear_global_seed`),
-//! and the `Sequential` fit-time shuffle seed (`new_with_seed` / `set_seed`)
+//! Exercises the public seeding surface: per-layer seeding via `with_random_state` on layers,
+//! the thread-local global seed (`set_global_seed` / `clear_global_seed`), and the
+//! `Sequential` fit-time shuffle seed (`new_with_seed` / `set_seed`).
 //!
-//! Equal seeds yield byte-identical output, so the "same" assertions use zero epsilon; the
-//! "different" assertions require the max absolute difference to clear a small threshold
+//! Equal seeds yield byte-identical output, so the "same" assertions use zero epsilon. The
+//! "different" assertions require the max absolute difference to clear a small threshold.
 
 use ndarray::Array2;
 use rustyml::neural_network::Tensor;
@@ -30,7 +30,7 @@ fn fixed_input_4() -> Tensor {
     t2(1, 4, vec![0.5, -1.0, 2.0, 0.25])
 }
 
-/// Maximum element-wise absolute difference between two equally-shaped tensors
+/// Maximum element-wise absolute difference between 2 equally-shaped tensors
 fn max_abs_diff(a: &Tensor, b: &Tensor) -> f32 {
     assert_eq!(a.shape(), b.shape(), "shape mismatch in max_abs_diff");
     a.iter()
@@ -48,7 +48,7 @@ fn dense_4_3(seed: Option<u64>) -> Dense {
     }
 }
 
-/// Two `Dense` layers with the same explicit seed produce byte-identical `predict()`
+/// 2 `Dense` layers with the same explicit seed produce byte-identical `predict()`
 /// output on the same input
 #[test]
 fn same_seed_same_init() {
@@ -101,12 +101,13 @@ fn global_seed_reproducible() {
 }
 
 /// An explicit local seed ignores the global seed: a `Some(5)` layer built with a global set
-/// equals one built with no global, so the local seed alone determines the weights
+/// equals one built with no global. The local seed alone determines the weights
 #[test]
 fn local_overrides_global() {
     let x = fixed_input_4();
 
-    // Built with a global seed active; the guard clears it at the end of this block, even on panic
+    // Built with a global seed active. The guard clears it at the end of this block, even on
+    // panic.
     let p_with_global = {
         let _seed = GlobalSeedGuard::set(999);
         dense_4_3(Some(5)).predict(&x).unwrap()
@@ -119,7 +120,7 @@ fn local_overrides_global() {
     assert_allclose(&p_with_global, &p_without_global, 0.0_f32);
 }
 
-/// Two `Sequential` models with identical architecture, layer seeds, and shuffle seed reach
+/// 2 `Sequential` models with identical architecture, layer seeds, and shuffle seed reach
 /// an identical `predict()` output after batched training (batch_size 2 exercises the shuffle)
 #[test]
 fn training_reproducible() {
@@ -133,7 +134,7 @@ fn training_reproducible() {
     ]);
     let y = t2(4, 1, vec![1.0, 0.0, -1.0, 0.5]);
 
-    // Build two identical, fully-seeded models and train them identically
+    // Build 2 identical, fully-seeded models and train them identically
     let build_and_train = || -> Sequential {
         let mut model = Sequential::new_with_seed(42);
         model
@@ -163,7 +164,7 @@ fn training_reproducible() {
     assert_allclose(&pa, &pb, 0.0_f32);
 }
 
-/// Under a single global seed, two consecutively-built unseeded layers get different
+/// Under a single global seed, 2 consecutively-built unseeded layers get different
 /// initializations, since each draw advances the global stream (`Linear` readout)
 #[test]
 fn global_seed_advances_between_unseeded_draws() {
@@ -184,17 +185,17 @@ fn global_seed_advances_between_unseeded_draws() {
     );
 }
 
-/// Inverse of `global_seed_reproducible`: with no global seed installed, two unseeded `Dense`
+/// Inverse of `global_seed_reproducible`: with no global seed installed, 2 unseeded `Dense`
 /// layers fall back to OS entropy and produce different `predict()` output
 #[test]
 fn cleared_global_seed_unseeded_layers_differ() {
     let x = fixed_input_4();
 
-    // Set a global, build one unseeded layer from it (matches the reproducibility setup)
+    // Set a global, build 1 unseeded layer from it (matches the reproducibility setup)
     let guard = GlobalSeedGuard::set(777);
     let _seeded_from_global = Dense::new(4, 3, Activation::Linear).unwrap();
-    // Clear the global so subsequent unseeded layers fall back to entropy; dropping the guard
-    // already clears it, so the call below is an idempotent reaffirmation
+    // Clear the global so subsequent unseeded layers fall back to entropy. Dropping the guard
+    // already clears it, so the call below is an idempotent reaffirmation.
     drop(guard);
     rustyml::clear_global_seed(); // explicit: no global seed is installed
 

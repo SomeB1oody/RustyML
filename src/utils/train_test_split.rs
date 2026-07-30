@@ -1,8 +1,8 @@
 //! Train/test split utilities
 //!
-//! Provides the [`TrainTestSplit`] type alias, the [`train_test_split()`] function for a plain
-//! random partition, and [`train_test_split_stratified()`] for a partition that preserves each
-//! class proportion across the two subsets
+//! Provides the [`TrainTestSplit`] type alias and [`train_test_split()`] for a plain random
+//! partition. [`train_test_split_stratified()`] partitions while preserving each class
+//! proportion across the 2 subsets
 
 use crate::error::Error;
 use ahash::AHashMap;
@@ -10,7 +10,7 @@ use ndarray::{Array1, Array2, Axis};
 use ndarray_rand::rand::seq::SliceRandom;
 use std::hash::Hash;
 
-/// The four arrays produced by [`train_test_split`], in order:
+/// The 4 arrays produced by [`train_test_split`], in order:
 /// `(x_train, x_test, y_train, y_test)`
 pub type TrainTestSplit<A> = (Array2<f64>, Array2<f64>, Array1<A>, Array1<A>);
 
@@ -19,25 +19,19 @@ pub type TrainTestSplit<A> = (Array2<f64>, Array2<f64>, Array1<A>, Array1<A>);
 /// # Parameters
 ///
 /// - `x` - Feature matrix with shape (n_samples, n_features)
-/// - `y` - Target values with shape (n_samples); the label type `A` is generic, so integer,
+/// - `y` - Target values with shape (n_samples). The label type `A` is generic, so integer,
 ///   float, or string labels all work (only `Clone` is required)
 /// - `test_size` - Size of the test set, default is 0.3 (30%)
 /// - `random_state` - Random seed, default is None
 ///
 /// # Type Parameters
 ///
-/// - `A` - The label element type; must be `Clone` so rows can be gathered into the output arrays
+/// - `A` - The label element type, which must be `Clone` so rows can be gathered into the
+///   output arrays
 ///
 /// # Returns
 ///
 /// - `Result<TrainTestSplit<A>, Error>` - `(x_train, x_test, y_train, y_test)` on success
-///
-/// # Errors
-///
-/// - [`Error::EmptyInput`] if the dataset is empty
-/// - [`Error::DimensionMismatch`] if `x` and `y` have different lengths
-/// - [`Error::InvalidParameter`] if `test_size` is not between 0 and 1
-/// - [`Error::InvalidInput`] if the dataset is too small to split
 ///
 /// # Examples
 ///
@@ -50,6 +44,13 @@ pub type TrainTestSplit<A> = (Array2<f64>, Array2<f64>, Array1<A>, Array1<A>);
 /// let y = Array1::from(vec![0, 1, 0, 1, 0]);
 /// let (x_train, x_test, y_train, y_test) = train_test_split(x, y, Some(0.4), Some(42)).unwrap();
 /// ```
+///
+/// # Errors
+///
+/// - [`Error::EmptyInput`] if the dataset is empty
+/// - [`Error::DimensionMismatch`] if `x` and `y` have different lengths
+/// - [`Error::InvalidParameter`] if `test_size` is not between 0 and 1
+/// - [`Error::InvalidInput`] if the dataset is too small to split
 pub fn train_test_split<A>(
     x: Array2<f64>,
     y: Array1<A>,
@@ -111,31 +112,24 @@ where
 /// Splits a dataset into training and test sets while preserving class proportions
 ///
 /// Each class is split independently using `test_size`, so both subsets keep roughly the same
-/// label distribution as the input. This avoids a class being absent from one side, which a plain
-/// [`train_test_split`] can produce on imbalanced data
+/// label distribution as the input. This avoids a class being absent from one side, which a
+/// plain [`train_test_split`] can produce on imbalanced data
 ///
 /// # Parameters
 ///
 /// - `x` - Feature matrix with shape (n_samples, n_features)
-/// - `y` - Class labels with shape (n_samples); the label type `A` must be hashable so samples can
-///   be grouped by class
+/// - `y` - Class labels with shape (n_samples). The label type `A` must be hashable so samples
+///   can be grouped by class
 /// - `test_size` - Fraction of each class placed in the test set, default is 0.3 (30%)
 /// - `random_state` - Random seed, default is None
 ///
 /// # Type Parameters
 ///
-/// - `A` - The label element type; must be `Clone + Eq + Hash` to group rows by class
+/// - `A` - The label element type, which must be `Clone + Eq + Hash` to group rows by class
 ///
 /// # Returns
 ///
 /// - `Result<TrainTestSplit<A>, Error>` - `(x_train, x_test, y_train, y_test)` on success
-///
-/// # Errors
-///
-/// - [`Error::EmptyInput`] if the dataset is empty
-/// - [`Error::DimensionMismatch`] if `x` and `y` have different lengths
-/// - [`Error::InvalidParameter`] if `test_size` is not between 0 and 1
-/// - [`Error::InvalidInput`] if any class has fewer than 2 samples
 ///
 /// # Examples
 ///
@@ -149,6 +143,13 @@ where
 /// let (x_train, x_test, y_train, y_test) =
 ///     train_test_split_stratified(x, y, Some(0.34), Some(42)).unwrap();
 /// ```
+///
+/// # Errors
+///
+/// - [`Error::EmptyInput`] if the dataset is empty
+/// - [`Error::DimensionMismatch`] if `x` and `y` have different lengths
+/// - [`Error::InvalidParameter`] if `test_size` is not between 0 and 1
+/// - [`Error::InvalidInput`] if any class has fewer than 2 samples
 pub fn train_test_split_stratified<A>(
     x: Array2<f64>,
     y: Array1<A>,

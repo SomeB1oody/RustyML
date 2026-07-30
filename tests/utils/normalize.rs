@@ -19,7 +19,7 @@ fn test_l2_row_single_row_3_4() {
     assert_allclose(&result, &expected, 1e-12);
 }
 
-/// Two-row matrix: each row is L2-normalized independently
+/// A 2-row matrix: each row is L2-normalized independently
 #[test]
 fn test_l2_row_two_rows() {
     let data: Array2<f64> = array![[3.0, 4.0], [0.0, 5.0]];
@@ -68,7 +68,7 @@ fn test_l1_row_single_row_3_4() {
     assert_allclose(&result, &expected, 1e-12);
 }
 
-/// Two-row, three-column matrix: each row is L1-normalized independently
+/// A 2-row, 3-column matrix: each row is L1-normalized independently
 #[test]
 fn test_l1_row_two_rows_three_cols() {
     let data: Array2<f64> = array![[1.0, 2.0, 3.0], [4.0, 0.0, 0.0]];
@@ -288,8 +288,8 @@ fn test_l2_global_2x2() {
     assert_allclose(&result, &expected, 1e-12);
 }
 
-/// An all-zero array under Global normalization stays all-zeros (no division by zero, and
-/// consistent with the per-lane path which zeros effectively-zero lanes)
+/// A global all-zero array stays all-zeros, with no division by zero. This matches the
+/// per-lane path, which also leaves an effectively zero lane untouched
 #[test]
 fn test_l2_global_zero_array_preserved() {
     let data: Array2<f64> = array![[0.0, 0.0], [0.0, 0.0]];

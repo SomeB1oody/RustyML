@@ -10,29 +10,25 @@ use rustyml::machine_learning::KMeans;
 
 // Helpers
 
-/// Build 3 tight, well-separated blobs of 5 points each, centred at (0,0),
-/// (10,0), (5,10) with per-coordinate offset in [-0.05, +0.05]
-///
-/// Inter-blob separation (>= 9.9) far exceeds intra-blob spread (<= 0.14), so any
-/// correct k=3 run assigns each blob to one cluster with centroid within 0.1 of the
-/// true mean
+/// Builds 3 blobs of 5 points near (0,0), (10,0), and (5,10).
+/// Blobs sit far enough apart that k=3 centers each within 0.1 of its true mean.
 fn three_blob_data() -> Array2<f64> {
-    // 15 rows x 2 columns; deterministic offsets keep blobs tight
+    // 15 rows, 2 columns. Deterministic offsets keep blobs tight.
     #[rustfmt::skip]
     let data = array![
-        // Blob 0: true centre (0.0, 0.0)
+        // Blob 0: true center (0.0, 0.0)
         [-0.05,  0.03],
         [ 0.04, -0.02],
         [ 0.01,  0.05],
         [-0.03, -0.04],
         [ 0.02,  0.01],
-        // Blob 1: true centre (10.0, 0.0)
+        // Blob 1: true center (10.0, 0.0)
         [ 9.95,  0.03],
         [10.04, -0.02],
         [10.01,  0.05],
         [ 9.97, -0.04],
         [10.02,  0.01],
-        // Blob 2: true centre (5.0, 10.0)
+        // Blob 2: true center (5.0, 10.0)
         [ 4.95, 10.03],
         [ 5.04,  9.98],
         [ 5.01, 10.05],
@@ -42,8 +38,7 @@ fn three_blob_data() -> Array2<f64> {
     data
 }
 
-/// Verify that all points within each blob share one label and that blobs get
-/// distinct labels
+/// Verifies that each blob shares a single label and that blobs get distinct labels.
 fn assert_blob_structure(labels: &Array1<isize>, blob_size: usize) {
     let n_blobs = labels.len() / blob_size;
     assert_eq!(
@@ -82,9 +77,8 @@ fn assert_blob_structure(labels: &Array1<isize>, blob_size: usize) {
 
 // Constructor validation
 
-/// Each invalid constructor argument must yield `Error::InvalidParameter`. Covers
-/// `n_clusters = 0`, `max_iterations = 0`, and `tolerance` rejected for
-/// `0.0`, negative, `NaN`, and `+Inf` (every other arg held at a valid value).
+/// Rejects invalid constructor arguments with `Error::InvalidParameter`.
+/// Covers n_clusters=0, max_iterations=0, and tolerance of 0, negative, NaN, or +Inf.
 #[test]
 fn constructor_invalid_params_are_rejected() {
     // (n_clusters, max_iterations, tolerance, label)
@@ -262,7 +256,7 @@ fn fit_k3_centroids_near_true_blob_means() {
 }
 
 /// After fitting, `get_labels` respects blob structure: each blob's 5 points share
-/// one label and the three blobs get distinct labels
+/// a label, and the 3 blobs get distinct labels.
 #[test]
 fn fit_k3_labels_respect_blob_structure() {
     let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
@@ -290,8 +284,8 @@ fn predict_on_training_data_matches_fit_labels() {
     }
 }
 
-/// `predict` on fresh points near each blob's true centre assigns them to the same
-/// cluster as the corresponding training blob
+/// `predict` on fresh points near each blob's true center assigns them to the same
+/// cluster as the corresponding training blob.
 #[test]
 fn predict_new_points_near_blob_centres() {
     let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
@@ -305,9 +299,9 @@ fn predict_new_points_near_blob_centres() {
     let label_blob2 = train_labels[10];
 
     let new_points = array![
-        [0.0, 0.0],  // near blob 0 centre
-        [10.0, 0.0], // near blob 1 centre
-        [5.0, 10.0], // near blob 2 centre
+        [0.0, 0.0],  // near blob 0 center
+        [10.0, 0.0], // near blob 1 center
+        [5.0, 10.0], // near blob 2 center
     ];
     let pred = km.predict(&new_points).unwrap();
 
@@ -354,8 +348,8 @@ fn inertia_is_positive_on_blob_data() {
     assert!(inertia > 0.0, "inertia must be positive, got {inertia}");
 }
 
-/// Inertia with k=1 must be >= inertia with k=3 on the same data, since more
-/// clusters can only reduce or equal the sum of squared distances
+/// Inertia with k=1 must be >= inertia with k=3 on the same data.
+/// More clusters can only reduce or match the sum of squared distances.
 #[test]
 fn inertia_decreases_as_k_grows() {
     let data = three_blob_data();
@@ -418,7 +412,6 @@ fn k_equals_n_samples_boundary() {
     let mut km_n = KMeans::new(n, 300, 1e-4).unwrap().with_random_state(42);
     km_n.fit(&data).unwrap();
 
-    // Centroid matrix must have n rows
     let centroids = km_n.get_centroids().unwrap();
     assert_eq!(centroids.nrows(), n, "k=n_samples: should have n centroids");
     assert_eq!(centroids.ncols(), 2);
@@ -433,7 +426,6 @@ fn k_equals_n_samples_boundary() {
         );
     }
 
-    // Inertia must be non-negative
     let inertia_n = km_n.get_inertia().unwrap();
     assert!(
         inertia_n >= 0.0,
@@ -453,8 +445,8 @@ fn k_equals_n_samples_boundary() {
 
 // Determinism (seeded reproducibility)
 
-/// Two KMeans instances with the same seed produce identical centroids, labels,
-/// inertia, and n_iter after fitting the same data
+/// 2 KMeans instances with the same seed produce identical centroids, labels,
+/// inertia, and n_iter after fitting the same data.
 #[test]
 fn same_seed_gives_identical_results() {
     let data = three_blob_data();
@@ -488,8 +480,8 @@ fn same_seed_gives_identical_results() {
     assert_eq!(na, nb, "n_iter mismatch between identical-seed runs");
 }
 
-/// Two KMeans instances with different seeds both converge to a blob-correct
-/// partition on well-separated data
+/// 2 KMeans instances with different seeds both converge to a blob-correct
+/// partition on well-separated data.
 #[test]
 fn different_seeds_still_converge_to_same_partition_on_blob_data() {
     let data = three_blob_data();
@@ -549,7 +541,7 @@ fn save_load_round_trip_preserves_predictions() {
         assert_eq!(o, l, "prediction mismatch after save/load round-trip");
     }
 
-    // Centroids must also be bit-for-bit equal (no lossy serialisation)
+    // Centroids must also be bit-for-bit equal (no lossy serialization)
     let co = km.get_centroids().unwrap();
     let cl = km_loaded.get_centroids().unwrap();
     assert_allclose(co, cl, 0.0_f64);
@@ -566,7 +558,7 @@ fn load_from_nonexistent_path_is_io_error() {
     );
 }
 
-// Larger-dataset fits: a medium-size correctness check on the parallel assignment branch
+// Larger-dataset fit: a correctness check at 1200 points
 
 /// Build 1200 points (3 tight, well-separated blobs of 400 each) with fully
 /// deterministic jitter (no RNG)
@@ -582,8 +574,8 @@ fn three_blobs_1200() -> Array2<f64> {
     Array2::from_shape_vec((1200, 2), v).unwrap()
 }
 
-/// k=3 on the 1200-point dataset exercises the parallel assignment branch and still
-/// recovers the 3 known blob means (within tol 0.1) and a blob-respecting partition
+/// Fits k=3 on 1200 points and recovers the 3 known blob means (within tol 0.1)
+/// and a blob-respecting partition.
 #[test]
 fn fit_parallel_branch_k3_centroids_near_true_means_1200() {
     let data = three_blobs_1200();
@@ -610,7 +602,7 @@ fn fit_parallel_branch_k3_centroids_near_true_means_1200() {
         );
     }
 
-    // Partition must be blob-pure: each block of 400 shares one label, blocks differ
+    // Partition must be blob-pure: each block of 400 shares a label, and blocks differ
     let labels = km.get_labels().unwrap();
     assert_eq!(labels.len(), 1200);
     let block_label = [labels[0], labels[400], labels[800]];
@@ -629,11 +621,8 @@ fn fit_parallel_branch_k3_centroids_near_true_means_1200() {
     }
 }
 
-/// Above the deterministic-fold gate (samples x features >= 262_144) the centroid
-/// accumulation runs as a blocked parallel fold. Integer-valued rows make every cluster
-/// sum exact in `f64` (well below 2^53), so regardless of summation grouping the stored
-/// centroids must equal the per-label means recomputed serially - bit for bit. A wiring
-/// bug in the fold (wrong rows, lost blocks, misordered merge) cannot pass this
+/// Above the parallel-fold gate, integer data keeps sums exact in `f64`, so the
+/// parallel and serial centroid sums must match bit for bit.
 #[test]
 fn fit_parallel_accumulate_matches_serial_means_exactly() {
     let n = 16_384_usize;
@@ -653,7 +642,7 @@ fn fit_parallel_accumulate_matches_serial_means_exactly() {
     }
     let data = Array2::from_shape_vec((n, d), v).unwrap();
 
-    // One Lloyd step: labels and centroids then come from the same assignment pass
+    // 1 Lloyd step: labels and centroids then come from the same assignment pass
     let mut km = KMeans::new(k, 1, 1e-12).unwrap().with_random_state(7);
     km.fit(&data).unwrap();
 
@@ -689,10 +678,8 @@ fn fit_parallel_accumulate_matches_serial_means_exactly() {
 
 // centroid-shift convergence: a converged solution is a fixed point
 
-/// The centroid-shift convergence criterion stops exactly when the centroids stop moving, so
-/// a converged k-means solution must satisfy the fixed-point property: every centroid equals
-/// the mean of the points assigned to it. (With a tight tolerance the residual is far below
-/// the asserted bound.)
+/// A converged fit's centroids satisfy the fixed-point property: each centroid equals the mean
+/// of the points assigned to it, within the test's tolerance.
 #[test]
 fn converged_centroids_equal_their_cluster_means() {
     let mut km = KMeans::new(3, 300, 1e-6).unwrap().with_random_state(42);
@@ -775,16 +762,13 @@ fn test_n_init_restarts_never_worsen_inertia() {
     assert_eq!(repeat.get_labels().unwrap(), many.get_labels().unwrap());
 }
 
-/// Stored labels always describe the stored centroids, even when the fit hits `max_iter`
-///
-/// The Lloyd loop labels against the current centroids and only then installs the updated ones, so
-/// on the `max_iter` exit path the recorded labels described the previous iteration and
-/// `predict(x) != get_labels()`. scikit-learn re-runs a final E-step for the same reason
+/// Stored labels always match the stored centroids, even when `fit` exits through `max_iter`.
+/// The crate finishes with an extra assignment pass, mirroring scikit-learn's final E-step.
 #[test]
 fn test_labels_agree_with_predict_when_max_iter_is_hit() {
     let data = three_blob_data();
 
-    // One iteration is nowhere near convergence, so this always exits through max_iter
+    // 1 iteration is nowhere near convergence, so this always exits through max_iter
     let mut km = KMeans::new(3, 1, 1e-12)
         .unwrap()
         .with_random_state(3)

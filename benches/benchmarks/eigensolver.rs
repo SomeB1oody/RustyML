@@ -1,10 +1,11 @@
 //! Power-iteration eigensolver benchmarks for the decomposition transformers.
 //!
-//! Isolates `machine_learning::linalg::top_eigenpairs_power_iteration` (power iteration with Hotelling
-//! deflation) through the two public APIs that select it: the PCA `PowerIteration` SVD solver
-//! and the KernelPCA `PowerIteration` eigen solver. Configs are chosen so the iterative inner
-//! loop - not the one-off covariance/kernel GEMM - dominates the wall clock, so a change to the
-//! per-iteration matvec count or the deflation step shows up cleanly.
+//! Isolates `machine_learning::linalg::top_eigenpairs_power_iteration` (power iteration with
+//! Hotelling deflation). It runs through the 2 public APIs that select it: the PCA
+//! `PowerIteration` SVD solver and the KernelPCA `PowerIteration` eigen solver. Configs are
+//! chosen so the iterative inner loop, not the single covariance or kernel GEMM, dominates the
+//! wall clock. A change to the per-iteration matvec count or the deflation step then shows up
+//! cleanly.
 //!
 //! ```bash
 //! cargo bench --bench eigensolver -- --save-baseline before   # before the change
@@ -29,9 +30,10 @@ fn random_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f64> {
 }
 
 /// KernelPCA with the `PowerIteration` eigen solver: the centered kernel matrix is `n x n`, so
-/// each power-iteration step is an `n x n` GEMV. With a small feature count the one-off kernel
-/// GEMM (`O(n^2 d)`) is dwarfed by the iterative solve (`n_components` deflation rounds, each many
-/// `O(n^2)` matvecs), so this is the cleanest isolation of the deflated power-iteration inner loop.
+/// each power-iteration step is an `n x n` GEMV. With a small feature count, the iterative solve
+/// dwarfs the single kernel GEMM (`O(n^2 d)`). That solve runs `n_components` deflation
+/// rounds, each running many `O(n^2)` matvecs, which isolates the deflated power-iteration inner
+/// loop.
 fn bench_kernel_pca_power_iteration(c: &mut Criterion) {
     let mut group = c.benchmark_group("eig_kernel_pca_power_iteration");
     group.sample_size(10);
@@ -60,9 +62,9 @@ fn bench_kernel_pca_power_iteration(c: &mut Criterion) {
     group.finish();
 }
 
-/// PCA with the `PowerIteration` SVD solver: the solver builds the `p x p` covariance once and then
-/// runs deflated power iteration on it. A modest sample count keeps the covariance GEMM cheap so the
-/// per-component iterative solve over the `p x p` matrix dominates.
+/// PCA with the `PowerIteration` SVD solver: the solver builds the `p x p` covariance once and
+/// then runs deflated power iteration on it. A modest sample count keeps the covariance GEMM
+/// cheap, so the per-component iterative solve over the `p x p` matrix dominates.
 fn bench_pca_power_iteration(c: &mut Criterion) {
     let mut group = c.benchmark_group("eig_pca_power_iteration");
     group.sample_size(10);

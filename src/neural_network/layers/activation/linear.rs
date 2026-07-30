@@ -39,8 +39,8 @@ use crate::neural_network::traits::Layer;
 /// ```
 #[derive(Debug)]
 pub struct Linear {
-    /// Shape of the input from the forward pass, used to validate the gradient during
-    /// backpropagation (Linear's derivative is 1, so the input values themselves are not needed)
+    /// Shape of the input from the forward pass. The backward pass uses it to validate the
+    /// gradient (Linear's derivative is 1, so the input values themselves are not needed)
     input_shape: Option<Vec<usize>>,
 }
 
@@ -49,7 +49,7 @@ impl Linear {
     ///
     /// # Returns
     ///
-    /// - `Self` - A new `Linear` layer instance
+    /// - `Self` - A new `Linear` layer
     pub fn new() -> Self {
         Linear { input_shape: None }
     }

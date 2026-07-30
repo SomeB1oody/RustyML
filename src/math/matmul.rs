@@ -1,45 +1,46 @@
 //! The crate's few additions to the [`gemmkit`](https://docs.rs/gemmkit) matrix-product backend
 //!
-//! Since the backend's own ndarray adapter ([`gemmkit-ndarray`](https://docs.rs/gemmkit-ndarray))
-//! is already the right call-site API, the estimators call it directly: `gemmkit_ndarray::dot`
-//! for an allocating product on the backend's automatic scheduling, and `gemmkit_ndarray::gemm` /
-//! `gemm_fused` where the caller owns the output buffer or fuses an epilogue. This module holds
-//! only what the adapter does not provide:
+//! The backend's own ndarray adapter ([`gemmkit-ndarray`](https://docs.rs/gemmkit-ndarray)) is
+//! already the right call-site API, so the estimators call it directly. They use
+//! `gemmkit_ndarray::dot` for an allocating product on the backend's automatic scheduling. They
+//! use `gemmkit_ndarray::gemm` or `gemm_fused` where the caller owns the output buffer or fuses
+//! an epilogue. This module holds only what the adapter does not provide.
 //!
-//! - `dot_par`: the allocating product with an explicit [`gemmkit::Parallelism`] (`dot` always
-//!   uses the automatic default; callers inside an already-parallel rayon region pass
-//!   `Parallelism::Serial` so the product does not fork again)
-//! - `matvec`: the matvec with `Array1` operands (the adapter is matrix-shaped; this wraps the
-//!   vector as a `[k, 1]` column, which the backend reroutes to its bandwidth-bound GEMV path)
+//! - `dot_par`: the allocating product with an explicit [`gemmkit::Parallelism`]. `dot` always
+//!   uses the automatic default. Callers inside an already-parallel rayon region pass
+//!   `Parallelism::Serial` so the product does not fork again.
+//! - `matvec`: the matvec with `Array1` operands. The adapter is matrix-shaped, so this wraps
+//!   the vector as a `[k, 1]` column, which the backend reroutes to its bandwidth-bound GEMV
+//!   path.
 //! - the row-chunk tiling policy (`gemm_chunk_rows`, `cache_resident`) for callers that
-//!   materialize a product too large to hold at once (KNN, t-SNE, MeanShift)
+//!   materialize a product too large to hold at once (KNN, t-SNE, MeanShift).
 //!
-//! Scheduling is entirely gemmkit's: `Parallelism::Rayon(0)` gates serial-vs-parallel on the
-//! work size, ramps the worker count onto persistent exact-fit pool tiers, parallelizes matvecs
-//! by memory bandwidth, and runs on the caller's pool when already inside a rayon region. The
-//! knobs live in gemmkit too - `GEMMKIT_*` environment variables (profiles from the
-//! [`gemmkit-tune`](https://docs.rs/gemmkit-tune) autotuner), programmatic via
-//! [`crate::tuning::matmul::backend`]
+//! Scheduling is entirely gemmkit's. `Parallelism::Rayon(0)` gates serial versus parallel on
+//! the work size and ramps the worker count onto persistent exact-fit pool tiers. It also
+//! parallelizes matvecs by memory bandwidth and runs on the caller's pool when already inside a
+//! rayon region. The knobs live in gemmkit too, as `GEMMKIT_*` environment variables (profiles
+//! from the [`gemmkit-tune`](https://docs.rs/gemmkit-tune) autotuner) or programmatically
+//! through [`crate::tuning::matmul::backend`].
 //!
 //! ## Reproducibility
 //!
-//! gemmkit's blocking and job order are independent of the worker count, so for a fixed machine
-//! and configuration the same product reproduces the same result bit-for-bit, no matter how many
-//! threads ran it (and re-running is deterministic). Fused epilogues (bias / activation) are
-//! bitwise-identical to the plain product followed by the same scalar map
+//! gemmkit's blocking and job order do not depend on the worker count. For a fixed machine and
+//! configuration, the same product reproduces the same result bit for bit, no matter how many
+//! threads ran it. The result also repeats from run to run. Fused epilogues (bias and
+//! activation) are bitwise identical to the plain product followed by the same scalar map.
 
 #[cfg(feature = "machine_learning")]
 use ndarray::{Array1, Ix1};
 #[cfg(any(feature = "machine_learning", feature = "neural_network"))]
 use ndarray::{Array2, ArrayBase, Data, Ix2};
 
-/// `A @ B` into a fresh standard-layout array, with an explicit [`gemmkit::Parallelism`]
+/// `A @ B` into a fresh standard-layout array, with an explicit [`gemmkit::Parallelism`].
 ///
-/// The allocating twin of `gemmkit_ndarray::dot` for callers that must control the parallelism -
-/// pass `Parallelism::Serial` from inside an already-parallel rayon region so the product does
-/// not fork again, or `Parallelism::Rayon(0)` for the backend's automatic scheduling (which is
-/// what plain `dot` always uses). `A` is `(m, k)`, `B` is `(k, n)`; any storage works (owned,
-/// view, transpose, slice - strides pass through zero-copy)
+/// The allocating twin of `gemmkit_ndarray::dot`, for callers that must control the
+/// parallelism. Pass `Parallelism::Serial` from inside an already-parallel rayon region so the
+/// product does not fork again. Pass `Parallelism::Rayon(0)` for the backend's automatic
+/// scheduling, the same one plain `dot` always uses. `A` is `(m, k)` and `B` is `(k, n)`. Any
+/// storage works (owned, view, transpose, or slice), because strides pass through with no copy.
 ///
 /// # Panics
 ///
@@ -61,20 +62,20 @@ where
         k, kb,
         "dot_par: inner dimensions disagree (a is {m}x{k}, b is {kb}x{n})",
     );
-    // `beta == 0` means the fill value is never read; `from_elem` avoids a `Zero` bound
+    // `beta == 0` means the fill value is never read, so `from_elem` avoids a `Zero` bound.
     let mut c = Array2::from_elem((m, n), T::ZERO);
     gemmkit_ndarray::gemm(T::ONE, a, b, T::ZERO, &mut c, par);
     c
 }
 
-/// `y = A @ x` for `Array1` operands, with an explicit [`gemmkit::Parallelism`]
+/// `y = A @ x` for `Array1` operands, with an explicit [`gemmkit::Parallelism`].
 ///
 /// The backend's adapter is matrix-shaped, so this wraps `x` as a `[k, 1]` column and unwraps
-/// the `[m, 1]` result; gemmkit detects the `n == 1` shape and runs its bandwidth-bound GEMV
-/// path (serial below an LLC-derived byte floor, then split across the memory-bandwidth worker
-/// cap - bit-identical at any worker count). `A` is `(m, k)`, `x` has length `k`. Pass
-/// `Parallelism::Rayon(0)` for the automatic scheduling, `Parallelism::Serial` from inside an
-/// already-parallel region
+/// the `[m, 1]` result. gemmkit detects the `n == 1` shape and runs its bandwidth-bound GEMV
+/// path. This path stays serial below an LLC-derived byte floor and then splits across the
+/// memory-bandwidth worker cap. The result is bit-identical at any worker count. `A` is
+/// `(m, k)` and `x` has length `k`. Pass `Parallelism::Rayon(0)` for the automatic scheduling,
+/// or `Parallelism::Serial` from inside an already-parallel region.
 ///
 /// # Panics
 ///
@@ -107,42 +108,44 @@ where
 }
 
 tunable_gate! {
-    /// Element budget for one row-chunk of a tiled product whose full result would be too large
-    /// to materialize at once (e.g. KNN's `[n_query, n_train]` projections or t-SNE's pairwise
-    /// blocks): `chunk_rows = gemm_chunk_elems() / row_len`, clamped to `[16, 4096]` rows
+    /// Element budget for one row-chunk of a tiled product. Some products are too large to
+    /// materialize at once, for example KNN's `[n_query, n_train]` projections or t-SNE's
+    /// pairwise blocks. `chunk_rows = gemm_chunk_elems() / row_len`, clamped to `[16, 4096]`
+    /// rows.
     ///
-    /// Tiling only pays when the shared operand overflows the cache (see `cache_resident`); there
-    /// bigger chunks are strictly better, so the budget caps the transient chunk buffer at 256 MB
-    /// of `f64` rather than chasing the asymptote. Overridable via [`crate::tuning::matmul`]
+    /// Tiling only pays when the shared operand overflows the cache (see `cache_resident`), and
+    /// bigger chunks are then strictly better. The budget caps the transient chunk buffer at
+    /// 256 MB of `f64` instead of growing without bound. Overridable through
+    /// [`crate::tuning::matmul`].
     pub(crate) GEMM_CHUNK_ELEMS => gemm_chunk_elems / set_gemm_chunk_elems = 33_554_432
 }
 
-/// Rows per chunk when tiling a product with `row_len`-wide output rows under `gemm_chunk_elems`
+/// Rows per chunk when tiling a product with `row_len`-wide output rows under `gemm_chunk_elems`.
 ///
-/// Crate-internal tiling policy; not part of the public API and carries no stability guarantee
+/// Crate-internal tiling policy. Not part of the public API and carries no stability guarantee.
 #[doc(hidden)]
 pub fn gemm_chunk_rows(row_len: usize) -> usize {
     (gemm_chunk_elems() / row_len.max(1)).clamp(16, 4096)
 }
 
 tunable_gate! {
-    /// Matrix size (bytes) below which repeated row-GEMV sweeps over a shared matrix stay
-    /// cache-resident, making a per-row GEMV swarm faster than a tiled GEMM
+    /// Matrix size in bytes below which repeated row-GEMV sweeps over a shared matrix stay
+    /// cache-resident, making a per-row GEMV swarm faster than a tiled GEMM.
     ///
-    /// When many tasks each compute `X . v` against the same `X`, the whole of `X` is re-read per
-    /// task - free while `X` fits in the shared L3, but a DRAM re-stream once it overflows, where a
-    /// tiled GEMM (which streams `X` once per chunk) wins instead. The default sits at a typical
-    /// L3 size; the band around it is uncalibrated. Overridable via [`crate::tuning::matmul`] - the
-    /// natural knob to match a machine's actual L3
+    /// When many tasks each compute `X . v` against the same `X`, the whole of `X` gets re-read
+    /// per task. That re-read is free while `X` fits in the shared L3. It becomes a DRAM
+    /// re-stream once `X` overflows the cache, and a tiled GEMM, which streams `X` once per
+    /// chunk, wins instead. The default sits at a typical L3 size. Override it through
+    /// [`crate::tuning::matmul`] to match a machine's actual L3.
     pub(crate) CACHE_RESIDENT_MAX_BYTES
         => cache_resident_max_bytes / set_cache_resident_max_bytes = 64 * 1024 * 1024
 }
 
 /// Whether an `[rows, cols]` matrix of `T` is small enough to treat as cache-resident for
-/// repeated row-GEMV sweeps (see `cache_resident_max_bytes`)
+/// repeated row-GEMV sweeps (see `cache_resident_max_bytes`).
 ///
-/// Crate-internal strategy policy; not part of the public API and carries no stability
-/// guarantee
+/// Crate-internal strategy policy. Not part of the public API and carries no stability
+/// guarantee.
 #[doc(hidden)]
 pub fn cache_resident<T>(rows: usize, cols: usize) -> bool {
     rows.saturating_mul(cols)
@@ -150,6 +153,7 @@ pub fn cache_resident<T>(rows: usize, cols: usize) -> bool {
         < cache_resident_max_bytes()
 }
 
+/// Correctness and reproducibility tests for the gemmkit-backed matrix products.
 #[cfg(all(test, any(feature = "machine_learning", feature = "neural_network")))]
 mod tests {
     use super::*;
@@ -159,7 +163,7 @@ mod tests {
     use ndarray::Array1;
     use ndarray::{Array2, LinalgScalar, s};
 
-    /// Deterministic pseudo-random matrices (hash-based, no rng dependency)
+    /// Deterministic pseudo-random matrices (hash-based, no rng dependency).
     fn rand_f32(r: usize, c: usize, seed: u64) -> Array2<f32> {
         Array2::from_shape_fn((r, c), |(i, j)| {
             let t = (seed as f64) * 0.731 + (i * c + j) as f64 * 0.618_033_988_7;
@@ -173,7 +177,7 @@ mod tests {
         })
     }
 
-    /// Independent triple-loop reference product (same element type, fixed k-order)
+    /// Independent triple-loop reference product (same element type, fixed k-order).
     fn naive<T: LinalgScalar>(a: &Array2<T>, b: &Array2<T>) -> Array2<T> {
         let (m, k) = a.dim();
         let n = b.ncols();
@@ -206,7 +210,7 @@ mod tests {
     // correctness vs an independent reference
 
     /// The backend's `dot` matches the naive product for f32 on both sides of its work gate
-    /// (`m*n*k` 589,824 by default)
+    /// (`m*n*k` = 589,824 by default).
     #[test]
     fn dot_matches_reference_f32() {
         for &(m, k, n) in &[
@@ -223,7 +227,7 @@ mod tests {
         assert_close_f32(&dot(&a, &b), &a.dot(&b), 1e-2);
     }
 
-    /// The backend's `dot` matches the reference for f64 on both sides of the work gate
+    /// The backend's `dot` matches the reference for f64 on both sides of the work gate.
     #[test]
     fn dot_matches_reference_f64() {
         for &(m, k, n) in &[
@@ -240,7 +244,7 @@ mod tests {
         assert_close_f64(&dot(&a, &b), &a.dot(&b), 1e-9);
     }
 
-    /// Transposed and non-contiguous (sliced) operands feed the right strides to the kernel
+    /// Transposed and non-contiguous (sliced) operands feed the right strides to the kernel.
     #[test]
     fn dot_strided_operands() {
         // A^T . B (the weight-gradient pattern): a is [k, m], a.t() is [m, k]
@@ -260,8 +264,8 @@ mod tests {
         assert_close_f64(&got, &want, 1e-9);
     }
 
-    /// Thin-output GEMM (`n` a handful, above the work gate) - the shape the old hand-rolled
-    /// row split existed for - is correct on the backend's own scheduling
+    /// Thin-output GEMM (`n` a handful, above the work gate) is correct on the backend's own
+    /// scheduling.
     #[test]
     fn dot_thin_output() {
         // f64: 4096*64*4 = 1.05M above the gate, n = 4
@@ -277,8 +281,8 @@ mod tests {
     // the reproducibility guard
 
     /// The backend's contract: for a fixed config the result is identical no matter how many
-    /// workers ran it. Serial and forced-parallel also agree bitwise on the current kernels
-    /// (both run the same kernel with thread-count-independent blocking)
+    /// workers ran it. Serial and forced-parallel also agree bitwise on the current kernels,
+    /// because both run the same kernel with thread-count-independent blocking.
     #[test]
     fn dot_par_thread_count_independent_f64() {
         // square, dense, and a thin-k shape (the one most likely to trigger a split-k reduction)
@@ -299,7 +303,7 @@ mod tests {
         }
     }
 
-    /// Same worker-count-independence check for f32
+    /// Same worker-count-independence check for f32.
     #[test]
     fn dot_par_thread_count_independent_f32() {
         for &(m, k, n) in &[(96usize, 96usize, 96usize), (64, 8192, 64)] {
@@ -319,8 +323,8 @@ mod tests {
         }
     }
 
-    /// Running the same product twice on the same machine gives the same result (this test asserts
-    /// bit-level equality)
+    /// Running the same product twice on the same machine gives the same result. This test
+    /// asserts bit-level equality.
     #[test]
     fn dot_run_to_run_deterministic() {
         let a = rand_f64(200, 200, 21);
@@ -334,11 +338,11 @@ mod tests {
         );
     }
 
-    // the epilogue guard: fused bias+activation is bitwise-identical to the unfused pipeline
+    // the epilogue guard: fused bias and activation are bitwise identical to the unfused pipeline
 
     /// gemmkit's fused epilogue contract for f32/f64: `gemm_fused` equals plain `gemm` followed
     /// by the same scalar bias-add and activation, bit for bit. The NN layers rely on this to
-    /// fuse bias + ReLU without changing numerics
+    /// fuse bias and ReLU without changing numerics.
     #[test]
     fn gemm_fused_bias_relu_bitwise_matches_unfused() {
         let a = rand_f32(64, 48, 31);
@@ -374,7 +378,7 @@ mod tests {
 
     // matvec
 
-    /// matvec matches the reference on both cache-resident and larger shapes
+    /// matvec matches the reference on both cache-resident and larger shapes.
     #[cfg(feature = "machine_learning")]
     #[test]
     fn matvec_matches_reference() {
@@ -390,8 +394,8 @@ mod tests {
         }
     }
 
-    /// Forced-serial and auto matvec agree bitwise (the backend reduces each output element over
-    /// the full `k` on one worker, so the matvec is bit-identical at any worker count)
+    /// Forced-serial and auto matvec agree bitwise. The backend reduces each output element
+    /// over the full `k` on one worker, so the matvec is bit-identical at any worker count.
     #[cfg(feature = "machine_learning")]
     #[test]
     fn matvec_serial_and_auto_agree_bitwise() {
@@ -409,7 +413,7 @@ mod tests {
         );
     }
 
-    /// matvec is run-to-run deterministic on the same machine
+    /// matvec is run-to-run deterministic on the same machine.
     #[cfg(feature = "machine_learning")]
     #[test]
     fn matvec_run_to_run_deterministic() {

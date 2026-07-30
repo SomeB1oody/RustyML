@@ -1,11 +1,11 @@
 //! Standardization that remembers its training statistics
 //!
-//! Provides [`StandardScaler`], the fit/transform counterpart to the stateless
-//! [`standardize`](crate::utils::standardize::standardize) function: it learns the per-feature
-//! mean and standard deviation once, on the training matrix, and reuses those frozen numbers
-//! for every later batch - the test split, a validation fold, or a single sample arriving at
-//! inference time. This is the scikit-learn `StandardScaler` contract, and it is what keeps a
-//! train/test boundary honest: rescaling a test set by its own column statistics applies a
+//! Provides [`StandardScaler`], the fit and transform counterpart to the stateless
+//! [`standardize`](crate::utils::standardize::standardize) function. It learns the per-feature
+//! mean and standard deviation once, on the training matrix. It reuses those frozen numbers
+//! for every later batch: the test split, a validation fold, or a single sample arriving at
+//! inference time. This is the scikit-learn `StandardScaler` contract, and it keeps a
+//! train-test boundary honest. Rescaling a test set by its own column statistics applies a
 //! different linear map than the one the model was trained under
 
 use super::{fitted, for_each_row, validate_matrix, validate_transform_matrix};
@@ -19,26 +19,27 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 /// Standardizes features by removing the mean and scaling to unit variance
 ///
 /// Rows are samples and columns are features. [`fit`](Self::fit) computes each feature's mean
-/// and population standard deviation and stores them; [`transform`](Self::transform) applies
+/// and population standard deviation and stores them. [`transform`](Self::transform) applies
 /// `(x - mean) / scale` using those stored values, whatever data it is handed. A feature whose
 /// spread is within floating-point noise gets a scale of `1.0`, so a constant column maps to
 /// zeros instead of `NaN`
 ///
-/// The divisor is the **population** standard deviation (variance divided by `n`, not `n - 1`),
-/// matching scikit-learn's `StandardScaler` (`ddof=0`), and the statistics come from the same
-/// numerically stable Welford pass that
-/// [`standardize`](crate::utils::standardize::standardize) uses - so
-/// `StandardScaler::default().fit_transform(&x)` is bit-for-bit identical to
+/// The divisor is the **population** standard deviation, variance divided by `n` rather than
+/// `n - 1`, matching scikit-learn's `StandardScaler` (`ddof=0`). The statistics come from the
+/// same numerically stable Welford pass that
+/// [`standardize`](crate::utils::standardize::standardize) uses. This makes
+/// `StandardScaler::default().fit_transform(&x)` bit-for-bit identical to
 /// `standardize(&x, StandardizationAxis::Column)` on a 2-D array
 ///
 /// # Deviations from scikit-learn
 ///
-/// - Non-finite input is rejected up front with [`Error::NonFinite`]; scikit-learn's scaler
-///   instead ignores `NaN` during `fit` and passes it through `transform`. Impute or drop
-///   missing values before scaling
-/// - `mean_` / `var_` / `scale_` are computed and kept even when `with_mean` / `with_std` are
-///   `false` (scikit-learn sets the unused ones to `None`); the flags decide only what
-///   [`transform`](Self::transform) applies, so the statistics stay available for inspection
+/// - This scaler rejects non-finite input up front with [`Error::NonFinite`]. scikit-learn's
+///   scaler instead ignores `NaN` during `fit` and passes it through `transform`. Impute or
+///   drop missing values before scaling
+/// - This scaler computes and keeps `mean_`, `var_`, and `scale_` even when `with_mean` or
+///   `with_std` is `false` (scikit-learn sets the unused ones to `None`). The flags decide
+///   only what [`transform`](Self::transform) applies, so the statistics stay available for
+///   inspection
 ///
 /// # Examples
 ///
@@ -56,7 +57,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 ///
 /// assert_eq!(z_train.dim(), (3, 2));
 /// assert_eq!(z_test.dim(), (1, 2));
-/// // The test row is scaled by the TRAINING mean/std, not its own
+/// // The scaler scales the test row by the TRAINING mean and std, not its own
 /// assert!((z_test[[0, 0]] - 2.449489742783178).abs() < 1e-12);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,8 +154,8 @@ impl StandardScaler {
 
     /// Fits the scaler, computing and storing each feature's mean and standard deviation
     ///
-    /// Any statistics from a previous fit are discarded. Call this on the training matrix only -
-    /// fitting on the full dataset before splitting leaks test-set information into the
+    /// This discards any statistics from a previous fit. Call this on the training matrix only.
+    /// Fitting on the full dataset before splitting leaks test-set information into the
     /// transform
     ///
     /// # Parameters
@@ -172,9 +173,8 @@ impl StandardScaler {
     ///
     /// # Performance
     ///
-    /// Each feature is folded independently in row order, parallelized across features above
-    /// the calibrated scan gate (see `crate::parallel_gates`), so the statistics never depend
-    /// on the thread count
+    /// One Welford fold per feature, parallelized across features above the calibrated scan
+    /// gate (see `crate::parallel_gates`), so the statistics never depend on the thread count
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
@@ -188,11 +188,11 @@ impl StandardScaler {
 
     /// Folds another batch of samples into the existing statistics
     ///
-    /// Merges the batch's per-feature moments into the stored ones (Chan et al.), so a scaler
-    /// can be fitted over data that never exists in memory at once - streaming batches, or one
-    /// chunk of a file at a time. On an unfitted scaler this behaves exactly like
-    /// [`fit`](Self::fit); the mean and variance after `n` batches equal what a single `fit`
-    /// over their concatenation would produce, up to floating-point rounding
+    /// Merges the batch's per-feature moments into the stored ones (Chan et al.). This lets a
+    /// scaler fit over data that never exists in memory at once. The data can arrive as
+    /// streaming batches, or one chunk of a file at a time. On an unfitted scaler this behaves
+    /// exactly like [`fit`](Self::fit). The mean and variance after `n` batches equal what a
+    /// single `fit` over their concatenation would produce, up to floating-point rounding
     ///
     /// # Parameters
     ///
@@ -205,22 +205,9 @@ impl StandardScaler {
     /// # Errors
     ///
     /// - [`Error::EmptyInput`] - If `x` has no rows or no columns
-    /// - [`Error::DimensionMismatch`] - If `x` has a different feature count than the previous batches
+    /// - [`Error::DimensionMismatch`] - If `x` has a different feature count than the previous
+    ///   batches
     /// - [`Error::NonFinite`] - If `x` contains NaN or infinite values
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use ndarray::array;
-    /// use rustyml::utils::StandardScaler;
-    ///
-    /// let mut scaler = StandardScaler::new();
-    /// scaler.partial_fit(&array![[1.0], [2.0]]).unwrap();
-    /// scaler.partial_fit(&array![[3.0], [4.0]]).unwrap();
-    ///
-    /// assert_eq!(scaler.get_n_samples_seen(), 4);
-    /// assert!((scaler.get_mean().unwrap()[0] - 2.5).abs() < 1e-12);
-    /// ```
     pub fn partial_fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
@@ -250,8 +237,8 @@ impl StandardScaler {
     /// Standardizes `x` with the stored training statistics
     ///
     /// Applies `(x - mean) / scale` feature by feature, using the numbers learned at fit time
-    /// and never recomputing them from `x`. A single-row `x` is fine: it is scaled by the
-    /// training statistics, which is exactly what inference needs
+    /// and never recomputing them from `x`. A single-row `x` is fine. The training statistics
+    /// scale it, which is exactly what inference needs
     ///
     /// # Parameters
     ///
@@ -259,7 +246,7 @@ impl StandardScaler {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, Error>` - A new standardized matrix; `x` is not modified
+    /// - `Result<Array2<f64>, Error>` - A new standardized matrix. `x` is not modified
     ///
     /// # Errors
     ///
@@ -305,7 +292,7 @@ impl StandardScaler {
 
     /// Fits the scaler on `x` and returns the standardized `x`
     ///
-    /// Equivalent to [`fit`](Self::fit) followed by [`transform`](Self::transform); this is the
+    /// Equivalent to [`fit`](Self::fit) followed by [`transform`](Self::transform). This is the
     /// call for the training matrix, after which [`transform`](Self::transform) handles every
     /// other batch
     ///
@@ -315,7 +302,7 @@ impl StandardScaler {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, Error>` - A new standardized matrix; `x` is not modified
+    /// - `Result<Array2<f64>, Error>` - A new standardized matrix. `x` is not modified
     ///
     /// # Errors
     ///
@@ -331,10 +318,10 @@ impl StandardScaler {
 
     /// Maps standardized data back to the original feature space
     ///
-    /// Applies `x * scale + mean`, the exact inverse of [`transform`](Self::transform) - useful
-    /// for reading a model's outputs or a reconstruction back in the units the data arrived in.
-    /// A feature that was constant at fit time cannot be recovered from its zeros: it comes
-    /// back as its training mean
+    /// Applies `x * scale + mean`, the exact inverse of [`transform`](Self::transform). This is
+    /// useful for reading a model's outputs or a reconstruction back in the units the data
+    /// arrived in. A feature that was constant at fit time cannot be recovered from its zeros.
+    /// It comes back as its training mean
     ///
     /// # Parameters
     ///
@@ -342,7 +329,7 @@ impl StandardScaler {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, Error>` - A new matrix in the original units; `x` is not modified
+    /// - `Result<Array2<f64>, Error>` - A new matrix in the original units. `x` is not modified
     ///
     /// # Errors
     ///
@@ -411,7 +398,7 @@ impl StandardScaler {
 
 /// Computes one Welford accumulator per feature, folding each column over the rows of `x`
 ///
-/// Columns are independent, so the serial and parallel paths produce identical results - the
+/// Columns are independent, so the serial and parallel paths produce identical results. The
 /// gate only decides who does the work
 fn column_states(x: &ArrayView2<f64>) -> Vec<WelfordState> {
     let fold_lane = |lane: ArrayView1<f64>| {
@@ -453,7 +440,7 @@ mod tests {
         let mut scaler = StandardScaler::new();
         scaler.fit(&x_train).unwrap();
 
-        // Training mean 2, population std sqrt(2/3); a lone sample must map through those
+        // Training mean 2, population std sqrt(2/3), so a lone sample must map through those
         let z = scaler.transform(&array![[3.0]]).unwrap();
         let expected = (3.0 - 2.0) / (2.0f64 / 3.0).sqrt();
         assert!((z[[0, 0]] - expected).abs() < 1e-12);
@@ -462,7 +449,7 @@ mod tests {
         assert!(z[[0, 0]] > 1.0);
     }
 
-    /// `partial_fit` over two batches matches a single `fit` over their concatenation
+    /// `partial_fit` over 2 batches matches a single `fit` over their concatenation
     #[test]
     fn partial_fit_matches_single_fit() {
         let batch_a = array![[1.0, 10.0], [2.0, 20.0]];
@@ -518,7 +505,7 @@ mod tests {
         assert!(z.column(1).iter().all(|v| v.is_finite()));
     }
 
-    /// The `with_mean` / `with_std` flags switch off centering and scaling independently
+    /// The `with_mean` and `with_std` flags switch off centering and scaling independently
     #[test]
     fn flags_control_what_transform_applies() {
         let x = array![[1.0], [2.0], [3.0]];
@@ -565,7 +552,7 @@ mod tests {
         }
     }
 
-    /// Non-finite input is rejected before any statistics are computed
+    /// `fit` rejects non-finite input before computing any statistics
     #[test]
     fn non_finite_input_is_rejected() {
         let err = StandardScaler::new()

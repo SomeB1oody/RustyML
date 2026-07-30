@@ -2,17 +2,17 @@
 //!
 //! Brute-force neighbor search costs O(n) distance evaluations per query, so a full DBSCAN
 //! fit or a batch of KNN predictions is O(n^2). A kd-tree partitions the points with
-//! axis-aligned splits so that whole subtrees can be pruned, bringing the average query cost
-//! down to roughly O(log n) in low dimensions
+//! axis-aligned splits so that whole subtrees can be pruned. This brings the average query
+//! cost down to roughly O(log n) in low dimensions
 //!
 //! The tree is metric-agnostic: it works for any [`DistanceCalculationMetric`] variant
 //! (Euclidean, Manhattan, Minkowski). All comparisons happen in the metric's root-free
-//! "comparable" space (see [`DistanceCalculationMetric::comparable_distance`]), and pruning
-//! uses the per-axis lower bound `comparable_scalar(|q_a - split|)`, a valid lower bound on
-//! the comparable distance for every Minkowski metric (`p >= 1`)
+//! "comparable" space (see [`DistanceCalculationMetric::comparable_distance`]). Pruning
+//! uses the per-axis lower bound `comparable_scalar(|q_a - split|)`. This is a valid lower
+//! bound on the comparable distance for every Minkowski metric (`p >= 1`)
 //!
 //! kd-trees lose their pruning power as the dimensionality grows, so callers fall back to
-//! brute force above a small feature-count threshold; this module only provides the index
+//! brute force above a small feature-count threshold. This module only provides the index
 
 use crate::math::DistanceCalculationMetric;
 use ndarray::{Array2, ArrayView1, ArrayView2};
@@ -39,12 +39,14 @@ struct KdNode {
 
 /// A candidate neighbor ordered by `(comparable_distance, index)`
 ///
-/// The index tie-break makes the k-nearest result a total order, so the tree returns exactly
-/// the same set as a brute-force search using the same ordering, staying deterministic even
+/// The index tie-break makes the k-nearest result a total order. The tree then returns exactly
+/// the same set as a brute-force search using the same ordering. This stays deterministic even
 /// when several points are equidistant from the query
 #[derive(Debug, Clone, Copy)]
 struct Neighbor {
+    /// Distance to the query, in the metric's comparable (root-free) space
     cmp_dist: f64,
+    /// Row index of this point in the tree's owned points matrix
     idx: usize,
 }
 
@@ -61,20 +63,22 @@ impl PartialOrd for Neighbor {
 }
 impl Ord for Neighbor {
     fn cmp(&self, other: &Self) -> Ordering {
-        // `total_cmp` gives a total order on f64; distances here are finite and non-negative
+        // `total_cmp` gives a total order on f64. Distances here are finite and non-negative
         self.cmp_dist
             .total_cmp(&other.cmp_dist)
             .then(self.idx.cmp(&other.idx))
     }
 }
 
-/// A kd-tree over a set of points, owning a copy of the coordinates so it is self-contained
+/// A kd-tree over a set of points. It owns a copy of the coordinates, so it is self-contained
 /// (`Send + Sync`, serializable-by-rebuild) and free of self-referential borrows
 #[derive(Debug, Clone)]
 pub struct KdTree {
+    /// Distance metric used for every comparison in this tree
     metric: DistanceCalculationMetric,
     /// Owned copy of the points, indexed by original row index
     points: Array2<f64>,
+    /// Flat arena of tree nodes, indexed by node position
     nodes: Vec<KdNode>,
     /// Root node index, or [`NONE`] for an empty tree
     root: usize,
@@ -83,8 +87,8 @@ pub struct KdTree {
 impl KdTree {
     /// Builds a balanced kd-tree over `points` (rows are samples)
     ///
-    /// Construction is `O(n * d * log n)`: each level chooses the maximum-spread axis and splits
-    /// at the count-median (via `select_nth_unstable`), so the tree is balanced regardless of how
+    /// Construction is `O(n * d * log n)`. Each level chooses the maximum-spread axis and splits
+    /// at the count-median (via `select_nth_unstable`). The tree stays balanced regardless of how
     /// the coordinate values are distributed
     pub fn build(points: ArrayView2<f64>, metric: DistanceCalculationMetric) -> Self {
         let points = points.to_owned();
@@ -211,7 +215,7 @@ impl KdTree {
     /// Returns the `k` nearest points to `query` as `(index, comparable_distance)` pairs,
     /// sorted ascending by `(comparable_distance, index)`
     ///
-    /// Distances are returned in comparable space; convert with
+    /// Distances are returned in comparable space. Convert with
     /// [`DistanceCalculationMetric::distance_from_comparable`] when a true distance is needed
     pub fn k_nearest(&self, query: ArrayView1<f64>, k: usize) -> Vec<(usize, f64)> {
         let mut heap: BinaryHeap<Neighbor> = BinaryHeap::with_capacity(k.min(self.nodes.len()));
@@ -258,7 +262,8 @@ impl KdTree {
 
         self.knn_recurse(near, query, k, heap);
 
-        // Descend the far side only if its per-axis lower bound is within the current k-th distance (or the heap is not yet full)
+        // Descend the far side only if its per-axis lower bound is within the current k-th
+        // distance, or if the heap is not yet full
         let worst = if heap.len() < k {
             f64::INFINITY
         } else {
@@ -353,7 +358,7 @@ mod tests {
     }
 
     /// The kd-tree k-NN must return exactly the brute-force result under the `(distance, index)`
-    /// total order, for every metric, including ties and `k` larger than the dataset
+    /// total order. This holds for every metric, including ties and `k` larger than the dataset
     #[test]
     fn knn_matches_brute_force() {
         for (seed, &n) in [7_u64, 19, 53].iter().zip([1_usize, 12, 150].iter()) {

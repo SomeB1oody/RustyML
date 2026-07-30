@@ -11,7 +11,7 @@ use rustyml::machine_learning::{Node, NodeType};
 use rustyml::{clear_global_seed, set_global_seed};
 use rustyml::{error::Error, machine_learning::TreeError};
 
-// A tiny linearly-separable binary dataset; feature 0 is 0.x for class 0
+// A tiny linearly-separable binary dataset. Feature 0 is 0.x for class 0
 // and 1.x for class 1, so any default-param tree reaches zero training error
 fn linearly_separable_binary() -> (Array2<f64>, Array1<f64>) {
     let x = array![
@@ -46,7 +46,7 @@ fn test_constructor_default_params_cart_classifier() {
 }
 
 /// ID3 and C4.5 with is_classifier=false must each return InvalidInput
-/// (neither supports regression). One row per algorithm.
+/// (neither supports regression). 1 row per algorithm.
 #[test]
 fn test_constructor_id3_c45_regression_returns_invalid_input() {
     for algo in [Algorithm::ID3, Algorithm::C45] {
@@ -58,9 +58,8 @@ fn test_constructor_id3_c45_regression_returns_invalid_input() {
     }
 }
 
-/// Out-of-range min_samples_* arguments must each return InvalidParameter:
-/// min_samples_split = 1 (less than 2) and min_samples_leaf = 0. One row per
-/// (builder, bad value) pair.
+/// min_samples_split=1 (below the minimum of 2) and min_samples_leaf=0 must each
+/// return InvalidParameter. 1 row per (builder, bad value) pair
 #[test]
 fn test_constructor_min_samples_out_of_range() {
     // (label, bad value, which builder to call)
@@ -83,8 +82,8 @@ fn test_constructor_min_samples_out_of_range() {
     }
 }
 
-/// min_samples_leaf > min_samples_split is rejected at fit time (the two are set
-/// independently through the builder, so the cross-field constraint cannot be checked earlier)
+/// fit rejects min_samples_leaf > min_samples_split. The builder sets each independently, so
+/// fit cannot check this cross-field rule earlier
 #[test]
 fn test_min_samples_leaf_greater_than_split_rejected_at_fit() {
     let mut tree = DecisionTree::new(Algorithm::CART, true)
@@ -103,7 +102,7 @@ fn test_min_samples_leaf_greater_than_split_rejected_at_fit() {
 }
 
 /// Invalid `min_impurity_decrease` values (negative, NaN, +Inf) must each return
-/// InvalidParameter. One row per originally-tested scalar.
+/// InvalidParameter
 #[test]
 fn test_constructor_invalid_min_impurity_decrease() {
     for v in [-0.1_f64, f64::NAN, f64::INFINITY] {
@@ -118,7 +117,7 @@ fn test_constructor_invalid_min_impurity_decrease() {
     }
 }
 
-/// Custom params are stored and returned by the getters
+/// The getters return the custom params that the builder stored
 #[test]
 fn test_constructor_custom_params_stored_correctly() {
     let tree = DecisionTree::new(Algorithm::ID3, true)
@@ -373,7 +372,7 @@ fn test_cart_classifier_zero_training_error() {
     assert!(tree.get_root().is_some());
 
     let preds = tree.predict(&x).unwrap();
-    // Known true classes come from problem design; the tree must reproduce them exactly
+    // Known true classes come from problem design. The tree must reproduce them exactly
     for (&pred, &expected) in preds.iter().zip(y.iter()) {
         assert_abs_diff_eq!(pred, expected, epsilon = 1e-9);
     }
@@ -424,7 +423,7 @@ fn test_c45_classifier_zero_training_error() {
     }
 }
 
-// Three-class (multi-class) classification
+// 3-class (multi-class) classification
 
 /// CART on a clearly-separated 3-class dataset achieves zero training error
 #[test]
@@ -565,18 +564,18 @@ fn test_predict_proba_one_sum_and_argmax() {
     assert_abs_diff_eq!(argmax as f64, pred_one, epsilon = 1e-9);
 }
 
-/// On a pure leaf, predict_proba gives probability 1.0 for the true class and
-/// 0.0 for all others
+/// On a pure leaf, predict_proba assigns at least 0.5 probability to the true class
 #[test]
 fn test_predict_proba_pure_leaf_gives_one_hot() {
     let (x, y) = linearly_separable_binary();
     let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
-    // With full depth the leaf covering the class-0 region holds a [1.0, 0.0] distribution
+    // Each leaf here is pure, so the true class actually gets probability 1.0,
+    // though the assertions below only require it to be at least 0.5
     let probas = tree.predict_proba(&x).unwrap();
 
-    // Rows 0-2 are class 0; their probability for class 1 must be 0.0
+    // Rows 0-2 are class 0, so their probabilities must sum to 1.0 and class 0 must dominate
     for i in 0..3 {
         assert_abs_diff_eq!(probas[[i, 0]] + probas[[i, 1]], 1.0, epsilon = 1e-10);
         // Known true class is 0 -> class-0 probability >= 0.5
@@ -668,7 +667,7 @@ fn test_max_depth_1_cannot_perfectly_fit_xor() {
     tree_shallow.fit(&x_xor, &y_xor).unwrap();
     let preds_shallow = tree_shallow.predict(&x_xor).unwrap();
 
-    // For XOR at least one must be wrong with depth=1
+    // For XOR at least 1 must be wrong with depth=1
     let n_wrong_shallow: usize = preds_shallow
         .iter()
         .zip(y_xor.iter())
@@ -680,8 +679,8 @@ fn test_max_depth_1_cannot_perfectly_fit_xor() {
         n_wrong_shallow
     );
 
-    // Unlimited depth must do at least as well as depth-1 on XOR; a greedy CART
-    // cannot necessarily memorize XOR, since at the root no single-feature split reduces impurity
+    // Unlimited depth must do at least as well as depth-1 on XOR. A greedy CART
+    // cannot always memorize XOR, since at the root no single-feature split reduces impurity
     let mut tree_deep = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree_deep.fit(&x_xor, &y_xor).unwrap();
     let preds_deep = tree_deep.predict(&x_xor).unwrap();
@@ -697,7 +696,7 @@ fn test_max_depth_1_cannot_perfectly_fit_xor() {
 }
 
 /// max_depth=1 still achieves zero training error on linearly-separable data,
-/// where one split suffices
+/// where 1 split suffices
 #[test]
 fn test_max_depth_1_suffices_for_linearly_separable_data() {
     let (x, y) = linearly_separable_binary();
@@ -757,7 +756,7 @@ fn test_pure_regression_set_creates_pure_root_leaf() {
 /// single binary numeric threshold can resolve
 #[test]
 fn test_c45_categorical_multiway_split_zero_training_error() {
-    // Each sample has one categorical feature
+    // Each sample has 1 categorical feature
     let x_cat = array![
         [0.0_f64],
         [0.0_f64],
@@ -982,7 +981,7 @@ fn test_predict_outputs_are_valid_class_labels() {
     }
 }
 
-/// All three algorithms produce predictions in the label domain {0, 1, 2} for a
+/// All 3 algorithms produce predictions in the label domain {0, 1, 2} for a
 /// 3-class problem
 #[test]
 fn test_multiclass_predict_outputs_in_valid_domain() {
@@ -1012,7 +1011,7 @@ fn test_multiclass_predict_outputs_in_valid_domain() {
 // random_state: seeded tie-breaking among equally-scoring splits
 
 /// Data with a guaranteed split tie: features 0 and 1 are identical columns that
-/// perfectly separate the two classes, while feature 2 is uninformative (zero gain)
+/// perfectly separate the 2 classes, while feature 2 is uninformative (zero gain)
 fn tie_break_data() -> (Array2<f64>, Array1<f64>) {
     let x = array![
         [0.0, 0.0, 0.0],
@@ -1024,8 +1023,8 @@ fn tie_break_data() -> (Array2<f64>, Array1<f64>) {
     (x, y)
 }
 
-/// Fit a CART classifier on the tie data with the given `random_state` and return
-/// its tree-structure string (which encodes the chosen split feature at each node)
+/// Fit a CART classifier on the tie data with the given `random_state`. Return
+/// its tree-structure string, which encodes the chosen split feature at each node
 fn tie_break_structure(random_state: Option<u64>) -> String {
     let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     if let Some(seed) = random_state {
@@ -1036,7 +1035,7 @@ fn tie_break_structure(random_state: Option<u64>) -> String {
     tree.generate_tree_structure().unwrap()
 }
 
-/// Same explicit seed => identical tree, even when ties are broken randomly
+/// Same explicit seed -> identical tree, even when ties are broken randomly
 #[test]
 fn random_state_same_seed_is_reproducible() {
     assert_eq!(
@@ -1046,7 +1045,7 @@ fn random_state_same_seed_is_reproducible() {
     );
 }
 
-/// `random_state = None` (with no global seed) => deterministic tie-breaking, so
+/// `random_state = None` (with no global seed) -> deterministic tie-breaking, so
 /// repeated fits are identical
 #[test]
 fn random_state_none_is_deterministic() {
@@ -1058,7 +1057,7 @@ fn random_state_none_is_deterministic() {
 }
 
 /// Seeded tie-breaking varies the chosen split: across a range of seeds the root
-/// does not always split on the same one of the two tied features
+/// does not always split on the same one of the 2 tied features
 #[test]
 fn random_state_varies_tie_breaking() {
     let distinct: std::collections::HashSet<String> =
@@ -1073,8 +1072,8 @@ fn random_state_varies_tie_breaking() {
 // Fit-time pruning: these tests prove min_impurity_decrease / min_samples_leaf /
 // min_samples_split change the grown tree, inspected via public `get_root()`
 
-/// Number of edges from `node` to its deepest leaf (a leaf has depth 0; an
-/// internal node is 1 + the max over its children)
+/// Number of edges from `node` to its deepest leaf. A leaf has depth 0, and an
+/// internal node is 1 + the max over its children
 fn leaf_depth(node: &Node) -> usize {
     match &node.node_type {
         NodeType::Leaf { .. } => 0,
@@ -1105,7 +1104,7 @@ fn root_is_leaf(tree: &DecisionTree) -> bool {
 }
 
 /// min_impurity_decrease prunes the root split exactly at the Gini-decrease
-/// threshold (root decrease is 0.5; 0.5001 collapses to one leaf, 0.4999 splits)
+/// threshold. The root decrease is 0.5, so 0.5001 collapses to 1 leaf and 0.4999 splits
 #[test]
 fn test_min_impurity_decrease_prunes_root_split_at_half() {
     let (x, y) = linearly_separable_binary();
@@ -1150,10 +1149,8 @@ fn test_min_impurity_decrease_prunes_root_split_at_half() {
     }
 }
 
-/// min_samples_leaf constrains the split SEARCH (a split is
-/// only considered if it leaves at least min_samples_leaf samples in each branch), so an
-/// impurity-optimal split with a too-small child is skipped in favour of the best valid
-/// split rather than collapsing the node entirely
+/// min_samples_leaf constrains the split search rather than rejecting the final pick.
+/// A split is skipped only if it would leave too few samples in a branch
 #[test]
 fn test_min_samples_leaf_constrains_split_search() {
     let x = array![[0.0_f64], [1.0_f64], [2.0_f64], [3.0_f64]];
@@ -1170,9 +1167,9 @@ fn test_min_samples_leaf_constrains_split_search() {
     assert_abs_diff_eq!(pred_allow[0], 1.0, epsilon = 1e-9);
 
     // min_samples_leaf = 2: the impurity-optimal split (threshold 2.5) would leave a
-    // size-1 leaf, so it is NOT considered. The tree instead takes the best split whose
-    // children both have >= 2 samples (threshold 1.5) - it must not collapse to a single
-    // leaf, which would discard a usable split.
+    // size-1 leaf, so it is not considered. The tree instead takes the best split whose
+    // children both have >= 2 samples (threshold 1.5). It must not collapse to a single
+    // leaf, which would discard a usable split
     let mut tree_constrained = DecisionTree::new(Algorithm::CART, true)
         .unwrap()
         .with_min_samples_leaf(2)
@@ -1189,7 +1186,7 @@ fn test_min_samples_leaf_constrains_split_search() {
         }
         _ => panic!("root must be an internal split node"),
     }
-    // Both children honour min_samples_leaf=2: the left branch {x=0,1} is pure class 0
+    // Both children honor min_samples_leaf=2: the left branch {x=0,1} is pure class 0
     let pred_left = tree_constrained.predict(&array![[0.0_f64]]).unwrap();
     assert_abs_diff_eq!(pred_left[0], 0.0, epsilon = 1e-9);
 }
@@ -1262,7 +1259,7 @@ fn test_predict_proba_exact_impure_leaf_distribution() {
 // max_depth = Some(0): the root is forced to be an immediate leaf
 
 /// With max_depth = Some(0) no split is made and the root is a single leaf holding
-/// the global majority class, so predict returns that class for every input
+/// the global majority class. Predict returns that class for every input
 #[test]
 fn test_max_depth_zero_root_is_leaf_predicts_global_majority() {
     let x = array![
@@ -1272,7 +1269,7 @@ fn test_max_depth_zero_root_is_leaf_predicts_global_majority() {
         [1.0, 1.0],
         [1.1, 1.0],
     ];
-    // 3 class-0 and 2 class-1 => global majority is class 0
+    // 3 class-0 and 2 class-1 -> global majority is class 0
     let y = array![0.0_f64, 0.0, 0.0, 1.0, 1.0];
 
     let mut tree = DecisionTree::new(Algorithm::CART, true)
@@ -1361,7 +1358,7 @@ fn test_save_load_categorical_multiway_round_trip_identical_predictions() {
 
 // Global crate seed drives tie-breaking for random_state = None trees
 
-/// RAII guard that clears the thread-local global seed on drop, so a panic in the
+/// RAII guard that clears the thread-local global seed on drop. This way, a panic in the
 /// test body cannot leak a seeded global stream onto this thread
 struct GlobalSeedGuard;
 impl Drop for GlobalSeedGuard {
@@ -1371,7 +1368,7 @@ impl Drop for GlobalSeedGuard {
 }
 
 /// Fit a `random_state = None` CART tree on the tie data and return its structure
-/// string; tie-breaking derives from the thread-local global seed when one is set
+/// string. Tie-breaking derives from the thread-local global seed when one is set
 fn tie_break_structure_none() -> String {
     let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     let (x, y) = tie_break_data();
@@ -1379,7 +1376,7 @@ fn tie_break_structure_none() -> String {
     tree.generate_tree_structure().unwrap()
 }
 
-/// Re-seeding the global stream to the same value before each fit makes two
+/// Re-seeding the global stream to the same value before each fit makes 2
 /// `random_state = None` trees identical, proving the global seed drives tie-breaking
 #[test]
 fn global_seed_makes_none_tree_tie_breaking_reproducible() {
@@ -1400,13 +1397,10 @@ fn global_seed_makes_none_tree_tie_breaking_reproducible() {
     // _guard clears the global seed here (and on any panic above)
 }
 
-// min_samples_leaf must constrain the split SEARCH, not merely reject the final pick
+// min_samples_leaf must constrain the split search, not merely reject the final pick
 
-/// A high-impurity-reduction split that isolates a single sample must not crowd out a
-/// valid split whose children both satisfy min_samples_leaf. Regression: the
-/// variance-optimal split isolates the lone large value (x=5) into a 1-sample child;
-/// with min_samples_leaf=2 the tree must still make a valid split (e.g. at 3.5) rather
-/// than collapsing to a single constant-prediction leaf.
+/// A split that isolates 1 outlier must not crowd out a valid split whose children
+/// both satisfy min_samples_leaf, so the tree still splits instead of collapsing
 #[test]
 fn min_samples_leaf_does_not_suppress_a_valid_numeric_split() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
@@ -1424,16 +1418,14 @@ fn min_samples_leaf_does_not_suppress_a_valid_numeric_split() {
         "root must be a split node; min_samples_leaf wrongly suppressed all numeric splits"
     );
 
-    // A correct tree places x=1 in the low-value region (mean 10); the buggy single-leaf
+    // A correct tree places x=1 in the low-value region (mean 10). The buggy single-leaf
     // tree predicts the global mean (208) for every input
     let pred_low = tree.predict(&array![[1.0]]).unwrap()[0];
     assert_abs_diff_eq!(pred_low, 10.0, epsilon = 1.0);
 }
 
-/// A multi-way categorical split must not be discarded just because one rare category
-/// has fewer than min_samples_leaf samples. Feature 0 is categorical: category 0 -> class
-/// 0 (x3), category 1 -> class 1 (x3), category 2 -> class 0 (x1, rare). With
-/// min_samples_leaf=2 the rare category must not throw away the whole split.
+/// A multi-way categorical split must not be dropped just because 1 rare category
+/// has fewer samples than min_samples_leaf
 #[test]
 fn min_samples_leaf_does_not_suppress_a_valid_categorical_split() {
     let x = array![[0.0], [0.0], [0.0], [1.0], [1.0], [1.0], [2.0]];
@@ -1451,7 +1443,7 @@ fn min_samples_leaf_does_not_suppress_a_valid_categorical_split() {
         "root must be a categorical split node; the rare category wrongly suppressed it"
     );
 
-    // Category 1 is pure class 1; a single-leaf fallback would predict the global
+    // Category 1 is pure class 1. A single-leaf fallback would predict the global
     // majority (class 0) and get this wrong
     let pred = tree.predict(&array![[1.0]]).unwrap()[0];
     assert_abs_diff_eq!(pred, 1.0, epsilon = 1e-9);
@@ -1460,10 +1452,7 @@ fn min_samples_leaf_does_not_suppress_a_valid_categorical_split() {
 // min_impurity_decrease must use the N_t/N_total node-weight scaling
 
 /// The node-local weighted impurity decrease is scaled by N_t/N_total before
-/// comparing to min_impurity_decrease. Regression tree: the root (N=8) splits at 4.5; the
-/// left child {x=1..4} has a local impurity decrease of 25, but scaled by 4/8 it is 12.5.
-/// With min_impurity_decrease = 20, the scaled rule rejects the left child's split (12.5 < 20)
-/// whereas the unscaled rule would accept it (25 >= 20), so x=1 and x=4 must share one leaf.
+/// comparing to min_impurity_decrease, matching scikit-learn
 #[test]
 fn min_impurity_decrease_uses_sklearn_node_weight_scaling() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0]];
@@ -1474,13 +1463,15 @@ fn min_impurity_decrease_uses_sklearn_node_weight_scaling() {
         .unwrap();
     tree.fit(&x, &y).unwrap();
 
-    // Left child {1,2,3,4} must NOT split: x=1 and x=4 fall in the same leaf (mean 5)
+    // Root (N=8) splits at 4.5. The left child {x=1..4} has a raw impurity decrease of 25,
+    // but scaled by 4/8 it is 12.5, so threshold 20.0 rejects it. The unscaled rule would
+    // have accepted 25 >= 20, so x=1 and x=4 must share 1 leaf (mean 5)
     let p1 = tree.predict(&array![[1.0]]).unwrap()[0];
     let p4 = tree.predict(&array![[4.0]]).unwrap()[0];
     assert_abs_diff_eq!(p1, 5.0, epsilon = 1e-9);
     assert_abs_diff_eq!(p4, 5.0, epsilon = 1e-9);
 
-    // The root split DID happen: the right group predicts 100
+    // The root split still happens, unlike the rejected left-child split above
     let p8 = tree.predict(&array![[8.0]]).unwrap()[0];
     assert_abs_diff_eq!(p8, 100.0, epsilon = 1e-9);
 }

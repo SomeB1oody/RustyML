@@ -52,8 +52,8 @@ use std::io::{BufWriter, Write};
 /// // Display model structure
 /// model.summary();
 ///
-/// // Train the model; the returned History holds one loss per epoch, each measured while that
-/// // epoch ran rather than after it
+/// // Train the model. History holds 1 loss value per epoch, each measured while that
+/// // epoch ran, rather than after it
 /// let history = model.fit(&x, &y, 10).unwrap();
 /// println!("Per-epoch loss: {:?}", history.loss());
 ///
@@ -90,7 +90,8 @@ pub struct Sequential {
     optimizer: Option<Box<dyn Optimizer>>,
     /// Loss function used to compute training loss
     loss: Option<Box<dyn Loss>>,
-    /// Optional seed governing the fit-time batch shuffle; falls back to the global seed or entropy. See crate::random
+    /// Optional seed governing the fit-time batch shuffle. Falls back to the global seed or
+    /// entropy. See crate::random
     seed: Option<u64>,
 }
 
@@ -102,11 +103,12 @@ impl Default for Sequential {
 
 /// Global L2 norm of every gradient currently stored across `layers`, for clip-by-global-norm
 ///
-/// Squared terms accumulate in f64 to limit round-off when summing across many parameters;
-/// each tensor folds as deterministic blocks (the rayon path at or above the square-sum gate
-/// is a performance switch that gives the same result), and the per-tensor totals merge
-/// in the fixed (layer, parameter) order, so rerunning on the same machine gives the same
-/// result. Layers without gradients contribute nothing; with no gradients at all the norm is 0.0
+/// Squared terms accumulate in f64 to limit round-off when summing across many parameters.
+/// Each tensor folds as deterministic blocks. The rayon path at or above the square-sum gate
+/// is a performance switch, and it gives the same result as the serial path. The per-tensor
+/// totals merge in the fixed (layer, parameter) order, so rerunning on the same machine gives
+/// the same result. Layers without gradients contribute nothing. With no gradients at all, the
+/// norm is 0.0
 fn global_grad_norm(layers: &mut [Box<dyn Layer>]) -> f32 {
     let mut sum_sq = 0.0_f64;
     for layer in layers.iter_mut() {
@@ -123,33 +125,33 @@ fn global_grad_norm(layers: &mut [Box<dyn Layer>]) -> f32 {
     sum_sq.sqrt() as f32
 }
 
-/// The per-epoch training loss recorded by [`Sequential::fit`] and
-/// [`Sequential::fit_with_batches`]
+/// The per-epoch training loss that [`Sequential::fit`] and [`Sequential::fit_with_batches`]
+/// record
 ///
-/// Keras' `History` in the shape this crate can fill today: one entry per epoch, in epoch order,
-/// so `loss()[e]` is epoch `e`'s loss and `loss().len()` is the number of epochs that actually
-/// ran. Training for zero epochs yields an empty slice
+/// This is Keras' `History`, in the shape this crate can fill today. It holds 1 entry per
+/// epoch, in epoch order, so `loss()[e]` is epoch `e`'s loss. `loss().len()` is the number of
+/// epochs that actually ran. Training for 0 epochs yields an empty slice
 ///
 /// # What the number means
 ///
 /// Each entry is the mean per-sample loss **measured during** the epoch, not after it. Every
-/// batch contributes the loss from the forward pass that preceded that batch's own weight update,
-/// so the value describes weights the model held while the epoch ran, and never the weights the
-/// epoch ends with. Read the final entry as the trained model's loss and you will be wrong in
-/// either direction: **above** the truth while training converges, because the epoch's own updates
-/// improved on the weights it measured, and **below** it once the step size starts overshooting
-/// and those updates make things worse. [`evaluate`](Sequential::evaluate) is the call that
-/// answers "how good is the model I am holding". This is Keras' convention, not an accident of
-/// the loop
+/// batch contributes the loss from the forward pass that preceded that batch's own weight
+/// update. The value therefore describes the weights the model held while the epoch ran, never
+/// the weights the epoch ends with. Read the final entry as the trained model's loss, and you
+/// will be wrong in either direction. It reads **above** the truth while training converges,
+/// because the epoch's own updates improved on the weights it measured. It reads **below** the
+/// truth once the step size starts overshooting and those updates make things worse.
+/// [`evaluate`](Sequential::evaluate) is the call that scores the weights the model currently
+/// holds. This matches Keras' convention for `History`
 ///
-/// Batches contribute in proportion to their sample count, so the short trailing batch that
-/// [`fit_with_batches`](Sequential::fit_with_batches) produces when `batch_size` does not divide
-/// the dataset pulls the epoch mean less than a full batch does. That makes the entry exactly the
-/// dataset-wide mean per-sample loss and matches Keras, whose loss metric accumulates each batch
-/// with `sample_weight = batch_size`; a plain mean over batches would not
+/// Batches contribute in proportion to their sample count. So the short trailing batch that
+/// [`fit_with_batches`](Sequential::fit_with_batches) produces, when `batch_size` does not
+/// divide the dataset, pulls the epoch mean less than a full batch does. That makes the entry
+/// exactly the dataset-wide mean per-sample loss, matching Keras. Keras' loss metric accumulates
+/// each batch with `sample_weight = batch_size`, rather than taking a plain mean over batches
 #[derive(Debug, Clone, PartialEq)]
 pub struct History {
-    /// One loss per epoch, in epoch order
+    /// 1 loss value per epoch, in epoch order
     loss: Vec<f32>,
 }
 
@@ -158,7 +160,7 @@ impl History {
     ///
     /// # Returns
     ///
-    /// - `&[f32]` - One entry per epoch that ran; empty if `epochs` was `0`
+    /// - `&[f32]` - 1 entry per epoch that ran (empty if `epochs` was `0`)
     pub fn loss(&self) -> &[f32] {
         &self.loss
     }
@@ -181,7 +183,7 @@ impl Sequential {
 
     /// Sets the seed governing the fit-time batch shuffle
     ///
-    /// Controls only the data shuffling order used by `fit_with_batches`; it does not
+    /// Controls only the data shuffling order used by `fit_with_batches`. It does not
     /// reinitialize or otherwise touch the model's layers. A fixed seed makes the per-epoch
     /// shuffle reproducible
     ///
@@ -232,7 +234,7 @@ impl Sequential {
     /// Creates a new empty Sequential model with the fit-time shuffle seed preset
     ///
     /// Equivalent to `Sequential::new()` followed by `set_seed(seed)`. The seed only governs
-    /// the per-epoch batch shuffle used by `fit_with_batches`; see crate::random
+    /// the per-epoch batch shuffle used by `fit_with_batches`. See crate::random
     ///
     /// # Parameters
     ///
@@ -302,11 +304,11 @@ impl Sequential {
         self.validate_evaluation_inputs(x, y)
     }
 
-    /// Validates the model state and input data for a loss computation
+    /// Validates the model state and input data for computing a loss
     ///
     /// Everything [`validate_training_inputs`](Self::validate_training_inputs) checks except the
-    /// optimizer, which only a parameter update needs: [`evaluate`](Self::evaluate) runs on a
-    /// model that has a loss but never has to step
+    /// optimizer, which only a parameter update needs. [`evaluate`](Self::evaluate) runs on a
+    /// model that has a loss, but it never has to step
     ///
     /// # Parameters
     ///
@@ -326,8 +328,8 @@ impl Sequential {
             return Err(Error::NeuralNetwork(NnError::EmptyModel));
         }
 
-        // A rank-0 tensor holds one element, so `is_empty` is false and the batch-axis index
-        // below would panic; reject it before then
+        // A rank-0 tensor holds 1 element, so `is_empty` is false and the batch-axis index
+        // below would panic. Reject it before then
         if x.ndim() == 0 || y.ndim() == 0 {
             return Err(Error::invalid_input(
                 "input tensors must have a leading batch axis, but a rank-0 tensor was supplied",
@@ -347,16 +349,17 @@ impl Sequential {
         Ok(())
     }
 
-    /// Trains on a single batch: one forward pass, one gradient step
+    /// Trains on a single batch: 1 forward pass, 1 gradient step
     ///
-    /// The unit [`fit`](Self::fit) and [`fit_with_batches`](Self::fit_with_batches) are built
-    /// from, public so a custom loop can own the epoch structure - curriculum ordering, a
-    /// per-step schedule, an early-stopping probe between steps - without reimplementing the
-    /// forward / loss / backward / clip / update sequencing. Keras calls this `train_on_batch`
+    /// [`fit`](Self::fit) and [`fit_with_batches`](Self::fit_with_batches) build on this unit.
+    /// It is public so a custom loop can own the epoch structure: curriculum ordering, a
+    /// per-step schedule, or an early-stopping probe between steps. This avoids reimplementing
+    /// the forward, loss, backward, clip, and update sequencing. Keras calls this
+    /// `train_on_batch`
     ///
-    /// The whole of `x` is the batch; nothing is split or shuffled. Mode-dependent layers run in
+    /// The whole of `x` is the batch. Nothing is split or shuffled. Mode-dependent layers run in
     /// **training** mode, so dropout samples a fresh mask and batch normalization updates its
-    /// running statistics - on such a model the returned loss is not comparable with
+    /// running statistics. On such a model, the returned loss is not comparable with
     /// [`evaluate`](Self::evaluate)'s
     ///
     /// # Parameters
@@ -372,10 +375,11 @@ impl Sequential {
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the optimizer or loss function is not specified
+    /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the optimizer or loss function is
+    ///   not specified
     /// - `Error::NeuralNetwork(NnError::EmptyModel)` - If the model has no layers
-    /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::DimensionMismatch` - If the tensors are
-    ///   empty, rank-0, or disagree on the batch size
+    /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::DimensionMismatch` - If the
+    ///   tensors are empty, rank-0, or disagree on the batch size
     /// - `Error::Computation` - If a layer fails during forward or backward pass
     pub fn train_batch(&mut self, x: &Tensor, y: &Tensor) -> Result<f32, Error> {
         // The unwraps below rest on this: it rejects a missing optimizer, a missing loss and an
@@ -406,7 +410,7 @@ impl Sequential {
             optimizer.step();
         }
 
-        // run every layer's backward so each stashes its gradients
+        // Run every layer's backward so each stashes its gradients
         for layer in self.layers.iter_mut().rev() {
             grad = layer.backward(&grad)?;
         }
@@ -450,28 +454,30 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// - `Result<History, Error>` - One loss per epoch, in epoch order, or an error
+    /// - `Result<History, Error>` - 1 loss value per epoch, in epoch order, or an error
     ///
     /// # Notes
     ///
-    /// Each epoch trains on the entire dataset as a single full-batch gradient step (there is only
-    /// one batch, so no shuffling happens and the fit-time seed is unused). For mini-batch training
-    /// that splits the data into fixed-size batches and reshuffles every epoch, use
+    /// Each epoch trains on the entire dataset as a single full-batch gradient step. There is
+    /// only 1 batch, so no shuffling happens and the fit-time seed is unused. For mini-batch
+    /// training that splits the data into fixed-size batches and reshuffles every epoch, use
     /// [`fit_with_batches`](Self::fit_with_batches)
     ///
-    /// Each epoch's loss is measured before that epoch's own update, so the last entry describes
-    /// the weights going *into* the final step, not the trained model - see [`History`]
+    /// Each epoch's loss is measured before that epoch's own update. So the last entry
+    /// describes the weights going *into* the final step, not the trained model. See
+    /// [`History`]
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the optimizer or loss function is not specified
+    /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the optimizer or loss function is
+    ///   not specified
     /// - `Error::NeuralNetwork(NnError::EmptyModel)` - If the model has no layers
-    /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::DimensionMismatch` - If inputs are
-    ///   empty, rank-0, or batch sizes disagree
+    /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::DimensionMismatch` - If inputs
+    ///   are empty, rank-0, or batch sizes disagree
     /// - `Error::Computation` - If a layer fails during forward or backward pass
     pub fn fit(&mut self, x: &Tensor, y: &Tensor, epochs: u32) -> Result<History, Error> {
-        // Validate up front so a broken model or mismatched data fails before any epoch runs -
-        // with `epochs == 0` the per-batch validation inside `train_batch` never happens
+        // Validate up front so a broken model or mismatched data fails before any epoch runs.
+        // With `epochs == 0`, the per-batch validation inside `train_batch` never happens
         self.validate_training_inputs(x, y)?;
 
         // Create progress bar for training epochs
@@ -484,7 +490,7 @@ impl Sequential {
         let mut loss = Vec::new();
 
         for _ in 0..epochs {
-            // Train on the entire dataset as one batch
+            // Train on the entire dataset as 1 batch
             let epoch_loss = self.train_batch(x, y)?;
             loss.push(epoch_loss);
 
@@ -517,23 +523,25 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// - `Result<History, Error>` - One loss per epoch, in epoch order, or an error
+    /// - `Result<History, Error>` - 1 loss value per epoch, in epoch order, or an error
     ///
     /// # Notes
     ///
-    /// The sample order is reshuffled at the start of every epoch; seed it via
+    /// The sample order is reshuffled at the start of every epoch. Seed it via
     /// [`set_seed`](Self::set_seed) / [`new_with_seed`](Self::new_with_seed) for a reproducible
     /// shuffle. To train on the whole dataset as a single full-batch gradient step per epoch
     /// instead (no batching, no shuffling), use [`fit`](Self::fit)
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the optimizer or loss function is not specified
+    /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the optimizer or loss function is
+    ///   not specified
     /// - `Error::NeuralNetwork(NnError::EmptyModel)` - If the model has no layers
-    /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::DimensionMismatch` - If inputs are
-    ///   empty, rank-0, or batch sizes disagree
-    /// - `Error::InvalidParameter` - If `batch_size` is zero or larger than the dataset
-    /// - `Error::Computation` - If a layer fails during forward or backward pass, or a batch tensor cannot be built
+    /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::DimensionMismatch` - If inputs
+    ///   are empty, rank-0, or batch sizes disagree
+    /// - `Error::InvalidParameter` - If `batch_size` is 0 or larger than the dataset
+    /// - `Error::Computation` - If a layer fails during forward or backward pass, or a batch
+    ///   tensor cannot be built
     pub fn fit_with_batches(
         &mut self,
         x: &Tensor,
@@ -573,7 +581,7 @@ impl Sequential {
         // Create sample indices for shuffling
         let mut indices: Vec<usize> = (0..n_samples).collect();
 
-        // Seed the per-epoch shuffle once; `None` consults the thread-local global seed
+        // Seed the per-epoch shuffle once. `None` consults the thread-local global seed
         let mut shuffle_rng = crate::random::make_rng(self.seed);
 
         #[cfg(feature = "show_progress")]
@@ -590,15 +598,16 @@ impl Sequential {
 
         let mut loss = Vec::new();
 
-        // Shuffle each epoch, then process fixed-size batches; only the progress-bar bookkeeping
-        // is gated on `show_progress`, the shuffle/chunk/train logic is shared
+        // Shuffle each epoch, then process fixed-size batches. Only the progress-bar bookkeeping
+        // is gated on `show_progress`. The shuffle, chunk, and train logic is shared
         for epoch in 0..epochs {
             indices.shuffle(&mut shuffle_rng);
 
-            // Each batch counts for as many samples as it holds rather than one vote each, so the
+            // Each batch counts for as many samples as it holds, rather than 1 vote each. So the
             // short trailing batch left when `batch_size` does not divide the dataset pulls the
-            // epoch figure less than a full batch: that makes it exactly the dataset-wide mean
-            // per-sample loss, and is what Keras' loss metric does (`sample_weight = batch_size`).
+            // epoch figure less than a full batch does. That makes it exactly the dataset-wide
+            // mean per-sample loss, which is what Keras' loss metric does
+            // (`sample_weight = batch_size`).
             // The running sum is f64 because an epoch can hold many thousands of batches
             let (mut weighted_loss, mut samples_seen) = (0.0_f64, 0_usize);
 
@@ -637,17 +646,18 @@ impl Sequential {
 
     /// Computes the loss on data without training on it
     ///
-    /// Keras' `evaluate`: one inference-mode forward pass over the whole of `x`, scored with the
-    /// compiled loss. Nothing is updated - no gradients, no parameters, no batch-normalization
-    /// running statistics - which is what a validation pass, an early-stopping test or a
+    /// Keras' `evaluate`: 1 inference-mode forward pass over the whole of `x`, scored with the
+    /// compiled loss. Nothing is updated: no gradients, no parameters, and no batch-normalization
+    /// running statistics. This is what a validation pass, an early-stopping test, or a
     /// checkpoint-selection rule needs. It borrows `&self`, so it can score a model between
-    /// training steps without disturbing it, and it draws from no RNG, so it cannot perturb the
-    /// shuffle stream [`fit_with_batches`](Self::fit_with_batches) depends on
+    /// training steps without disturbing it. It also draws from no RNG, so it cannot perturb
+    /// the shuffle stream that [`fit_with_batches`](Self::fit_with_batches) depends on
     ///
     /// Layers behave exactly as in [`predict`](Self::predict): dropout and noise layers are the
-    /// identity and batch normalization reads its running statistics. On a model containing one,
-    /// this number is therefore *not* the one [`fit`](Self::fit) records for the same data -
-    /// training-mode dropout inflates that one - and this is the honest estimate of the two
+    /// identity, and batch normalization reads its running statistics. On a model that contains
+    /// one of these layers, this number is therefore *not* the number [`fit`](Self::fit) records
+    /// for the same data. Training-mode dropout inflates that number. `evaluate`'s number is the
+    /// more accurate of the 2
     ///
     /// # Parameters
     ///
@@ -677,7 +687,7 @@ impl Sequential {
 
     /// Generates predictions for the input data
     ///
-    /// Only performs a forward pass without any training. To score those predictions against
+    /// Runs only a forward pass, without any training. To score those predictions against
     /// targets with the compiled loss, use [`evaluate`](Self::evaluate)
     ///
     /// # Parameters
@@ -762,7 +772,7 @@ impl Sequential {
             let out_shape = layer.output_shape();
 
             // Exhaustive match so adding a TrainingParameters variant forces a compile error
-            // instead of silently being counted as zero
+            // instead of silently being counted as 0
             let param_count_num = match layer.param_count() {
                 TrainingParameters::Trainable(count) => {
                     trainable_param_count += count;
@@ -795,7 +805,7 @@ impl Sequential {
             " Total params: {} ({} B)\n",
             total_params,
             total_params * 4
-        )); // Using f32, each parameter is 4 bytes
+        )); // f32 stores each parameter in 4 bytes
         output.push_str(&format!(
             " Trainable params: {} ({} B)\n",
             trainable_param_count,
@@ -831,8 +841,8 @@ impl Sequential {
     ///
     /// Serializes the model structure including layer types, configurations,
     /// and all trainable parameters (weights and biases) to a compact binary format using
-    /// postcard. Note that the optimizer and loss function are not saved and must be
-    /// reconfigured after loading
+    /// postcard. This does not save the optimizer or loss function. Reconfigure them with
+    /// `compile` after loading
     ///
     /// # Parameters
     ///
@@ -885,7 +895,7 @@ impl Sequential {
         // Write the serialized bytes to file
         writer.write_all(&bytes)?;
 
-        // Ensure all data is written to disk
+        // Make sure all data is written to disk
         writer.flush()?;
 
         Ok(())
@@ -907,16 +917,17 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// - `crate::error::RustymlResult<()>` - Ok if weights are loaded, or an IO/deserialization error
+    /// - `crate::error::RustymlResult<()>` - Ok if weights are loaded, or an
+    ///   IO/deserialization error
     ///
     /// # Errors
     ///
     /// - `Error::Io(IoError::Std)` - File not found or read operation failed
-    /// - `Error::Io(IoError::UnsupportedModelFormat)` - The file is not a RustyML model, or was
-    ///   written by a release whose on-disk format version differs from this one
+    /// - `Error::Io(IoError::UnsupportedModelFormat)` - The file is not a RustyML model, or a
+    ///   release whose on-disk format version differs from this one wrote it
     /// - `Error::Io(IoError::Serialization)` - Deserialization failed
-    /// - `Error::Io(IoError::ModelStructureMismatch)` - The current model's structure (layer count, a layer
-    ///   type at some position, or a weight shape) does not match the saved model
+    /// - `Error::Io(IoError::ModelStructureMismatch)` - The current model's structure (layer
+    ///   count, a layer type at some position, or a weight shape) does not match the saved model
     pub fn load_from_path(
         &mut self,
         path: impl AsRef<std::path::Path>,
@@ -924,10 +935,10 @@ impl Sequential {
         // Read the whole file into memory
         let bytes = std::fs::read(path)?;
 
-        // Validate the header before the body. postcard is sequential and carries no field names,
-        // so a file from an incompatible release otherwise runs off the end of some weight array
-        // and reports an opaque deserialization failure instead of naming the real problem - and
-        // where the extents happen to coincide it does not fail at all
+        // Validate the header before the body. postcard is sequential and carries no field names.
+        // So a file from an incompatible release otherwise runs off the end of some weight
+        // array. It then reports an opaque deserialization failure instead of naming the real
+        // problem. Where the extents happen to coincide, it does not fail at all
         let (magic, format_version): (u32, u32) = postcard::take_from_bytes(&bytes)
             .map(|(header, _rest)| header)
             .map_err(|_| {

@@ -4,8 +4,8 @@
 //! non-zero `weight_decay` enters the update. Classic [`Adam`](super::adam::Adam) folds an L2
 //! penalty into the gradient (coupled), while [`AdamW`](super::adam_w::AdamW) shrinks the
 //! parameter directly (decoupled). That single difference is the `decoupled` flag. Everything else
-//! (hyperparameter validation, clip-norm, the bias-correction timestep, and the lazily-sized
-//! per-parameter moment buffers) lives here once
+//! (hyperparameter validation, clip-by-global-norm clipping, the bias-correction timestep, and the
+//! lazily-sized per-parameter moment buffers) lives here once
 
 use crate::error::Error;
 use crate::neural_network::optimizers::kernels;
@@ -18,15 +18,17 @@ use crate::neural_network::traits::Layer;
 /// Adam's per-parameter first/second moment buffers, sized lazily on first use
 #[derive(Debug, Clone, Default)]
 struct AdamParamState {
+    /// First-moment (mean) estimate
     m: Vec<f32>,
+    /// Second-moment (uncentered variance) estimate
     v: Vec<f32>,
 }
 
 /// Shared Adam-family optimizer state
 ///
-/// `decoupled` selects the weight-decay flavor: `true` is AdamW (decoupled decay, applied directly
-/// to the parameter), `false` is classic Adam (coupled L2 decay, folded into the gradient). With
-/// `weight_decay == 0.0` the flag has no effect and both reduce to plain Adam
+/// `decoupled` selects the weight-decay flavor. `true` is AdamW (decoupled decay, applied
+/// directly to the parameter). `false` is classic Adam (coupled L2 decay, folded into the
+/// gradient). With `weight_decay == 0.0` the flag has no effect and both reduce to plain Adam
 #[derive(Debug)]
 pub(super) struct AdamCore {
     /// Learning rate controlling the size of parameter updates
@@ -41,11 +43,11 @@ pub(super) struct AdamCore {
     t: u64,
     /// Per-parameter moment buffers, indexed by the order layers yield parameters each step
     states: Vec<AdamParamState>,
-    /// Position within `states` for the parameter currently being updated; reset each `step`
+    /// Position within `states` for the parameter currently being updated. Reset each `step`
     cursor: usize,
-    /// Optional clip-by-global-norm threshold; `None` disables gradient clipping
+    /// Optional clip-by-global-norm threshold. `None` disables gradient clipping
     global_clipnorm: Option<f32>,
-    /// Weight decay coefficient; `0.0` disables it
+    /// Weight decay coefficient. `0.0` disables it
     weight_decay: f32,
     /// `true` for AdamW (decoupled decay), `false` for classic Adam (coupled L2 decay)
     decoupled: bool,
@@ -105,13 +107,12 @@ impl AdamCore {
 
     /// Advances the bias-correction timestep once per batch and rewinds the parameter cursor
     pub(super) fn step(&mut self) {
-        // Advance the timestep once per batch
+        // Clamp at i32::MAX so the bias-correction power (`t as i32`) stays valid
         self.t = self.t.saturating_add(1).min(i32::MAX as u64);
-        // Rewind to the first parameter
         self.cursor = 0;
     }
 
-    /// Updates one layer's parameters, applying weight decay per the `decoupled` mode
+    /// Updates a layer's parameters, applying weight decay per the `decoupled` mode
     pub(super) fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32) {
         for pg in layer.parameters() {
             if self.cursor >= self.states.len() {
@@ -129,7 +130,7 @@ impl AdamCore {
             let state = &mut self.states[self.cursor];
             let grad = kernels::scaled_grad(pg.grad, grad_scale);
 
-            // Weight decay applies to weight tensors only; biases and normalization gamma/beta
+            // Weight decay applies to weight tensors only. Biases and normalization gamma/beta
             // carry `decays = false` and are never decayed
             if pg.decays && self.weight_decay != 0.0 {
                 if self.decoupled {

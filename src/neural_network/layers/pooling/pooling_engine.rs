@@ -1,24 +1,27 @@
 //! Dimension-generic pooling engine shared by every pooling layer
 //!
-//! All pooling layers (max/average, windowed/global, 1D/2D/3D) reduce to 4 functions here. The
-//! spatial rank is derived at run time from `input.ndim() - 2`, so a single implementation serves
-//! every dimensionality. The only per-layer difference is the [`PoolKind`] and how the public
-//! `pool_size`/`strides` tuples are flattened into slices
+//! All pooling layers (max or average, windowed or global, at rank 1, 2, or 3) reduce to 4
+//! functions here. The spatial rank comes from `input.ndim() - 2` at run time, so a single
+//! implementation serves every dimensionality. The only per-layer difference is the [`PoolKind`]
+//! and how the public `pool_size` and `strides` tuples flatten into slices
 //!
 //! # Layout
 //!
-//! Inputs are channels-last, `[batch, spatial..., channels]`. The unit of work is one *output
-//! position*: a window reduction reads `channels` contiguous floats per tap and folds them into a
-//! `channels`-wide accumulator, so all channels of a position are reduced together. That is what
-//! makes the layout pay here - the rank-generic window geometry (bounds checks, index arithmetic,
-//! the in-bounds element count) is computed once per output position instead of once per
-//! `(channel, position)` pair, and is then amortized across every channel.
+//! Inputs are channels-last: `[batch, spatial..., channels]`. The unit of work is a single output
+//! position. A window reduction reads `channels` contiguous floats per tap and folds them into a
+//! `channels`-wide accumulator. This reduces every channel of a position together
 //!
-//! Forward work splits over `(batch item, output-position block)`, whose output slabs are disjoint.
-//! Backward splits over `(batch item, channel slab)` instead: a slab owning channels `[j0, j1)`
-//! writes only input addresses congruent to that range modulo `channels`, so the scatter is
-//! conflict-free without a halo, a merge, or atomics - and unlike splitting on batch alone it still
-//! fills the machine at `batch == 1`
+//! This layout pays off because of the window geometry: the bounds checks, the index arithmetic,
+//! and the in-bounds element count. The engine computes this geometry once per output position
+//! and reuses it for every channel, instead of once per `(channel, position)` pair
+//!
+//! Forward work splits over `(batch item, output-position block)`, each with a disjoint output
+//! slab
+//!
+//! Backward work splits over `(batch item, channel slab)` instead. A slab that owns channels
+//! `[j0, j1)` writes only input addresses congruent to that range modulo `channels`. The scatter
+//! is therefore conflict-free without a halo, a merge, or atomics. This split still fills the
+//! machine when `batch == 1`, unlike a split on batch alone
 
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::convolution::PaddingType;
@@ -26,28 +29,20 @@ use ndarray::{ArrayD, IxDyn};
 use rayon::prelude::*;
 
 tunable_gate! {
-    /// Estimated total element ops (`batch * out_positions * channels * window` taps) at or above
-    /// which a pooling pass runs in parallel
+    /// Total element ops (`batch * out_positions * channels * window` taps) at or above which a
+    /// pooling pass runs in parallel
     ///
-    /// Counting element ops rather than task count keeps the gate meaningful when a few positions
-    /// carry many channels and when many positions carry few
+    /// The gate counts element ops rather than tasks, so it stays meaningful when a few positions
+    /// carry many channels or when many positions carry few
     ///
-    /// Under this layout the tap count alone no longer predicts the crossover, because the serial
-    /// path's speed depends strongly on the channel count: the rank-generic window geometry is
-    /// computed once per output position and amortized across every channel, so a 25K-tap pool at
-    /// 64 channels runs serial in 14 us while a 16K-tap pool at 1 channel takes 77 us. The value
-    /// below is kept where it is deliberately - raising it to the bracket a work-only reading
-    /// suggests would trade a measured 45 us saving on the narrow-channel rung for avoiding a 7 us
-    /// loss on the wide one
-    ///
-    /// Overridable via [`crate::tuning`]
+    /// Overridable through [`crate::tuning`]
     pub(crate) POOL_PARALLEL_MIN_OPS => pool_parallel_min_ops / set_pool_parallel_min_ops = 12_000
 }
 
 /// Per-spatial-axis pooling output sizes and leading padding for a given padding mode
 ///
 /// `Valid` drops the trailing remainder and pads nothing. `Same` rounds the output up to
-/// `ceil(in / stride)` and splits the padding evenly with the extra cell on the trailing edge
+/// `ceil(in / stride)`. It splits the padding evenly, with the extra cell on the trailing edge
 /// (`pad_before = pad_total / 2`), matching the convolution engine. Padding cells are virtual:
 /// the forward/backward passes skip out-of-bounds positions, so average pooling divides by the
 /// count of real (in-bounds) elements, matching Keras `count_include_pad=False` behavior
@@ -130,16 +125,16 @@ const POOL_MIN_CHUNK_CHANNELS: usize = 16;
 
 /// Positions whose channels the accumulator visits per fold block in [`global_pool_forward`]
 ///
-/// A function of the channel count only, so the block grouping - and with it the summation order -
-/// depends on the input shape and never on how many threads happened to run
+/// The block size is a function of the channel count only. The fold grouping, and with it the
+/// summation order, depends on the input shape and never on the thread count
 fn rows_per_block(channels: usize) -> usize {
     (16_384 / channels.max(1)).max(1)
 }
 
 /// Folds one window's element into a running max, matching the serial scan's NaN rule
 ///
-/// Once a NaN is seen it wins and sticks: a later NaN does not replace it (so the *first* NaN's
-/// index is kept) and no finite value can displace it, because `v > NaN` is false. A bare
+/// Once a NaN appears, it wins and stays. A later NaN does not replace it, so the index of the
+/// first NaN is kept. No finite value can displace it either, because `v > NaN` is false. A bare
 /// `v > max_val` would silently drop NaNs instead of propagating them
 #[inline]
 fn fold_max(max_val: &mut f32, max_idx: &mut usize, v: f32, idx: usize) {
@@ -160,9 +155,10 @@ fn fold_max(max_val: &mut f32, max_idx: &mut usize, v: f32, idx: usize) {
 ///
 /// # Returns
 ///
-/// The pooled tensor and, for [`PoolKind::Max`], one arg-max per output element - a flat element
-/// offset into the batch item, so it already carries the channel and needs no further arithmetic in
-/// [`windowed_pool_backward`]; `None` for averaging
+/// - `Tensor` - the pooled output
+/// - `Option<Vec<usize>>` - for [`PoolKind::Max`], one arg-max per output element as a flat
+///   element offset into the batch item. It already carries the channel, so
+///   [`windowed_pool_backward`] needs no further arithmetic. `None` for averaging
 pub(super) fn windowed_pool_forward(
     input: &Tensor,
     pool: &[usize],
@@ -175,8 +171,8 @@ pub(super) fn windowed_pool_forward(
 
 /// `windowed_pool_forward` with an optional override of the parallel/serial gate decision
 ///
-/// `force_parallel` selects the parallel or serial path regardless of the work estimate;
-/// production passes `None`. Reachable outside the crate only through `bench_internals`
+/// `force_parallel` selects the parallel or serial path regardless of the work estimate.
+/// Production code passes `None`. Reachable outside the crate only through `bench_internals`
 pub fn windowed_pool_forward_impl(
     input: &Tensor,
     pool: &[usize],
@@ -201,9 +197,9 @@ pub fn windowed_pool_forward_impl(
         .as_slice()
         .expect("standard-layout array is contiguous");
 
-    // Reduces output positions `[c0, c0 + len)` of batch item `b`. Every position is folded by the
-    // same serial window loop whatever the block boundaries are, so the result does not depend on
-    // how the work was split
+    // Reduces output positions `[c0, c0 + len)` of batch item `b`. The same serial window loop
+    // folds every position, whatever the block boundaries are. The result therefore does not
+    // depend on how the work was split
     let process_range = |b: usize, c0: usize, len: usize| -> (Vec<f32>, Vec<usize>) {
         let item_base = b * item_in;
         let mut out_chunk = vec![0.0f32; len * channels];
@@ -227,8 +223,8 @@ pub fn windowed_pool_forward_impl(
                 PoolKind::Average => acc.fill(0.0),
             }
 
-            // The window geometry below is evaluated once for the whole position and reused by
-            // every channel - the saving that pays for this layout
+            // The loop evaluates the window geometry below once for the whole position, and
+            // every channel reuses it. That reuse is what pays for this layout
             w.iter_mut().for_each(|x| *x = 0);
             let mut count = 0usize;
             loop {
@@ -335,8 +331,8 @@ pub fn windowed_pool_forward_impl(
 /// Backward pass for windowed pooling
 ///
 /// `input_shape` is the full forward input shape `[batch, spatial..., channels]`. For
-/// [`PoolKind::Max`], `argmax` must be the offsets returned by [`windowed_pool_forward`];
-/// averaging redistributes each output gradient evenly over its window and ignores `argmax`
+/// [`PoolKind::Max`], `argmax` must be the offsets that [`windowed_pool_forward`] returns.
+/// Averaging redistributes each output gradient evenly over its window and ignores `argmax`
 pub(super) fn windowed_pool_backward(
     grad_output: &Tensor,
     input_shape: &[usize],
@@ -364,8 +360,8 @@ pub(super) fn windowed_pool_backward(
         .expect("standard-layout array is contiguous");
 
     // Accumulates the gradient for channels `[j0, j1)` of batch item `b` into `out`, a slab of the
-    // item laid out `[plane_in, j1 - j0]`. Two slabs never touch the same address, so this is safe
-    // to run concurrently, and within a slab the accumulation runs in output-position order
+    // item laid out `[plane_in, j1 - j0]`. 2 slabs never touch the same address, so this is safe
+    // to run concurrently. Within a slab, the accumulation runs in output-position order
     let process_slab = |b: usize, j0: usize, width: usize, out: &mut [f32]| {
         let g_item = b * plane_out * channels;
         match kind {
@@ -388,7 +384,7 @@ pub(super) fn windowed_pool_backward(
                 let mut o_flat = 0usize;
                 loop {
                     // Count the in-bounds elements of this window, then spread the gradient evenly.
-                    // The count is shared by every channel of the position
+                    // Every channel of the position shares the count
                     w.iter_mut().for_each(|x| *x = 0);
                     let mut count = 0usize;
                     loop {
@@ -492,8 +488,9 @@ pub(super) fn windowed_pool_backward(
 ///
 /// # Returns
 ///
-/// The pooled tensor and, for [`PoolKind::Max`], one arg-max per output element as a flat element
-/// offset into the batch item; `None` for averaging
+/// - `Tensor` - the pooled output, with shape `[batch, channels]`
+/// - `Option<Vec<usize>>` - for [`PoolKind::Max`], one arg-max per output element as a flat
+///   element offset into the batch item. `None` for averaging
 pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Option<Vec<usize>>) {
     let shape = input.shape();
     let r = shape.len() - 2;
@@ -508,9 +505,9 @@ pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Op
         .as_slice()
         .expect("standard-layout array is contiguous");
 
-    // One task per (batch item, block of positions). Blocks are sized from the channel count
-    // alone, so the fold grouping - and with it the float summation order - is a property of the
-    // input shape, not of the schedule
+    // One task per (batch item, block of positions). The block size depends only on the channel
+    // count. The fold grouping, and with it the float summation order, therefore depends on the
+    // input shape and never on the schedule
     let block = rows_per_block(channels);
     let tasks: Vec<(usize, usize, usize)> = (0..batch)
         .flat_map(|b| {
@@ -558,8 +555,8 @@ pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Op
     };
 
     // Merge the block partials in block order. Folding them with the same rule the serial scan
-    // uses makes the merged result identical to a single pass: a `Max` block that saw a NaN keeps
-    // it, and ties still resolve to the earliest position
+    // uses reproduces a single pass exactly. A `Max` block that saw a NaN keeps it. Ties still
+    // resolve to the earliest position
     let mut out_flat = match kind {
         PoolKind::Max => vec![f32::NEG_INFINITY; batch * channels],
         PoolKind::Average => vec![0.0f32; batch * channels],
@@ -629,10 +626,10 @@ pub(super) fn global_pool_backward(
                 }
             }
             PoolKind::Average => {
-                // Every position of the item gets the same `[channels]` vector, so build one tile
-                // that repeats it up to about a cache line's worth of work and stamp the item out
-                // in tile-sized strides. Writing it row by row instead would emit a `memcpy` call
-                // per position, which is the wrong shape when `channels` is small
+                // Every position of the item gets the same `[channels]` vector. This pass builds
+                // a tile that repeats the vector, then copies it into the item in tile-sized
+                // strides. Writing the item row by row would call `memcpy` once per position.
+                // That access pattern is the wrong shape when `channels` is small
                 let scale = 1.0 / positions as f32;
                 let reps = (1024 / channels.max(1)).clamp(1, positions.max(1));
                 let mut tile = Vec::with_capacity(reps * channels);
@@ -650,6 +647,7 @@ pub(super) fn global_pool_backward(
         .expect("grad-input length matches the input shape")
 }
 
+/// Unit tests for the pooling engine
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -733,7 +731,7 @@ mod tests {
     /// 1-D max-pool returns per-window maxima and their flat arg-max offsets
     #[test]
     fn test_windowed_pool_forward_1d_max() {
-        // [batch, length, channels] with one channel
+        // [batch, length, channels] with 1 channel
         let data = ArrayD::from_shape_vec(IxDyn(&[1, 4, 1]), vec![3.0f32, 1.0, 4.0, 1.0]).unwrap();
         let (out, argmax) =
             windowed_pool_forward(&data, &[2], &[2], PoolKind::Max, PaddingType::Valid);
@@ -761,8 +759,8 @@ mod tests {
 
     /// Each channel is pooled on its own, and the arg-max offset carries the channel
     ///
-    /// Channel 0 peaks in the first window position and channel 1 in the last, so a single shared
-    /// arg-max - or channels bleeding into each other - would both show up here
+    /// Channel 0 peaks in the first window position and channel 1 in the last. A single shared
+    /// arg-max, or channels bleeding into each other, would both appear here
     #[test]
     fn test_windowed_pool_forward_1d_max_two_channels() {
         // [1, 4, 2]: channel 0 is 4, 3, 2, 1 and channel 1 is 1, 2, 3, 4
@@ -819,8 +817,8 @@ mod tests {
 
     /// `Same` padding divides by the count of real elements, not the window size
     ///
-    /// The trailing window of a length-3 input under a size-2 stride-2 window holds one real
-    /// element and one padding cell, so its mean is that element itself
+    /// The trailing window of a length-3 input under a size-2 stride-2 window holds 1 real
+    /// element and 1 padding cell. Its mean is therefore that element itself
     #[test]
     fn test_windowed_pool_forward_1d_avg_same_padding_excludes_pad() {
         let data = ArrayD::from_shape_vec(IxDyn(&[1, 3, 1]), vec![1.0f32, 2.0, 6.0]).unwrap();
@@ -920,7 +918,7 @@ mod tests {
             None,
             PaddingType::Valid,
         );
-        // Each window contributes 1.0 to both of its positions; the interior is covered twice
+        // Each window contributes 1.0 to both of its positions. The interior is covered twice
         assert_eq!(
             grad_in.iter().copied().collect::<Vec<f32>>(),
             vec![1.0, 2.0, 2.0, 1.0]
@@ -1018,8 +1016,8 @@ mod tests {
 
     /// The parallel and serial forward paths agree bit for bit
     ///
-    /// Every output position is folded by the same serial window loop whatever the block
-    /// boundaries are, so the gate is a pure performance knob
+    /// The same serial window loop folds every output position, whatever the block boundaries
+    /// are, so the gate is a pure performance knob
     #[test]
     fn test_windowed_pool_forward_parallel_matches_serial() {
         let data: Vec<f32> = (0..2 * 20 * 20 * 5)

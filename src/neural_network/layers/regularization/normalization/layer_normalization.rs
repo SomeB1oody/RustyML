@@ -26,12 +26,9 @@ tunable_gate! {
     /// Total-element count above which the trailing-axis row passes (per-row statistics plus
     /// normalize, and the backward composition) run on rayon
     ///
-    /// Each normalization group is one contiguous row computed entirely inside one task with
-    /// fixed-order kernels, so the gate is a performance knob: the result is numerically
-    /// unchanged on either side of the gate (deterministic on a given machine)
-    ///
-    /// Measured crossover bracket 64K-256K elements (0.73x at 64K, 1.48x at 256K), 2.5-4.1x at 1M,
-    /// fading toward memory bandwidth (1.2x) at 12.6M
+    /// Each normalization group is 1 contiguous row. Each row runs entirely inside 1 task with
+    /// fixed-order kernels. This gate only changes performance. The result stays the same on
+    /// either side of the gate, and stays deterministic on a given machine.
     ///
     /// Overridable via [`crate::tuning`]
     pub(crate) LN_ROW_PARALLEL_MIN_ELEMS => ln_row_parallel_min_elems / set_ln_row_parallel_min_elems = 262_144
@@ -39,10 +36,6 @@ tunable_gate! {
 
 tunable_gate! {
     /// Element count above which the gamma/beta gradient column folds run on rayon
-    ///
-    /// The same row-block fold kernel class as BatchNorm's measured
-    /// `BN_COL_STATS_PARALLEL_MIN_ELEMS` (crossover bracket 64K-256K elements), mapped from that
-    /// measurement rather than calibrated separately
     ///
     /// Overridable via [`crate::tuning`]
     pub(crate) LN_COL_STATS_PARALLEL_MIN_ELEMS => ln_col_stats_parallel_min_elems / set_ln_col_stats_parallel_min_elems = 262_144
@@ -58,17 +51,19 @@ pub enum LayerNormalizationAxis {
     Default,
     /// Normalize along a single custom specified axis
     Custom(usize),
-    /// Normalize jointly over several axes (Keras-style axis list); statistics are computed over
-    /// the combined elements of those axes, and `gamma`/`beta` are 1-D with length equal to the
-    /// product of those axes' sizes
+    /// Normalize jointly over several axes (a Keras-style axis list). Statistics are computed
+    /// over the combined elements of those axes. `gamma` and `beta` are 1-D, with length equal
+    /// to the product of those axes' sizes
     Multiple(Vec<usize>),
 }
 
-/// Validates a `Multiple` axis list against the input rank and returns the merge permutation:
-/// the non-normalized axes (original order) followed by the normalized axes (given order)
+/// Validates a `Multiple` axis list against the input rank and returns the merge permutation
+///
+/// The permutation lists the non-normalized axes in their original order, followed by the
+/// normalized axes in the given order
 ///
 /// An identity permutation means the normalized axes already form the trailing contiguous
-/// block, so merging is pure reshape semantics and needs no transpose copy
+/// block. Merging is then pure reshape semantics, and needs no transpose copy
 fn multiple_axes_perm(ndim: usize, axes: &[usize]) -> Result<Vec<usize>, Error> {
     if axes.is_empty() {
         return Err(Error::invalid_parameter(
@@ -97,23 +92,28 @@ fn multiple_axes_perm(ndim: usize, axes: &[usize]) -> Result<Vec<usize>, Error> 
 
 /// How the configured axis maps onto the input layout
 enum LayoutPlan {
-    /// The normalized elements form the contiguous trailing block of each group: the input is
-    /// logically `[R, N]` and takes the fused row path with no layout transform
+    /// The normalized elements form the contiguous trailing block of each group. The input is
+    /// logically `[R, N]`, and takes the fused row path with no layout transform
     Rows { n: usize },
-    /// `Multiple` axes that need a genuine permutation before they form a trailing block: one
-    /// transpose copy in, the row path on the merged layout, one transpose copy back out
+    /// `Multiple` axes need a genuine permutation before they form a trailing block. The layer
+    /// runs 1 transpose copy in, the row path on the merged layout, then 1 transpose copy back
+    /// out
     MergedRows { axes: Vec<usize>, n: usize },
-    /// A non-trailing `Custom` axis: stays on the broadcast ndarray path. Its groups are
-    /// strided mid-axis lanes, and ndarray reduces them in place, so a transpose would add the
-    /// two copies the row path exists to avoid
+    /// A non-trailing `Custom` axis stays on the broadcast ndarray path. Its groups are strided
+    /// mid-axis lanes, and ndarray reduces them in place. A transpose would add the 2 copies the
+    /// row path exists to avoid
     Strided { axis: usize },
 }
 
-/// Fused per-row normalization over a standard-layout `[R, N]` slice: for each row, the mean
-/// and variance fold with the fixed-order segment kernels, then one streaming sweep writes the
-/// centered, normalized, and scaled-shifted values (plus the row's mean/std into `[R]`
-/// buffers). Rows are independent and each is computed entirely inside one task, so the
-/// `parallel` flag - and the rows-per-task chunking - never changes the result bits
+/// Runs a fused per-row normalization over a standard-layout `[R, N]` slice
+///
+/// For each row, the mean folds first with a fixed-order segment kernel, then a sweep centers
+/// the row. The variance then folds over the centered values, and a second sweep writes the
+/// normalized and scaled-shifted output. The pass also stores the row mean and standard
+/// deviation in the `[R]` buffers.
+///
+/// Rows are independent, and each row runs entirely inside 1 task, so neither the `parallel`
+/// flag nor the rows-per-task chunking changes the result bits.
 #[allow(clippy::too_many_arguments)]
 fn row_forward(
     x: &[f32],
@@ -178,9 +178,11 @@ fn row_forward(
     }
 }
 
-/// The inference twin of [`row_forward`]: identical per-row arithmetic, but writes
-/// only the output. The variance folds over the deviations in registers
-/// ([`segment_sq_dev`]) instead of through a centered buffer, and nothing else is allocated
+/// Runs the inference twin of [`row_forward`]: identical per-row arithmetic, but it writes
+/// only the output
+///
+/// The variance folds over the deviations in registers ([`segment_sq_dev`]) instead of through
+/// a centered buffer, and nothing else is allocated
 fn row_predict(
     x: &[f32],
     n: usize,
@@ -212,10 +214,13 @@ fn row_predict(
     }
 }
 
-/// Fused per-row backward over standard-layout `[R, N]` slices: the three per-row reductions
-/// (variance-gradient, mean-gradient, and centered sums) fold with the fixed-order segment
-/// kernels. `grad_x_normalized` is fused as `g * gamma` per term instead of materialized, and
-/// one streaming sweep composes the input gradient. Same flag semantics as [`row_forward`]
+/// Runs a fused per-row backward pass over standard-layout `[R, N]` slices
+///
+/// The 3 per-row reductions (variance-gradient, mean-gradient, and centered sums) fold with
+/// the fixed-order segment kernels. `grad_x_normalized` is fused as `g * gamma` per term instead
+/// of materialized, and then 1 streaming sweep composes the input gradient.
+///
+/// Same flag semantics as [`row_forward`]
 fn row_backward(
     g: &[f32],
     xc: &[f32],
@@ -264,13 +269,14 @@ fn row_backward(
     }
 }
 
-/// Permutes the `axes` to the trailing positions and merges them into a single axis, returning the
-/// transformed contiguous tensor plus the permutation and pre-merge shape needed to invert it
+/// Permutes the `axes` to the trailing positions and merges them into a single axis. It returns
+/// the transformed contiguous tensor, plus the permutation and pre-merge shape needed to invert
+/// it
 ///
-/// Multi-axis layer normalization reduces to single-axis normalization of this merged axis, so the
+/// Multi-axis layer normalization reduces to single-axis normalization of this merged axis. The
 /// public methods bracket the row core with this transform and its inverse,
-/// [`unmerge_normalized_axes`], but only when the permutation is not the identity. Trailing
-/// in-order axes skip the copies entirely (see [`LayoutPlan`])
+/// [`unmerge_normalized_axes`]. They apply the transform only when the permutation is not the
+/// identity. Trailing in-order axes skip the copies entirely (see [`LayoutPlan`])
 fn merge_normalized_axes(
     input: &Tensor,
     axes: &[usize],
@@ -372,14 +378,14 @@ impl LayerNormalization {
     /// - `input_shape` - Shape of the input tensor
     /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
     ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The new LayerNormalization layer instance, or a validation error
+    ///
     /// # Notes
     ///
     /// Normalization defaults to the last (feature) dimension. Choose a different axis with
     /// [`LayerNormalization::with_normalized_axis`]
-    ///
-    /// # Returns
-    ///
-    /// - `Result<Self, Error>` - New LayerNormalization layer instance or a validation error
     ///
     /// # Errors
     ///
@@ -436,10 +442,12 @@ impl LayerNormalization {
         Ok(self)
     }
 
-    /// Computes the 1-D `gamma`/`beta` parameter shape for the given input shape and axis selection
+    /// Computes the 1-D `gamma`/`beta` parameter shape for the given input shape and axis
+    /// selection
     ///
-    /// gamma/beta are 1-D over the normalized dimension(s): the axis size for a single axis, or the
-    /// product of the listed axes' sizes for `Multiple` (merged into one axis at runtime)
+    /// `gamma` and `beta` are 1-D over the normalized dimensions. The size is the axis size for
+    /// a single axis. For `Multiple`, the size is the product of the listed axes' sizes, merged
+    /// into 1 axis at runtime
     fn param_shape_for(
         input_shape: &[usize],
         normalized_axis: &LayerNormalizationAxis,
@@ -504,9 +512,10 @@ impl LayerNormalization {
         Ok(())
     }
 
-    /// Maps the configured axis onto the given tensor's layout (see [`LayoutPlan`]). The plan
-    /// depends only on the configuration and the shape, so forward and backward always resolve
-    /// to the same path and the caches they share stay layout-consistent
+    /// Maps the configured axis onto the given tensor's layout (see [`LayoutPlan`])
+    ///
+    /// The plan depends only on the configuration and the shape. Forward and backward always
+    /// resolve to the same path, so the caches they share stay layout-consistent
     fn resolve_plan(&self, t: &Tensor) -> Result<LayoutPlan, Error> {
         match &self.normalized_axis {
             LayerNormalizationAxis::Default => {
@@ -563,7 +572,7 @@ impl LayerNormalization {
         }
         let r = total / n;
 
-        // The row passes need contiguous data; standardize a non-contiguous input once
+        // The row passes need contiguous data. This standardizes a non-contiguous input once
         let std_input;
         let x: &[f32] = match input.as_slice() {
             Some(s) => s,
@@ -593,7 +602,7 @@ impl LayerNormalization {
             std_dev.as_slice_mut().unwrap(),
         );
 
-        // Cache values for backward pass (mean/std as [R], one scalar per row)
+        // Cache values for backward pass (mean/std as [R], 1 scalar per row)
         self.x_normalized = Some(x_normalized);
         self.x_centered = Some(x_centered);
         self.mean = Some(mean.into_dyn());
@@ -660,7 +669,7 @@ impl LayerNormalization {
             .std_dev
             .as_ref()
             .ok_or_else(|| Error::forward_pass_not_run("LayerNormalization"))?;
-        // The caches were built by forward_rows, so they are standard layout ([R] for std_dev)
+        // forward_rows builds the caches, so they are standard layout ([R] for std_dev)
         let xn_s = x_normalized.as_slice().unwrap();
         let xc_s = x_centered.as_slice().unwrap();
         let std_s = std_dev.as_slice().unwrap();
@@ -779,9 +788,10 @@ impl Layer for LayerNormalization {
 }
 
 impl LayerNormalization {
-    /// Training forward for a non-trailing `Custom` axis: the broadcast ndarray path. The
-    /// groups are strided mid-axis lanes that ndarray reduces in place, so this path stays
-    /// transpose-free by construction; it remains serial because its access pattern, not
+    /// Training forward for a non-trailing `Custom` axis: the broadcast ndarray path
+    ///
+    /// The groups are strided mid-axis lanes that ndarray reduces in place, so this path stays
+    /// transpose-free by construction. It remains serial because its access pattern, not
     /// compute, is the cost
     fn forward_strided(&mut self, input: &Tensor, axis_idx: usize) -> Result<Tensor, Error> {
         // Mean along the axis, then insert the axis back so broadcasting works
@@ -830,7 +840,7 @@ impl LayerNormalization {
         Ok(output)
     }
 
-    /// Inference forward for a non-trailing `Custom` axis (no caches); see
+    /// Inference forward for a non-trailing `Custom` axis (no caches). See
     /// [`Self::forward_strided`]
     fn predict_strided(&self, input: &Tensor, axis_idx: usize) -> Result<Tensor, Error> {
         let mean = input.mean_axis(Axis(axis_idx)).unwrap();
@@ -946,6 +956,7 @@ impl LayerNormalization {
     }
 }
 
+/// Tests for axis merging, the fused row path, and LayerNormalization forward/backward parity
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1022,7 +1033,8 @@ mod tests {
         }
     }
 
-    /// merge then unmerge round-trip holds when axes require a non-trivial permutation ([2,3,4], axes=[0,2])
+    /// merge then unmerge round-trip holds when axes require a non-trivial permutation
+    /// ([2,3,4], axes=[0,2])
     #[test]
     fn test_merge_unmerge_round_trip_nontrivial_perm() {
         let n = 2 * 3 * 4;
@@ -1032,7 +1044,7 @@ mod tests {
         let (merged, perm, permuted_shape) =
             merge_normalized_axes(&x, &[0, 2]).expect("merge_normalized_axes failed");
 
-        // Verify intermediate merged shape: outer=1 (axis 1), inner=2*4=8 -> [3,8]
+        // Verify the intermediate merged shape: outer=1 (axis 1), inner=2*4=8, giving [3,8]
         assert_eq!(merged.shape(), &[3, 8]);
 
         let recovered = unmerge_normalized_axes(merged, &perm, &permuted_shape);
@@ -1078,9 +1090,9 @@ mod tests {
         (0..r * n).map(|i| (i as f32 * salt).sin()).collect()
     }
 
-    /// The row passes compute each row entirely inside one task with fixed-order kernels, so
-    /// the parallel flag must never change the bits, including rows that straddle task-chunk
-    /// boundaries, sub-8 rows, and rows larger than one chunk
+    /// The row passes compute each row entirely inside 1 task with fixed-order kernels. The
+    /// parallel flag must never change the bits. This holds when a row is shorter than 8
+    /// elements, when a chunk holds 1 row, and when the rows span more than 1 chunk
     #[test]
     fn row_passes_parallel_flag_invariant() {
         for &(r, n) in &[
@@ -1137,8 +1149,8 @@ mod tests {
         }
     }
 
-    /// On integer-valued data with a power-of-two row length the per-row statistics are exact,
-    /// so the row-path forward must reproduce the broadcast ndarray reference exactly
+    /// On integer-valued data with a power-of-2 row length, the per-row statistics are exact.
+    /// The row-path forward must reproduce the broadcast ndarray reference exactly
     #[test]
     fn row_path_exact_on_integer_data_matches_broadcast_reference() {
         use ndarray::Array2;
@@ -1153,7 +1165,8 @@ mod tests {
             .unwrap();
         let out = ln.forward(&x).unwrap();
 
-        // Reference with the old broadcast forms; exact statistics make the grouping moot
+        // This reference uses the broadcast approach. Exact statistics make the grouping choice
+        // moot
         let mean = x2.mean_axis(Axis(1)).unwrap().insert_axis(Axis(1));
         let x_centered = &x2 - &mean;
         let var = (&x_centered * &x_centered)

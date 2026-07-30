@@ -1,43 +1,46 @@
-//! Linear-algebra primitives for `f64` matrices, written in pure Rust on top of `ndarray`
+//! Linear algebra primitives for `f64` matrices, built in pure Rust on top of `ndarray`.
 //!
-//! Two groups. The **dense direct factorizations** are the three workhorse routines the
-//! classical-ML estimators need - symmetric eigendecomposition, singular value decomposition, and a
-//! thin QR orthonormalization - reimplemented directly on [`ndarray`] arrays so the crate no longer
-//! carries a second linear-algebra ecosystem (`nalgebra`) just for these leaf operations.
-//! Everything operates on row-major [`Array2<f64>`] / [`Array1<f64>`] and matches the conventions
-//! the callers expect:
+//! The module has 2 groups of routines. The **dense direct factorizations** are the 3 core
+//! routines the classical-ML estimators need: symmetric eigendecomposition, singular value
+//! decomposition, and thin QR orthonormalization. Each one operates directly on [`ndarray`]
+//! arrays, so the crate does not depend on a second linear-algebra library (`nalgebra` stays a
+//! dev-dependency for test cross-checks). Every routine works on row-major [`Array2<f64>`] /
+//! [`Array1<f64>`]:
 //!
-//! - [`symmetric_eigen`] returns eigenvalues with their eigenvectors stored as the **columns** of
-//!   the returned matrix, in ascending eigenvalue order (callers re-sort as they need)
-//! - [`svd`] returns singular values in **descending** order with optional `U` and `Vᵀ`, plus
-//!   [`Svd::solve`] (minimum-norm least squares) and [`Svd::pseudo_inverse`]
-//! - [`qr_q`] returns an orthonormal basis `Q` for the column space of its input
+//! - [`symmetric_eigen`] returns eigenvalues with their eigenvectors stored as the columns of
+//!   the returned matrix, in ascending eigenvalue order. Callers re-sort as they need.
+//! - [`svd`] returns singular values in descending order with optional `U` and `V^T`, plus
+//!   [`Svd::solve`] (minimum-norm least squares) and [`Svd::pseudo_inverse`].
+//! - [`qr_q`] returns an orthonormal basis `Q` for the column space of its input.
 //!
-//! The **iterative partial eigensolvers** extract only the leading eigenpairs of a symmetric
-//! matrix, for callers that need a few components of a large matrix (e.g. PCA's `PowerIteration`
-//! SVD solver, KernelPCA's `Lanczos` / `PowerIteration`). Both return eigenpairs in descending
-//! eigenvalue order:
+//! The **iterative partial eigensolvers**, [`top_eigenpairs_power_iteration`] and
+//! [`top_eigenpairs_lanczos`], extract only the leading eigenpairs of a symmetric matrix.
+//! Callers use them when they need a few components of a large matrix, for example PCA's
+//! `PowerIteration` solver, or KernelPCA's `Lanczos` and `PowerIteration` solvers. Both return
+//! eigenpairs in descending eigenvalue order:
 //!
-//! - [`top_eigenpairs_power_iteration`] - power iteration with in-place Hotelling deflation
-//! - [`top_eigenpairs_lanczos`] - Lanczos with full reorthogonalization, reducing to a small
-//!   tridiagonal problem solved exactly by [`symmetric_eigen`]
+//! - [`top_eigenpairs_power_iteration`] uses power iteration with in-place Hotelling deflation.
+//! - [`top_eigenpairs_lanczos`] uses Lanczos with full reorthogonalization. It reduces the
+//!   problem to a small tridiagonal problem and solves that exactly with [`symmetric_eigen`].
 //!
 //! ## Algorithms
 //!
-//! - **Symmetric eigendecomposition** uses Householder tridiagonalization (`tred2`) followed by the
-//!   implicit-shift QL iteration with accumulated eigenvectors (`tql2`), the classic
-//!   EISPACK/JAMA pair. It is deterministic and accurate to near machine precision for the small to
-//!   mid-sized symmetric matrices that arise here (covariance matrices, centered kernels, the
-//!   reduced tridiagonal Lanczos problem)
-//! - **SVD** uses the one-sided Jacobi method, which orthogonalizes the columns of the (taller
-//!   orientation of the) matrix through a sweep of plane rotations. It converges reliably and
-//!   computes the small singular values to high relative accuracy
-//! - **QR** uses modified Gram-Schmidt with one reorthogonalization pass, matching the stabilized
-//!   orthogonalization the Lanczos solver already relies on
+//! Symmetric eigendecomposition uses Householder tridiagonalization (`tred2`) followed by the
+//! implicit-shift QL iteration with accumulated eigenvectors (`tql2`). This is the classic
+//! EISPACK/JAMA pair. It is deterministic and accurate to near machine precision for the small
+//! and mid-sized symmetric matrices that arise here. Those matrices include covariance
+//! matrices, centered kernels, and the reduced tridiagonal Lanczos problem.
 //!
-//! A crate-internal `machine_learning` helper shared across estimator families: LDA and
-//! ridge/linear regression (SVD), PCA (covariance eigendecomposition plus randomized QR/SVD, or
-//! power iteration), and Kernel PCA (centered-kernel eigendecomposition, dense or iterative).
+//! SVD uses the one-sided Jacobi method. It orthogonalizes the columns of the taller orientation
+//! of the matrix through a sweep of plane rotations. It converges reliably and computes small
+//! singular values to high relative accuracy.
+//!
+//! QR uses modified Gram-Schmidt with one reorthogonalization pass. This matches the stabilized
+//! orthogonalization that the Lanczos solver already relies on.
+//!
+//! This module is a crate-internal helper for `machine_learning`. Callers include LDA and
+//! ridge/linear regression (SVD), PCA (covariance eigendecomposition, plus randomized QR/SVD or
+//! power iteration), and KernelPCA (centered-kernel eigendecomposition, dense or iterative).
 
 use crate::error::Error;
 use crate::math::matmul::matvec;
@@ -61,9 +64,9 @@ pub(crate) struct SymmetricEigen {
 
 /// Computes the eigenvalues and eigenvectors of a real symmetric matrix
 ///
-/// The input is assumed symmetric; only its lower/upper symmetry is relied on implicitly by the
-/// reduction. Uses Householder tridiagonalization (`tred2`) plus the implicit-shift QL algorithm
-/// (`tql2`), porting the well-known EISPACK/JAMA routines
+/// The function assumes `a` is symmetric and does not check or enforce that property. It uses
+/// Householder tridiagonalization (`tred2`) followed by the implicit-shift QL algorithm
+/// (`tql2`), the classic EISPACK/JAMA routines
 ///
 /// # Parameters
 ///
@@ -71,7 +74,7 @@ pub(crate) struct SymmetricEigen {
 ///
 /// # Returns
 ///
-/// - [`SymmetricEigen`] - Eigenvalues (ascending) and their unit eigenvectors as columns
+/// - [`SymmetricEigen`] - Eigenvalues in ascending order with their unit eigenvectors as columns
 pub(crate) fn symmetric_eigen(a: &Array2<f64>) -> SymmetricEigen {
     let n = a.nrows();
     debug_assert_eq!(n, a.ncols(), "symmetric_eigen requires a square matrix");
@@ -83,7 +86,7 @@ pub(crate) fn symmetric_eigen(a: &Array2<f64>) -> SymmetricEigen {
         };
     }
 
-    // `v` starts as a copy of `a` (row-major flat buffer) and is overwritten with the eigenvectors
+    // `v` starts as a copy of `a` (row-major flat buffer) and ends up holding the eigenvectors
     let mut v = vec![0.0_f64; n * n];
     for i in 0..n {
         for j in 0..n {
@@ -214,7 +217,9 @@ fn tred2(n: usize, v: &mut [f64], d: &mut [f64], e: &mut [f64]) {
 /// On entry `d`/`e` hold the diagonal/subdiagonal of the tridiagonal matrix and `v` the orthogonal
 /// transform from [`tred2`]. On exit `d` holds the eigenvalues (sorted ascending) and the columns
 /// of `v` the corresponding eigenvectors
-#[allow(unused_assignments)] // `c2`/`c3`/`s2` are loop-carried; the final write is intentionally dead
+// `c2`, `c3`, and `s2` carry values across loop iterations. The final write to each is dead
+// code by design.
+#[allow(unused_assignments)]
 fn tql2(n: usize, v: &mut [f64], d: &mut [f64], e: &mut [f64]) {
     for i in 1..n {
         e[i - 1] = e[i];
@@ -235,7 +240,7 @@ fn tql2(n: usize, v: &mut [f64], d: &mut [f64], e: &mut [f64]) {
             m += 1;
         }
 
-        // If `m == l`, `d[l]` is already an eigenvalue; otherwise iterate
+        // If `m == l`, `d[l]` is already an eigenvalue. Otherwise, the loop below iterates.
         if m > l {
             loop {
                 // Compute the implicit shift
@@ -319,32 +324,31 @@ fn tql2(n: usize, v: &mut [f64], d: &mut [f64], e: &mut [f64]) {
 
 /// Singular value decomposition of a real matrix
 ///
-/// Singular values are non-negative and stored in descending order. When requested, `u` is the
-/// `m x r` matrix of left singular vectors and `v_t` the `r x n` matrix of right singular vectors
-/// transposed, where `r = min(m, n)`; together they satisfy `A ≈ U Σ Vᵀ`
+/// Singular values are non-negative and come back in descending order. When requested, `u` is the
+/// `m x r` matrix of left singular vectors and `v_t` is the `r x n` matrix of right singular
+/// vectors transposed, where `r = min(m, n)`. Together they satisfy `A ~= U * sigma * V^T`
 pub(crate) struct Svd {
     /// Singular values in descending order, length `r = min(m, n)`
     pub singular_values: Array1<f64>,
-    /// Left singular vectors as columns (`m x r`), present when `compute_u` was set.
-    /// Only the `machine_learning` solve/pseudo-inverse paths read `U`; the `utils` SVD callers
-    /// need only the singular values and `Vᵀ`
+    /// Left singular vectors as columns (`m x r`), present when `compute_u` is true.
+    /// Only the least-squares solve and pseudo-inverse paths need `u`
     #[cfg_attr(not(feature = "machine_learning"), allow(dead_code))]
     pub u: Option<Array2<f64>>,
-    /// Right singular vectors transposed (`r x n`), present when `compute_v` was set
+    /// Right singular vectors transposed (`r x n`), present when `compute_v` is true
     pub v_t: Option<Array2<f64>>,
 }
 
 #[cfg(feature = "machine_learning")]
 impl Svd {
-    /// Solves the least-squares problem `min ||A x - b||` using the decomposition, returning the
-    /// minimum-norm solution. Singular values at or below `tol` are treated as zero
+    /// Solves the least-squares problem `min ||A x - b||` using the decomposition. It returns
+    /// the minimum-norm solution and treats singular values at or below `tol` as zero
     ///
-    /// Requires that the decomposition was computed with both `U` and `Vᵀ`
+    /// The decomposition must include both `u` and `v_t`
     ///
     /// # Errors
     ///
-    /// - [`Error::Computation`] - If `U`/`Vᵀ` were not computed or the right-hand side length does
-    ///   not match the row count of `A`
+    /// - [`Error::Computation`] - If `u` or `v_t` were not computed, or the right-hand side
+    ///   length does not match the row count of `A`
     pub(crate) fn solve(&self, b: &Array1<f64>, tol: f64) -> Result<Array1<f64>, Error> {
         let u = self
             .u
@@ -363,7 +367,7 @@ impl Svd {
             ));
         }
 
-        // c = Σ⁺ Uᵀ b
+        // c = sigma^+ * U^T * b
         let mut c = Array1::<f64>::zeros(r);
         for k in 0..r {
             let sv = self.singular_values[k];
@@ -375,7 +379,7 @@ impl Svd {
                 c[k] = acc / sv;
             }
         }
-        // x = V c = (Vᵀ)ᵀ c
+        // x = V * c = (v_t)^T * c
         let mut x = Array1::<f64>::zeros(n);
         for j in 0..n {
             let mut acc = 0.0;
@@ -387,14 +391,14 @@ impl Svd {
         Ok(x)
     }
 
-    /// Builds the Moore-Penrose pseudo-inverse `A⁺ = V Σ⁺ Uᵀ` (`n x m`). Singular values at or
-    /// below `tol` are treated as zero
+    /// Builds the Moore-Penrose pseudo-inverse `A^+ = V * sigma^+ * U^T` (`n x m`). It treats
+    /// singular values at or below `tol` as zero
     ///
-    /// Requires that the decomposition was computed with both `U` and `Vᵀ`
+    /// The decomposition must include both `u` and `v_t`
     ///
     /// # Errors
     ///
-    /// - [`Error::Computation`] - If `U`/`Vᵀ` were not computed
+    /// - [`Error::Computation`] - If `u` or `v_t` were not computed
     pub(crate) fn pseudo_inverse(&self, tol: f64) -> Result<Array2<f64>, Error> {
         let u = self
             .u
@@ -414,7 +418,7 @@ impl Svd {
             sinv[k] = if sv > tol { 1.0 / sv } else { 0.0 };
         }
 
-        // A⁺[j, i] = Σ_k v_t[k, j] · sinv[k] · u[i, k]
+        // A^+[j, i] = sum_k v_t[k, j] * sinv[k] * u[i, k]
         let mut pinv = Array2::<f64>::zeros((n, m));
         for j in 0..n {
             for i in 0..m {
@@ -431,25 +435,27 @@ impl Svd {
 
 /// Computes the singular value decomposition of a real matrix via one-sided Jacobi
 ///
-/// The Jacobi sweeps run on whichever of `A` / `Aᵀ` is taller, so the working matrix always has at
-/// least as many rows as columns; the result is mapped back to `A`'s orientation. Singular values
-/// are returned in descending order with optional `U` (`m x r`) and `Vᵀ` (`r x n`)
+/// The Jacobi sweeps run on whichever of `A` or `A^T` is taller, so the working matrix always
+/// has at least as many rows as columns. The function maps the result back to `A`'s orientation.
+/// Singular values come back in descending order with optional `U` (`m x r`) and `V^T` (`r x n`)
 ///
 /// # Parameters
 ///
 /// - `a` - Input matrix (`m x n`)
 /// - `compute_u` - Whether to return the left singular vectors `U`
-/// - `compute_v` - Whether to return the right singular vectors (as `Vᵀ`)
+/// - `compute_v` - Whether to return the right singular vectors (as `V^T`)
 pub(crate) fn svd(a: &Array2<f64>, compute_u: bool, compute_v: bool) -> Svd {
     let m = a.nrows();
     let n = a.ncols();
 
-    // `u_like` is the (rows-of-A x r) left factor, `v_like` the (cols-of-A x r) right factor, both
-    // with columns aligned to the (still unsorted) singular values in `s`.
+    // `u_like` is the left factor with shape (rows of `A`) x `r`. `v_like` is the right factor
+    // with shape (columns of `A`) x `r`. Both have columns aligned to the still-unsorted
+    // singular values in `s`.
     let (s, u_like, v_like) = if m >= n {
         jacobi_svd_tall(a)
     } else {
-        // A = (Aᵀ)ᵀ: if Aᵀ = U₂ Σ V₂ᵀ then A = V₂ Σ U₂ᵀ, so U_A = V₂ and V_A = U₂.
+        // A = (A^T)^T. If A^T = U2 * sigma * V2^T, then A = V2 * sigma * U2^T, so U_A = V2 and
+        // V_A = U2.
         let at = a.t().to_owned();
         let (s, u2, v2) = jacobi_svd_tall(&at);
         (s, v2, u2)
@@ -469,8 +475,8 @@ pub(crate) fn svd(a: &Array2<f64>, compute_u: bool, compute_v: bool) -> Svd {
 
 /// One-sided Jacobi SVD for a matrix with at least as many rows as columns (`m >= n`)
 ///
-/// Returns `(singular_values, u, v)` (unsorted) with `A = U diag(s) Vᵀ`, where `u` is `m x n` with
-/// orthonormal columns and `v` is `n x n` orthogonal
+/// Returns `(singular_values, u, v)` (unsorted) with `A = U diag(s) V^T`, where `u` is `m x n`
+/// with orthonormal columns and `v` is `n x n` orthogonal
 fn jacobi_svd_tall(a: &Array2<f64>) -> (Array1<f64>, Array2<f64>, Array2<f64>) {
     let m = a.nrows();
     let n = a.ncols();
@@ -486,9 +492,9 @@ fn jacobi_svd_tall(a: &Array2<f64>) -> (Array1<f64>, Array2<f64>, Array2<f64>) {
         for p in 0..n {
             for q in (p + 1)..n {
                 // 2x2 sub-Gram of columns p, q
-                let mut alpha = 0.0; // ||u_p||²
-                let mut beta = 0.0; // ||u_q||²
-                let mut gamma = 0.0; // u_p · u_q
+                let mut alpha = 0.0; // ||u_p||^2
+                let mut beta = 0.0; // ||u_q||^2
+                let mut gamma = 0.0; // u_p * u_q
                 for i in 0..m {
                     let up = u[[i, p]];
                     let uq = u[[i, q]];
@@ -530,7 +536,7 @@ fn jacobi_svd_tall(a: &Array2<f64>) -> (Array1<f64>, Array2<f64>, Array2<f64>) {
         }
     }
 
-    // Singular values are the column norms of the rotated U; normalize to get orthonormal U
+    // Singular values are the column norms of the rotated U. Normalize it to get orthonormal U.
     let mut s = Array1::<f64>::zeros(n);
     for j in 0..n {
         let mut norm_sq = 0.0;
@@ -566,10 +572,10 @@ fn sort_svd_descending(
 
 /// Returns an orthonormal basis `Q` for the column space of `a` (same shape as `a`)
 ///
-/// Uses modified Gram-Schmidt with one reorthogonalization pass for numerical stability, the same
-/// twice-is-enough orthogonalization the Lanczos solver uses. A column that collapses to zero after
-/// orthogonalization (a rank-deficient direction) is left as a zero column; downstream consumers
-/// treat its contribution as a zero singular value
+/// Uses modified Gram-Schmidt with one reorthogonalization pass for numerical stability. The
+/// Lanczos solver uses this same two-pass approach. A column that collapses to zero during
+/// orthogonalization signals a rank-deficient direction. The function leaves that column as
+/// zero. Downstream consumers treat a zero column as a zero singular value
 ///
 /// # Parameters
 ///
@@ -580,7 +586,7 @@ pub(crate) fn qr_q(a: &Array2<f64>) -> Array2<f64> {
     let mut q = a.to_owned();
 
     for j in 0..k {
-        // Two modified Gram-Schmidt passes against the already-orthonormal columns 0..j
+        // 2 modified Gram-Schmidt passes against the already-orthonormal columns 0..j
         for _pass in 0..2 {
             for i in 0..j {
                 let mut proj = 0.0;
@@ -611,15 +617,11 @@ pub(crate) fn qr_q(a: &Array2<f64>) -> Array2<f64> {
     q
 }
 
-// Iterative top-`k` symmetric eigensolvers (power iteration + Lanczos)
-//
-// Partial solvers that extract only the leading eigenpairs, used by the decomposition estimators
-// (PCA's `PowerIteration` SVD solver, KernelPCA's `Lanczos` / `PowerIteration` eigen solvers).
-// They build on the dense `symmetric_eigen` above: Lanczos reduces to a small tridiagonal problem
-// solved exactly by it.
+// Iterative partial eigensolvers: power iteration and Lanczos. Both build on the dense
+// `symmetric_eigen` above.
 
-/// Builds a random unit vector of length `n`, falling back to a uniform unit
-/// vector if the random draw is numerically zero
+/// Builds a random unit vector of length `n`. If the random draw is numerically zero, it falls
+/// back to a uniform unit vector instead
 ///
 /// # Parameters
 ///
@@ -651,8 +653,8 @@ fn random_unit_vector(n: usize, rng: &mut StdRng) -> Array1<f64> {
 ///
 /// # Returns
 ///
-/// The unit eigenvector together with its eigenvalue, estimated as the Rayleigh
-/// quotient `v^T M v`
+/// - `Result<(Array1<f64>, f64), Error>` - The unit eigenvector and its eigenvalue, estimated
+///   as the Rayleigh quotient `v^T M v`
 ///
 /// # Errors
 ///
@@ -698,15 +700,15 @@ fn dominant_eigenpair(
 /// Extracts the top-`k` eigenpairs of a symmetric matrix using power iteration
 /// with Hotelling deflation
 ///
-/// The matrix is taken by value because each extracted component is deflated
-/// out of it in place. Eigenpairs come back in descending eigenvalue order as
+/// The function takes matrix by value because deflation modifies it in place as it extracts
+/// each component. Eigenpairs come back in descending eigenvalue order as
 /// parallel vectors: `eigenvectors[i]` is the unit eigenvector for
 /// `eigenvalues[i]`. Callers arrange those eigenvectors into rows or columns as
 /// their own layout requires
 ///
 /// # Parameters
 ///
-/// - `matrix` - Symmetric input matrix (e.g. a covariance or centered kernel matrix)
+/// - `matrix` - Symmetric input matrix, for example a covariance or centered kernel matrix
 /// - `k` - Number of leading eigenpairs to extract
 /// - `seed` - Seed for the random initialization, making the result deterministic
 /// - `max_iter` - Maximum power-iteration steps per component
@@ -714,8 +716,8 @@ fn dominant_eigenpair(
 ///
 /// # Returns
 ///
-/// The eigenvalues and their parallel unit eigenvectors, in descending
-/// eigenvalue order
+/// - `Result<(Vec<f64>, Vec<Array1<f64>>), Error>` - The eigenvalues and their parallel unit
+///   eigenvectors, in descending eigenvalue order
 ///
 /// # Errors
 ///
@@ -734,7 +736,8 @@ pub(crate) fn top_eigenpairs_power_iteration(
 
     for _ in 0..k {
         let (vector, value) = dominant_eigenpair(&matrix, &mut rng, max_iter, tol)?;
-        // Deflate the extracted component so the next iteration surfaces the next one: M = M - lambda v v^T
+        // Deflate the extracted component so the next iteration surfaces the next one.
+        // M = M - value * v * v^T
         deflate_rank_one(&mut matrix, &vector, value);
         eigenvalues.push(value);
         eigenvectors.push(vector);
@@ -743,11 +746,11 @@ pub(crate) fn top_eigenpairs_power_iteration(
     Ok((eigenvalues, eigenvectors))
 }
 
-/// Subtracts the rank-1 Hotelling term `value * v v^T` from `matrix` in place
+/// Subtracts the rank-1 Hotelling term `value * v * v^T` from `matrix` in place
 ///
 /// Applies the deflation row by row (`row_i -= value * v_i * v`) instead of forming the dense
-/// `n x n` outer product first, avoiding that temporary allocation. Rows are updated in parallel
-/// once the `n^2` element work clears the cheap-map gate, and serially below it
+/// `n x n` outer product first. This avoids the temporary allocation. Row updates run in
+/// parallel above the gate in `crate::parallel_gates`, and run serially below it
 ///
 /// # Parameters
 ///
@@ -776,9 +779,9 @@ fn deflate_rank_one(matrix: &mut Array2<f64>, v: &Array1<f64>, value: f64) {
 ///
 /// Lanczos builds a Krylov subspace, reduces the problem to a small symmetric
 /// tridiagonal eigenproblem, and maps the leading Ritz pairs back. For the
-/// dominant eigenpairs of a symmetric matrix (such as a centered kernel matrix)
-/// it converges faster and more stably than deflated power iteration. This is a
-/// single Lanczos pass without implicit restarts
+/// dominant eigenpairs of a symmetric matrix, such as a centered kernel matrix,
+/// it converges faster and more stably than deflated power iteration. This
+/// function runs a single Lanczos pass without implicit restarts
 ///
 /// Eigenpairs come back in descending eigenvalue order as parallel vectors:
 /// `eigenvectors[i]` is the unit eigenvector for `eigenvalues[i]`
@@ -791,12 +794,12 @@ fn deflate_rank_one(matrix: &mut Array2<f64>, v: &Array1<f64>, value: f64) {
 ///
 /// # Returns
 ///
-/// The eigenvalues and their parallel unit eigenvectors, in descending
-/// eigenvalue order
+/// - `Result<(Vec<f64>, Vec<Array1<f64>>), Error>` - The eigenvalues and their parallel unit
+///   eigenvectors, in descending eigenvalue order
 ///
 /// # Errors
 ///
-/// - [`Error::NotConverged`] - If the Krylov subspace collapses immediately
+/// - [`Error::NotConverged`] - If `matrix` has 0 columns, leaving the Krylov subspace empty
 pub(crate) fn top_eigenpairs_lanczos(
     matrix: &Array2<f64>,
     k: usize,
@@ -839,7 +842,7 @@ pub(crate) fn top_eigenpairs_lanczos(
 
         let beta = w.dot(&w).sqrt();
         if beta <= 1e-12 || !beta.is_finite() {
-            // Reached an invariant subspace; no further directions to explore
+            // Reached an invariant subspace. No further directions remain to explore.
             break;
         }
         betas.push(beta);
@@ -894,6 +897,7 @@ pub(crate) fn top_eigenpairs_lanczos(
     Ok((eigenvalues, eigenvectors))
 }
 
+/// Tests for the dense factorizations: `symmetric_eigen`, `svd`, and `qr_q`
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -948,7 +952,7 @@ mod tests {
         }
     }
 
-    /// Each returned pair satisfies `A v = λ v` and the eigenvectors are orthonormal
+    /// Each returned pair satisfies `A v = lambda v` and the eigenvectors are orthonormal
     #[test]
     fn symmetric_eigen_pairs_are_valid_and_orthonormal() {
         let a = array![[2.0, -1.0, 0.0], [-1.0, 2.0, -1.0], [0.0, -1.0, 2.0]];
@@ -962,7 +966,7 @@ mod tests {
                 assert_abs_diff_eq!(av[i], eig.eigenvalues[j] * v[i], epsilon = 1e-10);
             }
         }
-        // Orthonormal columns: VᵀV == I
+        // Orthonormal columns: V^T V == I
         for i in 0..n {
             for j in 0..n {
                 let dot: f64 = eig.eigenvectors.column(i).dot(&eig.eigenvectors.column(j));
@@ -1027,11 +1031,11 @@ mod tests {
         assert_svd_reconstructs(&a, 1e-10);
     }
 
-    /// Least-squares solve matches the normal-equation solution for an overdetermined system
+    /// Least-squares solve matches nalgebra's SVD solve for an overdetermined system
     #[cfg(feature = "machine_learning")]
     #[test]
     fn svd_solve_least_squares() {
-        // Overdetermined A x = b; compare against nalgebra's SVD solve
+        // Overdetermined `A x = b`. Compares against nalgebra's SVD solve.
         let a = array![[1.0, 1.0], [1.0, 2.0], [1.0, 3.0], [1.0, 4.0]];
         let b = array![6.0, 5.0, 7.0, 10.0];
         let mine = svd(&a, true, true).solve(&b, 1e-12).unwrap();
@@ -1044,13 +1048,13 @@ mod tests {
         }
     }
 
-    /// Pseudo-inverse satisfies the Moore-Penrose identity `A A⁺ A == A`
+    /// Pseudo-inverse satisfies the Moore-Penrose identity `A A^+ A == A`
     #[cfg(feature = "machine_learning")]
     #[test]
     fn svd_pseudo_inverse_identity() {
         let a = array![[1.0, 2.0], [3.0, 4.0], [5.0, 7.0]];
         let pinv = svd(&a, true, true).pseudo_inverse(1e-12).unwrap();
-        // A (A⁺ A) == A
+        // A (A^+ A) == A
         let ap = a.dot(&pinv); // m x m
         let apa = ap.dot(&a); // m x n
         for i in 0..a.nrows() {
@@ -1069,7 +1073,7 @@ mod tests {
         let s = svd(&a, true, true);
         let tol = 1e-12 * s.singular_values[0].max(1e-12);
         let pinv = s.pseudo_inverse(tol.max(1e-12)).unwrap();
-        // A A⁺ A == A still holds for the Moore-Penrose inverse on rank-deficient input
+        // A A^+ A == A still holds for the Moore-Penrose inverse on rank-deficient input
         let ap = a.dot(&pinv);
         let apa = ap.dot(&a);
         for i in 0..a.nrows() {
@@ -1093,7 +1097,7 @@ mod tests {
         let q = qr_q(&a);
         let k = a.ncols();
 
-        // QᵀQ == I
+        // Q^T Q == I
         for i in 0..k {
             for j in 0..k {
                 let dot: f64 = q.column(i).dot(&q.column(j));
@@ -1101,7 +1105,7 @@ mod tests {
                 assert_abs_diff_eq!(dot, expected, epsilon = 1e-10);
             }
         }
-        // The projector Q Qᵀ leaves A's columns unchanged: Q (Qᵀ A) == A
+        // The projector Q Q^T leaves A's columns unchanged: Q (Q^T A) == A
         let qt_a = q.t().dot(&a);
         let proj = q.dot(&qt_a);
         for i in 0..a.nrows() {
@@ -1112,6 +1116,7 @@ mod tests {
     }
 }
 
+/// Tests for the iterative partial eigensolvers: power iteration and Lanczos
 #[cfg(test)]
 mod iterative_tests {
     use super::*;
@@ -1149,7 +1154,7 @@ mod iterative_tests {
         let av = a.dot(vector);
         let lv = vector * value;
         for (x, y) in av.iter().zip(lv.iter()) {
-            assert!((x - y).abs() < tol, "A·v != λ·v: {} vs {}", x, y);
+            assert!((x - y).abs() < tol, "A*v != lambda*v: {} vs {}", x, y);
         }
         assert!(
             (vector.dot(vector).sqrt() - 1.0).abs() < tol,
@@ -1197,7 +1202,7 @@ mod iterative_tests {
 
     // edge-case tests for top_eigenpairs_power_iteration
 
-    /// k=0 returns two empty vecs without error
+    /// k=0 returns 2 empty vecs without error
     #[test]
     fn power_iteration_k_zero_returns_empty() {
         let a = symmetric_test_matrix();
@@ -1214,13 +1219,13 @@ mod iterative_tests {
         assert_eq!(vals.len(), 3);
         assert!(
             vals[0] > vals[1],
-            "λ_0 ({}) must be > λ_1 ({})",
+            "lambda_0 ({}) must be > lambda_1 ({})",
             vals[0],
             vals[1]
         );
         assert!(
             vals[1] > vals[2],
-            "λ_1 ({}) must be > λ_2 ({})",
+            "lambda_1 ({}) must be > lambda_2 ({})",
             vals[1],
             vals[2]
         );
@@ -1235,14 +1240,14 @@ mod iterative_tests {
         for i in 0..3 {
             for j in (i + 1)..3 {
                 let dot = vecs[i].dot(&vecs[j]).abs();
-                assert!(dot < 1e-5, "v_{} · v_{} = {} (expected < 1e-5)", i, j, dot);
+                assert!(dot < 1e-5, "v_{} . v_{} = {} (expected < 1e-5)", i, j, dot);
             }
         }
     }
 
     // edge-case tests for top_eigenpairs_lanczos
 
-    /// k=0 returns two empty vecs without error
+    /// k=0 returns 2 empty vecs without error
     #[test]
     fn lanczos_k_zero_returns_empty() {
         let a = symmetric_test_matrix();
@@ -1251,10 +1256,11 @@ mod iterative_tests {
         assert_eq!(vecs.len(), 0, "eigenvectors should be empty for k=0");
     }
 
-    /// On a rank-1 matrix Lanczos reaches an invariant subspace early, so at most 1 non-trivial eigenpair is returned
+    /// On a rank-1 matrix Lanczos reaches an invariant subspace early, so it returns at most 1
+    /// non-trivial eigenpair
     #[test]
     fn lanczos_rank_one_invariant_subspace_early_exit() {
-        // 3x3 rank-1 matrix: outer product of [1, 0, 0] with itself; only eigenvalue is 1
+        // 3x3 rank-1 matrix: outer product of [1, 0, 0] with itself. Only eigenvalue is 1.
         let a: Array2<f64> = ndarray::array![[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],];
 
         // Request k=5 to confirm fewer pairs come back only because the matrix is rank-1

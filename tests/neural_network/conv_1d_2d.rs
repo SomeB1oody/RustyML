@@ -1,12 +1,12 @@
 //! Integration tests for Conv1D and Conv2D forward values, shapes, error paths,
-//! param counts, set_weights, and predict==forward equivalence
+//! param counts, set_weights, and predict==forward equivalence.
 //!
 //! Layout is Keras channels-last: Conv1D sees \[batch, length, channels\] and Conv2D sees
 //! \[batch, height, width, channels\]. Kernels are \[k, Cin, F\] / \[kh, kw, Cin, F\] and every
-//! bias is rank-1 of length `filters`
+//! bias is rank-1 of length `filters`.
 //!
 //! Expected values come from the cross-correlation definition with known weights,
-//! not from recorded implementation output. Gradient checks live in gradient_check.rs
+//! not from recorded implementation output. Gradient checks live in gradient_check.rs.
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array3, Array4, array};
@@ -69,7 +69,7 @@ fn conv1d_stride2_windowed_sums() {
 #[test]
 fn conv1d_asymmetric_kernel_values() {
     let mut layer = Conv1D::new(1, 3, vec![1, 5, 1], 1, Linear::new()).unwrap();
-    // weight shape [kernel=3, channels=1, filters=1]; taps in order are 2, 0, 1
+    // weight shape [kernel=3, channels=1, filters=1]. Taps in order are 2, 0, 1.
     let weights = Array3::from_shape_vec((3, 1, 1), vec![2.0f32, 0.0, 1.0]).unwrap();
     let bias = Array1::zeros(1);
     layer.set_weights(weights, bias).unwrap();
@@ -109,14 +109,12 @@ fn conv1d_bias_offset_adds_to_every_output() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// Two filters with different tap patterns and biases produce independent outputs
+/// 2 filters with different tap patterns and biases produce independent outputs
 #[test]
 fn conv1d_two_filters_independent_outputs() {
     let mut layer = Conv1D::new(2, 2, vec![1, 5, 1], 1, Linear::new()).unwrap();
-    // weight [kernel=2, channels=1, filters=2], flat order (k0,f0), (k0,f1), (k1,f0), (k1,f1):
-    // filter 0 taps = [1, 1], filter 1 taps = [0, 1]. The 2x2 (kernel, filter) block is
-    // deliberately asymmetric, so reading it with the kernel and filter axes swapped would give
-    // filter 0 = [1, 0] and filter 1 = [1, 1] and change every expected value below
+    // weight [kernel=2, channels=1, filters=2], flat order (k0,f0), (k0,f1), (k1,f0), (k1,f1).
+    // Filter 0 taps = [1, 1] and filter 1 taps = [0, 1].
     let weights = Array3::from_shape_vec((2, 1, 2), vec![1.0f32, 0.0, 1.0, 1.0]).unwrap();
     let bias = array![0.0f32, 10.0];
     layer.set_weights(weights, bias).unwrap();
@@ -152,7 +150,7 @@ fn conv1d_relu_activation_clips_negatives() {
     let output = layer.forward(&input).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 1]);
-    // Pre-activation windowed sums: -2, 1, 6; ReLU clips the first to 0
+    // Pre-activation windowed sums are -2, 1, 6. ReLU clips the first value to 0.
     let expected = Array::from_shape_vec((1, 3, 1), vec![0.0f32, 1.0, 6.0])
         .unwrap()
         .into_dyn();
@@ -199,15 +197,15 @@ fn conv1d_same_padding_stride2_output_length_and_values() {
     let output = layer.forward(&input).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 1]);
-    // out_len = ceil(6/2) = 3; pad_total = (3-1)*2 + 3 - 6 = 1, all on the trailing edge:
-    // [1,2,3,4,5,6,0]. Windows start at 0, 2, 4: 1+2+3, 3+4+5, 5+6+0
+    // out_len = ceil(6/2) = 3. pad_total = (3-1)*2 + 3 - 6 = 1, all on the trailing edge.
+    // Padded input is [1,2,3,4,5,6,0]. Windows start at 0, 2, 4: 1+2+3, 3+4+5, 5+6+0
     let expected = Array::from_shape_vec((1, 3, 1), vec![6.0f32, 12.0, 11.0])
         .unwrap()
         .into_dyn();
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// Batch size > 1: identical samples are processed independently and yield identical outputs
+/// Batch size > 1: the layer processes identical samples independently and yields identical outputs
 #[test]
 fn conv1d_batch_forward_independent_samples() {
     let mut layer = Conv1D::new(1, 2, vec![2, 4, 1], 1, Linear::new()).unwrap();
@@ -215,7 +213,7 @@ fn conv1d_batch_forward_independent_samples() {
     let bias = Array1::zeros(1);
     layer.set_weights(weights, bias).unwrap();
 
-    // Two identical samples [1,2,3,4]; each yields windowed sums [3,5,7]
+    // 2 identical samples [1,2,3,4]. Each yields windowed sums [3,5,7].
     let input = Array::from_shape_vec((2, 4, 1), vec![1.0f32, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])
         .unwrap()
         .into_dyn();
@@ -230,7 +228,7 @@ fn conv1d_batch_forward_independent_samples() {
     }
 }
 
-/// input_length == kernel_size produces exactly one output element
+/// input_length == kernel_size produces exactly 1 output element
 #[test]
 fn conv1d_input_equals_kernel_produces_single_output() {
     let mut layer = Conv1D::new(1, 3, vec![1, 3, 1], 1, Linear::new()).unwrap();
@@ -247,7 +245,7 @@ fn conv1d_input_equals_kernel_produces_single_output() {
     assert_abs_diff_eq!(output[[0, 0, 0]], 60.0f32, epsilon = 1e-6f32);
 }
 
-/// Two input channels: the filter sums contributions across both channels
+/// 2 input channels: the filter sums contributions across both channels
 #[test]
 fn conv1d_two_input_channels_cross_channel_sum() {
     let mut layer = Conv1D::new(1, 2, vec![1, 3, 2], 1, Linear::new()).unwrap();
@@ -258,7 +256,7 @@ fn conv1d_two_input_channels_cross_channel_sum() {
     layer.set_weights(weights, bias).unwrap();
 
     // input [batch=1, length=3, channels=2]: ch0=[1,2,3], ch1=[10,20,30], interleaved per
-    // position. The two channels differ, so a swapped channel axis would change the result
+    // position. The 2 channels differ, so a swapped channel axis would change the result
     let input = Array::from_shape_vec((1, 3, 2), vec![1.0f32, 10.0, 2.0, 20.0, 3.0, 30.0])
         .unwrap()
         .into_dyn();
@@ -424,7 +422,7 @@ fn conv1d_backward_before_forward_errors() {
     );
 }
 
-// Conv1D - predict == forward in eval mode (no randomness; layer is stateless)
+// Conv1D - predict == forward in eval mode (no randomness, layer is stateless)
 
 /// predict() returns the same values as forward() for a deterministic layer
 #[test]
@@ -569,12 +567,12 @@ fn conv2d_stride2_valid_output_shape_and_values() {
     assert_abs_diff_eq!(output[[0, 1, 1, 0]], 54.0f32, epsilon = 1e-5f32); // 11+12+15+16
 }
 
-/// Two filters with independent weight patterns: all-ones kernel vs top-left-only kernel
+/// 2 filters with independent weight patterns: all-ones kernel vs top-left-only kernel
 #[test]
 fn conv2d_two_filters_independent_outputs() {
     let mut layer = Conv2D::new(2, (2, 2), vec![1, 3, 3, 1], (1, 1), Linear::new()).unwrap();
     // weight [kh=2, kw=2, channels=1, filters=2]: filter0 = [[1,1],[1,1]], filter1 = [[1,0],[0,0]].
-    // Flat order is (kh,kw)-major with the filter axis last, so each pair is (f0, f1) at one tap
+    // Flat order is (kh,kw)-major with the filter axis last, so each pair is (f0, f1) at 1 tap
     let weights = Array4::from_shape_vec(
         (2, 2, 1, 2),
         vec![1.0f32, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
@@ -605,7 +603,7 @@ fn conv2d_two_filters_independent_outputs() {
     assert_abs_diff_eq!(output[[0, 1, 1, 1]], 5.0f32, epsilon = 1e-5f32);
 }
 
-/// Two input channels: the filter sums contributions across the (last) channel axis
+/// 2 input channels: the filter sums contributions across the (last) channel axis
 #[test]
 fn conv2d_two_input_channels_cross_channel_sum() {
     let mut layer = Conv2D::new(1, (1, 1), vec![1, 2, 2, 2], (1, 1), Linear::new()).unwrap();
@@ -625,8 +623,8 @@ fn conv2d_two_input_channels_cross_channel_sum() {
     let output = layer.forward(&input).unwrap();
 
     assert_eq!(output.shape(), &[1, 2, 2, 1]);
-    // out[h,w] = 1*x[h,w,0] + 10*x[h,w,1]; the per-channel weights and the per-channel data both
-    // differ, so reading the channel axis anywhere but last changes every value
+    // out[h,w] = 1*x[h,w,0] + 10*x[h,w,1]. The per-channel weights and the per-channel data
+    // both differ, so reading the channel axis anywhere but last changes every value.
     assert_abs_diff_eq!(output[[0, 0, 0, 0]], 21.0f32, epsilon = 1e-5f32); // 1 + 10*2
     assert_abs_diff_eq!(output[[0, 0, 1, 0]], 43.0f32, epsilon = 1e-5f32); // 3 + 10*4
     assert_abs_diff_eq!(output[[0, 1, 0, 0]], 65.0f32, epsilon = 1e-5f32); // 5 + 10*6
@@ -686,7 +684,7 @@ fn conv2d_same_padding_all_ones_values() {
     let output = layer.forward(&input).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 3, 1]);
-    // pad_total = (3-1)*1 + 3 - 3 = 2 per axis, one row/column of zeros on each side
+    // pad_total = (3-1)*1 + 3 - 3 = 2 per axis, 1 row/column of zeros on each side
     // Corners: 2x2 = 4 overlapping ones
     assert_abs_diff_eq!(output[[0, 0, 0, 0]], 4.0f32, epsilon = 1e-5f32);
     assert_abs_diff_eq!(output[[0, 0, 2, 0]], 4.0f32, epsilon = 1e-5f32);
@@ -967,6 +965,8 @@ fn conv1d_same_output_length_cases() {
 
 // Conv2D - Valid output shape for diverse (H, W, kh, kw, sh, sw) cases
 
+/// Valid output shape is (dim - kernel) / stride + 1 on each spatial axis, across parameterized
+/// cases
 #[test]
 fn conv2d_valid_output_shape_cases() {
     // (H, W, kh, kw, sh, sw, out_h, out_w)
@@ -992,11 +992,10 @@ fn conv2d_valid_output_shape_cases() {
 }
 // Conv2D - convolution_engine parallel forward / weight-grad backward branches
 
-// The engine gates on estimated GEMM FLOPs (`CONV_PARALLEL_MIN_FLOPS`, default 4_000_000):
-// `2 * batch * filters * out_plane * Cin*k` on the forward pass and `4 * ...` on the backward
-// pass. These two tests size their tensors to just clear that gate and pin results to the
-// cross-correlation definition. Each asserts the crossing against the live gate value first, so a
-// retuned threshold fails loudly instead of silently demoting the test to the serial path
+// The engine runs in parallel once the estimated GEMM FLOPs clear the gate in
+// `crate::tuning::conv`. Each test below sizes its tensors to clear that gate. Each test also
+// checks the crossing against the live gate value first. A retuned threshold then fails the
+// assertion instead of silently demoting the test to the serial path.
 
 /// Parallel forward branch: windowed sums on a tensor whose estimated FLOPs clear the gate
 #[test]
@@ -1009,12 +1008,12 @@ fn conv2d_parallel_forward_windowed_sums() {
     );
 
     let mut layer = Conv2D::new(2, (2, 2), vec![2, 355, 355, 1], (1, 1), Linear::new()).unwrap();
-    // Both filters use an all-ones 2x2 kernel; bias filter0=0, filter1=100
+    // Both filters use an all-ones 2x2 kernel. Bias is filter0=0, filter1=100.
     let weights = Array4::from_elem((2, 2, 1, 2), 1.0f32);
     let bias = array![0.0f32, 100.0];
     layer.set_weights(weights, bias).unwrap();
 
-    // x[b,i,j,0] = i + j, identical across the two batch samples
+    // x[b,i,j,0] = i + j, identical across the 2 batch samples
     let mut input = Array4::<f32>::zeros((2, 355, 355, 1));
     for b in 0..2 {
         for i in 0..355 {
@@ -1027,8 +1026,8 @@ fn conv2d_parallel_forward_windowed_sums() {
 
     assert_eq!(output.shape(), &[2, 354, 354, 2]);
 
-    // The 2x2 window at (oh, ow) sums (oh+ow) + (oh+ow+1) + (oh+ow+1) + (oh+ow+2) = 4*oh + 4*ow + 4
-    // out[b,oh,ow,1] = that + 100, checked over both batches
+    // The 2x2 window at (oh, ow) sums (oh+ow) + (oh+ow+1) + (oh+ow+1) + (oh+ow+2), which is
+    // 4*oh + 4*ow + 4. out[b,oh,ow,1] = that + 100, checked over both batches
     let f0 = |oh: usize, ow: usize| (4 * oh + 4 * ow + 4) as f32;
     for b in 0..2 {
         // corners / edges of filter 0
@@ -1057,7 +1056,8 @@ fn conv2d_parallel_weight_grad_constant_count() {
     );
 
     let mut layer = Conv2D::new(1, (3, 3), vec![4, 120, 120, 2], (1, 1), Linear::new()).unwrap();
-    // Weights do not affect the weight gradient; all-ones, bias 0, for determinism
+    // Weight values do not affect the weight gradient here. This test uses all-ones weights
+    // and bias 0, for determinism.
     let weights = Array4::from_elem((3, 3, 2, 1), 1.0f32);
     let bias = Array1::zeros(1);
     layer.set_weights(weights, bias).unwrap();
@@ -1065,11 +1065,11 @@ fn conv2d_parallel_weight_grad_constant_count() {
     let input = Array::ones((4, 120, 120, 2)).into_dyn();
     let _ = layer.forward(&input).unwrap();
 
-    // grad w.r.t. the conv output: all ones, shape [batch, out_h, out_w, filters]
+    // gradient of the conv output: all ones, shape [batch, out_h, out_w, filters]
     let grad = Array::ones((4, 118, 118, 1)).into_dyn();
     let _input_grad = layer.backward(&grad).unwrap();
 
-    // parameters() returns weights first; its `.grad` is the flat weight gradient
+    // parameters() returns weights first. Its `.grad` field holds the flat weight gradient.
     let params = layer.parameters();
     let weight_grad = params[0].grad;
     // 3*3 taps * 2 input channels * 1 filter

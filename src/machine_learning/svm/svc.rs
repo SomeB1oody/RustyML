@@ -1,10 +1,11 @@
 //! Support Vector Classifier (SVC)
 //!
 //! Provides the [`SVC`] binary classifier, trained with the Sequential Minimal
-//! Optimization (SMO) algorithm, and the kernel types re-exported as [`KernelType`](crate::machine_learning::KernelType)
+//! Optimization (SMO) algorithm, and the kernel types re-exported as
+//! [`KernelType`](crate::machine_learning::KernelType)
 //!
 //! Labels are `{0.0, 1.0}` on the public API, matching the crate's other binary
-//! classifiers; the ±1 encoding the SMO dual requires is confined to `fit`
+//! classifiers. Only `fit` uses the internal +/-1 encoding that the SMO dual needs
 
 use crate::error::Error;
 use crate::machine_learning::parallel::map_collect;
@@ -20,11 +21,10 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 use ndarray_rand::rand::Rng;
 use ndarray_rand::rand::rngs::StdRng;
 
-/// Support Vector Machine classifier
+/// Support Vector Machine (SVM) binary classifier
 ///
-/// Support Vector Machines (SVM) are supervised learning methods used for
-/// classification, regression, and outlier detection. This implementation uses
-/// the Sequential Minimal Optimization (SMO) algorithm
+/// Finds the maximum-margin hyperplane that separates the 2 classes, trained
+/// with the Sequential Minimal Optimization (SMO) algorithm
 ///
 /// # Examples
 ///
@@ -58,13 +58,13 @@ use ndarray_rand::rand::rngs::StdRng;
 pub struct SVC {
     /// Kernel function type that transforms input data to higher dimensions
     kernel: KernelType,
-    /// Regularization parameter C, trading off margin width against classification error
+    /// Regularization parameter C. Balances margin width against classification error
     regularization_param: f64,
     /// Lagrange multipliers for the dual optimization problem
     alphas: Option<Array1<f64>>,
     /// Training samples that define the decision boundary
     support_vectors: Option<Array2<f64>>,
-    /// Class labels corresponding to the support vectors, in the SMO-internal ±1 encoding
+    /// Class labels for the support vectors, in the SMO-internal +/-1 encoding
     support_vector_labels: Option<Array1<f64>>,
     /// Intercept term in the decision function
     bias: Option<f64>,
@@ -76,7 +76,8 @@ pub struct SVC {
     eps: f64,
     /// Number of SMO iterations actually performed during the last fit
     n_iter: Option<usize>,
-    /// Optional seed for the SMO working-set selection, enabling reproducible training
+    /// Optional seed for the SMO working-set selection. A fixed seed makes training
+    /// reproducible
     random_state: Option<u64>,
 }
 
@@ -116,7 +117,8 @@ impl SVC {
     /// # Parameters
     ///
     /// - `kernel` - The kernel type to use for the algorithm
-    /// - `regularization_param` - The regularization parameter (C) that trades off margin size and training error
+    /// - `regularization_param` - Regularization strength C. Balances margin width
+    ///   against training error
     /// - `tol` - Tolerance for the stopping criterion
     /// - `max_iter` - Maximum number of iterations for the optimization algorithm
     ///
@@ -124,14 +126,15 @@ impl SVC {
     ///
     /// - `Result<Self, Error>` - A new SVC instance if parameters are valid
     ///
-    /// # Errors
-    ///
-    /// - `Error::InvalidParameter` - If `regularization_param` is non-positive or non-finite, or if `tol` or `max_iter` fail validation
-    ///
     /// # Notes
     ///
     /// Training is non-deterministic by default. For reproducible runs, set a fixed seed
     /// after construction with [`with_random_state`](Self::with_random_state)
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If `regularization_param` is non-positive or non-finite, or
+    ///   if `tol` or `max_iter` fail validation
     pub fn new(
         kernel: KernelType,
         regularization_param: f64,
@@ -164,8 +167,8 @@ impl SVC {
         })
     }
 
-    /// Sets a fixed RNG seed for the SMO working-set selection, making training
-    /// reproducible (default: `None`, non-deterministic)
+    /// Sets a fixed RNG seed for the SMO working-set selection. A fixed seed makes
+    /// training reproducible (default: `None`, non-deterministic)
     ///
     /// # Parameters
     ///
@@ -189,7 +192,7 @@ impl SVC {
     get_field!(get_random_state, random_state, Option<u64>);
     get_field_as_ref!(get_alphas, alphas, Option<&Array1<f64>>);
     get_field_as_ref!(get_support_vectors, support_vectors, Option<&Array2<f64>>);
-    // Note: returns the SMO-internal ±1 encoding, not the {0.0, 1.0} public label domain
+    // Note: returns the SMO-internal +/-1 encoding, not the {0.0, 1.0} public label domain
     get_field_as_ref!(
         get_support_vector_labels,
         support_vector_labels,
@@ -197,8 +200,8 @@ impl SVC {
     );
     get_field!(get_bias, bias, Option<f64>);
 
-    /// Computes the raw decision-function value for every row of `x` in one batched pass,
-    /// returning one value per sample
+    /// Computes the raw decision-function value for every row of `x` in 1 batched pass,
+    /// returning 1 value per sample
     fn decision_values_batch<S>(
         &self,
         x: &ArrayBase<S, Ix2>,
@@ -212,7 +215,7 @@ impl SVC {
     {
         let coef = alphas * support_vector_labels;
         let kernel_matrix = self.kernel.compute_matrix(x, support_vectors);
-        // Serial gemm-crate matvec
+        // Serial gemmkit matvec
         let mut decision_values = matvec(&kernel_matrix, &coef, Parallelism::Serial);
         decision_values += bias;
         decision_values
@@ -233,23 +236,24 @@ impl SVC {
     ///
     /// # Notes
     ///
-    /// The SMO dual is formulated over ±1 labels; `fit` converts internally, so the
+    /// The SMO dual uses +/-1 labels internally. `fit` converts the labels, so the
     /// `{0.0, 1.0}` domain matches [`LinearSVC`](crate::machine_learning::LinearSVC)
-    /// and [`LogisticRegression`](crate::machine_learning::LogisticRegression) and the
-    /// two SVM classifiers are interchangeable without rewriting the label array
+    /// and [`LogisticRegression`](crate::machine_learning::LogisticRegression), and the
+    /// 2 SVM classifiers are interchangeable without rewriting the label array
     ///
     /// # Errors
     ///
     /// - `Error::EmptyInput` - If input data is empty
+    /// - `Error::DimensionMismatch` - If `x` and `y` have different sample counts
     /// - `Error::InvalidInput` - If labels are not `0.0`/`1.0`
-    /// - `Error::NotConverged` - If the model fails to converge and no support vectors are found
+    /// - `Error::NotConverged` - If no support vectors are found
     /// - `Error::NonFinite` - If numerical instability produces non-finite values
     ///
     /// # Performance
     ///
-    /// The kernel-matrix GEMM runs parallel above its FLOPs gate, and the error-cache
-    /// initialization parallelizes above the calibrated scan-class gate; the SMO inner loops
-    /// are sequential so the optimization trajectory is reproducible
+    /// The kernel-matrix GEMM runs in parallel above its FLOPs gate. The error-cache
+    /// initialization runs in parallel above the calibrated scan-class gate. The SMO
+    /// inner loops stay sequential, so the optimization trajectory is reproducible
     pub fn fit<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -271,8 +275,8 @@ impl SVC {
             ));
         }
 
-        // The SMO dual is formulated over ±1 labels, so convert once here and keep the
-        // convention internal; `predict` maps back to {0.0, 1.0}
+        // Converts labels to the +/-1 encoding the SMO dual needs. The encoding stays
+        // internal, and `predict` maps back to {0.0, 1.0}
         let y = &y.mapv(|v| if v <= 0.0 { -1.0 } else { 1.0 });
 
         let x_mean = x.mean().unwrap_or(0.0);
@@ -283,7 +287,7 @@ impl SVC {
         let mut alphas = Array1::<f64>::zeros(n_samples);
         let mut b = 0.0;
 
-        // Symmetric Gram matrix via one GEMM + elementwise kernel transform
+        // Symmetric kernel matrix via 1 GEMM + elementwise kernel transform
         let kernel_matrix = self.kernel.compute_matrix(x, x);
 
         if kernel_matrix.iter().any(|&val| !val.is_finite()) {
@@ -420,14 +424,14 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, Error>` - A 1D array containing predicted class labels (`0.0` or `1.0`)
+    /// - `Result<Array1<f64>, Error>` - Predicted class labels (`0.0` or `1.0`) per sample
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model hasn't been fitted yet
+    /// - `Error::NotFitted` - If the model has not been fitted yet
     /// - `Error::EmptyInput` - If input data is empty
     /// - `Error::DimensionMismatch` - If feature dimensions mismatch
-    /// - `Error::NonFinite` - If numerical issues produce a non-finite decision value during prediction
+    /// - `Error::NonFinite` - If the decision value is non-finite during prediction
     ///
     /// # Performance
     ///
@@ -437,7 +441,7 @@ impl SVC {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        // Ensure the model has been fitted
+        // Make sure the model has been fitted
         let (support_vectors, support_vector_labels, alphas, bias) = match (
             &self.support_vectors,
             &self.support_vector_labels,
@@ -480,11 +484,12 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, Error>` - A 1D array containing the raw decision function values (distance to hyperplane)
+    /// - `Result<Array1<f64>, Error>` - Raw decision function values (distance to hyperplane)
+    ///   per sample
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model hasn't been fitted yet
+    /// - `Error::NotFitted` - If the model has not been fitted yet
     /// - `Error::EmptyInput` - If input data is empty
     /// - `Error::DimensionMismatch` - If feature dimensions mismatch
     ///
@@ -496,7 +501,7 @@ impl SVC {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        // Ensure the model has been fitted
+        // Make sure the model has been fitted
         let (support_vectors, support_vector_labels, alphas, bias) = match (
             &self.support_vectors,
             &self.support_vector_labels,
@@ -539,7 +544,7 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// - `usize` - Number of alpha values changed (0 or 1)
+    /// - `usize` - 1 if the example produced a successful alpha update, 0 otherwise
     #[allow(clippy::too_many_arguments)]
     fn examine_example<S>(
         &self,
@@ -647,7 +652,7 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// - `bool` - `true` if the alpha values were changed, `false` otherwise
+    /// - `bool` - `true` if the step changed the alpha values, `false` otherwise
     #[allow(clippy::too_many_arguments)]
     fn take_step<S>(
         &self,
@@ -735,7 +740,8 @@ impl SVC {
 
         let alpha1_new = alpha1_old + s * (alpha2_old - alpha2_new);
 
-        // Update bias under the u = sum + b convention (compute_error / decision_values_batch add + b)
+        // The bias update follows the u = sum + b convention used by compute_error
+        // and decision_values_batch
         let b_old = *b;
         let b1 =
             *b - e1 - y1 * (alpha1_new - alpha1_old) * k11 - y2 * (alpha2_new - alpha2_old) * k12;
@@ -797,9 +803,8 @@ impl SVC {
     {
         let n_samples = alphas.len();
 
-        // Decision-function sum over the non-zero alphas. Stays serial: the O(n^2) kernel
-        // matrix bounds n far below the parallel sum gate (262_144 alphas would need a
-        // ~550 GB kernel matrix)
+        // Decision-function sum over the non-zero alphas. Stays serial because the O(n^2)
+        // kernel matrix already bounds n far below the parallel sum gate
         let sum: f64 = (0..n_samples)
             .filter(|&j| alphas[j] > 0.0)
             .map(|j| alphas[j] * y[j] * kernel_matrix[[i, j]])
@@ -819,12 +824,14 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, Error>` - Predicted class labels (`0.0` or `1.0`) for the training data
+    /// - `Result<Array1<f64>, Error>` - Predicted class labels (`0.0` or `1.0`) for
+    ///   the training data
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::InvalidParameter` - If input data is invalid
-    /// - `Error::NotConverged` / `Error::NonFinite` / `Error::NotFitted` / `Error::DimensionMismatch` - If an error occurs during fitting or prediction
+    /// - `Error::EmptyInput` / `Error::InvalidInput` - If input data is invalid
+    /// - `Error::NotConverged` / `Error::NonFinite` / `Error::NotFitted` /
+    ///   `Error::DimensionMismatch` - If an error occurs during fitting or prediction
     pub fn fit_predict<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -840,6 +847,7 @@ impl SVC {
 
     model_save_and_load_methods!(SVC);
 }
+/// Unit tests for [`SVC`]
 #[cfg(test)]
 mod tests {
     use super::*;

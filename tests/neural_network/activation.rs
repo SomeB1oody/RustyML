@@ -1,11 +1,13 @@
-//! Integration tests for the activation layers and the `Activation` enum
+//! Integration tests for the activation layers and the `Activation` enum.
 //!
-//! Expected values come from the mathematical definitions. Gradient
-//! correctness is covered by tests/neural_network/gradient_check.rs, so this
-//! file does not duplicate those backward-value checks. Coverage:
+//! Expected values come from the mathematical definitions. `gradient_check.rs` covers gradient
+//! correctness. This file does not duplicate those backward-value checks.
+//!
+//! Coverage:
 //!   - forward values, predict() == forward()
 //!   - backward before forward -> NnError::ForwardPassNotRun
-//!   - non-finite input propagates (pure math, no rejection); empty input -> EmptyInput
+//!   - non-finite input propagates (pure math, no rejection)
+//!   - empty input -> Error::EmptyInput
 //!   - Activation enum forward delegation, and the Linear layer
 
 use approx::assert_abs_diff_eq;
@@ -470,7 +472,7 @@ fn linear_backward_before_forward_is_error() {
     );
 }
 
-/// Non-finite input is not rejected: Linear is the identity, so NaN/Inf pass straight through
+/// Non-finite input is not rejected: Linear is the identity, so NaN and Inf pass straight through
 #[test]
 fn linear_non_finite_input_propagates() {
     let mut layer = Linear::new();
@@ -496,8 +498,8 @@ fn linear_predict_non_finite_propagates() {
     assert!(out.as_slice().expect("contiguous")[0].is_nan());
 }
 
-// Activation enum - forward delegates to the standalone layers, so the enum's
-// forward() must match the same values
+// Activation enum: forward() delegates to the standalone layers, so its output
+// must match theirs
 
 /// Activation::Linear.forward is identity
 #[test]
@@ -567,7 +569,7 @@ fn activation_enum_softmax_rejects_1d() {
     );
 }
 
-// From<Layer> -> Activation conversions (ensures the enum round-trips)
+// From<Layer> -> Activation conversions (confirms the enum round-trips)
 
 /// From<Linear> for Activation yields Activation::Linear
 #[test]
@@ -604,10 +606,10 @@ fn from_softmax_yields_activation_softmax() {
     assert_eq!(act, Activation::Softmax);
 }
 
-// All five activation layers reject 0-length input in forward and predict; the
-// empty check runs first, so a zero-element tensor yields Error::EmptyInput
+// All 5 activation layers reject 0-length input in forward() and predict().
+// The empty check runs first, so a 0-element tensor yields Error::EmptyInput.
 
-/// Fresh boxed instances of all five activation layers, in a stable order
+/// Fresh boxed instances of all 5 activation layers, in a stable order
 fn all_activation_layers() -> Vec<(&'static str, Box<dyn Layer>)> {
     vec![
         ("ReLU", Box::new(ReLU::new())),
@@ -647,14 +649,14 @@ fn all_layers_empty_input_predict_is_error() {
     }
 }
 
-// All five activation layers validate only the structural shape of grad_output in backward
-// (wrong shape gives ShapeMismatch); they do NOT sanitize values. A non-finite grad_output is
-// pure-math propagated, surfacing downstream (next forward / NaN loss) rather than being rejected here
+// All 5 activation layers check only the structural shape of grad_output in backward().
+// A wrong shape gives ShapeMismatch. They do not sanitize values: a non-finite grad_output
+// flows through instead, surfacing downstream in the next forward pass or as a NaN loss.
 
 /// Wrong-shaped grad_output after a valid forward gives Error::ShapeMismatch
 #[test]
 fn all_layers_backward_wrong_shape_is_shape_mismatch() {
-    let input = tensor2(1, 3, vec![1.0, 2.0, 3.0]); // valid for all five (2-D)
+    let input = tensor2(1, 3, vec![1.0, 2.0, 3.0]); // valid for all 5 layers (2D)
     // grad with a different shape (1x2 instead of the cached 1x3)
     let bad_grad = tensor2(1, 2, vec![1.0, 1.0]);
     for (name, mut layer) in all_activation_layers() {
@@ -668,8 +670,8 @@ fn all_layers_backward_wrong_shape_is_shape_mismatch() {
     }
 }
 
-/// Non-finite grad_output (correct shape) is propagated, not rejected: backward is pure math, so it
-/// returns Ok and the non-finite value flows into the result instead of being masked or erroring
+/// Non-finite grad_output (correct shape) is not rejected: backward is pure math, so it returns Ok.
+/// The result carries the non-finite value forward, instead of masking it or raising an error
 #[test]
 fn all_layers_backward_propagates_non_finite_grad() {
     let input = tensor2(1, 3, vec![1.0, 2.0, 3.0]);
@@ -687,8 +689,8 @@ fn all_layers_backward_propagates_non_finite_grad() {
     }
 }
 
-// ReLU derivative: ReLU'(x) = 1 for x > 0 and 0 for x <= 0, so backward passes
-// grad_output through where input was > 0 and zeroes it elsewhere
+// ReLU derivative: ReLU'(x) = 1 for x > 0 and 0 for x <= 0.
+// backward passes grad_output through where the input was positive, and zeroes it elsewhere.
 
 /// ReLU backward passes the gradient through positive inputs and blocks the rest
 #[test]
@@ -704,8 +706,8 @@ fn relu_backward_derivative_from_definition() {
     assert_allclose(&grad_in, &expected, 1e-6_f32);
 }
 
-// Sigmoid derivative: sigmoid'(x) = a * (1 - a) where a = sigmoid(x), so backward
-// multiplies grad_output element-wise by a*(1-a)
+// Sigmoid derivative: sigmoid'(x) = a * (1 - a) where a = sigmoid(x).
+// backward multiplies grad_output element-wise by a*(1-a).
 
 /// Sigmoid backward with all-ones grad_output equals a*(1-a) element-wise
 #[test]

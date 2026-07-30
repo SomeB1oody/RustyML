@@ -36,7 +36,8 @@ impl SVDSolver {
     /// Computes the top `n_components` principal axes and their singular values from
     /// the centered data, dispatching over the configured solver strategy
     ///
-    /// Returns `(components, singular_values)`, where the principal axes are the rows of `components`
+    /// Returns `(components, singular_values)`, where the principal axes are the rows of
+    /// `components`
     fn compute_components(
         &self,
         x_centered: &Array2<f64>,
@@ -49,8 +50,8 @@ impl SVDSolver {
         }
     }
 
-    /// Exact, deterministic full decomposition via the symmetric eigendecomposition of the
-    /// covariance matrix `Xᵀ X / (n - 1)`: its eigenvectors are the principal axes and its
+    /// Exact, deterministic decomposition using the symmetric eigendecomposition of the
+    /// covariance matrix `X^T X / (n - 1)`. Its eigenvectors are the principal axes, and its
     /// eigenvalues map back to the singular values of the centered data
     fn full_svd(
         x_centered: &Array2<f64>,
@@ -60,12 +61,12 @@ impl SVDSolver {
         let n_features = x_centered.ncols();
         let denom = (n_samples - 1) as f64;
 
-        // Eigendecompose the covariance matrix: eigenvectors are the principal axes, eigenvalues
-        // are the per-axis variances
+        // Eigenvalues of the covariance matrix are per-axis variances. The loop below converts
+        // them into singular values
         let cov = dot(&x_centered.t(), x_centered) / denom;
         let eigen = crate::machine_learning::linalg::symmetric_eigen(&cov);
 
-        // The solver returns eigenpairs ascending; order them by descending eigenvalue
+        // The solver returns eigenpairs in ascending order. Sort them here by descending eigenvalue
         let mut order: Vec<usize> = (0..n_features).collect();
         order.sort_by(|&a, &b| {
             eigen.eigenvalues[b]
@@ -93,7 +94,7 @@ impl SVDSolver {
         Ok((components, Array1::from_vec(singular_values)))
     }
 
-    /// Randomized SVD with oversampling and a couple of power iterations
+    /// Randomized SVD with oversampling and 2 power iterations
     fn randomized_svd(
         x_centered: &Array2<f64>,
         n_components: usize,
@@ -243,10 +244,10 @@ impl Default for PCA {
 impl PCA {
     /// Creates a new PCA instance with validated hyperparameters
     ///
-    /// Solver guidance: choose `SVDSolver::Full` for small to mid-sized datasets (typically fewer
-    /// than 10,000 samples or features), `SVDSolver::Randomized` for large datasets (10,000+ samples
-    /// or features) when speed matters, and `SVDSolver::PowerIteration` when extracting only a few
-    /// components from very large or memory-constrained problems
+    /// Choose `SVDSolver::Full` for small to mid-sized datasets, typically fewer than 10,000
+    /// samples or features. Choose `SVDSolver::Randomized` for large datasets (10,000+ samples
+    /// or features) when speed matters. Choose `SVDSolver::PowerIteration` when you need only a
+    /// few components from very large or memory-constrained problems
     ///
     /// # Parameters
     ///
@@ -254,18 +255,18 @@ impl PCA {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A new PCA instance or validation error
+    /// - `Result<Self, Error>` - A new PCA instance or a validation error
+    ///
+    /// # Notes
+    ///
+    /// The SVD solver defaults to `SVDSolver::Full`. To pick another strategy, for example a
+    /// randomized or power-iteration solver for large data, use the builder method below.
+    ///
+    /// - [`with_svd_solver`](Self::with_svd_solver) - SVD solver strategy
     ///
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `n_components` is 0
-    ///
-    /// # Notes
-    ///
-    /// The SVD solver defaults to `SVDSolver::Full`. To pick another strategy (e.g. a
-    /// randomized or power-iteration solver for large data), use the builder method below:
-    ///
-    /// - [`with_svd_solver`](Self::with_svd_solver) - SVD solver strategy
     pub fn new(n_components: usize) -> Result<Self, Error> {
         if n_components == 0 {
             return Err(Error::invalid_parameter(
@@ -335,14 +336,18 @@ impl PCA {
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` / `Error::NonFinite` / `Error::InvalidParameter` - If the input is empty, has non-finite values, or has incompatible dimensions
-    /// - `Error::Computation` - If the decomposition fails or numerical issues occur
+    /// - `Error::EmptyInput` - If `x` has no rows or no feature columns
+    /// - `Error::NonFinite` - If `x` contains a NaN or infinite value
+    /// - `Error::InvalidInput` - If `x` has fewer than 2 samples
+    /// - `Error::InvalidParameter` - If `n_components` exceeds `min(n_samples, n_features)`
+    /// - `Error::Computation` - If the decomposition fails or produces a numerical error
+    /// - `Error::NotConverged` - If the power-iteration solver fails to converge
     ///
     /// # Performance
     ///
-    /// The covariance/projection GEMMs run parallel above their FLOPs gates; centering
-    /// and the variance reduction parallelize above the calibrated cheap-map/sum gates (see
-    /// `crate::parallel_gates`)
+    /// The covariance and projection GEMMs run in parallel above an internal size gate.
+    /// Centering and the variance reduction parallelize above the calibrated cheap-map and
+    /// sum gates (see `crate::parallel_gates`)
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
@@ -365,12 +370,14 @@ impl PCA {
     /// # Errors
     ///
     /// - `Error::NotFitted` - If the model has not been fitted
-    /// - `Error::EmptyInput` / `Error::NonFinite` / `Error::DimensionMismatch` - If the input is empty, has non-finite values, or has incompatible dimensions
-    /// - `Error::Computation` - If projection fails
+    /// - `Error::EmptyInput` - If `x` has no rows
+    /// - `Error::DimensionMismatch` - If the feature count of `x` does not match the fitted model
+    /// - `Error::NonFinite` - If `x` contains a NaN or infinite value
     ///
     /// # Performance
     ///
-    /// The projection GEMM runs on the `gemm` backend (parallelized for large products)
+    /// The projection runs as one GEMM call, which parallelizes in the backend above an
+    /// internal size gate
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -392,14 +399,18 @@ impl PCA {
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` / `Error::NonFinite` / `Error::InvalidParameter` - If the input is empty, has non-finite values, or has incompatible dimensions
-    /// - `Error::Computation` - If the decomposition or projection fails
+    /// - `Error::EmptyInput` - If `x` has no rows or no feature columns
+    /// - `Error::NonFinite` - If `x` contains a NaN or infinite value
+    /// - `Error::InvalidInput` - If `x` has fewer than 2 samples
+    /// - `Error::InvalidParameter` - If `n_components` exceeds `min(n_samples, n_features)`
+    /// - `Error::Computation` - If the decomposition fails or produces a numerical error
+    /// - `Error::NotConverged` - If the power-iteration solver fails to converge
     ///
     /// # Performance
     ///
-    /// The covariance/projection GEMMs run parallel above their FLOPs gates; centering
-    /// and the variance reduction parallelize above the calibrated cheap-map/sum gates (see
-    /// `crate::parallel_gates`)
+    /// The covariance and projection GEMMs run in parallel above an internal size gate.
+    /// Centering and the variance reduction parallelize above the calibrated cheap-map and
+    /// sum gates (see `crate::parallel_gates`)
     pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -443,12 +454,15 @@ impl PCA {
     /// # Errors
     ///
     /// - `Error::NotFitted` - If the model has not been fitted
-    /// - `Error::EmptyInput` / `Error::NonFinite` / `Error::DimensionMismatch` - If the input is empty, has non-finite values, or has incompatible dimensions
-    /// - `Error::Computation` - If reconstruction fails
+    /// - `Error::EmptyInput` - If `x` has no rows
+    /// - `Error::DimensionMismatch` - If the column count of `x` does not match the number of
+    ///   components
+    /// - `Error::NonFinite` - If `x` contains a NaN or infinite value
     ///
     /// # Performance
     ///
-    /// The reconstruction GEMM runs on the `gemm` backend (parallelized for large products)
+    /// The reconstruction runs as one GEMM call, which parallelizes in the backend above an
+    /// internal size gate
     pub fn inverse_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -480,7 +494,7 @@ impl PCA {
             progress_bar.set_message("Reconstructing data");
         }
 
-        // Map back to feature space; the GEMM parallelizes above its FLOPs gate
+        // Maps back into the original feature space
         let mut reconstructed = dot(x, components);
         reconstructed += mean;
 
@@ -628,7 +642,7 @@ impl PCA {
             progress_bar.set_message("Projecting data");
         }
 
-        // Project into component space; the GEMM parallelizes above its FLOPs gate
+        // Projects onto the component axes
         let transformed = dot(&x_centered, &components.t());
 
         #[cfg(feature = "show_progress")]
@@ -642,7 +656,6 @@ impl PCA {
 
     /// Computes the per-feature mean for centering
     fn compute_mean(x: &Array2<f64>) -> Array1<f64> {
-        // `mean_axis` sums each column in row-major (cache-friendly) order
         x.mean_axis(Axis(0)).expect("Input data must be non-empty")
     }
 
@@ -665,16 +678,18 @@ impl PCA {
 
     /// Fixes the sign of each principal axis so the decomposition is deterministic
     ///
-    /// Each component (row of `components`) is negated when its largest-magnitude loading is
-    /// negative, making that entry non-negative. This removes the sign ambiguity inherent to
-    /// eigen/SVD decompositions so all solvers and repeated runs agree on the orientation of every
-    /// axis. The decision uses the component vectors themselves, not `U` (which the randomized and
-    /// power-iteration solvers never form), so it is internally consistent but need not byte-match a
-    /// `U`-based sign convention. Reconstructions are unaffected: flipping an axis flips its
-    /// scores in step, leaving their product unchanged
+    /// Negates a component (row of `components`) when its largest-magnitude loading is negative,
+    /// so that entry becomes non-negative. This removes the sign ambiguity inherent to eigen and
+    /// SVD decompositions, so every solver and every repeated run agrees on the orientation of
+    /// each axis.
+    ///
+    /// The decision uses the component vectors themselves, not `U`, which the randomized and
+    /// power-iteration solvers never form. This makes the choice internally consistent, but it
+    /// need not byte-match a `U`-based sign convention. Reconstructions are unaffected, since
+    /// flipping an axis flips its scores in step, leaving their product unchanged
     fn flip_component_signs(components: &mut Array2<f64>) {
         for mut row in components.axis_iter_mut(Axis(0)) {
-            // Index of the largest-magnitude loading; ties keep the first (lowest) index
+            // Index of the largest-magnitude loading. Ties keep the first (lowest) index
             let mut max_idx = 0;
             let mut max_abs = 0.0;
             for (j, &v) in row.iter().enumerate() {

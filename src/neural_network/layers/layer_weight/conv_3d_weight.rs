@@ -13,9 +13,10 @@ use std::borrow::Cow;
 /// deserializes them into owned arrays
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Conv3DLayerWeight<'a> {
-    /// 5D convolution kernel with shape \[kernel_depth, kernel_height, kernel_width, channels, filters\]
+    /// 5D convolution kernel with shape (kernel_depth, kernel_height, kernel_width, channels,
+    /// filters)
     pub weight: Cow<'a, Array5<f32>>,
-    /// Bias vector with shape \[filters\]
+    /// Bias vector with shape (filters,)
     pub bias: Cow<'a, Array1<f32>>,
 }
 

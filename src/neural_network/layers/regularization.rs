@@ -1,7 +1,7 @@
 //! Regularization layers and the shared training-mode infrastructure that backs them
 //!
-//! Re-exports the three families of regularization layers and defines the macros that generate
-//! their common training-mode methods, plus a private `validation` submodule of parameter and
+//! Re-exports the 3 families of regularization layers. Defines the macros that generate their
+//! common training-mode methods, plus a private `validation` submodule of parameter and
 //! input-shape checks shared across the layers.
 //!
 //! The families are:
@@ -16,10 +16,10 @@
 //!   [`GroupNormalization`](crate::neural_network::layers::regularization::normalization::group_normalization::GroupNormalization),
 //!   and [`InstanceNormalization`](crate::neural_network::layers::regularization::normalization::instance_normalization::InstanceNormalization)
 //!
-//! Because every one of these layers behaves differently in training versus inference, the module
-//! defines two macros for toggling the shared `training` field: `mode_dependent_layer_set_training`
-//! generates the inherent `set_training` method, and `mode_dependent_layer_trait` generates the
-//! `set_training_if_mode_dependent` trait method that delegates to it.
+//! Every layer behaves differently in training versus inference. The module defines 2 macros to
+//! toggle the shared `training` field. `mode_dependent_layer_set_training` generates the inherent
+//! `set_training` method. `mode_dependent_layer_trait` generates the
+//! `set_training_if_mode_dependent` trait method that calls it.
 
 /// Dropout layers for neural networks
 pub mod dropout;
@@ -44,7 +44,7 @@ macro_rules! mode_dependent_layer_set_training {
         ///
         /// # Parameters
         ///
-        /// - `is_training` - whether the layer should be in training mode (`true`) or inference mode (`false`)
+        /// - `is_training` - `true` for training mode, `false` for inference mode
         pub fn set_training(&mut self, is_training: bool) {
             self.training = is_training;
         }

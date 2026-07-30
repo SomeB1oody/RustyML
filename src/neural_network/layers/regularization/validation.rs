@@ -24,18 +24,16 @@ pub(super) fn validate_rate_exclusive(rate: f32, param_name: &str) -> Result<(),
     Ok(())
 }
 
-/// Validates that an input's shape matches the declared one, **ignoring the batch axis**
+/// Validates that an input's shape matches the declared one, ignoring the batch axis
 ///
-/// The declared `expected_shape` includes a leading batch size (it is Keras' `batch_shape`, not
-/// its `input_shape`), but that axis is not a property of the layer: it varies with whoever calls
-/// `forward`. [`fit_with_batches`](crate::neural_network::sequential::Sequential::fit_with_batches)
-/// feeds `batch_size` rows per step plus a shorter final chunk when the dataset does not divide
-/// evenly, and `predict` may be handed any number of samples at all. Comparing axis 0 therefore
-/// rejected every batch whose size differed from the one named at construction - which, since the
-/// declared size is normally the *whole* dataset, meant every mini-batch. Only the rank and the
-/// per-sample axes are checked here
+/// The declared `expected_shape` includes a leading batch size (Keras calls it `batch_shape`,
+/// not `input_shape`). That axis is not fixed for a layer.
+/// [`fit_with_batches`](crate::neural_network::sequential::Sequential::fit_with_batches) feeds
+/// `batch_size` rows per step, plus a shorter final chunk when the dataset does not divide evenly.
+/// `predict` may also get any number of samples. This function checks only the rank and the
+/// per-sample axes, and never axis 0.
 ///
-/// An empty `expected_shape` disables the check entirely
+/// An empty `expected_shape` disables the check entirely.
 pub(super) fn validate_input_shape(
     input_shape: &[usize],
     expected_shape: &[usize],
@@ -47,9 +45,8 @@ pub(super) fn validate_input_shape(
         return Err(Error::shape_mismatch(expected_shape, input_shape));
     }
     if input_shape[1..] != expected_shape[1..] {
-        // Substitute the actual batch size into the reported expectation, so the printed
-        // difference is exactly the axes that really disagree rather than a declared batch
-        // size that is no longer enforced
+        // Substitute the actual batch size into the reported shape. The printed difference then
+        // shows only the axes that truly disagree, not the unenforced batch size.
         let mut reported = expected_shape.to_vec();
         reported[0] = input_shape[0];
         return Err(Error::shape_mismatch(reported, input_shape));
@@ -95,7 +92,8 @@ pub(super) fn validate_stddev(stddev: f32) -> Result<(), Error> {
             "Standard deviation cannot be negative",
         ));
     }
-    // A non-finite stddev (NaN / +inf) would otherwise reach `Normal::new(..).unwrap()` in the forward pass and panic, so reject it up front
+    // A non-finite stddev (NaN or infinity) would reach `Normal::new(..).unwrap()` in the forward
+    // pass. That call panics, so this function rejects it up front.
     if !stddev.is_finite() {
         return Err(Error::invalid_parameter(
             "stddev",

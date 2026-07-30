@@ -1,4 +1,5 @@
-//! 1D max pooling layer that selects the maximum value within each window along the length dimension
+//! 1D max pooling layer that selects the maximum value within each pooling window along the
+//! length dimension.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -18,10 +19,10 @@ use crate::neural_network::traits::Layer;
 
 /// 1D max pooling layer
 ///
-/// Selects the maximum value within each pooling window along the length dimension. Input
-/// tensor shape `[batch_size, length, channels]`, output tensor shape
-/// `[batch_size, pooled_length, channels]` where
-/// `pooled_length = (length - pool_size) / stride + 1`
+/// Selects the maximum value within each pooling window along the length dimension.
+/// Input tensor shape: `[batch_size, length, channels]`. Output tensor shape:
+/// `[batch_size, pooled_length, channels]`. With `Valid` padding,
+/// `pooled_length = (length - pool_size) / stride + 1`.
 ///
 /// # Examples
 ///
@@ -34,10 +35,10 @@ use crate::neural_network::traits::Layer;
 /// use approx::assert_relative_eq;
 ///
 /// // Create an input tensor: [batch_size, length, channels]
-/// // batch_size=2, 8 elements per channel, 3 input channels
+/// // batch size 2, 8 elements per channel, 3 input channels
 /// let mut input_data = Array3::zeros((2, 8, 3));
 ///
-/// // Set test data to make max pooling results predictable
+/// // Set test data to make the max pooling results predictable
 /// for b in 0..2 {
 ///     for c in 0..3 {
 ///         for i in 0..8 {
@@ -48,7 +49,7 @@ use crate::neural_network::traits::Layer;
 ///
 /// let x = input_data.clone().into_dyn();
 ///
-/// // Test MaxPooling1D using Sequential model
+/// // Test MaxPooling1D with a Sequential model
 /// let mut model = Sequential::new();
 /// model
 ///     // stride defaults to pool_size (2) and padding defaults to Valid
@@ -59,17 +60,17 @@ use crate::neural_network::traits::Layer;
 /// let output = model.predict(&x).unwrap();
 /// assert_eq!(output.shape(), &[2, 4, 3]);
 ///
-/// // Verify correctness of pooling results
-/// // For window size 2 and stride 2, the maximum element in each window is selected
+/// // Verify the pooling results
+/// // Window size 2 and stride 2: each window keeps its maximum element
 /// for b in 0..2 {
 ///     for c in 0..3 {
-///         // First window (0,1) -> max value should be 1.0
+///         // First window (0, 1): max value 1.0
 ///        assert_relative_eq!(output[[b, 0, c]], 1.0);
-///         // Second window (2,3) -> max value should be 3.0
+///         // Second window (2, 3): max value 3.0
 ///         assert_relative_eq!(output[[b, 1, c]], 3.0);
-///         // Third window (4,5) -> max value should be 5.0
+///         // Third window (4, 5): max value 5.0
 ///         assert_relative_eq!(output[[b, 2, c]], 5.0);
-///         // Fourth window (6,7) -> max value should be 7.0
+///         // Fourth window (6, 7): max value 7.0
 ///         assert_relative_eq!(output[[b, 3, c]], 7.0);
 ///     }
 /// }
@@ -77,9 +78,9 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is gated on the estimated element ops of the whole pass
-/// (`batch * out_positions * channels * window taps`) clearing
-/// [`tuning::pool`](crate::tuning::pool), not on any fixed shape
+/// The pass runs in parallel when its estimated element count
+/// (`batch * out_positions * channels * window taps`) clears the gate in
+/// [`tuning::pool`](crate::tuning::pool). The gate does not depend on any fixed shape.
 #[derive(Debug)]
 pub struct MaxPooling1D {
     /// Size of the pooling window
@@ -90,9 +91,9 @@ pub struct MaxPooling1D {
     input_shape: Vec<usize>,
     /// Padding mode applied around the input before pooling
     padding: PaddingType,
-    /// Shape of the most recent forward input, cached for backpropagation
+    /// Shape of the most recent forward input, cached for the backward pass
     forward_input_shape: Option<Vec<usize>>,
-    /// Cached flat per-output arg-max indices used for backpropagation
+    /// Cached flat per-output arg-max indices used for the backward pass
     argmax: Option<Vec<usize>>,
 }
 
@@ -104,19 +105,19 @@ impl MaxPooling1D {
     /// - `pool_size` - Size of the pooling window
     /// - `input_shape` - Input tensor shape `[batch_size, length, channels]`
     ///
-    /// # Notes
-    ///
-    /// The stride defaults to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override
-    /// them with [`MaxPooling1D::with_stride`] and [`MaxPooling1D::with_padding`]
-    ///
     /// # Returns
     ///
     /// - `Result<MaxPooling1D, Error>` - New layer instance on success
     ///
+    /// # Notes
+    ///
+    /// The stride defaults to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override
+    /// them with [`MaxPooling1D::with_stride`] and [`MaxPooling1D::with_padding`].
+    ///
     /// # Errors
     ///
     /// - `Error::DimensionMismatch` - If `input_shape` is not 3D
-    /// - `Error::InvalidInput` - If `input_shape` contains a zero dimension
+    /// - `Error::InvalidInput` - If any `input_shape` dimension is zero
     /// - `Error::InvalidParameter` - If `pool_size` is zero or larger than the input length
     pub fn new(pool_size: usize, input_shape: Vec<usize>) -> Result<Self, Error> {
         validate_input_shape_dims(&input_shape, 3, "MaxPooling1D")?;
@@ -152,7 +153,8 @@ impl MaxPooling1D {
     ///
     /// # Parameters
     ///
-    /// - `padding` - `Valid` (no padding) or `Same` (pad so the output covers the input)
+    /// - `padding` - `Valid` (no padding) or `Same` (pad so the output covers the input, with
+    ///   padded cells excluded from each window)
     ///
     /// # Returns
     ///
@@ -169,7 +171,7 @@ impl Layer for MaxPooling1D {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }
 
-        // Cache input shape and arg-max positions for the backward pass
+        // Cache the input shape and arg-max positions for the backward pass
         self.forward_input_shape = Some(input.shape().to_vec());
 
         let (output, argmax) = windowed_pool_forward(
@@ -183,7 +185,7 @@ impl Layer for MaxPooling1D {
         Ok(output)
     }
 
-    /// Inference forward in eval mode, writes no caches. See [`Layer::predict`]
+    /// Runs the forward pass for inference. Writes no cache. See [`Layer::predict`].
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         if input.ndim() != 3 {
             return Err(Error::invalid_input("input tensor is not 3D"));

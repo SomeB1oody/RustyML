@@ -1,7 +1,7 @@
-//! Integration tests for `LogisticRegression` and `generate_polynomial_features`
+//! Integration tests for `LogisticRegression` and `generate_polynomial_features`.
 //!
-//! Label contract: `predict` returns `Array1<f64>` with values in {0.0, 1.0};
-//! `predict_proba` returns `Array1<f64>` with values in (0.0, 1.0)
+//! Label contract: `predict` returns `Array1<f64>` with values in {0.0, 1.0}.
+//! `predict_proba` returns `Array1<f64>` with values in (0.0, 1.0).
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
@@ -15,7 +15,7 @@ use crate::common::assert_allclose;
 
 // Constructor validation
 
-/// Invalid learning rates (zero / negative / NaN / +Inf) are each rejected with InvalidParameter
+/// `new` rejects each invalid learning rate (zero, negative, NaN, or +Inf) with InvalidParameter
 #[test]
 fn new_invalid_learning_rate_is_invalid() {
     for lr in [0.0, -0.01, f64::NAN, f64::INFINITY] {
@@ -28,7 +28,7 @@ fn new_invalid_learning_rate_is_invalid() {
     }
 }
 
-/// max_iterations = 0 is rejected with InvalidParameter
+/// `new` rejects max_iterations = 0 with InvalidParameter
 #[test]
 fn new_zero_max_iterations_is_invalid() {
     let result = LogisticRegression::new(true, 0.1, 0, 1e-4);
@@ -39,7 +39,7 @@ fn new_zero_max_iterations_is_invalid() {
     );
 }
 
-/// Invalid tolerances (zero / negative) are each rejected (must be strictly positive)
+/// `new` rejects a zero or negative tolerance, since tolerance must be strictly positive
 #[test]
 fn new_invalid_tolerance_is_invalid() {
     for tol in [0.0, -1e-4] {
@@ -52,7 +52,8 @@ fn new_invalid_tolerance_is_invalid() {
     }
 }
 
-/// Invalid regularization alphas (negative L1 / negative L2 / NaN L2) are each rejected with InvalidParameter
+/// `with_regularization` rejects each invalid alpha (negative L1, negative L2, or NaN L2)
+/// with InvalidParameter
 #[test]
 fn new_invalid_regularization_alpha_is_invalid() {
     for reg in [
@@ -146,8 +147,8 @@ fn fit_xy_dimension_mismatch_returns_dimension_mismatch() {
     );
 }
 
-/// Non-binary labels each return InvalidInput: the label domain is strictly {0, 1}
-/// (0.5 rejected, 2.0 rejected, and -1.0 rejected — i.e. not the {-1, +1} convention)
+/// Non-binary labels each return InvalidInput: the label domain is strictly {0, 1}.
+/// 0.5, 2.0, and -1.0 are each rejected, so the domain is not the {-1, +1} convention.
 #[test]
 fn fit_non_binary_label_returns_invalid_input() {
     let cases = [
@@ -223,7 +224,8 @@ fn predict_nan_input_returns_non_finite() {
 
 // Correctness: linearly separable data
 
-/// On perfectly separable data (class 0 at x1 << 0, class 1 at x1 >> 0) all training points are classified correctly
+/// On perfectly separable data (class 0 at x1 << 0, class 1 at x1 >> 0), `predict`
+/// classifies every training point correctly
 #[test]
 fn predict_linearly_separable_classifies_correctly() {
     let mut model = LogisticRegression::new(true, 0.1, 2000, 1e-7).expect("valid params");
@@ -255,7 +257,8 @@ fn predict_linearly_separable_classifies_correctly() {
     assert_eq!(preds[5], 1.0, "(8,3) should be class 1");
 }
 
-/// predict_proba returns values strictly in (0, 1), with class-0 probabilities < 0.5 and class-1 > 0.5, consistent with predict
+/// predict_proba returns values strictly in (0, 1), with class-0 probabilities < 0.5 and
+/// class-1 > 0.5, consistent with predict
 #[test]
 fn predict_proba_range_and_consistency_with_predict() {
     let mut model = LogisticRegression::new(true, 0.1, 2000, 1e-7).expect("valid params");
@@ -328,8 +331,8 @@ fn fit_predict_agrees_with_fit_then_predict() {
 
 // Label-type interop
 
-/// `predict` output feeds the f64 classification metrics and `fit` directly, with no conversion:
-/// this is the contract that motivates `Array1<f64>` labels over an integer type
+/// `predict` output feeds the f64 classification metrics and `fit` directly, with no conversion.
+/// `Array1<f64>` labels make this direct round-trip possible.
 #[test]
 fn predict_labels_feed_metrics_and_refit_without_conversion() {
     let x = array![[-5.0, 0.0], [-4.0, 1.0], [4.0, 0.0], [5.0, 1.0],];
@@ -339,7 +342,7 @@ fn predict_labels_feed_metrics_and_refit_without_conversion() {
     model.fit(&x, &y).expect("fit should succeed");
     let preds = model.predict(&x).expect("predict should succeed");
 
-    // Straight into the metrics layer — no `.mapv(|v| v as f64)` bridge
+    // Straight into the metrics layer, with no `.mapv(|v| v as f64)` bridge needed
     #[cfg(feature = "metrics")]
     {
         let cm = ConfusionMatrix::new(&y, &preds);
@@ -347,15 +350,15 @@ fn predict_labels_feed_metrics_and_refit_without_conversion() {
         assert_abs_diff_eq!(accuracy(&y, &preds), 1.0, epsilon = 1e-12);
     }
 
-    // And straight back into `fit` as labels — the round-trip the i32 output could not do
+    // Straight back into `fit` as labels too, with no conversion needed
     let mut refit = LogisticRegression::new(true, 0.1, 2000, 1e-8).expect("valid params");
     refit
         .fit(&x, &preds)
         .expect("predicted labels must be valid training targets");
 }
 
-/// `fit` accepts `x` and `y` backed by different storage types (owned matrix, borrowed view),
-/// which the single-`S` signature rejected at compile time
+/// `fit` accepts an owned feature matrix paired with a borrowed target view, and the
+/// reverse pairing of storage types.
 #[test]
 fn fit_accepts_mixed_storage_for_x_and_y() {
     let x = array![[-5.0, 0.0], [-4.0, 1.0], [4.0, 0.0], [5.0, 1.0],];
@@ -382,7 +385,8 @@ fn fit_accepts_mixed_storage_for_x_and_y() {
 
 // fit_intercept=false
 
-/// Without an intercept, the model has exactly n_features weights (2 features -> 2 weights, no bias column)
+/// Without an intercept, the model has exactly n_features weights (2 features -> 2
+/// weights, no bias column)
 #[test]
 fn fit_no_intercept_weight_count_equals_features() {
     let mut model = LogisticRegression::new(false, 0.1, 1000, 1e-7).expect("valid params");
@@ -629,7 +633,8 @@ fn poly_features_three_features_degree3_gives_nineteen_columns() {
     );
 }
 
-/// Multiple samples are transformed independently: each row is expanded correctly
+/// `generate_polynomial_features` transforms multiple samples independently, expanding each
+/// row correctly
 #[test]
 fn poly_features_multiple_samples_each_row_correct() {
     let x = array![[3.0], [5.0]];
@@ -642,10 +647,11 @@ fn poly_features_multiple_samples_each_row_correct() {
     assert_abs_diff_eq!(result[[1, 1]], 25.0, epsilon = 1e-14);
 }
 
-/// Degree-2 expansion makes circular data (classes split by x1^2 + x2^2) linearly separable, classifying all training points correctly
+/// Degree-2 expansion makes circular data (classes split by x1^2 + x2^2) linearly
+/// separable, classifying all training points correctly
 #[test]
 fn poly_features_pipeline_makes_circular_data_separable() {
-    // Class 0: on circle of radius ~1; class 1: on circle of radius ~5
+    // Class 0: on circle of radius ~1. Class 1: on circle of radius ~5.
     let x = array![
         [1.0, 0.0],  // radius 1, class 0
         [0.0, 1.0],  // radius 1, class 0
@@ -675,7 +681,8 @@ fn poly_features_pipeline_makes_circular_data_separable() {
 
 // Determinism (same seed = identical weights)
 
-/// Two fits with the same hyperparameters on the same data produce bit-identical weights (gradient descent has no randomness)
+/// 2 fits with the same hyperparameters on the same data produce bit-identical weights
+/// (gradient descent has no randomness)
 #[test]
 fn deterministic_fit_produces_identical_weights() {
     let x = array![[-3.0, 1.0], [-2.0, -1.0], [2.0, 1.0], [3.0, -1.0],];
@@ -693,7 +700,7 @@ fn deterministic_fit_produces_identical_weights() {
     assert_allclose(w_a, w_b, 0.0); // bit-identical
 }
 
-/// Two fits produce the same predictions on unseen data
+/// 2 fits produce the same predictions on unseen data
 #[test]
 fn deterministic_fit_produces_identical_predictions_on_unseen_data() {
     let x_train = array![[-3.0, 1.0], [-2.0, -1.0], [2.0, 1.0], [3.0, -1.0],];
@@ -717,7 +724,8 @@ fn deterministic_fit_produces_identical_predictions_on_unseen_data() {
 }
 // In-loop NonFinite guards (huge learning rate on finite data)
 
-/// A huge but finite learning rate on finite, large-magnitude data trips an in-loop numerical guard in `fit` and returns `Error::NonFinite`
+/// A huge but finite learning rate on finite, large-magnitude data trips an in-loop
+/// numerical guard in `fit` and returns `Error::NonFinite`
 #[test]
 fn fit_huge_learning_rate_on_finite_data_returns_non_finite() {
     // Large-magnitude finite features so an overflowing update is guaranteed
@@ -736,11 +744,8 @@ fn fit_huge_learning_rate_on_finite_data_returns_non_finite() {
 
 // regularization scaling convention (penalty NOT divided by n_samples)
 
-/// The L2-regularized objective (1/n)Σlogloss + (α/2)||w||² is invariant to replicating
-/// every sample (mean log-loss and penalty are both unchanged), so the regularized optimum
-/// must be too. With a penalty erroneously divided by n_samples, replicating the data weakens
-/// the effective penalty and inflates the weights. Full-batch GD makes the replicated run an
-/// exact copy of the original once the penalty no longer depends on n.
+/// The L2 objective is mean log-loss plus (alpha/2)||w||^2. Neither term depends on how many
+/// times each row repeats, so replicating every training row 3 times must not change the fit.
 #[test]
 fn l2_regularization_strength_is_sample_count_invariant() {
     let x = array![

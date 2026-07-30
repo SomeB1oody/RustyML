@@ -1,11 +1,11 @@
-//! Integration tests for Conv3D, DepthwiseConv2D, and SeparableConv2D
+//! Integration tests for Conv3D, DepthwiseConv2D, and SeparableConv2D.
 //!
 //! Tensors are channels-last (Keras): Conv3D takes \[batch, depth, height, width, channels\] and
 //! the 2D layers take \[batch, height, width, channels\]. Kernels are \[k..., Cin, F\] and every
-//! bias is a rank-1 \[F\] vector
+//! bias is a rank-1 \[F\] vector.
 //!
 //! Expected values come from the mathematical definition or hand calculation, not from
-//! recording layer output. Gradient checks live in tests/neural_network/gradient_check.rs
+//! recording layer output. Gradient checks live in tests/neural_network/gradient_check.rs.
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array4, Array5};
@@ -21,13 +21,8 @@ use crate::common::assert_allclose;
 
 // Conv3D - constructor validation
 
-/// Each invalid constructor argument must be rejected with the matching error variant.
-/// Rows fold the former per-argument tests:
-/// - filters=0                -> InvalidParameter (was conv3d_new_rejects_zero_filters)
-/// - zero in kernel tuple     -> InvalidParameter (was conv3d_new_rejects_zero_kernel_dimension)
-/// - zero in stride tuple     -> InvalidParameter (was conv3d_new_rejects_zero_stride)
-/// - 4D (non-5D) input_shape  -> InvalidInput     (was conv3d_new_rejects_non_5d_input_shape)
-/// - zero input dimension     -> InvalidInput     (was conv3d_new_rejects_zero_input_dimension)
+/// Each invalid constructor argument returns the matching error: InvalidParameter for a zero
+/// filter count, kernel dimension, or stride, and InvalidInput for a bad input_shape.
 #[test]
 fn conv3d_new_rejects_invalid_args() {
     enum Want {
@@ -147,11 +142,8 @@ fn conv3d_forward_output_shape_stride2_valid() {
 
 // Conv3D - known-weight forward value
 
-/// All-ones 2x2x2 kernel sums the 8-element window: forward output matches the hand calculation
-///
-/// With one channel, `x[0, d, h, w, 0] = 0.05 * (9d + 3h + w) - 0.40`. The window at output
-/// `(od, oh, ow)` covers `d in {od, od+1}`, `h in {oh, oh+1}`, `w in {ow, ow+1}`, so the sum of
-/// its flat indices is `72*od + 24*oh + 8*ow + 52` and the output is `0.05 * S - 8 * 0.40`
+/// All-ones 2x2x2 kernel sums the 8-element window. Forward output matches a hand calculation
+/// for `x[0, d, h, w, 0] = 0.05 * (9d + 3h + w) - 0.40`.
 #[test]
 fn conv3d_known_weight_forward_values() {
     let mut conv =
@@ -230,8 +222,8 @@ fn conv3d_forward_rejects_non_5d_input() {
     );
 }
 
-/// Constructing with a declared input spatial dim smaller than the kernel is rejected (parity
-/// with Conv1D/Conv2D, which already checked this)
+/// Constructing with a declared input spatial dim smaller than the kernel is rejected, matching
+/// Conv1D and Conv2D.
 #[test]
 fn conv3d_new_rejects_input_smaller_than_kernel() {
     let err = Conv3D::new(
@@ -274,7 +266,8 @@ fn conv3d_forward_rejects_input_smaller_than_kernel() {
 fn conv3d_set_weights_shape_mismatch_errors() {
     let mut conv =
         Conv3D::new(1, (2, 2, 2), vec![1, 3, 3, 3, 1], (1, 1, 1), Linear::new()).unwrap();
-    // Layer expects weights [2,2,2,1,1] ([kd,kh,kw,Cin,F]); supply 2 filters instead of 1
+    // Layer expects weights [2,2,2,1,1] ([kd,kh,kw,Cin,F]). This test supplies 2 filters
+    // instead of 1.
     let wrong_w = Array5::zeros((2_usize, 2, 2, 1, 2));
     let b = Array1::zeros(1);
     let err = conv.set_weights(wrong_w, b).unwrap_err();
@@ -286,11 +279,8 @@ fn conv3d_set_weights_shape_mismatch_errors() {
 
 // DepthwiseConv2D - constructor validation
 
-/// Each invalid constructor argument must be rejected with the matching error variant.
-///
-/// `DepthwiseConv2D::new` no longer takes a `filters` argument (the output channel count is
-/// `channels * depth_multiplier`), so the former filters rows are gone; what remains is the
-/// kernel/stride/input-shape validation.
+/// Each invalid constructor argument returns the matching error: InvalidParameter for a zero
+/// kernel or stride, and InvalidInput for a bad input_shape.
 #[test]
 fn depthwise_conv2d_new_rejects_invalid_args() {
     enum Want {
@@ -352,7 +342,7 @@ fn depthwise_conv2d_new_rejects_invalid_args() {
     }
 }
 
-/// `with_depth_multiplier(0)` is rejected with InvalidParameter
+/// `with_depth_multiplier(0)` returns InvalidParameter
 #[test]
 fn depthwise_conv2d_with_depth_multiplier_rejects_zero() {
     let err = DepthwiseConv2D::new((2, 2), vec![1, 4, 4, 2], (1, 1), Linear::new())
@@ -365,8 +355,8 @@ fn depthwise_conv2d_with_depth_multiplier_rejects_zero() {
     );
 }
 
-/// A runtime input whose channel count differs from the declared one returns DimensionMismatch
-/// (previously an `assert_eq!` panic)
+/// A runtime input whose channel count differs from the declared one returns DimensionMismatch,
+/// instead of a panic.
 #[test]
 fn depthwise_conv2d_forward_rejects_wrong_channels() {
     let mut conv = DepthwiseConv2D::new(
@@ -393,7 +383,7 @@ fn depthwise_conv2d_channel_independence() {
     let mut conv = DepthwiseConv2D::new((2, 2), vec![1, 3, 3, 2], (1, 1), Linear::new()).unwrap();
 
     // Weight layout is [kh, kw, channels, depth_multiplier], dm = 1 here
-    // Channel 0 kernel = all 1s; channel 1 kernel stays zero
+    // Channel 0 kernel = all 1s. Channel 1 kernel stays zero.
     let mut w = Array4::<f32>::zeros((2, 2, 2, 1));
     w[[0, 0, 0, 0]] = 1.0;
     w[[0, 1, 0, 0]] = 1.0;
@@ -436,7 +426,7 @@ fn depthwise_conv2d_channel_independence() {
 fn depthwise_conv2d_cross_channel_no_bleed() {
     let mut conv = DepthwiseConv2D::new((2, 2), vec![1, 3, 3, 2], (1, 1), Linear::new()).unwrap();
 
-    // Channel 0 kernel = [[1,0],[0,0]] (only top-left); channel 1 kernel = all zeros
+    // Channel 0 kernel = [[1,0],[0,0]] (only top-left). Channel 1 kernel = all zeros.
     let mut w = Array4::<f32>::zeros((2, 2, 2, 1));
     w[[0, 0, 0, 0]] = 1.0;
     let bias = Array1::<f32>::zeros(2);
@@ -490,7 +480,7 @@ fn depthwise_conv2d_cross_channel_no_bleed() {
 fn depthwise_conv2d_known_weight_single_channel() {
     let mut conv = DepthwiseConv2D::new((2, 2), vec![1, 3, 3, 1], (1, 1), Linear::new()).unwrap();
 
-    // Kernel: [[1,2],[3,4]] laid out as [kh, kw, channels=1, dm=1]; bias 0.5
+    // Kernel [[1,2],[3,4]] is laid out as [kh, kw, channels=1, dm=1]. Bias is 0.5.
     let mut w = Array4::<f32>::zeros((2, 2, 1, 1));
     w[[0, 0, 0, 0]] = 1.0;
     w[[0, 1, 0, 0]] = 2.0;
@@ -556,7 +546,7 @@ fn depthwise_conv2d_backward_before_forward_errors() {
 #[test]
 fn depthwise_conv2d_set_weights_shape_mismatch_errors() {
     let mut conv = DepthwiseConv2D::new((2, 2), vec![1, 4, 4, 2], (1, 1), Linear::new()).unwrap();
-    // Layer expects weights [2,2,2,1] ([kh,kw,channels,dm]); supply 3 channels
+    // Layer expects weights [2,2,2,1] ([kh,kw,channels,dm]). This test supplies 3 channels.
     let wrong_w = Array4::<f32>::zeros((2, 2, 3, 1));
     let bias = Array1::<f32>::zeros(2);
     let err = conv.set_weights(wrong_w, bias).unwrap_err();
@@ -568,12 +558,8 @@ fn depthwise_conv2d_set_weights_shape_mismatch_errors() {
 
 // SeparableConv2D - constructor validation
 
-/// Each invalid constructor argument must be rejected with the matching error variant.
-/// Rows fold the former per-argument tests:
-/// - filters=0            -> InvalidParameter (was separable_conv2d_new_rejects_zero_filters)
-/// - depth_multiplier=0   -> InvalidParameter (was separable_conv2d_new_rejects_zero_depth_multiplier)
-/// - zero kernel dim      -> InvalidParameter (was separable_conv2d_new_rejects_zero_kernel)
-/// - non-4D input_shape   -> InvalidInput     (was separable_conv2d_new_rejects_non_4d_input_shape)
+/// Each invalid constructor argument returns the matching error: InvalidParameter for a zero
+/// filter count, depth multiplier, or kernel dimension, and InvalidInput for a bad input_shape.
 #[test]
 fn separable_conv2d_new_rejects_invalid_args() {
     enum Want {
@@ -726,15 +712,15 @@ fn separable_conv2d_known_weight_forward_values() {
     assert_abs_diff_eq!(out[[0, 1, 1, 0]], 29.0_f32, epsilon = 1e-5);
 }
 
-/// `Same` padding zero-pads the depthwise stage: output is the zero-padded 3x3 box filter over 1..=9
-/// (regression - the old boundary-clipping code returned the unpadded 3x3 sum 45 at [0,0])
+/// `Same` padding zero-pads the depthwise stage: output is the zero-padded 3x3 box filter
+/// over the input 1..=9.
 #[test]
 fn separable_conv2d_same_padding_zero_pads_depthwise() {
     let mut conv = SeparableConv2D::new(1, (3, 3), vec![1, 3, 3, 1], (1, 1), 1, Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
 
-    // depthwise: 3x3 all-ones box filter; pointwise: identity (scale by 1); bias 0
+    // Depthwise is a 3x3 all-ones box filter. Pointwise is identity (scale by 1). Bias is 0.
     let dw = Array4::<f32>::from_elem((3, 3, 1, 1), 1.0);
     let pw = Array4::<f32>::from_elem((1, 1, 1, 1), 1.0);
     let bias = Array1::<f32>::zeros(1);
@@ -751,8 +737,8 @@ fn separable_conv2d_same_padding_zero_pads_depthwise() {
     // `Same` keeps the spatial shape
     assert_eq!(out.shape(), &[1, 3, 3, 1]);
 
-    // pad_total = (3-1)*1 + 3 - 3 = 2, so one zero row/column on each edge; each entry is the
-    // sum of the in-bounds members of its 3x3 neighbourhood over [[1,2,3],[4,5,6],[7,8,9]]
+    // pad_total = (3-1)*1 + 3 - 3 = 2, so 1 zero row/column sits on each edge. Each entry is
+    // the sum of the in-bounds members of its 3x3 neighborhood over [[1,2,3],[4,5,6],[7,8,9]].
     let expected = [
         [12.0_f32, 21.0, 16.0],
         [27.0, 45.0, 33.0],
@@ -804,7 +790,7 @@ fn separable_conv2d_backward_before_forward_errors() {
 fn separable_conv2d_set_weights_shape_mismatch_errors() {
     let mut conv =
         SeparableConv2D::new(2, (2, 2), vec![1, 4, 4, 2], (1, 1), 1, Linear::new()).unwrap();
-    // depthwise_weights should be [kh=2, kw=2, channels=2, dm=1]; supply wrong dm=3
+    // depthwise_weights should be [kh=2, kw=2, channels=2, dm=1]. This test supplies dm=3.
     let bad_dw = Array4::<f32>::zeros((2, 2, 2, 3));
     let ok_pw = Array4::<f32>::zeros((1, 1, 2, 2));
     let ok_b = Array1::<f32>::zeros(2);
@@ -817,7 +803,7 @@ fn separable_conv2d_set_weights_shape_mismatch_errors() {
 
 // SeparableConv2D - depth_multiplier correctly expands intermediate channels
 
-/// depth_multiplier=2 yields two scaled copies; filter 0 reproduces input, filter 1 is 2x input
+/// depth_multiplier=2 yields 2 scaled copies. Filter 0 reproduces the input, filter 1 doubles it.
 #[test]
 fn separable_conv2d_depth_multiplier_2_forward_values() {
     let mut conv =
@@ -893,14 +879,14 @@ fn depthwise_conv2d_large_input_windowed_sums() {
 
 // SeparableConv2D - large-input windowed sums
 
-/// A [1,72,72,1] ramp through an all-ones 2x2 depthwise then a scale-by-2 pointwise plus bias 1:
-/// final out = 2*(4*oh + 4*ow + 4) + 1 = 8*oh + 8*ow + 9
+/// A [1,72,72,1] ramp goes through an all-ones 2x2 depthwise, then a scale-by-2 pointwise plus
+/// bias 1. The final output is 8*oh + 8*ow + 9.
 #[test]
 fn separable_conv2d_large_input_windowed_sums() {
     let mut conv =
         SeparableConv2D::new(1, (2, 2), vec![1, 72, 72, 1], (1, 1), 1, Linear::new()).unwrap();
 
-    // depthwise: all-ones 2x2; pointwise: scale by 2; bias 1.0
+    // Depthwise is an all-ones 2x2 kernel. Pointwise scales by 2. Bias is 1.0.
     let dw = Array4::<f32>::from_elem((2, 2, 1, 1), 1.0);
     let pw = Array4::<f32>::from_elem((1, 1, 1, 1), 2.0);
     let bias = Array1::<f32>::from_elem(1, 1.0);

@@ -1,11 +1,11 @@
-//! Mean Squared Error loss function and its gradient
+//! Mean Squared Error loss function and its gradient.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::losses::validate_same_shape;
 use crate::neural_network::traits::Loss;
 
-/// Mean Squared Error loss function
+/// Mean Squared Error loss function.
 ///
 /// # Examples
 ///
@@ -40,11 +40,11 @@ use crate::neural_network::traits::Loss;
 pub struct MeanSquaredError;
 
 impl MeanSquaredError {
-    /// Creates a new `MeanSquaredError` instance
+    /// Creates a new `MeanSquaredError` instance.
     ///
     /// # Returns
     ///
-    /// - `MeanSquaredError` - A unit-like loss-function struct
+    /// - `MeanSquaredError` - a unit-like loss-function struct
     pub fn new() -> Self {
         Self {}
     }

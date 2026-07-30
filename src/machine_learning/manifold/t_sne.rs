@@ -1,8 +1,8 @@
 //! t-SNE (t-distributed Stochastic Neighbor Embedding) for dimensionality reduction
 //!
 //! Provides the [`TSNE`] model with PCA or random embedding initialization, early exaggeration,
-//! momentum-based gradient descent, and a per-point sigma solver that calibrates conditional
-//! probabilities to a target perplexity
+//! and momentum-based gradient descent. It also provides a per-point sigma solver that
+//! calibrates conditional probabilities to a target perplexity
 
 use crate::error::Error;
 use crate::math::matmul::{cache_resident, gemm_chunk_rows, matvec};
@@ -15,11 +15,11 @@ use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut1, Axis, Data, 
 use ndarray_rand::rand::Rng;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
-/// Finds the sigma matching a target perplexity for one point's distances, via binary search
+/// Finds the sigma matching a target perplexity for 1 point's distances, via binary search
 ///
 /// Returns the resulting probability distribution together with the sigma that achieves the
-/// target perplexity. This is t-SNE's per-point precision calibration, an algorithm-specific
-/// solver, so it lives with the model rather than in `crate::math`
+/// target perplexity. This is t-SNE's per-point precision calibration. It is algorithm-specific,
+/// so it lives with the model rather than in `crate::math`
 ///
 /// # Returns
 ///
@@ -99,10 +99,10 @@ const GAIN_INCREASE: f64 = 0.2;
 const GAIN_DECAY: f64 = 0.8;
 /// Floor for the per-parameter adaptive gain
 const MIN_GAIN: f64 = 0.01;
-/// Lower bound for q_ij / the Barnes-Hut normalizer Z before division and log
+/// Lower bound for q_ij and the Barnes-Hut normalizer Z before division or log
 const MIN_Q: f64 = f64::EPSILON;
-/// Default gradient infinity-norm threshold for early stopping; `min_grad_norm` defaults to
-/// 1e-7
+/// Default value for the `min_grad_norm` gradient infinity-norm threshold used for early
+/// stopping
 const DEFAULT_MIN_GRAD_NORM: f64 = 1e-7;
 
 /// serde default for [`TSNE::min_grad_norm`], so models serialized before the field existed
@@ -114,8 +114,8 @@ fn default_min_grad_norm() -> f64 {
 /// Strategy for initializing the low-dimensional embedding before optimization
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Init {
-    /// Initialize from the top principal components of the input. Deterministic and gives a
-    /// stable, well-spread starting layout, so it is the default and ignores `random_state`
+    /// Initialize from the top principal components of the input. This method is deterministic
+    /// and gives a stable, well-spread layout. It is the default, and it ignores `random_state`
     #[default]
     PCA,
     /// Initialize from small random noise seeded by `random_state`
@@ -125,15 +125,15 @@ pub enum Init {
 /// Gradient computation method for t-SNE optimization
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum TSNEMethod {
-    /// Barnes-Hut approximation. Affinities are kept sparse over each point's nearest neighbors
-    /// and the repulsive forces are summarized through a space-partitioning tree, giving roughly
-    /// `O(n log n)` per iteration. `angle` (theta) in `[0, 1)` trades accuracy for speed, where
-    /// larger values are faster and less accurate. Only supports `n_components <= 3`
+    /// Barnes-Hut approximation. It keeps affinities sparse over each point's nearest neighbors
+    /// and summarizes the repulsive forces through a space-partitioning tree, at roughly
+    /// `O(n log n)` per iteration. `angle` (theta) is in `[0, 1)` and trades accuracy for speed.
+    /// A larger value is faster and less accurate. Supports only `n_components <= 3`
     BarnesHut {
-        /// Opening angle (theta) in `[0, 1)`; larger is faster and less accurate
+        /// Opening angle (theta) in `[0, 1)`. A larger value is faster and less accurate
         angle: f64,
     },
-    /// Exact gradient over all pairs, costing `O(n^2)` per iteration. Supports any `n_components`
+    /// Exact gradient over all pairs, at `O(n^2)` per iteration. Supports any `n_components`
     Exact,
 }
 
@@ -181,8 +181,8 @@ pub struct TSNE {
     /// Gradient computation method (defaults to [`TSNEMethod::BarnesHut`])
     #[serde(default)]
     method: TSNEMethod,
-    /// Gradient infinity-norm below which optimization stops early (after early exaggeration);
-    /// `0` disables early stopping and always runs the full `n_iter`
+    /// Gradient infinity-norm below which optimization stops early (after early exaggeration).
+    /// `0` disables early stopping, so optimization always runs the full `n_iter`
     #[serde(default = "default_min_grad_norm")]
     min_grad_norm: f64,
 }
@@ -199,6 +199,7 @@ impl Default for TSNE {
     /// - `random_state` - None
     /// - `init` - [`Init::PCA`]
     /// - `method` - [`TSNEMethod::BarnesHut`] with `angle = 0.5`
+    /// - `min_grad_norm` - 1e-7
     fn default() -> Self {
         TSNE::new(2, 30.0, 200.0, 1000).expect("Default TSNE parameters should be valid")
     }
@@ -218,22 +219,25 @@ impl TSNE {
     ///
     /// - `Result<Self, Error>` - A new TSNE instance or validation error
     ///
+    /// # Notes
+    ///
+    /// The gradient method defaults to [`TSNEMethod::BarnesHut`] (with `angle = 0.5`) for
+    /// `n_components <= 3`. It falls back to [`TSNEMethod::Exact`] otherwise. The embedding is
+    /// PCA-initialized by default. The random path is deterministic only when seeded, either
+    /// locally through `with_random_state` or globally through `crate::random`.
+    /// Override any of these with the builder methods (`with_method` returns `Result` because
+    /// Barnes-Hut requires a valid angle and a low-dimensional embedding):
+    ///
+    /// - [`with_random_state`](Self::with_random_state) - fixed seed for the random init path
+    /// - [`with_init`](Self::with_init) - embedding initialization
+    ///   ([`Init::PCA`] or [`Init::Random`])
+    /// - [`with_method`](Self::with_method) - gradient method
+    ///   ([`TSNEMethod::BarnesHut`] or [`TSNEMethod::Exact`])
+    ///
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `n_components` or `n_iter` is 0, or if `perplexity` or
     ///   `learning_rate` is non-positive or not finite
-    ///
-    /// # Notes
-    ///
-    /// The gradient method defaults to [`TSNEMethod::BarnesHut`] (with `angle = 0.5`) for
-    /// `n_components <= 3` and falls back to [`TSNEMethod::Exact`] otherwise; the embedding is
-    /// PCA-initialized and the random path is seeded non-deterministically. Override any of
-    /// these with the builder methods (`with_method` returns `Result` because Barnes-Hut
-    /// requires a valid angle and a low-dimensional embedding):
-    ///
-    /// - [`with_random_state`](Self::with_random_state) - fixed seed for the random init path
-    /// - [`with_init`](Self::with_init) - embedding initialization ([`Init::PCA`] or [`Init::Random`])
-    /// - [`with_method`](Self::with_method) - gradient method ([`TSNEMethod::BarnesHut`] or [`TSNEMethod::Exact`])
     pub fn new(
         n_components: usize,
         perplexity: f64,
@@ -265,8 +269,8 @@ impl TSNE {
             return Err(Error::invalid_parameter("n_iter", "must be greater than 0"));
         }
 
-        // Barnes-Hut needs a low-dimensional embedding for the tree, so default to it only when
-        // valid; higher-dimensional embeddings fall back to the exact gradient
+        // Barnes-Hut needs a low-dimensional embedding for the tree, so it is the default only
+        // when valid. Higher-dimensional embeddings fall back to the exact gradient
         let method = if n_components <= 3 {
             TSNEMethod::BarnesHut { angle: 0.5 }
         } else {
@@ -285,8 +289,8 @@ impl TSNE {
         })
     }
 
-    /// Sets a fixed RNG seed for the random initialization path, making it reproducible
-    /// (default: `None`; PCA initialization is deterministic regardless)
+    /// Sets a fixed RNG seed for the random initialization path, so it becomes reproducible.
+    /// The default is `None`, and PCA initialization stays deterministic regardless
     ///
     /// # Parameters
     ///
@@ -323,7 +327,7 @@ impl TSNE {
     ///
     /// # Returns
     ///
-    /// - `Ok(Self)` - the updated instance, for method chaining
+    /// - `Result<Self, Error>` - the updated instance, for method chaining
     ///
     /// # Errors
     ///
@@ -354,9 +358,10 @@ impl TSNE {
 
     /// Sets the gradient infinity-norm threshold for early stopping (default: `1e-7`)
     ///
-    /// Once the early-exaggeration phase is over, optimization stops as soon as the largest
-    /// absolute gradient entry drops below this value, sparing iterations after the embedding has
-    /// converged. Set it to `0.0` to disable early stopping and always run the full `n_iter`
+    /// Once the early-exaggeration phase ends, optimization stops as soon as the largest
+    /// absolute gradient entry drops below this value. This spares iterations after the
+    /// embedding converges. Set the value to `0.0` to disable early stopping, so the run
+    /// always uses the full `n_iter`
     ///
     /// # Parameters
     ///
@@ -399,7 +404,7 @@ impl TSNE {
     /// # Performance
     ///
     /// Parallelizes when the pairwise work clears the calibrated class gates (see
-    /// `crate::parallel_gates`); the GEMMs gate themselves inside the gemmkit backend
+    /// `crate::parallel_gates`). The GEMMs gate themselves inside the gemmkit backend
     pub fn fit_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -559,7 +564,7 @@ impl TSNE {
         Ok(y)
     }
 
-    /// Applies one momentum SGD step with the adaptive per-parameter gains, then recenters
+    /// Applies 1 momentum SGD step with the adaptive per-parameter gains, then recenters
     ///
     /// Updates `gains` with Jacobs' delta-bar-delta heuristic, accumulates the momentum increment
     /// into `y_incs`, advances `y`, and subtracts the mean to keep the embedding centered
@@ -600,11 +605,11 @@ impl TSNE {
 
     /// Builds the symmetric sparse joint probabilities over each point's nearest neighbors
     ///
-    /// For each point the `k = min(n - 1, ceil(3 * perplexity) + 1)` nearest neighbors are found by
-    /// a brute-force search, the per-point sigma is calibrated over those neighbors, and the
-    /// conditional probabilities are symmetrized into joint probabilities. Returns one neighbor
-    /// list per point, each entry holding `(neighbor_index, p_ij)`. The neighbor search is `O(n^2)`
-    /// and runs once, while the per-iteration repulsion stays `O(n log n)`
+    /// For each point, this finds the `k = min(n - 1, ceil(3 * perplexity) + 1)` nearest
+    /// neighbors by brute-force search. It calibrates the per-point sigma over them, and
+    /// symmetrizes the conditional probabilities into joint probabilities. It returns 1
+    /// neighbor list per point, each entry holding `(neighbor_index, p_ij)`. The neighbor
+    /// search runs once at `O(n^2)`, while the per-iteration repulsion stays at `O(n log n)`
     fn neighbor_probabilities(&self, x: &Array2<f64>, parallel: bool) -> Vec<Vec<(usize, f64)>> {
         let n_samples = x.nrows();
         let k = (((3.0 * self.perplexity).ceil() as usize) + 1)
@@ -614,8 +619,8 @@ impl TSNE {
         // Squared distances come from the `||x_i||^2 + ||x_j||^2 - 2 x_i.x_j` identity
         let x_sq = x.map_axis(Axis(1), |row| row.dot(&row));
 
-        // Find the k nearest neighbors of point i with their squared distances, calibrate sigma
-        // over them, and return the conditional probabilities
+        // Finds the k nearest neighbors of point i by squared distance, calibrates sigma over
+        // them, and returns the conditional probabilities
         let conditional_row = |i: usize, proj_row: ArrayView1<f64>| -> (Vec<usize>, Array1<f64>) {
             let mut dists: Vec<(f64, usize)> = (0..n_samples)
                 .filter(|&j| j != i)
@@ -641,9 +646,9 @@ impl TSNE {
         let conditional: Vec<(Vec<usize>, Array1<f64>)> =
             if cache_resident::<f64>(n_samples, x.ncols()) {
                 let swarm_row = |i: usize| {
-                    // Forced serial on both arms: the parallel arm already runs one task per row,
-                    // so a matvec that forked again would nest inside its own rayon task, and the
-                    // sequential arm is serial by request
+                    // Both arms force this matvec to run serial. The parallel arm already runs
+                    // 1 task per row, so a parallel matvec would nest inside its own rayon task.
+                    // The serial arm is serial by request
                     let projections = matvec(x, &x.row(i), Parallelism::Serial);
                     conditional_row(i, projections.view())
                 };
@@ -674,7 +679,7 @@ impl TSNE {
                 conditional
             };
 
-        // Symmetrize: p_ij = (p_{j|i} + p_{i|j}) / (2n), accumulated from both directed edges
+        // Symmetrize: p_ij = (p_{j|i} + p_{i|j}) / (2n), added from both directed edges
         let norm = 2.0 * n_samples as f64;
         let mut adjacency: Vec<AHashMap<usize, f64>> = vec![AHashMap::new(); n_samples];
         for (i, (neighbor_idx, p_row)) in conditional.iter().enumerate() {
@@ -698,10 +703,10 @@ impl TSNE {
 
     /// Computes the Barnes-Hut gradient and the repulsive normalization term `Z`
     ///
-    /// The attractive part sums the sparse affinities over each point's neighbors, while the
-    /// repulsive part is summarized through the space-partitioning tree. The gradient matches the
-    /// exact path's scale (the factor of 4 is folded in), so the same learning rate fits both
-    /// methods. `Z` is summed sequentially so the result is reproducible
+    /// The attractive part sums the sparse affinities over each point's neighbors. The repulsive
+    /// part uses the space-partitioning tree to summarize forces. The gradient folds in the
+    /// factor of 4 to match the exact path's scale, so the same learning rate fits both methods.
+    /// The sum for `Z` runs sequentially, so the result is reproducible
     fn barnes_hut_gradient(
         &self,
         y: &Array2<f64>,
@@ -722,7 +727,7 @@ impl TSNE {
                 *slot = y[[i, d]];
             }
 
-            // Repulsive forces summarized by the tree
+            // The tree summarizes the repulsive forces
             let mut neg_f = [0.0_f64; 3];
             let mut sum_q = 0.0;
             tree.repulsive_force(i, &query[..dim], theta2, &mut neg_f[..dim], &mut sum_q);
@@ -819,8 +824,8 @@ impl TSNE {
 
     /// Builds the initial embedding according to the configured [`Init`] strategy
     ///
-    /// PCA initialization is deterministic and falls back to random initialization when the
-    /// input has fewer features than components or its leading component is degenerate
+    /// PCA initialization is deterministic. It falls back to random initialization when the
+    /// input has fewer features than components, or when its leading component is degenerate
     fn init_embedding(&self, x: &Array2<f64>) -> Array2<f64> {
         match self.init {
             Init::PCA => self
@@ -832,9 +837,10 @@ impl TSNE {
 
     /// Initializes the embedding from the top principal components of `x`
     ///
-    /// The result is rescaled so the leading component has standard deviation [`INIT_SCALE`],
+    /// This rescales the result so the leading component has standard deviation [`INIT_SCALE`],
     /// which keeps early gradients small. Returns `None` when PCA cannot supply `n_components`
-    /// directions or the leading component has zero spread, letting the caller fall back to random
+    /// directions or the leading component has zero spread. The caller then falls back to random
+    /// initialization
     fn pca_init(&self, x: &Array2<f64>) -> Option<Array2<f64>> {
         if x.ncols() < self.n_components {
             return None;
@@ -932,7 +938,7 @@ impl TSNE {
         let mut p = Array2::<f64>::zeros((n_samples, n_samples));
         let normalization = 2.0 * n_samples as f64;
 
-        // Average conditional probabilities to form joint probabilities
+        // Symmetrize and normalize by 2n so the joint probabilities sum to 1
         for i in 0..n_samples {
             for j in (i + 1)..n_samples {
                 let val = (p_conditional[[i, j]] + p_conditional[[j, i]]) / normalization;
@@ -1033,8 +1039,8 @@ impl TSNE {
     ) -> f64 {
         let n_samples = p.nrows();
 
-        // Blocked fold over the per-row KL terms so the displayed value is reproducible on a
-        // given machine: a bare rayon `sum` would group by scheduling and vary run to run
+        // Folds the per-row KL terms in fixed blocks so the result stays reproducible. A plain
+        // rayon `sum` would group terms by scheduling, and the total would vary between runs
         crate::math::reduction::det_reduce_range(
             n_samples,
             parallel,
@@ -1182,9 +1188,9 @@ impl SPNode {
 
     /// Accumulates the Barnes-Hut repulsive force and normalization term for `query`
     ///
-    /// `target_idx` is the index of the query point so its own leaf is skipped, and `theta2` is the
-    /// squared opening angle. Adds the unnormalized repulsive force into `neg_f` and the Student-t
-    /// normalizer into `sum_q`
+    /// `target_idx` is the index of the query point, so the search skips its own leaf. `theta2`
+    /// is the squared opening angle. Adds the unnormalized repulsive force into `neg_f` and the
+    /// Student-t normalizer into `sum_q`
     fn repulsive_force(
         &self,
         target_idx: usize,
@@ -1221,7 +1227,8 @@ impl SPNode {
             }
         }
 
-        // Treat the cell as one summary when it is a leaf or distant enough (width/dist < theta)
+        // Treat the cell as a single summary when it is a leaf or distant enough
+        // (width/dist < theta)
         if self.children.is_empty() || max_width * max_width < theta2 * d2 {
             let inv = 1.0 / (1.0 + d2);
             let mult = self.cum_size as f64 * inv;
@@ -1274,6 +1281,7 @@ fn build_sp_tree(y: &Array2<f64>) -> SPNode {
     root
 }
 
+/// Unit tests for the sigma solver, the Barnes-Hut tree, and the sparse neighbor probabilities
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1292,11 +1300,11 @@ mod tests {
         // P is a probability distribution: sums to 1
         assert_abs_diff_eq!(p.sum(), 1.0_f64, epsilon = 1e-9);
 
-        // Self / zero-distance entry must be exactly 0 (the `d == 0.0` branch)
+        // Self or zero-distance entry must be exactly 0 (the `d == 0.0` branch)
         assert_abs_diff_eq!(p[0], 0.0_f64, epsilon = 1e-12);
 
-        // Achieved perplexity = exp(-sum p ln p) must be within tolerance of the target,
-        // looser than the solver's 1e-5 exit bound to absorb accumulated float error
+        // Achieved perplexity, exp(-sum p ln p), must be within tolerance of the target. The
+        // tolerance is looser than the solver's 1e-5 exit bound, to absorb accumulated float error
         let h: f64 = p
             .iter()
             .map(|&v| if v > 1e-10 { -v * v.ln() } else { 0.0 })
@@ -1317,7 +1325,7 @@ mod tests {
         let root = build_sp_tree(&y);
 
         assert_eq!(root.cum_size, 4);
-        // Mean of the four corners is (1.0, 1.0)
+        // Mean of the 4 corners is (1.0, 1.0)
         assert_abs_diff_eq!(root.center_of_mass[0], 1.0, epsilon = 1e-12);
         assert_abs_diff_eq!(root.center_of_mass[1], 1.0, epsilon = 1e-12);
     }

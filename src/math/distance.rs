@@ -1,15 +1,15 @@
 //! Pairwise distance primitives and the [`DistanceCalculationMetric`] dispatcher
 //!
-//! The three `*_distance_row` functions are the allocation-free per-vector kernels;
-//! [`DistanceCalculationMetric`] is the configurable-metric abstraction layered on top of
-//! them, used by both the machine-learning estimators (KNN, DBSCAN, the spatial index) and
-//! the clustering metrics (e.g. `silhouette_score`)
+//! The 3 `*_distance_row` functions are the allocation-free per-vector kernels.
+//! [`DistanceCalculationMetric`] is the configurable-metric abstraction layered on top of them.
+//! Both the machine-learning estimators (KNN, DBSCAN, the spatial index) and the clustering
+//! metrics (for example `silhouette_score`) use it.
 
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 use crate::{Deserialize, Serialize};
 use ndarray::{ArrayBase, ArrayView1, Data, Ix1, Zip};
 
-/// Calculates the squared Euclidean distance between two vectors
+/// Calculates the squared Euclidean distance between 2 vectors.
 ///
 /// # Parameters
 ///
@@ -18,7 +18,7 @@ use ndarray::{ArrayBase, ArrayView1, Data, Ix1, Zip};
 ///
 /// # Returns
 ///
-/// - `f64` - Squared Euclidean distance between the two vectors
+/// - `f64` - Squared Euclidean distance between the 2 vectors
 ///
 /// # Examples
 ///
@@ -41,7 +41,7 @@ where
     S1: Data<Elem = f64>,
     S2: Data<Elem = f64>,
 {
-    // Accumulate in a single pass with no intermediate allocation
+    // Accumulates in a single pass with no intermediate allocation.
     let mut sum = 0.0;
     Zip::from(x1).and(x2).for_each(|&a, &b| {
         let d = a - b;
@@ -50,7 +50,7 @@ where
     sum
 }
 
-/// Calculates the Manhattan (L1) distance between two vectors
+/// Calculates the Manhattan (L1) distance between 2 vectors.
 ///
 /// # Parameters
 ///
@@ -59,7 +59,7 @@ where
 ///
 /// # Returns
 ///
-/// - `f64` - Manhattan distance between the two vectors
+/// - `f64` - Manhattan distance between the 2 vectors
 ///
 /// # Examples
 ///
@@ -79,7 +79,7 @@ where
     S1: Data<Elem = f64>,
     S2: Data<Elem = f64>,
 {
-    // Single-pass, allocation-free L1 norm of the difference
+    // Single-pass, allocation-free L1 norm of the difference.
     let mut sum = 0.0;
     Zip::from(x1)
         .and(x2)
@@ -87,9 +87,9 @@ where
     sum
 }
 
-/// Calculates the Minkowski distance between two vectors
+/// Calculates the Minkowski distance between 2 vectors.
 ///
-/// Computes the p-norm of the difference between two 1D arrays
+/// Computes the p-norm of the difference between 2 1D arrays.
 ///
 /// # Parameters
 ///
@@ -99,12 +99,7 @@ where
 ///
 /// # Returns
 ///
-/// - `f64` - Minkowski distance between the two vectors
-///
-/// # Panics
-///
-/// - Panics if `p < 1.0` (or `p` is `NaN`): for such orders the result is not a valid metric
-///   (the triangle inequality fails), and `p <= 0` additionally yields a meaningless `sum^inf`
+/// - `f64` - Minkowski distance between the 2 vectors
 ///
 /// # Examples
 ///
@@ -115,9 +110,14 @@ where
 /// let v1 = array![1.0, 2.0];
 /// let v2 = array![4.0, 6.0];
 /// let distance = minkowski_distance_row(&v1, &v2, 3.0);
-/// // Expected distance is approximately 4.497
+/// // Expected distance is about 4.497
 /// assert!((distance - 4.497).abs() < 1e-3);
 /// ```
+///
+/// # Panics
+///
+/// - Panics when `p` is less than 1.0, or when `p` is NaN. These orders break the triangle
+///   inequality, so they do not give a valid metric.
 #[inline]
 pub fn minkowski_distance_row<S1, S2>(
     x1: &ArrayBase<S1, Ix1>,
@@ -128,7 +128,8 @@ where
     S1: Data<Elem = f64>,
     S2: Data<Elem = f64>,
 {
-    // `p.is_nan()` is rejected alongside `p < 1.0`; orders below 1 break the triangle inequality
+    // `p.is_nan()` is rejected alongside `p < 1.0`, because orders below 1 break the triangle
+    // inequality.
     if p < 1.0 || p.is_nan() {
         panic!("invalid parameter `p`: Minkowski order must be at least 1.0, got {p}");
     }
@@ -140,10 +141,22 @@ where
     sum.powf(1.0 / p)
 }
 
-/// Distance calculation methods used across machine learning algorithms
+/// Distance calculation methods used across machine learning algorithms.
 ///
-/// Defines common distance metrics for clustering algorithms, nearest neighbor
-/// searches, and other applications where distance between points is relevant
+/// Defines the distance metrics for clustering algorithms, nearest-neighbor searches, and
+/// other applications that compare points by distance.
+///
+/// # Examples
+///
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::math::DistanceCalculationMetric;
+///
+/// let metric = DistanceCalculationMetric::Euclidean;
+/// let a = array![0.0, 0.0];
+/// let b = array![3.0, 4.0];
+/// assert_eq!(metric.distance(a.view(), b.view()), 5.0);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 #[cfg_attr(
     any(feature = "machine_learning", feature = "utils"),
@@ -151,22 +164,22 @@ where
 )]
 pub enum DistanceCalculationMetric {
     /// Euclidean distance (L2 norm): the square root of the sum of squared
-    /// differences between corresponding coordinates
+    /// differences between corresponding coordinates.
     #[default]
     Euclidean,
     /// Manhattan distance (L1 norm): the sum of absolute differences between
-    /// corresponding coordinates
+    /// corresponding coordinates.
     Manhattan,
-    /// Generalized metric with Euclidean and Manhattan as special cases; the
-    /// `f64` is the order parameter `p`
+    /// Generalized metric with Euclidean and Manhattan as special cases. The
+    /// `f64` is the order parameter `p`.
     Minkowski(f64),
 }
 
 impl DistanceCalculationMetric {
-    /// Computes the distance between two vectors under this metric
+    /// Computes the distance between 2 vectors under this metric.
     ///
-    /// Single source of truth for metric dispatch; models such as KNN and DBSCAN
-    /// call it instead of re-implementing the `match` over variants
+    /// Single source of truth for metric dispatch. Models such as KNN and DBSCAN call it
+    /// instead of reimplementing the match over variants.
     ///
     /// # Parameters
     ///
@@ -185,19 +198,19 @@ impl DistanceCalculationMetric {
         }
     }
 
-    /// Returns whether `distance(a, b) <= threshold` under this metric
+    /// Returns whether `distance(a, b) <= threshold` under this metric.
     #[inline]
     pub fn within(&self, a: ArrayView1<f64>, b: ArrayView1<f64>, threshold: f64) -> bool {
         self.comparable_distance(a, b) <= self.comparable_scalar(threshold)
     }
 
-    /// Maps a non-negative scalar (a true distance or a per-axis coordinate gap) into this
-    /// metric's order-preserving "comparable" space, where the final root is skipped:
-    /// `Euclidean -> t^2`, `Manhattan -> t`, `Minkowski(p) -> t^p`
+    /// Maps a non-negative scalar, a true distance or a per-axis coordinate gap, into this
+    /// metric's order-preserving "comparable" space. This skips the final root:
+    /// `Euclidean -> t^2`, `Manhattan -> t`, `Minkowski(p) -> t^p`.
     ///
-    /// Used by spatial indexes so radius thresholds and per-axis pruning bounds can be
-    /// compared against [`comparable_distance`](Self::comparable_distance) without repeated
-    /// roots. The mapping is monotonic on `t >= 0`, so all ordering decisions are preserved
+    /// Spatial indexes compare radius thresholds and per-axis pruning bounds against
+    /// [`comparable_distance`](Self::comparable_distance) in this space instead of repeating
+    /// roots. The mapping is monotonic on `t >= 0`, so it preserves ordering.
     pub(crate) fn comparable_scalar(&self, t: f64) -> f64 {
         match *self {
             DistanceCalculationMetric::Euclidean => t * t,
@@ -206,10 +219,10 @@ impl DistanceCalculationMetric {
         }
     }
 
-    /// Distance between two vectors in this metric's comparable space (see
-    /// [`comparable_scalar`](Self::comparable_scalar)): the monotonic, root-free form of
-    /// [`distance`](Self::distance). Equals `distance(a, b)` raised to the metric's power
-    /// (squared for Euclidean, `^p` for Minkowski, unchanged for Manhattan)
+    /// Distance between 2 vectors in this metric's comparable space (see
+    /// [`comparable_scalar`](Self::comparable_scalar)). This is the monotonic, root-free form
+    /// of [`distance`](Self::distance): `distance(a, b)` raised to the metric's power (squared
+    /// for Euclidean, `^p` for Minkowski, unchanged for Manhattan).
     pub(crate) fn comparable_distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
         match *self {
             DistanceCalculationMetric::Euclidean => squared_euclidean_distance_row(&a, &b),
@@ -224,7 +237,7 @@ impl DistanceCalculationMetric {
 
     /// Converts a comparable-space distance back to a true distance (inverse of
     /// [`comparable_distance`](Self::comparable_distance)): `Euclidean -> sqrt`,
-    /// `Manhattan -> identity`, `Minkowski(p) -> ^(1/p)`
+    /// `Manhattan -> identity`, `Minkowski(p) -> ^(1/p)`.
     #[cfg(feature = "machine_learning")]
     pub(crate) fn distance_from_comparable(&self, c: f64) -> f64 {
         match *self {
@@ -235,6 +248,7 @@ impl DistanceCalculationMetric {
     }
 }
 
+/// Unit tests for the distance primitives and the metric dispatcher.
 #[cfg(test)]
 mod tests {
     use super::*;

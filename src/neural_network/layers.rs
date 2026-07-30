@@ -1,11 +1,11 @@
 //! Neural network layers: the layer subsystem aggregator
 //!
-//! Declares every layer submodule, glob-re-exports the public layer types, and defines the
-//! shared infrastructure used across the subsystem: the
+//! Declares every layer submodule and glob-re-exports the public layer types. It also defines
+//! the shared infrastructure used across the subsystem: the
 //! [`TrainingParameters`](crate::neural_network::layers::TrainingParameters) classification (a
-//! layer is `Trainable`, `NonTrainable`, or `NoTrainable`) and the
-//! `no_trainable_parameters_layer_functions` macro that emits the `param_count`/`get_weights`
-//! stubs for parameter-free layers.
+//! layer is `Trainable`, `NonTrainable`, or `NoTrainable`), and the
+//! `no_trainable_parameters_layer_functions` macro. That macro emits the `param_count` and
+//! `get_weights` stubs for parameter-free layers.
 //!
 //! The submodules fall into a few categories:
 //!
@@ -25,21 +25,20 @@
 
 /// Classifies a layer by its parameter training capability
 ///
-/// Layers fall into 3 groups: those with trainable parameters (e.g. Dense,
-/// convolutional layers), those whose parameters are frozen, and those with no
-/// parameters at all (e.g. pooling, activation layers)
+/// Layers fall into 3 groups. Some have trainable parameters, such as Dense or a convolutional
+/// layer. Some have parameters, but they are frozen. Others have no parameters at all, such as
+/// a pooling or activation layer
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrainingParameters {
-    /// Layer has trainable parameters updated during optimization; the `usize` is the count
+    /// Layer has trainable parameters updated during optimization. The `usize` is the count
     Trainable(usize),
-    /// Layer has parameters but they are frozen; the `usize` is the count of non-trainable parameters
+    /// Layer has parameters, but they are frozen. The `usize` is the count of non-trainable
+    /// parameters
     ///
-    /// No layer returns this yet, so `summary()`'s non-trainable column always reads 0. It is kept
-    /// deliberately rather than deleted as dead: per-layer `trainable` freezing is the planned
-    /// producer, and `summary()` already accounts for the variant, so the arm is the half of that
-    /// feature that is already correct
+    /// No layer returns this variant yet, so the non-trainable column in `summary()` always
+    /// reads 0
     NonTrainable(usize),
-    /// Layer has no trainable parameters whatsoever
+    /// Layer has no trainable parameters
     NoTrainable,
 }
 
@@ -79,13 +78,14 @@ pub use regularization::*;
 /// Generates the trait method stubs for layers without trainable parameters
 ///
 /// Such layers rely on the default [`Layer::parameters`] (an empty list, so the optimizer
-/// skips them); this macro supplies the remaining required `param_count` and `get_weights`
+/// skips them). This macro supplies the remaining required `param_count` and `get_weights`
+/// methods
 ///
 /// It is path-exported via a `pub(in ...) use` re-export, so callers import it explicitly
 /// rather than depending on textual macro ordering:
 /// `use crate::neural_network::layers::no_trainable_parameters_layer_functions;`
 ///
-/// The generated `param_count` returns `TrainingParameters::NoTrainable` and `get_weights`
+/// The generated `param_count` returns `TrainingParameters::NoTrainable`, and `get_weights`
 /// returns `LayerWeight::Empty`
 macro_rules! no_trainable_parameters_layer_functions {
     () => {

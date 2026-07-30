@@ -33,10 +33,9 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// // Create a Dropout layer with 50% dropout rate
 /// let mut dropout = Dropout::new(0.5, vec![32, 128]).unwrap();
 ///
-/// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
-/// // During training, approximately 50% of values will be set to 0
+/// // During training, about 50% of values are set to 0
 /// let output = dropout.forward(&input).unwrap();
 /// ```
 #[derive(Debug)]
@@ -67,8 +66,8 @@ impl Dropout {
     ///
     /// # Notes
     ///
-    /// The mask RNG is seeded from the global seed or entropy by default. For reproducible masks,
-    /// set a seed with [`Dropout::with_random_state`]
+    /// By default, `new` seeds the mask RNG from the global seed or entropy. For reproducible
+    /// masks, set a seed with [`Dropout::with_random_state`]
     ///
     /// # Errors
     ///
@@ -87,8 +86,8 @@ impl Dropout {
 
     /// Sets the seed for reproducible mask sampling
     ///
-    /// By default the RNG is seeded from the global seed or entropy (see [`crate::random`]). This
-    /// re-seeds it deterministically from `random_state`
+    /// By default, `new` seeds the RNG from the global seed or entropy (see [`crate::random`]).
+    /// This method re-seeds it deterministically from `random_state`
     ///
     /// # Parameters
     ///

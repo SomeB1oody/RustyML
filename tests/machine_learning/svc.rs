@@ -2,7 +2,7 @@
 //!
 //! Label-domain contract: fit requires labels in {0.0, 1.0}, predict emits
 //! labels in {0.0, 1.0}, and sign(decision_function[i]) >= 0 <-> predict[i] == 1.0.
-//! The ±1 encoding the SMO dual needs is internal to `fit`; only
+//! The +/-1 encoding the SMO dual needs stays internal to `fit`. Only
 //! `get_support_vector_labels` still exposes it.
 
 use approx::assert_abs_diff_eq;
@@ -123,12 +123,12 @@ fn default_has_expected_params() {
 
 // fit label-domain validation
 
-/// fit rejects the ±1 SVM-textbook domain: the public contract is {0.0, 1.0},
+/// fit rejects the +/-1 SVM-textbook domain: the public contract is {0.0, 1.0},
 /// matching LinearSVC and LogisticRegression
 #[test]
 fn fit_rejects_plus_minus_one_labels() {
     let x = Array2::from_shape_vec((4, 2), vec![1.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, -1.0]).unwrap();
-    // ±1 labels are the SMO-internal encoding, not the public domain
+    // +/-1 labels are the SMO-internal encoding, not the public domain
     let y = array![1.0, 1.0, -1.0, -1.0];
     let mut svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100)
         .unwrap()
@@ -228,7 +228,7 @@ fn predict_wrong_feature_dim_returns_dimension_mismatch() {
         .with_random_state(42);
     svc.fit(&x_train, &y_train).expect("fit must succeed");
 
-    // training used 2 features; pass 3-feature input
+    // training used 2 features, but this input has 3
     let x_bad = Array2::from_shape_vec((2, 3), vec![1.0, 0.0, 0.0, -1.0, 0.0, 0.0]).unwrap();
     let result = svc.predict(&x_bad);
     assert!(
@@ -366,7 +366,7 @@ fn actual_iterations_in_valid_range() {
 // RBF kernel: non-linearly separable concentric rings
 
 /// An RBF-kernel SVC classifies every concentric-ring point into its known ring
-/// (class +1 inner, class -1 outer), which a linear kernel cannot
+/// (class 1 inner, class 0 outer), which a linear kernel cannot
 #[test]
 fn rbf_kernel_classifies_concentric_rings_perfectly() {
     let (x, y) = concentric_rings_data();
@@ -422,9 +422,9 @@ fn sign_consistency_rbf_kernel() {
     }
 }
 
-// all five kernels: construct, fit, predict
+// all 5 kernels: construct, fit, predict
 
-/// All five kernel variants construct, train, and predict on the
+/// All 5 kernel variants construct, train, and predict on the
 /// linearly-separable data without error
 #[test]
 fn all_kernels_fit_and_predict_without_error() {
@@ -456,7 +456,6 @@ fn all_kernels_fit_and_predict_without_error() {
         let preds = svc
             .predict(&x)
             .unwrap_or_else(|e| panic!("predict failed for kernel {:?}: {e}", kernel));
-        // predictions must be in the correct domain
         for &p in preds.iter() {
             assert!(
                 p == 1.0 || p == 0.0,
@@ -498,17 +497,17 @@ fn poly_kernel_classifies_separable_data_correctly() {
 
 // Cosine kernel: zero-vector robustness
 
-/// The Cosine kernel tolerates a zero vector in the data without panic or
-/// non-finite values; no specific prediction value is asserted
+/// The Cosine kernel tolerates a zero vector without panic or non-finite
+/// values. It does not assert any specific prediction
 #[test]
 fn cosine_kernel_zero_vector_does_not_panic() {
-    // zero vector in the training set, labelled +1 (arbitrary but must be +/-1)
+    // zero vector in the training set, labeled 1.0 here (arbitrary, label domain is {0.0, 1.0})
     let x = Array2::from_shape_vec(
         (6, 2),
         vec![
-            2.0, 2.0, 3.0, 3.0, // class +1
-            0.0, 0.0, // class +1, zero vector
-            -2.0, -2.0, -3.0, -3.0, -4.0, -4.0, // class -1
+            2.0, 2.0, 3.0, 3.0, // class 1
+            0.0, 0.0, // class 1, zero vector
+            -2.0, -2.0, -3.0, -3.0, -4.0, -4.0, // class 0
         ],
     )
     .unwrap();
@@ -517,13 +516,13 @@ fn cosine_kernel_zero_vector_does_not_panic() {
     let mut svc = SVC::new(KernelType::Cosine, 5.0, 1e-3, 1000)
         .unwrap()
         .with_random_state(42);
-    // fit may converge or not; what matters is that it does not panic
+    // fit may converge or not. What matters is that it does not panic
     let _ = svc.fit(&x, &y);
 }
 
 // Reproducibility with fixed random_state
 
-/// Two runs with the same seed produce identical predictions, decision values,
+/// 2 runs with the same seed produce identical predictions, decision values,
 /// and bias
 #[test]
 fn same_seed_produces_identical_results() {
@@ -553,19 +552,16 @@ fn same_seed_produces_identical_results() {
     .with_random_state(42);
     svc2.fit(&x, &y).expect("second fit must succeed");
 
-    // predictions must be identical
     let preds1 = svc1.predict(&x).expect("predict1 must succeed");
     let preds2 = svc2.predict(&x).expect("predict2 must succeed");
     assert_eq!(preds1, preds2, "same seed must yield identical predictions");
 
-    // decision function values must be identical
     let df1 = svc1.decision_function(&x).expect("df1 must succeed");
     let df2 = svc2.decision_function(&x).expect("df2 must succeed");
     for (a, b) in df1.iter().zip(df2.iter()) {
         assert_abs_diff_eq!(a, b, epsilon = 1e-12);
     }
 
-    // bias must be identical
     assert_abs_diff_eq!(
         svc1.get_bias().unwrap(),
         svc2.get_bias().unwrap(),
@@ -618,7 +614,6 @@ fn save_load_round_trip_yields_identical_predictions() {
         .decision_function(&x)
         .expect("df must succeed before save");
 
-    // write to a temporary path
     let path = "/tmp/rustyml_svc_test_roundtrip.bin";
     svc.save_to_path(path).expect("save_to_path must succeed");
 
@@ -649,7 +644,7 @@ fn save_load_round_trip_yields_identical_predictions() {
         epsilon = 1e-12
     );
 
-    // clean up the temp file; failure to delete is non-fatal for test correctness
+    // clean up the temp file, ignoring any error since it does not affect test correctness
     let _ = std::fs::remove_file(path);
 }
 
@@ -756,7 +751,7 @@ fn sigmoid_kernel_sign_consistency() {
 #[test]
 fn fit_single_class_data_returns_not_converged() {
     let x = array![[0.0, 0.0], [1.0, 1.0], [2.0, 0.5], [0.5, 2.0]];
-    let y = array![1.0, 1.0, 1.0, 1.0]; // one class only
+    let y = array![1.0, 1.0, 1.0, 1.0]; // 1 class only
     let mut svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100)
         .unwrap()
         .with_random_state(42);
@@ -783,7 +778,7 @@ fn decision_function_and_bias_match_closed_form_linear_kernel() {
     // asymmetric placement forces a non-zero intercept: b = -1
     assert_abs_diff_eq!(svc.get_bias().unwrap(), -1.0, epsilon = 1e-2);
 
-    // f(x) = x - 1 at the two support vectors (the +/-1 margins) and the boundary
+    // f(x) = x - 1 at the 2 support vectors (the +/-1 margins) and the boundary
     let probe = array![[0.0], [2.0], [1.0]];
     let df = svc
         .decision_function(&probe)
@@ -802,8 +797,8 @@ fn rbf_gamma_scale_resolves_and_matches_explicit_equivalent() {
     let x = Array2::from_shape_vec(
         (6, 2),
         vec![
-            0.0, 0.0, 0.5, 0.2, 0.1, 0.4, // class -1
-            3.0, 3.0, 3.2, 2.8, 2.9, 3.1, // class +1
+            0.0, 0.0, 0.5, 0.2, 0.1, 0.4, // class 0
+            3.0, 3.0, 3.2, 2.8, 2.9, 3.1, // class 1
         ],
     )
     .unwrap();
@@ -827,7 +822,7 @@ fn rbf_gamma_scale_resolves_and_matches_explicit_equivalent() {
     .with_random_state(0);
     scale_model.fit(&x, &y).unwrap();
 
-    // After fit, gamma is a resolved Value approximately equal to the scale formula
+    // After fit, gamma is a resolved Value that matches the scale formula within tolerance
     let resolved_gamma = match scale_model.get_kernel() {
         KernelType::RBF {
             gamma: Gamma::Value(g),
@@ -862,8 +857,8 @@ fn rbf_gamma_auto_resolves_to_inverse_n_features() {
     let x = Array2::from_shape_vec(
         (4, 3),
         vec![
-            0.0, 0.0, 0.0, 0.1, 0.2, 0.1, // class -1
-            3.0, 3.0, 3.0, 3.1, 2.9, 3.0, // class +1
+            0.0, 0.0, 0.0, 0.1, 0.2, 0.1, // class 0
+            3.0, 3.0, 3.0, 3.1, 2.9, 3.0, // class 1
         ],
     )
     .unwrap();

@@ -18,15 +18,15 @@
 //! (`machine_learning::Fit`, `utils::Fit`), and both preludes bring them into scope
 //!
 //! Every implementor also exposes the same operations as inherent methods
-//! (`model.fit(..)`, `model.predict(..)`); the trait implementations forward to them,
-//! and Rust's method resolution keeps the inherent methods first, so existing call
+//! (`model.fit(..)`, `model.predict(..)`). The trait implementations forward to them.
+//! Rust's method resolution tries the inherent methods first, so existing call
 //! sites are unaffected. Bring the traits into scope (directly or via a prelude) to
 //! write code that is generic over the concrete estimator
 //!
 //! # Examples
 //!
-//! Writing one routine that trains and scores any supervised estimator, without naming
-//! a concrete model type:
+//! This example writes one routine that trains and scores any supervised estimator, without
+//! naming a concrete model type:
 //!
 //! ```rust
 //! use rustyml::traits::{Fit, Predict};
@@ -79,7 +79,7 @@ pub trait Fit<D> {
 /// Runs inference with a fitted estimator
 ///
 /// `X` is the input type, the feature matrix `&ArrayBase<S, Ix2>` for every model,
-/// and [`Predict::Output`] is the prediction type produced by the model
+/// and [`Predict::Output`] is the prediction type the model produces
 ///
 /// # Type Parameters
 ///
@@ -99,10 +99,10 @@ pub trait Predict<X> {
 /// Projects new data through a fitted transformer (out-of-sample transform)
 ///
 /// `X` is the input type (a feature matrix `&ArrayBase<S, Ix2>`), and
-/// [`Transform::Output`] is the projected representation. Implemented by the
-/// decomposition estimators that learn a reusable projection ([`PCA`],
-/// [`KernelPCA`]); manifold methods such as [`TSNE`], which embed only the data
-/// they are fitted on, implement [`FitTransform`] instead
+/// [`Transform::Output`] is the projected representation. The decomposition estimators that
+/// learn a reusable projection ([`PCA`], [`KernelPCA`]) implement this trait. Manifold methods
+/// such as [`TSNE`] embed only the data they are fitted on, and implement [`FitTransform`]
+/// instead
 ///
 /// # Type Parameters
 ///
@@ -467,9 +467,9 @@ mod machine_learning_impls {
     {
         type Output = Array2<f64>;
         fn fit_transform(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
-            // t-SNE's inherent `fit_transform` takes `&self` (it stores no fitted state), while this
-            // trait method takes `&mut self`. Reborrow as shared so method resolution selects the
-            // inherent method here rather than recursing into this trait impl
+            // t-SNE's inherent `fit_transform` takes `&self` (it stores no fitted state), while
+            // this trait method takes `&mut self`. Reborrow as shared so method resolution
+            // selects the inherent method here rather than recursing into this trait impl
             let this: &TSNE = self;
             this.fit_transform(data)
         }
@@ -628,6 +628,7 @@ mod utils_impls {
     }
 }
 
+/// Unit tests for the `Fit`, `Predict`, `Transform`, and `FitTransform` forwarding impls
 #[cfg(all(test, feature = "machine_learning"))]
 mod tests {
     use super::*;
@@ -658,9 +659,9 @@ mod tests {
 
     #[test]
     fn transformers_through_traits() {
-        // The transformer trait methods forward to the inherent methods. For t-SNE the inherent
-        // method takes `&self` while the trait takes `&mut self`, so this also guards against the
-        // forwarding recursing (which would overflow the stack rather than just fail an assert)
+        // The transformer trait methods forward to the inherent methods. For t-SNE, the inherent
+        // method takes `&self` while the trait takes `&mut self`. This also guards against a
+        // forwarding recursion, which would overflow the stack instead of failing an assert.
         use crate::machine_learning::{KernelPCA, KernelType, PCA, TSNE, TSNEMethod};
 
         let x = ndarray::array![[0.0, 1.0], [1.0, 0.0], [2.0, 2.0]];
@@ -694,6 +695,7 @@ mod tests {
     }
 }
 
+/// Unit tests for the `Fit`/`Transform` forwarding impls on the `utils` scalers
 #[cfg(all(test, feature = "utils"))]
 mod utils_tests {
     use super::*;

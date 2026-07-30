@@ -1,13 +1,13 @@
 //! Integration tests for GroupNormalization and InstanceNormalization: forward
 //! values, error paths, mode behavior, eval-mode backward passthrough, and
-//! predict == forward. Expected values come from the mathematical definition;
-//! gradient correctness lives in gradient_check.rs
+//! predict == forward. Expected values come from the mathematical definition.
+//! Gradient correctness lives in gradient_check.rs.
 //!
 //! Both layers read the crate's channels-last layout: an input is
-//! `[batch, spatial..., channels]`, the channel axis is always the trailing one, and a channel
-//! group is a contiguous sub-run of each position's channel vector. Statistics are population
-//! statistics (divide by n, not n-1) taken per (sample, group) over that group's channels across
-//! every spatial position
+//! `[batch, spatial..., channels]`, and the channel axis is always the trailing one.
+//! A channel group is a contiguous sub-run of each position's channel vector. Statistics are
+//! population statistics (divide by n, not n-1), taken per (sample, group) over that group's
+//! channels across every spatial position.
 
 use ndarray::Array;
 use rustyml::neural_network::Tensor;
@@ -29,11 +29,11 @@ fn param1d(vals: &[f32]) -> Tensor {
 
 // GroupNormalization - forward value tests
 
-/// GN with num_groups=1 folds all channels into one group, normalizing across the
+/// GN with num_groups=1 folds all channels into 1 group, normalizing across the
 /// whole (positions * channels) volume
 #[test]
 fn group_norm_single_group_forward_values() {
-    // shape [batch=1, positions=3, channels=2]; one group spans both channels
+    // shape [batch=1, positions=3, channels=2]. 1 group spans both channels.
     let mut gn = GroupNormalization::new(vec![1, 3, 2], 1, 1e-5).unwrap();
 
     // Channels-last row-major: position p holds [channel0, channel1]
@@ -43,8 +43,8 @@ fn group_norm_single_group_forward_values() {
 
     let output = gn.forward(&input).unwrap();
 
-    // The single group holds all six values {1..6}: mean 3.5, population variance
-    // (2.5^2 + 1.5^2 + 0.5^2 + 0.5^2 + 1.5^2 + 2.5^2) / 6 = 17.5 / 6
+    // The single group holds all 6 values {1..6}: mean 3.5.
+    // Population variance is (2.5^2 + 1.5^2 + 0.5^2 + 0.5^2 + 1.5^2 + 2.5^2) / 6 = 17.5 / 6.
     let std_val = (17.5_f32 / 6.0 + 1e-5).sqrt();
     let expected_flat = vec![
         -2.5 / std_val,
@@ -64,19 +64,20 @@ fn group_norm_single_group_forward_values() {
 /// GN with num_groups=2 normalizes trailing-axis channels {0,1} and {2,3} as separate groups
 #[test]
 fn group_norm_two_groups_forward_values() {
-    // shape [batch=1, positions=2, channels=4]; 2 groups of 2 channels each
+    // shape [batch=1, positions=2, channels=4]. 2 groups of 2 channels each.
     let mut gn = GroupNormalization::new(vec![1, 2, 4], 2, 1e-5).unwrap();
 
-    // position0 = [1, 2, 5, 6], position1 = [3, 4, 7, 8], so group 0 (channels 0-1) holds
-    // {1, 2, 3, 4} and group 1 (channels 2-3) holds {5, 6, 7, 8}
+    // position0 = [1, 2, 5, 6], position1 = [3, 4, 7, 8].
+    // Group 0 (channels 0-1) holds {1, 2, 3, 4}, and group 1 (channels 2-3) holds {5, 6, 7, 8}.
     let input = Array::from_shape_vec((1, 2, 4), vec![1.0_f32, 2.0, 5.0, 6.0, 3.0, 4.0, 7.0, 8.0])
         .unwrap()
         .into_dyn();
 
     let output = gn.forward(&input).unwrap();
 
-    // Group 0: mean 2.5; group 1: mean 6.5. Both have the same spread, so both have population
-    // variance (1.5^2 + 0.5^2 + 0.5^2 + 1.5^2) / 4 = 1.25 and both centre to [-1.5,-0.5,0.5,1.5]
+    // Group 0: mean 2.5. Group 1: mean 6.5. Both have the same spread.
+    // Population variance is (1.5^2 + 0.5^2 + 0.5^2 + 1.5^2) / 4 = 1.25, and both center to
+    // [-1.5,-0.5,0.5,1.5]
     let std_val = (1.25_f32 + 1e-5).sqrt();
     let expected_flat = vec![
         -1.5 / std_val, // pos0 ch0: 1 - 2.5
@@ -95,14 +96,14 @@ fn group_norm_two_groups_forward_values() {
     assert_allclose(&output, &expected, 1e-5_f32);
 }
 
-/// GN normalizes each batch sample independently across two groups
+/// GN normalizes each batch sample independently across 2 groups
 #[test]
 fn group_norm_two_batches_forward_values() {
-    // shape [batch=2, positions=3, channels=4]; 2 groups of 2 channels each
+    // shape [batch=2, positions=3, channels=4]. 2 groups of 2 channels each.
     let mut gn = GroupNormalization::new(vec![2, 3, 4], 2, 1e-5).unwrap();
 
-    // Per channel: batch0 has ch0=[1,2,3], ch1=[4,5,6], ch2=[7,8,9], ch3=[10,11,12];
-    // batch1 is the same plus one. Channels-last stores position p as
+    // Per channel: batch0 has ch0=[1,2,3], ch1=[4,5,6], ch2=[7,8,9], ch3=[10,11,12].
+    // batch1 is the same, plus 1. Channels-last stores position p as
     // [ch0[p], ch1[p], ch2[p], ch3[p]]
     let input = Array::from_shape_vec(
         (2, 3, 4),
@@ -111,7 +112,7 @@ fn group_norm_two_batches_forward_values() {
             1.0, 4.0, 7.0, 10.0, // position 0
             2.0, 5.0, 8.0, 11.0, // position 1
             3.0, 6.0, 9.0, 12.0, // position 2
-            // batch 1 (every value one larger)
+            // batch 1 (every value increased by 1)
             2.0, 5.0, 8.0, 11.0, 3.0, 6.0, 9.0, 12.0, 4.0, 7.0, 10.0, 13.0,
         ],
     )
@@ -120,9 +121,10 @@ fn group_norm_two_batches_forward_values() {
 
     let output = gn.forward(&input).unwrap();
 
-    // Group 0 of batch 0 is channels 0-1 = {1,2,3,4,5,6} (mean 3.5); group 1 is channels 2-3 =
-    // {7..12} (mean 9.5). Both, and both groups of batch 1, share the population variance
-    // (2.5^2 + 1.5^2 + 0.5^2 + 0.5^2 + 1.5^2 + 2.5^2) / 6 = 17.5 / 6
+    // Group 0 of batch 0 is channels 0-1 = {1,2,3,4,5,6} (mean 3.5).
+    // Group 1 is channels 2-3 = {7..12} (mean 9.5).
+    // Both, and both groups of batch 1, share the population variance.
+    // (2.5^2 + 1.5^2 + 0.5^2 + 0.5^2 + 1.5^2 + 2.5^2) / 6 = 17.5 / 6.
     let std_val = (17.5_f32 / 6.0 + 1e-5).sqrt();
     let n = [-2.5_f32, -1.5, -0.5, 0.5, 1.5, 2.5].map(|c| c / std_val);
 
@@ -160,7 +162,7 @@ fn group_norm_custom_gamma_beta_forward_values() {
 
     let output = gn.forward(&input).unwrap();
 
-    // Both groups have variance 1.25 and centre to [-1.5,-0.5,0.5,1.5]
+    // Both groups have variance 1.25 and center to [-1.5,-0.5,0.5,1.5]
     let std_val = (1.25_f32 + 1e-5).sqrt();
     let c = [-1.5_f32, -0.5, 0.5, 1.5].map(|v| v / std_val);
 
@@ -185,7 +187,7 @@ fn group_norm_custom_gamma_beta_forward_values() {
 /// A constant input has zero variance, so GN output is all zero (x_norm=0, beta=0)
 #[test]
 fn group_norm_constant_input_yields_zero_output() {
-    // [batch=1, positions=3, channels=4], one group over all four channels
+    // [batch=1, positions=3, channels=4], 1 group over all 4 channels
     let mut gn = GroupNormalization::new(vec![1, 3, 4], 1, 1e-5).unwrap();
 
     let input = Array::from_elem((1, 3, 4), 5.0_f32).into_dyn();
@@ -195,10 +197,8 @@ fn group_norm_constant_input_yields_zero_output() {
     assert_allclose(&output, &expected, 1e-6_f32);
 }
 
-/// The group boundary runs across the trailing (channel) axis
-///
-/// The two groups are given wildly different scales, so an implementation that split anywhere
-/// other than the last axis would blend them and neither hand-derived number would survive
+/// The group boundary runs across the trailing (channel) axis. This test uses 2 groups of
+/// wildly different scales, so a wrong split axis would blend them and change the results.
 #[test]
 fn group_norm_channel_axis_is_last() {
     // [batch=1, positions=2, channels=4], 2 groups of 2 channels
@@ -216,8 +216,8 @@ fn group_norm_channel_axis_is_last() {
 
     // Group 0 (channels 0-1) = {2, 4, 6, 8}: mean 5, variance (9 + 1 + 1 + 9) / 4 = 5
     let inv0 = 1.0 / (5.0_f32 + 1e-5).sqrt();
-    // Group 1 (channels 2-3) = {100, 200, 300, 400}: mean 250,
-    // variance (150^2 + 50^2 + 50^2 + 150^2) / 4 = 50000 / 4 = 12500
+    // Group 1 (channels 2-3) = {100, 200, 300, 400}: mean 250.
+    // Variance is (150^2 + 50^2 + 50^2 + 150^2) / 4 = 50000 / 4 = 12500.
     let inv1 = 1.0 / (12500.0_f32 + 1e-5).sqrt();
 
     let expected_flat = vec![
@@ -262,7 +262,7 @@ fn group_norm_predict_equals_forward() {
 // GroupNormalization - constructor / forward error paths
 
 /// Constructor rejects each invalid hyperparameter with InvalidParameter. Each row
-/// makes exactly one argument bad: num_groups (zero) or epsilon (zero / negative)
+/// makes exactly 1 argument bad: num_groups (zero) or epsilon (zero or negative)
 #[test]
 fn group_norm_constructor_invalid_parameter_errors() {
     // (num_groups, epsilon, description)
@@ -354,8 +354,8 @@ fn instance_norm_forward_values() {
 
     let output = inn.forward(&input).unwrap();
 
-    // ch0 mean 2.5, ch1 mean 6.5; both have population variance
-    // (1.5^2 + 0.5^2 + 0.5^2 + 1.5^2) / 4 = 1.25 and centre to [-1.5,-0.5,0.5,1.5]
+    // ch0 mean 2.5, ch1 mean 6.5. Both have population variance
+    // (1.5^2 + 0.5^2 + 0.5^2 + 1.5^2) / 4 = 1.25 and center to [-1.5,-0.5,0.5,1.5]
     let std_val = (1.25_f32 + 1e-5).sqrt();
     let c = [-1.5_f32, -0.5, 0.5, 1.5].map(|v| v / std_val);
     let expected_flat = vec![c[0], c[0], c[1], c[1], c[2], c[2], c[3], c[3]];
@@ -395,7 +395,7 @@ fn instance_norm_custom_gamma_beta_forward_values() {
     assert_allclose(&output, &expected, 1e-5_f32);
 }
 
-/// IN normalizes each (batch, channel) instance independently; here every instance
+/// IN normalizes each (batch, channel) instance independently. Here every instance
 /// is a ternary ramp with variance 2/3
 #[test]
 fn instance_norm_multiple_batches_forward_values() {
@@ -422,13 +422,13 @@ fn instance_norm_multiple_batches_forward_values() {
     let mut inn = InstanceNormalization::new(vec![2, 3, 3], 1e-5).unwrap();
     let output = inn.forward(&input).unwrap();
 
-    // Every instance is a unit-step ramp of three values, so var = ((-1)^2 + 0^2 + 1^2) / 3 = 2/3
+    // Every instance is a unit-step ramp of 3 values, so var = ((-1)^2 + 0^2 + 1^2) / 3 = 2/3
     let var = 2.0_f32 / 3.0;
     let std_val = (var + 1e-5).sqrt();
     let a = 1.0 / std_val;
 
-    // At position 0 every channel sits one step below its mean, at position 1 exactly on it, and
-    // at position 2 one step above - in both batches
+    // At position 0 every channel sits 1 step below its mean, and at position 1 exactly on it.
+    // At position 2 every channel sits 1 step above its mean, in both batches.
     let expected_flat: Vec<f32> = vec![
         -a, -a, -a, // batch 0, position 0
         0.0, 0.0, 0.0, // batch 0, position 1
@@ -454,10 +454,8 @@ fn instance_norm_constant_input_yields_zero_output() {
     assert_allclose(&output, &expected, 1e-6_f32);
 }
 
-/// IN takes its instances along the trailing (channel) axis
-///
-/// The two channels are given very different spreads, so an implementation that read the channel
-/// axis anywhere else would mix them and neither inverse standard deviation would come out
+/// IN takes its instances along the trailing (channel) axis. This test uses 2 channels of
+/// very different spreads, so reading the axis anywhere else would mix them and change the results.
 #[test]
 fn instance_norm_channel_axis_is_last() {
     // [batch=1, positions=3, channels=2]: ch0 = [1,2,3], ch1 = [10,20,30]
@@ -513,8 +511,8 @@ fn group_norm_full_groups_equals_instance_norm() {
     // The outputs should be numerically identical (same algorithm)
     assert_allclose(&out_gn, &out_in, 1e-6_f32);
 
-    // Cross-check against hand-computed values: each channel is a unit ramp of four values, so
-    // all three share population variance (1.5^2 + 0.5^2 + 0.5^2 + 1.5^2) / 4 = 1.25
+    // Cross-check against hand-computed values: each channel is a unit ramp of 4 values.
+    // All 3 share population variance (1.5^2 + 0.5^2 + 0.5^2 + 1.5^2) / 4 = 1.25.
     let std_val = (1.25_f32 + 1e-5).sqrt();
     let c = [-1.5_f32, -0.5, 0.5, 1.5].map(|v| v / std_val);
     let expected_flat = vec![

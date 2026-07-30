@@ -1,23 +1,24 @@
 //! Flat-slice optimizer update kernels
 //!
-//! Each optimizer's per-parameter math lives here as a single function operating on `&mut [f32]`
-//! parameter data plus `&[f32]` gradients (and any optimizer state slices). Because every layer
-//! exposes its parameters as flat slices via [`Layer::parameters`](crate::neural_network::traits::Layer::parameters),
-//! these kernels work for any parameter shape
+//! Each optimizer's per-parameter math lives here as a single function. Every function operates
+//! on a mutable `f32` parameter slice, a gradient slice, and any needed optimizer state slices.
+//! Every layer exposes its parameters as flat slices through
+//! [`Layer::parameters`](crate::neural_network::traits::Layer::parameters). These kernels work for
+//! any parameter shape
 
 use crate::parallel_gates::fused_slice_parallel_threshold;
 use rayon::prelude::*;
 use std::borrow::Cow;
 
-/// Scales a gradient by `grad_scale`, used to apply clip-by-global-norm before the optimizer step
+/// Scales a gradient by `grad_scale` to apply clip-by-global-norm before the optimizer step
 ///
 /// Returns a borrow of the original gradient when `grad_scale == 1.0` (the no-clip case), so the
-/// common path allocates nothing; only an active clip (`grad_scale < 1.0`) materializes a scaled copy
+/// common path allocates nothing. An active clip (`grad_scale < 1.0`) makes a scaled copy instead
 ///
 /// # Parameters
 ///
 /// - `grad` - the gradient slice to scale
-/// - `grad_scale` - the scaling factor; `1.0` means no clipping
+/// - `grad_scale` - the scaling factor. `1.0` means no clipping
 ///
 /// # Returns
 ///
@@ -95,17 +96,18 @@ pub fn sgd_momentum_step(
 /// Decoupled (AdamW/SGDW-style) weight decay
 ///
 /// Shrinks each parameter toward zero by the factor `(1 - lr * weight_decay)`, independent of the
-/// gradient. A no-op when `weight_decay == 0`. Apply this *before* the optimizer's gradient step so
-/// the shrink uses the pre-step parameter, matching the AdamW formulation
-/// `theta <- theta - lr*(update + wd*theta)`. "Decoupled" means the penalty acts directly on the
-/// weights rather than being folded into the gradient (where an adaptive optimizer would rescale it
-/// inconsistently)
+/// gradient. A no-op when `weight_decay == 0`. Apply this before the optimizer's gradient step, so
+/// the shrink uses the pre-step parameter. This matches the AdamW formulation
+/// `theta = theta - lr*(update + wd*theta)`
+///
+/// "Decoupled" means the penalty acts directly on the weights instead of entering the gradient,
+/// where an adaptive optimizer would rescale it inconsistently
 ///
 /// # Parameters
 ///
 /// - `param` - the parameter slice to shrink in place
 /// - `lr` - the learning rate
-/// - `weight_decay` - the decay coefficient; `0` skips the shrink
+/// - `weight_decay` - the decay coefficient. `0` skips the shrink
 pub fn apply_weight_decay(param: &mut [f32], lr: f32, weight_decay: f32) {
     if weight_decay == 0.0 {
         return;
@@ -123,10 +125,10 @@ pub fn apply_weight_decay(param: &mut [f32], lr: f32, weight_decay: f32) {
 /// Coupled (classic-Adam) L2 weight decay: returns `grad + weight_decay * param`, evaluated
 /// against the pre-step parameter
 ///
-/// Unlike [`apply_weight_decay`]'s decoupled shrink, this folds the penalty into the gradient, so
-/// it flows through Adam's moment estimates and is rescaled by the adaptive denominator (the
-/// classic `Adam(weight_decay=...)` behavior, as opposed to `AdamW`). Only called when
-/// `weight_decay != 0`, so it always allocates the combined buffer
+/// Unlike [`apply_weight_decay`]'s decoupled shrink, this folds the penalty into the gradient. It
+/// then flows through Adam's moment estimates, and the adaptive denominator rescales it (the
+/// classic `Adam(weight_decay=...)` behavior, as opposed to `AdamW`). The optimizer calls this
+/// function only when `weight_decay != 0`, so it always allocates the combined buffer
 ///
 /// # Parameters
 ///
@@ -152,20 +154,6 @@ pub fn l2_regularized_grad(grad: &[f32], param: &[f32], weight_decay: f32) -> Ve
 /// param -= lr * (m / (1-beta1^t)) / (sqrt(v / (1-beta2^t)) + epsilon)
 /// ```
 ///
-/// # Epsilon placement
-///
-/// Unlike [`rmsprop_step`] and [`adagrad_step`], `epsilon` here goes **outside** the square root,
-/// and it is compared against the *bias-corrected* `v`. That is deliberate and matches both
-/// Keras' `Adam` and PyTorch's, as well as Algorithm 1 of Kingma & Ba - Keras is internally
-/// inconsistent on this point, placing epsilon inside the root only in `RMSprop`/`Adagrad`, so
-/// do not "unify" the three kernels here
-///
-/// One residual difference from Keras, deliberately not matched: Keras folds bias correction
-/// into a scalar `alpha = lr*sqrt(1-beta2^t)/(1-beta1^t)` and divides by `sqrt(v) + epsilon`
-/// using the *raw* `v`, which makes its effective epsilon `epsilon/sqrt(1-beta2^t)` - about
-/// 31.6x larger at `t = 1` with `beta2 = 0.999`, decaying to 1x as training proceeds. This
-/// crate follows PyTorch's form, where epsilon means the same thing at every timestep
-///
 /// # Parameters
 ///
 /// - `param` - the parameter slice to update in place
@@ -177,6 +165,19 @@ pub fn l2_regularized_grad(grad: &[f32], param: &[f32], weight_decay: f32) -> Ve
 /// - `beta2` - the second-moment decay rate
 /// - `epsilon` - the denominator stabilizer, on the gradient scale (added after the root)
 /// - `t` - the 1-based timestep used for bias correction
+///
+/// # Epsilon placement
+///
+/// `epsilon` goes outside the square root here, and the denominator uses the bias-corrected `v`.
+/// This matches Keras' `Adam`, PyTorch, and Algorithm 1 of Kingma and Ba. Keras itself places
+/// epsilon inside the root for `RMSprop` and `Adagrad` instead, which is an inconsistency inside
+/// Keras, not in this crate
+///
+/// 1 residual difference from Keras remains, and this crate does not match it. Keras folds
+/// bias correction into a scalar `alpha = lr*sqrt(1-beta2^t)/(1-beta1^t)` and divides by
+/// `sqrt(v) + epsilon` using the raw `v`. That makes its effective epsilon
+/// `epsilon/sqrt(1-beta2^t)`, which changes with the timestep. This crate follows PyTorch's
+/// form, where epsilon means the same thing at every timestep
 #[allow(clippy::too_many_arguments)]
 pub fn adam_step(
     param: &mut [f32],
@@ -226,19 +227,6 @@ pub fn adam_step(
 /// param -= lr * g / sqrt(cache + epsilon)
 /// ```
 ///
-/// # Epsilon placement
-///
-/// `epsilon` goes **inside** the square root, matching Keras
-/// (`denominator = velocity + epsilon; increment = lr * grad / sqrt(denominator)`). PyTorch
-/// instead adds it after the root, and so does this crate's [`adam_step`] - because Keras' own
-/// `Adam` does too, which is an inconsistency inside Keras rather than one here
-///
-/// The placement is not cosmetic, because it changes what `epsilon` is *measured in*: `cache`
-/// carries units of gradient-squared, so an epsilon added inside the root lives on the `g^2`
-/// scale while one added outside lives on the `g` scale. The two correspond roughly as
-/// `eps_inside = eps_outside^2`, so a value ported across the two forms is off by orders of
-/// magnitude. Keras' default of `1e-7` here is equivalent to `3.2e-4` in the outside form
-///
 /// # Parameters
 ///
 /// - `param` - the parameter slice to update in place
@@ -247,6 +235,16 @@ pub fn adam_step(
 /// - `rho` - the decay rate for the squared-gradient average
 /// - `lr` - the learning rate
 /// - `epsilon` - the denominator stabilizer, on the squared-gradient scale
+///
+/// # Epsilon placement
+///
+/// `epsilon` goes inside the square root here, matching Keras. PyTorch adds it after the root
+/// instead, and so does this crate's [`adam_step`]. Keras itself is inconsistent on this point:
+/// it places epsilon inside the root only for `RMSprop` and `Adagrad`
+///
+/// Do not port an epsilon value between the 2 placements unchanged. Epsilon inside the root is
+/// on the gradient-squared scale. Epsilon outside the root is on the gradient scale. The 2
+/// scales differ by roughly a square
 pub fn rmsprop_step(
     param: &mut [f32],
     grad: &[f32],
@@ -280,13 +278,6 @@ pub fn rmsprop_step(
 /// param -= lr * g / sqrt(accumulator + epsilon)
 /// ```
 ///
-/// # Epsilon placement
-///
-/// `epsilon` goes **inside** the square root, matching Keras
-/// (`lr * gradient / sqrt(accumulator + epsilon)`). See [`rmsprop_step`] for why the placement
-/// changes the scale `epsilon` is measured on, and why a value cannot be ported between the two
-/// forms unchanged
-///
 /// # Parameters
 ///
 /// - `param` - the parameter slice to update in place
@@ -294,6 +285,12 @@ pub fn rmsprop_step(
 /// - `accumulator` - the running sum of squared gradients, updated in place
 /// - `lr` - the learning rate
 /// - `epsilon` - the denominator stabilizer, on the squared-gradient scale
+///
+/// # Epsilon placement
+///
+/// `epsilon` goes inside the square root here, matching Keras. See [`rmsprop_step`] for why the
+/// placement changes the scale on which epsilon is measured, and why a value cannot move between
+/// the 2 forms unchanged
 pub fn adagrad_step(
     param: &mut [f32],
     grad: &[f32],
@@ -319,6 +316,7 @@ pub fn adagrad_step(
     }
 }
 
+/// Unit tests for the flat-slice optimizer kernels
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,7 +346,8 @@ mod tests {
 
     // SGD momentum / weight decay
 
-    /// Plain (non-Nesterov) momentum accumulates velocity across steps: v = mu*v + g, p -= lr*v
+    /// Plain (non-Nesterov) momentum accumulates velocity across steps: v = momentum*v + g,
+    /// p -= lr*v
     #[test]
     fn sgd_momentum_step_accumulates() {
         let mut param = vec![1.0_f32];
@@ -375,7 +374,8 @@ mod tests {
         assert_abs_diff_eq!(param[0], 0.62_f32, epsilon = 1e-6);
     }
 
-    /// Decoupled weight decay scales the parameter by (1 - lr*wd) and is a no-op when wd == 0
+    /// Decoupled weight decay scales the parameter by `(1 - lr*weight_decay)`. It is a no-op
+    /// when `weight_decay == 0`
     #[test]
     fn apply_weight_decay_scales_param() {
         let mut param = vec![1.0_f32, 2.0];
@@ -412,7 +412,7 @@ mod tests {
         assert_abs_diff_eq!(param[1], 2.1_f32, epsilon = 1e-6);
     }
 
-    /// SGD parallel path (>=1024 elements) applies the same update via the rayon branch
+    /// SGD at 1024 elements applies the same update as the small path (below the parallel gate)
     #[test]
     fn sgd_step_parallel_path() {
         let n = 1024_usize;
@@ -449,7 +449,7 @@ mod tests {
 
         adam_step(&mut param, &grad, &mut m, &mut v, 0.1, 0.9, 0.999, 1e-8, 1);
 
-        // m and v are updated first
+        // adam_step updates m and v first
         assert_abs_diff_eq!(m[0], 0.1_f32, epsilon = 1e-7);
         assert_abs_diff_eq!(v[0], 0.001_f32, epsilon = 1e-7);
 
@@ -458,7 +458,7 @@ mod tests {
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
 
-    /// Adam moments accumulate correctly across two sequential t=1, t=2 calls
+    /// Adam moments accumulate correctly across 2 sequential t=1, t=2 calls
     #[test]
     fn adam_step_t2_moment_accumulation() {
         let mut param = vec![0.0_f32];
@@ -498,7 +498,7 @@ mod tests {
 
     // RMSprop
 
-    /// RMSprop one step from zero cache produces the expected single-element update
+    /// RMSprop 1 step from zero cache produces the expected single-element update
     #[test]
     fn rmsprop_step_single_element() {
         let mut param = vec![2.0_f32];
@@ -514,7 +514,7 @@ mod tests {
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
 
-    /// RMSprop keeps independent per-element cache state across two elements
+    /// RMSprop keeps independent per-element cache state across 2 elements
     #[test]
     fn rmsprop_step_two_elements() {
         let mut param = vec![2.0_f32, 3.0_f32];
@@ -555,7 +555,7 @@ mod tests {
 
     // AdaGrad
 
-    /// AdaGrad one step from zero accumulator produces the expected single-element update
+    /// AdaGrad 1 step from zero accumulator produces the expected single-element update
     #[test]
     fn adagrad_step_single_element() {
         let mut param = vec![3.0_f32];
@@ -583,7 +583,7 @@ mod tests {
 
         adagrad_step(&mut param, &grad, &mut acc, 0.01, 1e-8);
 
-        // accumulator must grow: 0 -> 4 -> 8
+        // accumulator must grow: 0, then 4, then 8
         assert_abs_diff_eq!(acc[0], 8.0_f32, epsilon = 1e-6);
 
         // second update uses sqrt(8)
@@ -607,12 +607,15 @@ mod tests {
         let expected_param = 1.0_f32 - 0.01_f32 * (-0.5_f32) / (0.25_f32 + 1e-8_f32).sqrt();
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
-    // Parallel-path coverage (>=1024 elements) for adam/rmsprop/adagrad: length fused_slice_parallel_threshold() forces the rayon branch
+    // The default `fused_slice_parallel_threshold` is 1_000_000 (see `crate::parallel_gates`).
+    // The 1024-element tests below stay under that gate. They run the same serial branch as the
+    // small-path tests above and do not exercise the rayon branch.
 
-    /// Adam parallel path (1024 elements) applies the canonical t=1-from-zero update everywhere
+    /// Adam at 1024 elements applies the same t=1-from-zero update everywhere (below the
+    /// parallel gate)
     #[test]
     fn adam_step_parallel_path() {
-        let n = 1024_usize; // == fused_slice_parallel_threshold(), forces the rayon branch
+        let n = 1024_usize;
         let mut param = vec![0.0_f32; n];
         let grad = vec![1.0_f32; n];
         let mut m = vec![0.0_f32; n];
@@ -640,7 +643,8 @@ mod tests {
         }
     }
 
-    /// RMSprop parallel path (1024 elements) applies the same single-step update everywhere
+    /// RMSprop at 1024 elements applies the same single-step update everywhere (below the
+    /// parallel gate)
     #[test]
     fn rmsprop_step_parallel_path() {
         let n = 1024_usize;
@@ -665,7 +669,8 @@ mod tests {
         }
     }
 
-    /// AdaGrad parallel path (1024 elements) applies the same single-step update everywhere
+    /// AdaGrad at 1024 elements applies the same single-step update everywhere (below the
+    /// parallel gate)
     #[test]
     fn adagrad_step_parallel_path() {
         let n = 1024_usize;

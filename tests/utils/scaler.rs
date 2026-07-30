@@ -1,5 +1,5 @@
-//! Integration tests for the `rustyml::utils::scaler` family - `StandardScaler`,
-//! `MinMaxScaler`, `MaxAbsScaler`, `RobustScaler`, and `Normalizer` - covering the
+//! Integration tests for the `rustyml::utils::scaler` family (`StandardScaler`,
+//! `MinMaxScaler`, `MaxAbsScaler`, `RobustScaler`, and `Normalizer`), covering the
 //! fit/transform contract, incremental fitting, persistence, and the error paths
 
 use crate::common::assert_allclose;
@@ -65,11 +65,11 @@ fn test_fit_transform_matches_stateless_standardize() {
     let scaled = StandardScaler::new().fit_transform(&x).unwrap();
     let stateless = standardize(&x, StandardizationAxis::Column).unwrap();
 
-    // Same Welford pass and the same constant-feature rule, so the two agree exactly
+    // Same Welford pass and the same constant-feature rule, so the 2 agree exactly
     assert_eq!(scaled, stateless);
 }
 
-/// A later batch is scaled by the training statistics, not by its own
+/// The training statistics scale a later batch, not its own
 #[test]
 fn test_transform_uses_frozen_training_statistics() {
     let x_train = array![[1.0], [2.0], [3.0]];
@@ -157,7 +157,7 @@ fn test_with_mean_and_with_std_flags() {
     scaler.fit(&x).unwrap();
     assert_allclose(scaler.get_mean().unwrap(), &array![2.0], 1e-12);
 
-    // Inverse transform honours the same flags, so the round trip still holds
+    // Inverse transform honors the same flags, so the round trip still holds
     let restored = scaler.inverse_transform(&untouched).unwrap();
     assert_eq!(restored, x);
 }
@@ -381,9 +381,7 @@ fn test_non_finite_input() {
     }
 }
 
-// ============================================================================
 // MinMaxScaler
-// ============================================================================
 
 /// The training extrema are recorded and mapped onto the default `[0, 1]` range
 #[test]
@@ -402,7 +400,7 @@ fn test_min_max_default_range() {
     assert_eq!(scaler.get_n_features(), Some(2));
 }
 
-/// A later batch is mapped by the training extrema, so it may leave the target range
+/// The training extrema map a later batch, so it may leave the target range
 #[test]
 fn test_min_max_uses_frozen_training_extrema() {
     let x_train = array![[1.0], [3.0]];
@@ -600,9 +598,7 @@ fn test_min_max_errors() {
     }
 }
 
-// ============================================================================
 // MaxAbsScaler
-// ============================================================================
 
 /// Each feature is divided by its own magnitude, leaving zeros and signs intact
 #[test]
@@ -618,7 +614,7 @@ fn test_max_abs_divides_by_magnitude() {
     assert_eq!(scaler.get_n_features(), Some(2));
 }
 
-/// Structural zeros stay zero - the property that separates MaxAbs from MinMax
+/// Structural zeros stay zero (the property that separates MaxAbs from MinMax)
 #[test]
 fn test_max_abs_preserves_zeros_where_min_max_does_not() {
     let x = array![[0.0, 1.0], [4.0, 2.0], [8.0, 3.0]];
@@ -628,7 +624,8 @@ fn test_max_abs_preserves_zeros_where_min_max_does_not() {
 
     // MaxAbs never shifts, so a zero entry stays exactly zero
     assert_eq!(max_abs[[0, 0]], 0.0);
-    // MinMax shifts by the column minimum, so the zero in column 1 (min 1.0) moves
+    // MinMax shifts by the column minimum, so column 1's scaled zero comes from its
+    // minimum value (1.0), not from an actual zero entry
     assert_eq!(min_max[[0, 1]], 0.0);
     assert!((max_abs[[0, 1]] - 1.0 / 3.0).abs() < 1e-12);
 }
@@ -739,9 +736,7 @@ fn test_max_abs_errors() {
     }
 }
 
-// ============================================================================
 // Normalizer
-// ============================================================================
 
 /// Each row is scaled to unit norm under the configured order
 #[test]
@@ -852,9 +847,7 @@ fn test_normalizer_errors() {
     }
 }
 
-// ============================================================================
-// The family through the shared traits
-// ============================================================================
+// Family through shared traits
 
 /// Every scaler in the family is usable through `Fit` / `Transform` / `FitTransform`
 #[test]
@@ -908,9 +901,7 @@ fn test_scaler_family_through_shared_traits() {
     );
 }
 
-// ============================================================================
 // RobustScaler
-// ============================================================================
 
 /// Reproduces the worked example from scikit-learn's `RobustScaler` documentation
 #[test]
@@ -941,7 +932,7 @@ fn test_robust_quantile_interpolation() {
     assert_eq!(scaler.get_n_samples_seen(), 4);
     assert_eq!(scaler.get_n_features(), Some(1));
 
-    // An odd count puts the median on an exact index instead of between two
+    // An odd count puts the median on an exact index instead of between 2
     let odd = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let mut scaler = RobustScaler::new();
     scaler.fit(&odd).unwrap();
@@ -993,7 +984,7 @@ fn test_robust_resists_outliers() {
         standard_spoiled.get_mean().unwrap()[0] > 100.0 * standard_clean.get_mean().unwrap()[0]
     );
 
-    // And the eight in-distribution rows stay comparable under robust scaling
+    // And the 8 in-distribution rows stay comparable under robust scaling
     let z = robust_spoiled.transform(&spoiled).unwrap();
     assert!(z.rows().into_iter().take(8).all(|row| row[0].abs() <= 1.0));
 }

@@ -1,10 +1,10 @@
 //! Prelude that re-exports the crate's machine learning, metrics, neural network, and utility items
 //!
 //! A single import point for the crate's most commonly used types, traits, and functions. `use
-//! rustyml::prelude::*` pulls in every enabled category at once; alternatively, import one category
-//! at a time through the [`machine_learning`], [`metrics`], [`neural_network`], and [`utils`]
-//! submodules. Each category is feature-gated, so the prelude exposes only the items whose feature
-//! is enabled
+//! rustyml::prelude::*` pulls in every enabled category at once. Alternatively, import one
+//! category at a time through the [`machine_learning`], [`metrics`], [`neural_network`], and
+//! [`utils`] submodules. Each category is feature-gated, so the prelude exposes only the items
+//! whose feature is enabled
 //!
 //! # Available components
 //!

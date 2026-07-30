@@ -3,10 +3,11 @@
 //! Provides [`standardize()`] and the [`StandardizationAxis`] selector, with sequential
 //! and parallel paths chosen by data size
 //!
-//! This is the one-shot form: every call recomputes the statistics from the array it is
-//! handed. When the same statistics have to be applied to more than one batch - a test split
-//! scaled by the training mean, or a single sample at inference time - use
-//! [`StandardScaler`](crate::utils::StandardScaler) instead, which stores them at fit time
+//! This is the one-shot form. Every call recomputes the statistics from the array it is
+//! handed. When the same statistics must apply to more than one batch, use
+//! [`StandardScaler`](crate::utils::StandardScaler) instead. Examples include a test split
+//! scaled by the training mean, or a single sample at inference time. It stores the
+//! statistics at fit time
 
 use crate::error::Error;
 use crate::math::reduction::det_reduce;
@@ -64,6 +65,15 @@ impl StandardizationAxis {
 ///
 /// - `Result<Array<f64, D>, Error>` - Standardized array with the same dimensions as the input
 ///
+/// # Notes
+///
+/// The statistics come from `data` itself on every call, so standardizing a test set this way
+/// scales it by its own column statistics. This is a different linear map than the one applied
+/// to the training data. Fit a [`StandardScaler`](crate::utils::StandardScaler) on the training
+/// matrix and `transform` the rest when the batches have to agree.
+/// `StandardScaler::default().fit_transform(&x)` returns exactly what
+/// [`StandardizationAxis::Column`] produces here
+///
 /// # Examples
 ///
 /// ```rust
@@ -80,20 +90,11 @@ impl StandardizationAxis {
 /// - [`Error::NonFinite`] - If the input contains NaN or infinite values
 /// - [`Error::Computation`] - If the global-axis path has no values to standardize
 ///
-/// # Notes
-///
-/// The statistics come from `data` itself on every call, so standardizing a test set this way
-/// scales it by its own column statistics - a different linear map than the one applied to the
-/// training data. Fit a [`StandardScaler`](crate::utils::StandardScaler) on the training matrix
-/// and `transform` the rest when the batches have to agree;
-/// `StandardScaler::default().fit_transform(&x)` returns exactly what
-/// [`StandardizationAxis::Column`] produces here
-///
 /// # Performance
 ///
-/// - The global-axis path computes its moments through a blocked parallel reduction above
-///   the calibrated sum gate (see `crate::parallel_gates`), so rerunning on the same machine
-///   gives the same result (not necessarily bit-for-bit)
+/// The global-axis path computes its moments through a blocked parallel reduction above the
+/// sum gate in `crate::parallel_gates`. The reduction order can vary with the thread count, so
+/// results stay close but are not always bit for bit identical
 pub fn standardize<S, D>(
     data: &ArrayBase<S, D>,
     axis: StandardizationAxis,
@@ -129,8 +130,9 @@ pub(super) fn welford_step((count, mean, m2): WelfordState, x: f64) -> WelfordSt
     (count, mean, m2)
 }
 
-/// Merges two Welford accumulators (Chan et al.), enabling a parallel one-pass reduction
-/// and the incremental refits behind [`StandardScaler::partial_fit`](crate::utils::StandardScaler::partial_fit)
+/// Merges 2 Welford accumulators (Chan et al.), enabling a parallel one-pass reduction
+/// and the incremental refits behind
+/// [`StandardScaler::partial_fit`](crate::utils::StandardScaler::partial_fit)
 #[inline]
 pub(super) fn welford_merge(a: WelfordState, b: WelfordState) -> WelfordState {
     let (na, ma, m2a) = a;
@@ -150,10 +152,10 @@ pub(super) fn welford_merge(a: WelfordState, b: WelfordState) -> WelfordState {
 
 /// Detects whether a lane is indistinguishable from constant
 ///
-/// Uses the error bound of the 2-pass variance algorithm (Chan, Golub & LeVeque): a lane is
-/// constant when `variance <= n*eps*variance + (n*mean*eps)^2` with `eps = f64::EPSILON`. This
-/// is variance-based and magnitude-relative, so it flags features whose spread is within
-/// floating-point noise regardless of their scale
+/// Uses the error bound of the 2-pass variance algorithm (Chan, Golub and LeVeque). A lane
+/// counts as constant when `variance <= n*eps*variance + (n*mean*eps)^2`, with
+/// `eps = f64::EPSILON`. The bound is variance-based and magnitude-relative, so it flags
+/// features whose spread sits within floating-point noise regardless of their scale
 #[inline]
 fn is_constant_feature(variance: f64, mean: f64, n: f64) -> bool {
     let eps = f64::EPSILON;
@@ -163,9 +165,9 @@ fn is_constant_feature(variance: f64, mean: f64, n: f64) -> bool {
 
 /// Converts a lane's population variance and mean into the standardization divisor
 ///
-/// Returns the raw `sqrt(variance)`, except that a constant lane (per [`is_constant_feature`])
-/// is divided by `1.0` instead, so its centered values map to zeros rather than being amplified
-/// by a vanishing divisor, setting the scale of a constant feature to `1.0`
+/// Returns the raw `sqrt(variance)`, or `1.0` for a constant lane (see [`is_constant_feature`]).
+/// This keeps a constant feature's centered values at zero instead of amplifying them through
+/// a vanishing divisor
 #[inline]
 pub(super) fn scale_from_variance(variance: f64, mean: f64, n: f64) -> f64 {
     if is_constant_feature(variance, mean, n) {
@@ -228,11 +230,11 @@ fn lane_mean_and_std(lane: &ArrayViewMut1<f64>) -> (f64, f64) {
     (mean, scale_from_variance(m2 / n, mean, n))
 }
 
-/// Standardizes each lane along the axis `axis_from_end` positions from the end
-/// (`1` = last axis, rows; `2` = second-to-last, columns)
+/// Standardizes each lane along the axis `axis_from_end` positions from the end.
+/// `1` means the last axis (rows), `2` means the second-to-last axis (columns)
 ///
-/// Parallelizes across lanes once there are enough of them; each lane is then
-/// processed sequentially, so the two levels never nest
+/// Parallelizes across lanes once there are enough of them. Each lane is then
+/// processed sequentially, so the 2 levels never nest
 fn standardize_lanes<D>(
     data: &mut Array<f64, D>,
     axis_from_end: usize,

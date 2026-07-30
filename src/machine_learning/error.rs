@@ -1,9 +1,9 @@
 //! Decision-tree error type
 //!
-//! [`TreeError`] enumerates the failures specific to decision-tree models. Callers receive it
-//! through the crate-wide [`Error::Tree`](crate::error::Error::Tree) variant, into which it converts
-//! via `?` (a `#[from]` bridge). See [`crate::error`] for the unified [`Error`](crate::error::Error)
-//! that aggregates the per-domain error enums
+//! [`TreeError`] enumerates the failures specific to decision-tree models. Callers receive
+//! it through the crate-wide [`Error::Tree`](crate::error::Error::Tree) variant, into which
+//! it converts via `?` (a `#[from]` bridge). See [`crate::error`] for the unified
+//! [`Error`](crate::error::Error) that aggregates the per-domain error enums
 
 /// Decision-tree-specific errors, surfaced through [`Error::Tree`](crate::error::Error::Tree)
 #[non_exhaustive]

@@ -13,8 +13,8 @@ use crate::neural_network::traits::Layer;
 /// Applies softmax along the last axis, converting logits into a probability distribution
 /// that sums to 1 for each row while preserving the input shape
 ///
-/// The activation math is provided by [`Activation::Softmax`]; this layer only adds
-/// boundary validation and the caching required for backpropagation
+/// [`Activation::Softmax`] provides the activation math. This layer only adds boundary
+/// validation and the caching required for backpropagation
 ///
 /// # Examples
 ///
@@ -52,7 +52,7 @@ impl Softmax {
     ///
     /// # Returns
     ///
-    /// - `Self` - A new `Softmax` layer instance
+    /// - `Self` - A new `Softmax` layer
     pub fn new() -> Self {
         Softmax { output_cache: None }
     }

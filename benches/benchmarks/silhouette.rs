@@ -2,11 +2,11 @@
 //!
 //! Isolates the dominant cost of [`rustyml::metrics::silhouette_score`]: the `O(n^2 * d)`
 //! pairwise-distance fill of `dist_to_cluster`. Configs are sized so `scan_work = n * n * d`
-//! clears the `silhouette_parallel_min_elems` gate (262_144), so the parallel fill path is the
-//! one being measured. Each metric is benchmarked separately because the per-pair cost differs
-//! (`Manhattan` < `Euclidean` (a `sqrt`) < `Minkowski(p)` (a `powf`)), and the symmetric
-//! optimization removes half of these calls - so the more expensive the metric, the larger the
-//! expected win.
+//! clears the `silhouette_parallel_min_elems` gate (262_144). This keeps the parallel fill path
+//! as the one being measured. Each metric is benchmarked separately because the per-pair cost
+//! differs (`Manhattan` < `Euclidean` (a `sqrt`) < `Minkowski(p)` (a `powf`)). The symmetric
+//! optimization also removes half of these calls, so the more expensive the metric, the larger
+//! the expected win.
 //!
 //! ```bash
 //! cargo bench --bench silhouette -- --save-baseline before   # before the change

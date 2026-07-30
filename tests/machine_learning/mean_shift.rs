@@ -9,8 +9,8 @@ use rustyml::machine_learning::{MeanShift, estimate_bandwidth};
 
 // helpers
 
-/// Two well-separated unit blobs of 5 points each, near (0,0) and (20,20); with
-/// bandwidth=2.0 every intra-blob point sits inside the kernel window
+/// Builds 2 well-separated blobs of 5 points each, near (0,0) and (20,20).
+/// With bandwidth=2.0, every intra-blob point sits inside the kernel window.
 fn two_blob_data() -> Array2<f64> {
     Array2::from_shape_vec(
         (10, 2),
@@ -122,7 +122,7 @@ fn test_predict_wrong_feature_dimension_returns_dimension_mismatch() {
         .with_cluster_all(true);
     ms.fit(&data).unwrap();
 
-    // Provide 3-feature points; the model was trained on 2-feature points
+    // Provide 3-feature points. The model was trained on 2-feature points.
     let x_wrong = Array2::from_shape_vec((2, 3), vec![0.0, 0.0, 0.0, 20.0, 20.0, 20.0]).unwrap();
     let result = ms.predict(&x_wrong);
     assert!(
@@ -134,7 +134,7 @@ fn test_predict_wrong_feature_dimension_returns_dimension_mismatch() {
 
 // fit / predict correctness on designed data
 
-/// fit on two tight, well-separated blobs discovers exactly 2 centers numerically
+/// fit on 2 tight, well-separated blobs discovers exactly 2 centers numerically
 /// close to the true blob means (0,0) and (20,20)
 #[test]
 fn test_fit_produces_two_centers_near_true_means() {
@@ -198,7 +198,7 @@ fn test_fit_labels_match_known_cluster_structure() {
     let labels = ms.get_labels().unwrap();
     assert_eq!(labels.len(), 10);
 
-    // Samples 0-4 are Blob A, samples 5-9 are Blob B; same-blob samples share a label
+    // Samples 0-4 are Blob A, and samples 5-9 are Blob B. Same-blob samples share a label.
     let label_a = labels[0];
     let label_b = labels[5];
     assert_ne!(label_a, label_b, "blobs must be assigned different labels");
@@ -229,7 +229,7 @@ fn test_predict_assigns_points_to_correct_cluster() {
     let label_a = labels_train[0]; // label for blob-A region
     let label_b = labels_train[5]; // label for blob-B region
 
-    // Two canonical predict points, one deep inside each blob
+    // 2 canonical predict points, one deep inside each blob
     let x_new = Array2::from_shape_vec(
         (2, 2),
         vec![
@@ -273,8 +273,8 @@ fn test_fit_predict_consistent_with_fit_then_labels() {
 
 // cluster_all=false outlier label
 
-/// With cluster_all=false, a point farther than bandwidth from every fitted center
-/// receives the label n_clusters (the documented outlier sentinel)
+/// With cluster_all=false, a point beyond bandwidth from every fitted center is labeled -1,
+/// matching scikit-learn's noise sentinel.
 #[test]
 fn test_cluster_all_false_outlier_label_is_n_clusters() {
     let data = two_blob_data(); // blobs at (0,0) and (20,20)
@@ -327,7 +327,7 @@ fn test_cluster_all_true_never_produces_outlier_label() {
     assert!(preds[0] >= 0 && preds[0] < n_clusters);
 }
 
-/// fit labels obey the same invariant: no label equals n_clusters when cluster_all=true
+/// fit labels obey the same invariant: every label stays below n_clusters when cluster_all=true
 #[test]
 fn test_fit_labels_cluster_all_true_all_assigned() {
     let data = two_blob_data();
@@ -427,8 +427,8 @@ fn test_bin_seeding_produces_valid_centers() {
 #[test]
 fn test_no_bin_seeding_produces_valid_centers() {
     let data = two_blob_data();
-    // bin_seeding=false keeps up to 100 shuffled points as seeds; with only 10 samples
-    // the whole set is kept, so this just checks the non-bin_seeding branch is valid
+    // bin_seeding=false keeps up to 100 shuffled points as seeds. With only 10 samples,
+    // the whole set is kept, so this just checks the non-bin_seeding branch is valid.
     let mut ms_no_bin = MeanShift::new(2.0)
         .unwrap()
         .with_max_iter(300)
@@ -444,7 +444,7 @@ fn test_no_bin_seeding_produces_valid_centers() {
     assert_eq!(centers.ncols(), 2);
 }
 
-/// 120 points in three well-separated blobs (40 each) with deterministic 2-D jitter,
+/// 120 points in 3 well-separated blobs (40 each) with deterministic 2-D jitter,
 /// used to exercise non-bin-seeding fitting on a larger set
 fn three_blobs_over_100() -> Array2<f64> {
     let centers = [(0.0_f64, 0.0_f64), (12.0, 0.0), (6.0, 11.0)];
@@ -458,7 +458,7 @@ fn three_blobs_over_100() -> Array2<f64> {
     Array2::from_shape_vec((120, 2), v).unwrap()
 }
 
-/// Two non-bin_seeding fits on the same data produce identical centers and labels:
+/// 2 non-bin_seeding fits on the same data produce identical centers and labels:
 /// MeanShift fitting is deterministic since it seeds from every point
 #[test]
 fn non_bin_seeding_fit_is_deterministic() {
@@ -493,7 +493,7 @@ fn non_bin_seeding_fit_is_deterministic() {
 
 #[test]
 fn test_estimate_bandwidth_invalid_quantile_is_invalid() {
-    // Quantile must lie strictly in (0, 1); each out-of-range value yields InvalidParameter
+    // Quantile must lie strictly in (0, 1). Each out-of-range value yields InvalidParameter.
     let x = array![[0.0_f64, 0.0], [1.0, 1.0]];
     for quantile in [0.0, 1.0, -0.1, 1.5] {
         let result = estimate_bandwidth(&x, Some(quantile), None, None);
@@ -505,11 +505,8 @@ fn test_estimate_bandwidth_invalid_quantile_is_invalid() {
     }
 }
 
-/// A neighbourhood of one holds only the query point, so the bandwidth is 0.0
-///
-/// `k = floor(n * quantile)` is 0 for two points at any quantile below 1.0, and clamps to 1. The
-/// single "neighbour" is then the query point itself at distance zero. scikit-learn returns 0.0
-/// here as well and leaves it to `MeanShift` to reject the bandwidth
+/// With 2 points, `k = floor(n * quantile)` clamps to 1, so the sole neighbor is the query
+/// point itself, at distance 0, matching scikit-learn.
 #[test]
 fn test_estimate_bandwidth_degenerate_neighbourhood_is_zero() {
     let x = Array2::from_shape_vec((2, 2), vec![0.0_f64, 0.0, 3.0, 4.0]).unwrap();
@@ -520,12 +517,8 @@ fn test_estimate_bandwidth_degenerate_neighbourhood_is_zero() {
     }
 }
 
-/// Matches `sklearn.cluster.estimate_bandwidth` numerically
-///
-/// Reference from scikit-learn 1.9.0: `estimate_bandwidth(X, quantile=0.3)` on this 10-point set
-/// is `1.1228546930655043`. The value is the mean distance to each point's `(k - 1)`-th nearest
-/// neighbour with `k = floor(n * quantile)`, because scikit-learn's neighbour query counts the
-/// query point itself
+/// Matches `sklearn.cluster.estimate_bandwidth` (scikit-learn 1.9.0) with quantile=0.3 on a
+/// 10-point set: each point's (k-1)-th neighbor distance, since scikit-learn counts itself.
 #[test]
 fn test_estimate_bandwidth_matches_scikit_learn() {
     let x = Array2::from_shape_vec(
@@ -563,8 +556,8 @@ fn test_estimate_bandwidth_deterministic_with_seed() {
 fn test_estimate_bandwidth_n_samples_larger_than_rows() {
     let x = Array2::from_shape_vec((3, 2), vec![0.0, 0.0, 1.0, 0.0, 0.5, 0.866]).unwrap();
     // Requesting 1000 samples when only 3 exist uses all 3, not a panic. Quantile 0.7 gives
-    // k = 2, the smallest neighbourhood that reaches past the query point itself; scikit-learn
-    // returns 0.9999779997579946 here, the mean nearest-neighbour distance of the triangle
+    // k = 2, the smallest neighborhood that reaches past the query point itself. scikit-learn
+    // returns 0.9999779997579946 here, the mean nearest-neighbor distance of the triangle.
     let result = estimate_bandwidth(&x, Some(0.7), Some(1000), Some(42));
     assert!(result.is_ok());
     assert_abs_diff_eq!(result.unwrap(), 0.999_977_999_757_994_6, epsilon = 1e-12);
@@ -572,7 +565,7 @@ fn test_estimate_bandwidth_n_samples_larger_than_rows() {
 
 // fit on minimal (single-point) dataset
 
-/// A single-point dataset produces one cluster center equal to that point
+/// A single-point dataset produces 1 cluster center equal to that point
 #[test]
 fn test_fit_single_point_produces_one_center() {
     let x = Array2::from_shape_vec((1, 2), vec![3.0_f64, 7.0]).unwrap();
@@ -672,7 +665,7 @@ fn test_estimate_bandwidth_same_seed_same_result() {
 }
 
 /// estimate_bandwidth with different seeds (sampling 5 of 10 rows) yields positive
-/// values; a probabilistic sanity check asserting only positivity
+/// values. This is a sanity check on positivity only.
 #[test]
 fn test_estimate_bandwidth_different_seeds_both_positive() {
     let data = two_blob_data();
@@ -685,7 +678,7 @@ fn test_estimate_bandwidth_different_seeds_both_positive() {
 // determinism of fit: with bin_seeding disabled, `fit` seeds from every point, so 150
 // points exercise the deterministic non-bin-seeding path
 
-/// 150 deterministic points across three well-separated blobs (no RNG in the test)
+/// 150 deterministic points across 3 well-separated blobs (no RNG in the test)
 fn three_blob_data() -> Array2<f64> {
     let n = 150;
     let mut x = Array2::zeros((n, 2));
@@ -701,7 +694,7 @@ fn three_blob_data() -> Array2<f64> {
     x
 }
 
-/// Two fits with bin_seeding = false produce identical labels and cluster centers:
+/// 2 fits with bin_seeding = false produce identical labels and cluster centers:
 /// non-bin-seeding fitting is deterministic
 #[test]
 fn test_non_bin_seeding_fit_is_reproducible() {
@@ -732,7 +725,7 @@ fn test_non_bin_seeding_fit_is_reproducible() {
     );
 }
 
-/// With bin_seeding = true (no RNG), two fits agree exactly across runs despite
+/// With bin_seeding = true (no RNG), 2 fits agree exactly across runs despite
 /// AHashMap iteration order and the per-cell representative choice
 #[test]
 fn test_bin_seeding_is_deterministic_across_runs() {
@@ -762,10 +755,9 @@ fn test_bin_seeding_is_deterministic_across_runs() {
         1e-15,
     );
 }
-// large-dataset parallel seed-loop + label branch: `fit` parallelizes only when
-// n_samples > MEANSHIFT_PARALLEL_THRESHOLD (1000), so 1200 points hit both branches
+// Larger-dataset fit: a correctness check at 1200 points
 
-/// 1200 points: three tight, well-separated blobs (400 each) with deterministic jitter
+/// 1200 points: 3 tight, well-separated blobs (400 each) with deterministic jitter
 /// around centers (0,0), (10,0), (5,10), separation far exceeding intra-blob spread
 fn three_blobs_1200() -> Array2<f64> {
     let centers = [(0.0_f64, 0.0_f64), (10.0, 0.0), (5.0, 10.0)];
@@ -779,14 +771,14 @@ fn three_blobs_1200() -> Array2<f64> {
     Array2::from_shape_vec((1200, 2), v).unwrap()
 }
 
-/// fit on 1200 points (> 1000, parallel seed-loop and label branch) recovers exactly
-/// 3 centers each within 0.5 of a true mean and groups the three 400-point blocks distinctly
+/// Fits 1200 points and recovers exactly 3 centers, each within 0.5 of a true mean, while
+/// keeping the 3 400-point blocks in distinct clusters.
 #[test]
 fn test_fit_parallel_branch_three_blobs_1200() {
     let data = three_blobs_1200();
     assert_eq!(data.nrows(), 1200, "dataset must exceed the 1000 threshold");
 
-    // bin_seeding=true gives deterministic seeds; bandwidth=2.0 separates the blobs
+    // bin_seeding=true gives deterministic seeds. bandwidth=2.0 separates the blobs
     let mut ms = MeanShift::new(2.0)
         .unwrap()
         .with_max_iter(300)
@@ -824,7 +816,7 @@ fn test_fit_parallel_branch_three_blobs_1200() {
         );
     }
 
-    // Labels (parallel map_collect at this size) must respect the blob blocks
+    // Labels must respect the blob blocks
     let labels = ms.get_labels().unwrap();
     assert_eq!(labels.len(), 1200);
     let block_label = [labels[0], labels[400], labels[800]];
@@ -845,13 +837,12 @@ fn test_fit_parallel_branch_three_blobs_1200() {
 
 // scikit-learn parity
 
-/// Reproduces `sklearn.cluster.MeanShift(bandwidth=2.0)` element for element
+/// Reproduces `sklearn.cluster.MeanShift(bandwidth=2.0)` element for element.
 ///
-/// Reference from scikit-learn 1.9.0 on this 10-point set: `cluster_centers_` is
-/// `[[10.05, 9.925], [1.0, 2.05], [5.05, 4.95]]` and `labels_` is `[1,1,1,1,0,0,0,0,2,2]`.
-/// Three things have to line up for that: the flat kernel (a Gaussian one pulls the modes towards
-/// the global centre of mass), the intensity-ordered greedy merge (which fixes both the centers
-/// and their numbering), and the `(intensity, coordinates)` tiebreak between equally dense modes
+/// scikit-learn 1.9.0 gives `cluster_centers_` = `[[10.05, 9.925], [1.0, 2.05], [5.05, 4.95]]`
+/// and `labels_` = `[1,1,1,1,0,0,0,0,2,2]` on this 10-point set. The flat kernel, the
+/// intensity-ordered merge order, and the `(intensity, coordinates)` tiebreak together fix
+/// both the centers and this exact label numbering.
 #[test]
 fn test_matches_scikit_learn_reference_clustering() {
     let x = Array2::from_shape_vec(

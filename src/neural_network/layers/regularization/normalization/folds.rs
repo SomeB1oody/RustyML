@@ -1,8 +1,8 @@
 //! Deterministic fold kernels shared by the normalization layers
 //!
-//! Everything here computes with a fixed, shape-derived grouping and accumulation order, so a
-//! caller's `parallel` flag (or task chunking) only decides whether work runs on rayon, not the
-//! result, which is reproducible across runs on the same machine
+//! Everything here computes with a fixed, shape-derived grouping and accumulation order. A
+//! caller's `parallel` flag (or task chunking) only decides whether the work runs on rayon. The
+//! result is the same either way, and reproducible across runs on the same machine.
 
 use crate::math::reduction::DET_REDUCE_BLOCK;
 use crate::neural_network::Tensor;
@@ -10,7 +10,7 @@ use ndarray::Array1;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSlice;
 
-/// Sums one contiguous segment of scaled terms in 8 independent lanes combined in a fixed
+/// Sums 1 contiguous segment of scaled terms in 8 independent lanes combined in a fixed
 /// order (the serial kernel the deterministic folds share)
 ///
 /// The result depends only on the segment boundaries, which derive from the input shape, never
@@ -78,8 +78,9 @@ pub(super) fn segment_sq_dev(seg: &[f32], mean: f32) -> f32 {
 }
 
 /// The triple-product sibling of [`segment_dot`]: `sum_i a[i] * b[i] * c[i] * scale` over
-/// 3 equal-length contiguous segments, left-associated per term so fusing matches the
-/// 2-step `(a * b)` -> `segment_dot` composition
+/// 3 equal-length contiguous segments
+///
+/// Terms are left-associated to match the 2-step `(a * b)` then `segment_dot` composition
 pub(super) fn segment_dot3(a: &[f32], b: &[f32], c: &[f32], scale: f32) -> f32 {
     let mut lanes = [0.0f32; 8];
     let mut chunks_a = a.chunks_exact(8);
@@ -108,16 +109,16 @@ pub(super) fn segment_dot3(a: &[f32], b: &[f32], c: &[f32], scale: f32) -> f32 {
         + tail
 }
 
-/// Rows per block for the column folds: whole rows, sized so one block holds about
+/// Rows per block for the column folds: whole rows, sized so 1 block holds about
 /// [`DET_REDUCE_BLOCK`] elements
 ///
-/// A function of the input shape only, so the deterministic fold grouping never depends on
-/// scheduling
+/// The block size depends only on the input shape, so the deterministic fold grouping never
+/// depends on scheduling
 pub(super) fn rows_per_block(c: usize) -> usize {
     (DET_REDUCE_BLOCK / c).max(1)
 }
 
-/// Folds one chunk of whole rows into a local per-column accumulator (the serial kernel both
+/// Folds 1 chunk of whole rows into a local per-column accumulator (the serial kernel both
 /// paths of the column folds share)
 fn col_sum_chunk(chunk: &[f32], c: usize, scale: f32) -> Vec<f32> {
     let mut acc = vec![0.0f32; c];
@@ -173,8 +174,10 @@ pub(super) fn par_col_sum(x: &[f32], c: usize, parallel: bool, scale: f32) -> Te
 }
 
 /// Per-column sums of scaled products over 2 standard-layout `[M, C]` slices:
-/// `out[j] = sum_r a[r, j] * b[r, j] * scale`, as the same row-block deterministic fold as
-/// [`par_col_sum`] (same flag semantics)
+/// `out[j] = sum_r a[r, j] * b[r, j] * scale`
+///
+/// This is the same row-block deterministic fold as [`par_col_sum`], with the same flag
+/// semantics
 ///
 /// Fusing the product into the fold avoids materializing the `[M, C]` temp the serial
 /// `(a * b * scale).sum_axis(Axis(0))` form requires

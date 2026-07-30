@@ -1,9 +1,11 @@
-//! Linear models trained by gradient descent
+//! Linear models for regression and classification
 //!
 //! Groups [`LinearRegression`] for regression and [`LogisticRegression`] for binary
-//! classification (with its [`generate_polynomial_features`] helper)
+//! classification. [`LinearRegression`] supports gradient-descent and closed-form solvers.
+//! [`LogisticRegression`] trains only by gradient descent and adds the
+//! [`generate_polynomial_features`] helper
 
-/// Linear regression via gradient descent
+/// Linear regression with gradient-descent and closed-form solvers
 pub mod linear_regression;
 /// Logistic regression for binary classification
 pub mod logistic_regression;

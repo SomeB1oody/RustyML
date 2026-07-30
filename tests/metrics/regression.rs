@@ -280,10 +280,7 @@ fn test_r2_constant_y_true_nonzero_sse() {
     assert_abs_diff_eq!(r2_score(&y_true, &y_pred), 0.0, epsilon = 1e-12);
 }
 
-/// A target that genuinely varies is scored normally however small its magnitude
-///
-/// The absolute `SST < 1e-10` guard this replaced reported a perfect 1.0 here, because the whole
-/// spread of the data sat below the threshold
+/// `r2_score` scores a target with a tiny but nonzero magnitude normally, not as constant.
 #[test]
 fn test_r2_small_magnitude_target_is_not_treated_as_constant() {
     let y_true = array![1e-6, 2e-6, 3e-6];
@@ -292,10 +289,8 @@ fn test_r2_small_magnitude_target_is_not_treated_as_constant() {
     assert_abs_diff_eq!(r2_score(&y_true, &y_pred), -0.5, epsilon = 1e-9);
 }
 
-/// A constant target is recognised even when `sum / n` does not round-trip it
-///
-/// Eight copies of `0.1` leave SST at 1.5e-33 rather than at exactly zero, so an `sst == 0.0` test
-/// would fall through to `1 - SSE/SST` and return garbage of order 1e31
+/// r2_score recognizes a constant target even though `sum / n` does not round-trip it. 8 copies
+/// of `0.1` leave SST at about 1.5e-33, not exactly 0, so the guard checks the raw values instead.
 #[test]
 fn test_r2_constant_target_that_does_not_round_trip() {
     let y_true = array![0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1];
@@ -405,15 +400,13 @@ fn test_evs_constant_y_true_nonzero_residual_variance() {
     );
 }
 
-/// A target that genuinely varies is scored normally however small its magnitude
-///
-/// The absolute variance guard this replaced reported a perfect 1.0 here, because both variances
-/// sat below the threshold
+/// explained_variance_score treats a tiny but nonzero target magnitude normally, not as constant.
 #[test]
 fn test_evs_small_magnitude_target_is_not_treated_as_constant() {
     let y_true = array![1e-6, 2e-6, 3e-6];
     let y_pred = array![1e-6, 3e-6, 2e-6];
-    // The residuals and the target have the same spread, so none of the variance is explained
+    // The residuals and the target have the same spread, so explained_variance_score explains
+    // none of the variance
     assert_abs_diff_eq!(
         explained_variance_score(&y_true, &y_pred),
         0.0,
@@ -421,10 +414,8 @@ fn test_evs_small_magnitude_target_is_not_treated_as_constant() {
     );
 }
 
-/// A constant target is recognised even when `sum / n` does not round-trip it
-///
-/// Eight copies of `0.1` leave the population variance at 1.9e-34 rather than at exactly zero, so
-/// a `variance == 0.0` test applied to that sum would fall through and return garbage
+/// explained_variance_score recognizes a constant target even though `sum / n` does not
+/// round-trip it. 8 copies of `0.1` leave the population variance at about 1.9e-34, not 0.
 #[test]
 fn test_evs_constant_target_that_does_not_round_trip() {
     let y_true = array![0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1];
@@ -482,7 +473,7 @@ fn test_medae_odd_samples() {
     );
 }
 
-/// Even sample count: median averages the two middle sorted errors (1.5)
+/// Even sample count: median averages the 2 middle sorted errors (1.5).
 #[test]
 fn test_medae_even_samples() {
     let y_true = array![1.0, 2.0, 3.0, 4.0];
@@ -638,7 +629,8 @@ fn test_mape_nonnegative() {
     assert!(mean_absolute_percentage_error(&y_true, &y_pred) >= 0.0);
 }
 
-/// When y_true = 0 the denominator is floored at `f64::EPSILON`, so MAPE blows up (> 1e13)
+/// When `y_true` = 0, the function floors the denominator at `f64::EPSILON`, so MAPE grows very
+/// large (> 1e13).
 #[test]
 fn test_mape_zero_y_true_eps_floor() {
     let y_true = array![0.0, 2.0];

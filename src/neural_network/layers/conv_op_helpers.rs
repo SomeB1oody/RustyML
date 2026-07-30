@@ -1,14 +1,14 @@
-//! The depthwise convolution kernel, shared by `DepthwiseConv2D` and `SeparableConv2D`'s first stage
+//! The depthwise convolution kernel, shared by `DepthwiseConv2D` and `SeparableConv2D`'s first
+//! stage
 //!
-//! A depthwise convolution never mixes channels, so under the crate's channels-last layout the
-//! channel axis is a pure vector lane: one kernel tap at one output position reads `channels`
-//! contiguous input floats and writes `channels * depth_multiplier` contiguous accumulator floats.
-//! That is what these kernels exploit, and it is why they take flat slices rather than per-channel
-//! plane views - a channels-first plane would have to be gathered out with a stride, which is the
-//! one thing this layout exists to avoid.
+//! A depthwise convolution never mixes channels. Under the crate's channels-last layout, the
+//! channel axis is a pure vector lane. One kernel tap at one output position reads `channels`
+//! contiguous input floats, and writes `channels * depth_multiplier` contiguous accumulator
+//! floats. These kernels exploit that layout, so they take flat slices instead of per-channel
+//! plane views. A channels-first plane would need a strided gather, which this layout avoids
 //!
-//! Zero-padding is handled by skipping out-of-range taps rather than materializing a padded copy,
-//! so `Same` padding costs no extra buffer.
+//! The kernels skip out-of-range taps instead of materializing a padded copy, so `Same` padding
+//! costs no extra buffer.
 
 /// The shape and stride facts a depthwise pass needs, shared by its forward and backward kernels
 pub(super) struct DepthwiseGeometry {
@@ -61,8 +61,8 @@ impl DepthwiseGeometry {
 ///
 /// `src` is the whole `[batch, height, width, channels]` input and `ker` the whole
 /// `[kh, kw, channels, depth_multiplier]` kernel, both flat and row-major. `out_row` is the
-/// `[out_width, channels * depth_multiplier]` row for output row `oh` of batch item `b`; `bias`
-/// seeds it when the caller has one, otherwise it starts at zero
+/// `[out_width, channels * depth_multiplier]` row for output row `oh` of batch item `b`.
+/// `bias` seeds it when the caller has one. Otherwise the row starts at zero
 ///
 /// Output rows are disjoint, so a caller can run these concurrently with no halo and no merge
 pub(super) fn depthwise_forward_row(
@@ -94,11 +94,9 @@ pub(super) fn depthwise_forward_row(
                 let k = &ker[(kh * kw_size + kw) * out_channels..][..out_channels];
                 if dm == 1 {
                     // The general form below is `for m in 0..dm`, whose trip count the compiler
-                    // cannot see is 1, so it emits a scalar nested loop where this is a plain
-                    // element-wise multiply-accumulate over three equal-length contiguous slices.
-                    // That difference measured 1.76x on an 8x56x56x64 depthwise forward, and
-                    // `depth_multiplier == 1` is both Keras' default and the only shape this layer
-                    // supported before it gained the parameter - so it is worth spelling out
+                    // cannot see is 1, so it emits a scalar nested loop. This fast path is
+                    // instead a plain element-wise multiply-accumulate over 3 equal-length
+                    // contiguous slices. `depth_multiplier == 1` is Keras' default
                     for ((a, &xc), &kc) in acc.iter_mut().zip(x).zip(k) {
                         *a += xc * kc;
                     }
@@ -127,7 +125,7 @@ pub(super) struct DepthwiseGradients {
 
 /// Weight, bias and input gradients for one batch item of a depthwise convolution
 ///
-/// Splitting the work by batch item keeps every write private, so a caller only has to sum the
+/// Splitting the work by batch item keeps every write private. A caller only has to sum the
 /// weight and bias partials in batch order to stay reproducible. Callers with no bias of their own
 /// (the depthwise stage of a separable convolution carries its bias on the pointwise side) can
 /// ignore [`DepthwiseGradients::bias`]
@@ -161,9 +159,9 @@ pub(super) fn depthwise_item_gradients(
                     };
                     let k_off = (kh * kw_size + kw) * out_channels;
                     if dm == 1 {
-                        // Same reason as the forward's fast path: with the multiplier fixed at 1
-                        // every index collapses to the channel, and all five slices are equal-length
-                        // and contiguous
+                        // Same reason as the forward's fast path. With the multiplier fixed at
+                        // 1, every index collapses to the channel, and all 5 slices are
+                        // equal-length and contiguous
                         let x = &src[in_item + off..][..g.channels];
                         let wg = &mut weight[k_off..][..g.channels];
                         let kc = &ker[k_off..][..g.channels];
@@ -203,8 +201,8 @@ pub(super) fn depthwise_item_gradients(
 mod tests {
     use super::*;
 
-    /// A tap that reaches past the input in either direction is skipped rather than clamped, which
-    /// is what lets `Same` padding work without materializing a padded copy
+    /// `tap_offset` skips a tap that reaches past the input, in either direction, rather than
+    /// clamping it. This lets `Same` padding work without a padded copy
     #[test]
     fn tap_offset_skips_padding_on_both_edges() {
         let g = DepthwiseGeometry {
@@ -217,11 +215,11 @@ mod tests {
             pad_before: (1, 1),
         };
 
-        // Output (0, 0) with tap (0, 0) sits one row and one column before the input
+        // Output (0, 0) with tap (0, 0) sits 1 row and 1 column before the input
         assert_eq!(g.tap_offset(0, 0, 0, 0), None);
         // Tap (1, 1) of the same window is input (0, 0)
         assert_eq!(g.tap_offset(0, 0, 1, 1), Some(0));
-        // Output (2, 2) with tap (2, 2) runs one past the trailing edge
+        // Output (2, 2) with tap (2, 2) runs 1 past the trailing edge
         assert_eq!(g.tap_offset(2, 2, 2, 2), None);
         // Its tap (1, 1) is input (2, 2), the last position: (2 * 3 + 2) * 2 channels
         assert_eq!(g.tap_offset(2, 2, 1, 1), Some(16));

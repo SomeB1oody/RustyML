@@ -13,8 +13,8 @@ use crate::neural_network::traits::Layer;
 /// Applies `1 / (1 + e^(-x))` elementwise to the input tensor, squashing values to (0, 1)
 /// while preserving the input shape
 ///
-/// The activation math is provided by [`Activation::Sigmoid`]; this layer adds
-/// boundary validation and the caching required for backpropagation
+/// [`Activation::Sigmoid`] provides the activation math. This layer adds boundary
+/// validation and the caching required for backpropagation
 ///
 /// # Examples
 ///
@@ -52,7 +52,7 @@ impl Sigmoid {
     ///
     /// # Returns
     ///
-    /// - `Self` - A new `Sigmoid` layer instance
+    /// - `Self` - A new `Sigmoid` layer
     pub fn new() -> Self {
         Sigmoid { output_cache: None }
     }

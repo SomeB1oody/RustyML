@@ -1,65 +1,66 @@
-//! # RustyML - A Machine Learning and Deep Learning Library in Pure Rust
+//! # RustyML: Machine Learning and Deep Learning in Pure Rust
 //!
-//! RustyML is a machine learning and deep learning library written entirely in Rust,
-//! using Rust's memory safety, concurrency features, and zero-cost abstractions to provide
-//! implementations of classical ML algorithms, neural networks, and data processing utilities
+//! RustyML is a machine learning and deep learning library written entirely in Rust. It
+//! implements classical ML algorithms, neural networks, and data-processing utilities
 //!
 //! ## Overview
 //!
-//! This crate covers machine learning tasks from data preprocessing and feature engineering
-//! to model training and evaluation. Implementations feature error handling, parallel processing,
-//! and input validation
+//! The crate covers a full workflow: preprocessing, feature engineering, model training, and
+//! evaluation. It validates input and reports errors
 //!
-//! Estimator defaults, score orientations, and metric output conventions follow scikit-learn and
-//! are checked numerically against it, so a ported pipeline produces the same numbers. Where the
-//! crate deliberately departs - `metrics` panicking instead of returning `Result`, `roc_curve`
-//! always returning the full threshold sweep, `MeanShift`'s opt-in Gaussian kernel - the item's own
-//! documentation says so
+//! Estimator defaults, score orientations, and metric conventions follow scikit-learn and are
+//! checked numerically against it, so a ported pipeline produces the same numbers. Where the
+//! crate departs from scikit-learn, the item's own documentation says so. Known departures:
+//!
+//! - `metrics` panics instead of returning `Result`
+//! - `roc_curve` always returns the full threshold sweep
+//! - `MeanShift` has an opt-in Gaussian kernel
 //!
 //! ## Architecture
 //!
-//! The library is organized into 5 main modules, each gated by feature flags:
+//! The crate splits into 5 modules. A feature flag gates each one:
 //!
 //! ### [`machine_learning`]
 //! Classical machine learning algorithms for supervised and unsupervised learning:
 //! - **Regression**: Linear Regression with L1/L2 regularization, solved in closed form by default
 //!   or by gradient descent
 //! - **Classification**: Logistic Regression, KNN, Decision Tree, SVC, Linear SVC, LDA
-//! - **Clustering**: KMeans, DBSCAN, MeanShift - all three label samples as `Array1<isize>`, with
-//!   `-1` for noise or unassigned
+//! - **Clustering**: KMeans, DBSCAN, MeanShift. All 3 label samples as `Array1<isize>`, with
+//!   `-1` for noise or unassigned points
 //! - **Dimensionality Reduction**: PCA, Kernel PCA, t-SNE
 //! - **Anomaly Detection**: Isolation Forest, scoring in `[-1, 0)` where lower is more anomalous
 //!   and predicting `-1` (outlier) / `+1` (inlier)
 //!
 //! ### [`neural_network`]
-//! Complete neural network framework with flexible architecture design. Tensors are channels-last
-//! and kernels use Keras' shapes, so a layout carried over from Keras needs no permutation:
-//! - **Layers**: Dense, RNN, LSTM, Convolution, Pooling, Dropout
-//! - **Optimizers**: SGD, Adam, AdamW, RMSProp, AdaGrad
-//! - **Loss Functions**: MSE, MAE, Binary/Categorical Cross-Entropy
-//! - **Models**: Sequential architecture for feed-forward networks, trained by `fit` /
-//!   `fit_with_batches` - which return a `History` of one loss per epoch - or by a hand-written
-//!   loop over the public `train_batch`, and scored without training by `evaluate`
+//! Neural network framework built around a sequential model. Tensors are channels-last, and
+//! kernel shapes match Keras, so a layout carried over from Keras needs no permutation:
+//! - **Layers**: Dense, SimpleRNN, LSTM, GRU, Convolution, Pooling, Dropout
+//! - **Optimizers**: SGD, Adam, AdamW, RMSprop, AdaGrad
+//! - **Loss Functions**: MSE, MAE, Binary/Categorical/Sparse Categorical Cross-Entropy
+//! - **Models**: Sequential architecture for feed-forward networks. `fit` and `fit_with_batches`
+//!   return a `History` of one loss per epoch. A hand-written loop can call the public
+//!   `train_batch` instead, and `evaluate` scores the model without training it
 //!
 //! ### [`utils`]
 //! Data preprocessing and dataset-splitting utilities:
-//! - **Preprocessing**: one-shot `standardize` / `normalize`, or the stateful scaler family
-//!   (`StandardScaler`, `MinMaxScaler`, `MaxAbsScaler`, `RobustScaler`, `Normalizer`) when the
-//!   training statistics must be reused on later batches; plus label encoding
+//! - **Preprocessing**: one-shot `standardize` / `normalize`, the stateful scaler family
+//!   (`StandardScaler`, `MinMaxScaler`, `MaxAbsScaler`, `RobustScaler`, `Normalizer`) for reusing
+//!   training statistics on later batches, and label encoding
 //! - **Dataset Splitting**: train/test split (optionally stratified)
 //!
 //! ### [`metrics`]
-//! Evaluation metrics for model performance assessment. Unlike the rest of the crate, these
-//! functions panic on a precondition violation rather than returning a `Result`, which keeps this
-//! leaf module dependency-light:
+//! Evaluation metrics for model performance. Unlike the rest of the crate, these functions panic
+//! on a precondition violation instead of returning a `Result`, which keeps this leaf module
+//! dependency-light:
 //! - **Regression**: MSE, RMSE, MAE, R^2 score
 //! - **Classification**: Accuracy, Confusion Matrix, AUC-ROC, F1-score
-//! - **Clustering**: Adjusted Rand Index, Normalized/Adjusted Mutual Information, Silhouette Score -
-//!   every one of them takes `isize` labels, the type the clustering estimators return
+//! - **Clustering**: Adjusted Rand Index, Normalized/Adjusted Mutual Information, Silhouette
+//!   Score. Every one of them takes `isize` labels, the type the clustering estimators return
 //!
 //! ### [`math`]
 //! Low-level numeric primitives shared across modules:
-//! - **Distance Metrics**: Euclidean, Manhattan, Minkowski, plus the `DistanceCalculationMetric` dispatcher
+//! - **Distance Metrics**: Euclidean, Manhattan, Minkowski, plus the `DistanceCalculationMetric`
+//!   dispatcher
 //! - **Matrix Products**: `gemmkit`-backed GEMM/GEMV with automatic parallelism
 //! - **Reductions**: deterministic blocked parallel reductions
 //!
@@ -71,9 +72,9 @@
 //! ```toml
 //! [dependencies]
 //! rustyml = "*"
-//! # The default feature set is `full`, so every module is available. To slim the build down,
-//! # opt out and name what you need: `{ version = "*", default-features = false, features = ["machine_learning"] }`
-//! # Add `"show_progress"` in `features` to show progress bars when training
+//! # The default feature set is `full`. To slim the build, set `default-features = false` and
+//! # list the features you need, e.g. `features = ["machine_learning"]`
+//! # Add `"show_progress"` to show progress bars during training
 //! ```
 //!
 //! In your Rust code, write:
@@ -122,9 +123,9 @@
 //! ```toml
 //! [dependencies]
 //! rustyml = "*"
-//! # The default feature set is `full`, so every module is available. To slim the build down,
-//! # opt out and name what you need: `{ version = "*", default-features = false, features = ["neural_network"] }`
-//! # Add `"show_progress"` in `features` to show progress bars when training
+//! # The default feature set is `full`. To slim the build, set `default-features = false` and
+//! # list the features you need, e.g. `features = ["neural_network"]`
+//! # Add `"show_progress"` to show progress bars during training
 //! ```
 //!
 //! In your Rust code, write:
@@ -152,12 +153,12 @@
 //! // Display model structure
 //! model.summary();
 //!
-//! // Train the model; the returned History holds one loss per epoch, each measured while that
-//! // epoch ran rather than after it
+//! // Train the model
+//! // The returned History holds one loss per epoch, measured during that epoch, not after it
 //! let history = model.fit(&x, &y, 10).unwrap();
 //! println!("Per-epoch loss: {:?}", history.loss());
 //!
-//! // Score the weights the model is holding now - an inference-mode pass that updates nothing
+//! // Score the model's current weights, an inference-mode pass that changes nothing
 //! println!("Loss after training: {}", model.evaluate(&x, &y).unwrap());
 //!
 //! // Save model weights to file
@@ -198,10 +199,10 @@
 //!
 //! `machine_learning`, `neural_network`, `utils`, and `metrics` each enable `math`.
 //!
-//! The default is deliberately everything: a scikit-learn workflow reaches across modules
+//! The default enables everything. A scikit-learn workflow reaches across modules
 //! (`utils::train_test_split` -> `machine_learning` -> `metrics`), so a fresh `cargo add rustyml`
-//! should have all of it. Features are additive, so naming one does not turn the rest off; to
-//! actually restrict a build, set `default-features = false` and list what you need.
+//! should have all of it. Features are additive. Naming one does not turn the rest off, so to
+//! restrict a build, set `default-features = false` and list what you need.
 
 #[cfg(any(
     feature = "machine_learning",
@@ -213,33 +214,19 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "show_progress")]
 use indicatif::{ProgressBar, ProgressStyle};
 
-/// Creates a progress bar with a consistent style across the crate
+/// Creates a progress bar with the crate's style
 ///
-/// The progress bar is only created when the `show_progress` feature is enabled
+/// Compiled only when the `show_progress` feature is enabled
 ///
 /// # Parameters
 ///
-/// - `total` - The total number of iterations or items to process
-/// - `template` - A custom template string for the progress bar format,
-///   using placeholders {elapsed_precise}, {bar:40}, {pos}, {len}, {msg};
-///   example: "\[{elapsed_precise}\] {bar:40} {pos}/{len} | Cost: {msg}"
+/// - `total` - the total number of iterations or items to process
+/// - `template` - the template string, using placeholders {elapsed_precise}, {bar:40}, {pos},
+///   {len}, {msg}, for example `"[{elapsed_precise}] {bar:40} {pos}/{len} | Cost: {msg}"`
 ///
 /// # Returns
 ///
-/// - `ProgressBar` - A configured progress bar instance
-///
-/// # Notes
-///
-/// Example templates:
-/// - For iterations with cost: `"[{elapsed_precise}] {bar:40} {pos}/{len} | Cost: {msg}"`
-/// - For iterations with loss: `"[{elapsed_precise}] {bar:40} {pos}/{len} | Loss: {msg}"`
-/// - For node counting: `"[{elapsed_precise}] {bar:40} {pos} nodes | Depth: {msg}"`
-/// - For general progress: `"[{elapsed_precise}] {bar:40} {pos}/{len} | Stage: {msg}"`
-///
-/// All progress bars use the unified style with:
-/// - Progress characters: `"#>-"` (completed, current, remaining)
-/// - Bar width: 40 characters
-/// - Time display: precise elapsed time
+/// - `ProgressBar` - a progress bar ready to update
 #[cfg(feature = "show_progress")]
 #[allow(dead_code)]
 fn create_progress_bar(total: u64, template: &str) -> ProgressBar {
@@ -366,17 +353,17 @@ macro_rules! model_save_and_load_methods {
 ///
 /// Replaces a `const` gate threshold with an [`AtomicUsize`](std::sync::atomic::AtomicUsize)
 /// initialized to the same default, so the value can be overridden at runtime without a
-/// recompile. Every leading attribute (`#[cfg(...)]`, doc comments) is applied to all three
+/// recompile. Every leading attribute (`#[cfg(...)]`, doc comments) is applied to all 3
 /// generated items, so a gate keeps the exact feature-gating of the constant it replaces. The
-/// hot-path read is a single `Relaxed` load - the gate only selects a strategy, never changes a
+/// hot-path read is a single `Relaxed` load. The gate only selects a strategy and never changes a
 /// result, so no stronger ordering is needed. The public [`crate::tuning`] facade wraps the
 /// generated setters into one discoverable surface
 ///
 /// # Syntax
 ///
-/// `[attrs..] [vis] STORE => getter / setter = default`, where the attributes (docs and any
-/// `#[cfg(...)]`) and the visibility are optional, `STORE` is the static's name, and `=>` / `/`
-/// are just separators
+/// `[attrs..] [vis] STORE => getter / setter = default`. The attributes (docs and any
+/// `#[cfg(...)]`) and the visibility are optional. `STORE` is the static's name, and `=>` and
+/// `/` are just separators
 ///
 /// # Usage and expansion
 ///
@@ -434,7 +421,7 @@ macro_rules! tunable_gate {
     };
 }
 
-/// Runtime overrides for the crate's parallel/serial gate thresholds; see the module docs
+/// Runtime overrides for the crate's parallel and serial gate thresholds
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
@@ -444,7 +431,8 @@ macro_rules! tunable_gate {
 ))]
 pub mod tuning;
 
-/// The crate's unified error type ([`error::Error`]) and its result alias ([`error::RustymlResult`])
+/// The crate's unified error type ([`error::Error`]) and its result alias
+/// ([`error::RustymlResult`])
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
@@ -460,7 +448,7 @@ pub mod error;
 ))]
 pub mod random;
 
-/// Re-export of the global-seed controls; canonical home is the [`random`] module
+/// Re-export of the global-seed controls defined in [`random`]
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
@@ -487,8 +475,8 @@ pub mod math;
 #[cfg(feature = "machine_learning")]
 pub mod machine_learning;
 
-/// The shared estimator contract - `Fit` / `Predict` / `Transform` / `FitTransform` -
-/// implemented by every model and stateful transformer in the crate
+/// Every model and stateful transformer in the crate implements the shared estimator contract
+/// (`Fit`, `Predict`, `Transform`, `FitTransform`)
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 pub mod traits;
 
@@ -508,7 +496,8 @@ pub mod metrics;
 #[cfg(feature = "neural_network")]
 pub mod neural_network;
 
-/// Internal hooks for the `benches/` targets - not part of the public API, no stability guarantees
+/// Internal hooks for the `benches/` targets. Not part of the public API, with no stability
+/// guarantee
 #[cfg(any(feature = "machine_learning", feature = "neural_network"))]
 #[doc(hidden)]
 pub mod bench_internals;

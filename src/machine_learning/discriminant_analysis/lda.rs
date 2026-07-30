@@ -1,7 +1,7 @@
-//! Linear Discriminant Analysis (LDA) for supervised dimensionality reduction and
-//! classification
+//! Linear Discriminant Analysis (LDA) for supervised dimensionality reduction and classification
 //!
-//! Contains the [`LDA`] model along with its [`DiscriminantSolver`] and [`Shrinkage`] configuration enums
+//! Contains the [`LDA`] model and its [`DiscriminantSolver`] and [`Shrinkage`] configuration
+//! enums
 
 use crate::error::Error;
 use crate::math::matmul::{dot_par, matvec};
@@ -12,25 +12,31 @@ use gemmkit_ndarray::{Bias, Parallelism, dot};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
-/// Numerical strategy used to invert the shared covariance when scoring with LDA
+/// Numerical strategy for computing the per-class linear scoring coefficients used when scoring
+/// with LDA
 ///
-/// Selects the numerical method used to derive the per-class linear scoring coefficients from
-/// the shared covariance. The discriminant projection used by `transform` is solver-independent,
-/// so this choice only affects `predict`
+/// Selects the numerical method that derives the per-class linear scoring coefficients from the
+/// shared covariance. The discriminant projection that `transform` uses does not depend on this
+/// choice. It affects only the scoring path behind `predict`, `decision_function`, and
+/// `predict_proba`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub enum DiscriminantSolver {
-    /// Inverts the shared covariance through its SVD pseudo-inverse, then scores with that inverse
+    /// Inverts the shared covariance through its SVD pseudo-inverse, then derives the per-class
+    /// scoring coefficients from it
     #[default]
     SVD,
-    /// Inverts the shared covariance through a symmetric eigendecomposition, then scores with that inverse
+    /// Inverts the shared covariance through a symmetric eigendecomposition, then derives the
+    /// per-class scoring coefficients from it
     Eigen,
     /// Solves each class scoring system `Sigma * coef = mu` directly with the iterative LSQR
     /// method (Paige and Saunders), forming no explicit inverse
     LSQR,
 }
 
-/// Returns the symmetric part `(m + mᵀ) / 2` of a square matrix, used to defensively symmetrize
-/// covariance and scatter matrices before a symmetric eigendecomposition
+/// Returns the symmetric part `(m + m^T) / 2` of a square matrix
+///
+/// Callers apply this before a symmetric eigendecomposition, to correct any floating-point
+/// asymmetry in covariance or scatter matrices
 fn symmetric_part(m: &Array2<f64>) -> Array2<f64> {
     let mut out = m.to_owned();
     out.zip_mut_with(&m.t(), |a, &b| *a = (*a + b) * 0.5);
@@ -104,16 +110,19 @@ impl DiscriminantSolver {
     }
 
     /// Derives the LDA projection matrix by solving the generalized eigenproblem
-    /// `S_b w = lambda * S_w w`, where `cov` is the (shrunk/regularized) within-class
+    /// `S_b w = lambda * S_w w`. Here `cov` is the (shrunk or regularized) within-class
     /// covariance `S_w` and `sb` is the between-class scatter `S_b`
     ///
-    /// A whitening transform keeps every step a symmetric eigendecomposition, which is
-    /// numerically robust. Writing `S_w = U diag(d) U^T`, define the whitening
-    /// `W = U diag(d^{-1/2})`. Then `A = W^T S_b W` is symmetric and its eigenvectors `v` map
-    /// back to the discriminant directions `w = W v`. This is the correct generalized-eigenvector
-    /// solution, unlike taking singular vectors of the non-symmetric `S_w^{-1} S_b`, whose left
-    /// singular vectors are not the discriminant axes. The result is independent of the
-    /// covariance-inversion `DiscriminantSolver`, which only governs the linear-scoring path used by `predict`
+    /// A whitening transform keeps every step a symmetric eigendecomposition, which stays
+    /// numerically stable. Write `S_w = U diag(d) U^T` and define the whitening
+    /// `W = U diag(d^{-1/2})`. Then `A = W^T S_b W` is symmetric. Its eigenvectors `v` map back
+    /// to the discriminant directions `w = W v`. This is the correct generalized-eigenvector
+    /// solution
+    ///
+    /// Taking singular vectors of the non-symmetric `S_w^{-1} S_b` is not equivalent. Its left
+    /// singular vectors are not the discriminant axes. The result does not depend on the
+    /// `DiscriminantSolver`, which governs only the linear-scoring path behind `predict`,
+    /// `decision_function`, and `predict_proba`
     fn project(
         cov: &Array2<f64>,
         sb: &Array2<f64>,
@@ -154,14 +163,14 @@ impl DiscriminantSolver {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Select the top components, keeping each axis at the scale the whitening produced. That
-        // scale is what makes the projected data have unit within-class covariance, which is the
-        // convention scikit-learn's `scalings_` follows; rescaling the columns to unit L2 norm
-        // would undo the whitening and put the projection on a different scale
+        // Selects the top components, keeping each axis at the scale the whitening produced.
+        // That scale gives the projected data unit within-class covariance, the convention
+        // scikit-learn's `scalings_` follows. Rescaling the columns to unit L2 norm would undo
+        // the whitening and put the projection on a different scale
         let selected: Vec<usize> = order.iter().take(n_components).copied().collect();
 
-        // The degenerate test has to be relative, because these norms scale like the inverse
-        // square root of the within-class variance and so carry the data's units
+        // The degenerate check must be relative. These norms scale like the inverse square root
+        // of the within-class variance, so they carry the data's units
         let max_norm = selected
             .iter()
             .map(|&idx| {
@@ -191,21 +200,11 @@ impl DiscriminantSolver {
 
 /// Solves `min ||a x - b||_2` with the iterative LSQR method of Paige and Saunders
 ///
-/// `a` is the regularized within-class covariance, which is symmetric positive definite, so the
-/// iteration converges quickly. The method works through a Golub-Kahan bidiagonalization and a
-/// running Givens rotation, never forming an explicit inverse. `max_iter` caps the iterations and
-/// `tol` is the relative residual threshold for early stopping
-///
-/// # Parameters
-///
-/// - `a` - regularized within-class covariance (symmetric positive definite)
-/// - `b` - right-hand side vector
-/// - `max_iter` - maximum number of iterations
-/// - `tol` - relative residual threshold for early stopping
-///
-/// # Returns
-///
-/// - `Array1<f64>` - solution vector `x`
+/// `a` is the regularized within-class covariance, symmetric and positive definite, so the
+/// iteration converges quickly. `b` is the right-hand side vector. The method runs a
+/// Golub-Kahan bidiagonalization with a running Givens rotation. It never forms an explicit
+/// inverse. `max_iter` caps the iteration count. `tol` is the relative residual threshold that
+/// stops the iteration early
 fn lsqr_solve(a: &Array2<f64>, b: ArrayView1<f64>, max_iter: usize, tol: f64) -> Array1<f64> {
     let n = a.ncols();
     let mut x = Array1::<f64>::zeros(n);
@@ -274,23 +273,15 @@ fn lsqr_solve(a: &Array2<f64>, b: ArrayView1<f64>, max_iter: usize, tol: f64) ->
 
 /// Computes the Ledoit-Wolf optimal shrinkage intensity toward a scaled identity target
 ///
-/// Works from the pooled within-class scatter `sw` (so the maximum-likelihood covariance is
-/// `S = sw / n_samples`) and `sum_z4`, the sum over all centered samples of `||z_k||^4`. Following
-/// Ledoit and Wolf (2004), it returns `delta = b^2 / d^2` clamped to `[0, 1]`, where `d^2` is the
-/// dispersion of `S` around its identity target and `b^2` is the estimation error of `S`. A return
-/// of `0` means no shrinkage and `1` means full shrinkage to the target. The inner product used
-/// throughout is the trace inner product normalized by the feature count
+/// `sw` is the pooled within-class scatter. `n_samples` and `n_features` are the sample and
+/// feature counts. `sum_z4` is the sum over all centered samples of `||z_k||^4`. The
+/// maximum-likelihood covariance is `S = sw / n_samples`
 ///
-/// # Parameters
-///
-/// - `sw` - pooled within-class scatter
-/// - `sum_z4` - sum over all centered samples of `||z_k||^4`
-/// - `n_samples` - number of samples
-/// - `n_features` - number of features
-///
-/// # Returns
-///
-/// - `f64` - shrinkage intensity `delta` in `[0, 1]`
+/// Following Ledoit and Wolf (2004), the function returns `delta = b^2 / d^2` clamped to
+/// `[0, 1]`. `d^2` is the dispersion of `S` around its identity target. `b^2` is the estimation
+/// error of `S`. A return of `0` means no shrinkage, and a return of `1` means full shrinkage to
+/// the target. The inner product used throughout is the trace inner product, normalized by the
+/// feature count
 fn ledoit_wolf_shrinkage(
     sw: &Array2<f64>,
     sum_z4: f64,
@@ -321,12 +312,13 @@ fn ledoit_wolf_shrinkage(
 
 /// Shrinkage strategy for covariance estimation
 ///
-/// Controls how the covariance matrix is regularized to improve numerical stability
+/// Sets how much LDA shrinks the within-class covariance toward a scaled identity target, which
+/// improves numerical stability
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum Shrinkage {
-    /// Automatic shrinkage factor based on sample and feature counts
+    /// Ledoit-Wolf shrinkage intensity, estimated automatically from the training data
     Auto,
-    /// Explicit shrinkage factor in the range [0, 1]
+    /// Explicit shrinkage factor in the range `[0, 1]`
     Manual(f64),
 }
 
@@ -361,9 +353,9 @@ pub struct LDA {
     /// Number of components to keep after dimensionality reduction. `None` means "auto":
     /// the maximum possible, `min(n_classes - 1, n_features)`, resolved at fit time
     n_components: Option<usize>,
-    /// DiscriminantSolver strategy for LDA computations
+    /// Solver strategy for the LDA scoring computation
     solver: DiscriminantSolver,
-    /// Optional shrinkage strategy for covariance estimation
+    /// Shrinkage strategy for covariance estimation, or `None` for no shrinkage
     shrinkage: Option<Shrinkage>,
     /// Unique class labels from training data
     classes: Option<Array1<i32>>,
@@ -372,25 +364,22 @@ pub struct LDA {
     /// Mean vectors for each class
     means: Option<Array2<f64>>,
     /// Mean of the whole training matrix, scikit-learn's `xbar_`. [`LDA::transform`] subtracts it
-    /// before projecting, which is what puts the projected coordinates on scikit-learn's scale
+    /// before projecting, which puts the projected coordinates on scikit-learn's scale
     ///
     /// Stored as the arithmetic row mean. That equals the prior-weighted average of the class
-    /// means (`priors . means`, which is how scikit-learn defines it) because the priors here are
-    /// always `n_class / n_samples`; a future `with_priors` builder would have to switch to the
-    /// weighted form
+    /// means (`priors . means`), because the priors always equal `n_class / n_samples`
     overall_mean: Option<Array1<f64>>,
     /// Projection matrix for dimensionality reduction
     projection: Option<Array2<f64>>,
-    /// Per-class linear discriminant scoring coefficients (`Sigma^-1 * mu_c`), cached at fit
-    /// time so `predict` does not recompute them on every call
+    /// Per-class linear discriminant scoring coefficients (`Sigma^-1 * mu_c`). Cached at fit
+    /// time so `predict`, `decision_function`, and `predict_proba` do not recompute them
     coefficients: Option<Array2<f64>>,
-    /// Per-class scoring intercepts (`-0.5 * mu_c . Sigma^-1 mu_c + ln prior_c`), cached at fit
+    /// Per-class scoring intercepts (`-0.5 * mu_c . Sigma^-1 mu_c + ln prior_c`). Cached at fit
+    /// time alongside the coefficients
     intercepts: Option<Array1<f64>>,
 }
 
 /// Default LDA configuration
-///
-/// Provides a reasonable starting point for most datasets
 ///
 /// # Default Values
 ///
@@ -425,18 +414,18 @@ impl LDA {
     ///
     /// - `Result<Self, Error>` - A new LDA instance or validation error
     ///
-    /// # Errors
-    ///
-    /// - `Error::InvalidParameter` - If `n_components` is zero
-    ///
     /// # Notes
     ///
-    /// The solver defaults to `DiscriminantSolver::SVD` and no shrinkage is applied. Override either with
-    /// the builder methods below (`with_shrinkage` returns `Result` because a manual shrinkage
-    /// coefficient is validated):
+    /// The solver defaults to `DiscriminantSolver::SVD`, and no shrinkage applies by default.
+    /// Override either with the builder methods below. `with_shrinkage` returns `Result` because
+    /// it validates a manual shrinkage coefficient
     ///
     /// - [`with_solver`](Self::with_solver) - solver strategy for the LDA computation
     /// - [`with_shrinkage`](Self::with_shrinkage) - shrinkage strategy for covariance estimation
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If `n_components` is zero
     pub fn new(n_components: usize) -> Result<Self, Error> {
         if n_components == 0 {
             return Err(Error::invalid_parameter(
@@ -481,11 +470,12 @@ impl LDA {
     ///
     /// # Returns
     ///
-    /// - `Ok(Self)` - the updated instance, for method chaining
+    /// - `Result<Self, Error>` - the updated instance, for method chaining
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - if a [`Shrinkage::Manual`] coefficient is outside `[0, 1]` or not finite
+    /// - `Error::InvalidParameter` - if a [`Shrinkage::Manual`] coefficient is outside `[0, 1]`
+    ///   or not finite
     pub fn with_shrinkage(mut self, shrinkage: Shrinkage) -> Result<Self, Error> {
         if let Shrinkage::Manual(alpha) = shrinkage
             && (!alpha.is_finite() || !(0.0..=1.0).contains(&alpha))
@@ -499,7 +489,6 @@ impl LDA {
         Ok(self)
     }
 
-    // Getters
     get_field!(get_n_components, n_components, Option<usize>);
     get_field!(get_solver, solver, DiscriminantSolver);
     get_field!(get_shrinkage, shrinkage, Option<Shrinkage>);
@@ -524,13 +513,14 @@ impl LDA {
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs are empty, shapes mismatch, or contain invalid values
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs
+    ///   are empty, the shapes do not match, or values are not valid
     /// - `Error::Computation` - If numerical computation fails during fitting
     ///
     /// # Performance
     ///
     /// Parallelizes the per-class statistics when the total work clears the calibrated
-    /// scan-class gate (see `crate::parallel_gates`); the internal GEMMs gate themselves
+    /// scan-class gate (see `crate::parallel_gates`). The internal GEMMs gate themselves
     pub fn fit<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -635,7 +625,8 @@ impl LDA {
             .ok_or_else(|| Error::computation("Error computing overall mean"))?;
 
         let class_pairs: Vec<_> = classes.iter().enumerate().collect();
-        // Force each class task's scatter GEMM serial once the class fan alone fills the pool (`n_classes >= threads`)
+        // Forces each class task's scatter GEMM serial once the class fan alone fills the pool
+        // (`n_classes >= threads`)
         let scatter_par = if use_parallel && n_classes >= rayon::current_num_threads() {
             Parallelism::Serial
         } else {
@@ -756,7 +747,8 @@ impl LDA {
 
     /// Predicts class labels for new samples using the trained model
     ///
-    /// Applies the learned class means and shared covariance to compute linear scores
+    /// Scores each sample against every class with the cached linear coefficients, then returns
+    /// the best-scoring class label per row
     ///
     /// # Parameters
     ///
@@ -769,12 +761,13 @@ impl LDA {
     /// # Errors
     ///
     /// - `Error::NotFitted` - If the model has not been fitted
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs are empty, mismatched, or contain invalid values
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs
+    ///   are empty, the shapes do not match, or values are not valid
     ///
     /// # Performance
     ///
-    /// Scores through 1 parallel GEMM; the per-row label pick parallelizes when the
-    /// total scan work clears the calibrated scan-class gate (see `crate::parallel_gates`)
+    /// Scores through 1 parallel GEMM. The per-row label pick parallelizes when the total scan
+    /// work clears the calibrated scan-class gate (see `crate::parallel_gates`)
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
     where
         S: Data<Elem = f64>,
@@ -784,7 +777,7 @@ impl LDA {
             .as_ref()
             .ok_or_else(|| Error::not_fitted("LDA"))?;
 
-        // Per-class linear discriminant scores; columns are aligned to `classes`
+        // Per-class discriminant scores. Columns align to `classes`
         let scores = self.decision_scores(x)?;
 
         #[cfg(feature = "show_progress")]
@@ -800,7 +793,7 @@ impl LDA {
         let n_classes = classes.len();
 
         let predict_sample = |score_row: ArrayView1<f64>| {
-            // Keep the best-scoring label; ties resolve to the lowest class index
+            // Keeps the best-scoring label. Ties resolve to the lowest class index
             let mut best_score = f64::NEG_INFINITY;
             let mut best_class = classes[0];
             for j in 0..n_classes {
@@ -857,7 +850,7 @@ impl LDA {
     where
         S: Data<Elem = f64>,
     {
-        // Per-class scoring parameters were precomputed at fit time
+        // `fit` precomputed these per-class scoring parameters
         let coefficients = self
             .coefficients
             .as_ref()
@@ -870,12 +863,12 @@ impl LDA {
         let n_features = coefficients.ncols();
         crate::machine_learning::validation::validate_predict_input(x, n_features)?;
 
-        // `x . coefficientsᵀ` plus the per-class intercept in one pass: the intercept is constant
-        // down each column of the `(n_samples, n_classes)` score matrix, so it rides the GEMM's
-        // fused epilogue instead of a second broadcast sweep over the whole result. The fused
-        // epilogue is bitwise-identical to the product followed by the same scalar add, and
-        // `beta = 0` means the freshly allocated buffer is written without being read. The
-        // intercepts are stored as an owned contiguous 1-D array, so the bias slice is a borrow
+        // Computes `x . coefficients^T` plus the per-class intercept in one pass. The intercept
+        // is constant down each column of the score matrix, so it rides the GEMM's fused
+        // epilogue instead of a second broadcast sweep. The fused epilogue equals the product
+        // followed by the same scalar add. `beta = 0` means the write never reads the freshly
+        // allocated buffer. The intercepts are a contiguous owned array, so the bias slice below
+        // is a plain borrow
         let mut scores = Array2::<f64>::zeros((x.nrows(), coefficients.nrows()));
         gemmkit_ndarray::gemm_fused(
             1.0,
@@ -896,8 +889,8 @@ impl LDA {
 
     /// Returns the per-class linear discriminant scores (the decision function)
     ///
-    /// The result has shape `(n_samples, n_classes)`; column `j` is the discriminant score
-    /// for the class at index `j` of [`get_classes`](Self::get_classes). [`predict`](Self::predict)
+    /// The result has shape `(n_samples, n_classes)`. Column `j` is the discriminant score for
+    /// the class at index `j` of [`get_classes`](Self::get_classes). [`predict`](Self::predict)
     /// returns the per-row argmax of these scores
     ///
     /// # Parameters
@@ -911,7 +904,8 @@ impl LDA {
     /// # Errors
     ///
     /// - `Error::NotFitted` - If the model has not been fitted
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs are empty, mismatched, or contain invalid values
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs
+    ///   are empty, the shapes do not match, or values are not valid
     pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -921,12 +915,12 @@ impl LDA {
 
     /// Returns the posterior class probabilities for each sample
     ///
-    /// Under the LDA Gaussian model with a shared covariance, the posterior `P(class_j | x)`
-    /// is the softmax of the discriminant scores from
-    /// [`decision_function`](Self::decision_function). The result has shape `(n_samples, n_classes)`,
-    /// each row sums to 1, and columns are ordered to match
-    /// [`get_classes`](Self::get_classes). The softmax is computed in a numerically stable way
-    /// (subtracting the per-row maximum before exponentiating)
+    /// Under the LDA Gaussian model with a shared covariance, the posterior `P(class_j | x)` is
+    /// the softmax of the discriminant scores from
+    /// [`decision_function`](Self::decision_function). The result has shape
+    /// `(n_samples, n_classes)`. Each row sums to 1, and the columns match the order of
+    /// [`get_classes`](Self::get_classes). The softmax subtracts the per-row maximum before it
+    /// exponentiates, for numerical stability
     ///
     /// # Parameters
     ///
@@ -939,7 +933,8 @@ impl LDA {
     /// # Errors
     ///
     /// - `Error::NotFitted` - If the model has not been fitted
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs are empty, mismatched, or contain invalid values
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs
+    ///   are empty, the shapes do not match, or values are not valid
     pub fn predict_proba<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -970,7 +965,8 @@ impl LDA {
     /// # Errors
     ///
     /// - `Error::NotFitted` - If the model has not been fitted
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs are empty, mismatched, or contain invalid values
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs
+    ///   are empty, the shapes do not match, or values are not valid
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -980,7 +976,7 @@ impl LDA {
 
     /// Fits the model and transforms the data in one step
     ///
-    /// Convenience method that trains the model and returns the projected data
+    /// Trains the model, then returns the projected data
     ///
     /// # Parameters
     ///
@@ -993,13 +989,14 @@ impl LDA {
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs are empty, shapes mismatch, or contain invalid values
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs
+    ///   are empty, the shapes do not match, or values are not valid
     /// - `Error::Computation` - If numerical computation fails during fitting
     ///
     /// # Performance
     ///
     /// Parallelizes the per-class statistics when the total work clears the calibrated
-    /// scan-class gate (see `crate::parallel_gates`); the internal GEMMs gate themselves
+    /// scan-class gate (see `crate::parallel_gates`). The internal GEMMs gate themselves
     pub fn fit_transform<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -1041,10 +1038,11 @@ impl LDA {
             progress_bar.set_message("Applying projection");
         }
 
-        // scikit-learn projects `(X - xbar_) @ scalings_`. The centering is materialized rather
-        // than folded into the product as `X W - xbar W`: the two are equal in real arithmetic but
-        // the folded form loses digits to cancellation whenever the data sits far from the origin
-        // relative to its spread, and matching scikit-learn numerically is the point here
+        // scikit-learn projects `(X - xbar_) @ scalings_`. This materializes the centering
+        // rather than folding it into the product as `X W - xbar W`. The 2 forms are equal in
+        // real arithmetic. The folded form loses digits to cancellation when the data sits far
+        // from the origin relative to its spread. Matching scikit-learn numerically is the
+        // point here
         let overall_mean = self
             .overall_mean
             .as_ref()
@@ -1068,8 +1066,8 @@ impl LDA {
     ///
     /// `scatter_par` is the parallelism the within-class scatter product runs with. Pass
     /// `Parallelism::Serial` when the per-class loop already fills the pool
-    /// (`n_classes >= threads`) so each class task does not fork rayon again inside its scatter
-    /// GEMM; otherwise `Parallelism::Rayon(0)` lets the backend spread it over the
+    /// (`n_classes >= threads`), so each class task does not fork rayon again inside its
+    /// scatter GEMM. Otherwise, `Parallelism::Rayon(0)` lets the backend spread it over the
     /// otherwise-idle cores
     fn compute_class_stats<S>(
         x: &ArrayBase<S, Ix2>,
@@ -1140,7 +1138,7 @@ impl LDA {
         shrunk
     }
 
-    /// Adds a small diagonal regularization term to covariance
+    /// Adds a small diagonal regularization term to the covariance matrix
     fn regularize_covariance(&self, cov: &mut Array2<f64>) {
         let n_features = cov.ncols().max(1);
         let trace = cov.diag().sum();
@@ -1156,6 +1154,7 @@ impl LDA {
     model_save_and_load_methods!(LDA);
 }
 
+/// Unit tests for the private numerical helpers that LDA fitting uses
 #[cfg(test)]
 mod tests {
     use super::*;

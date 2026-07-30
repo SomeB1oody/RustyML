@@ -1,19 +1,22 @@
 //! Recurrent layers (SimpleRNN, GRU, LSTM) and their shared helpers
 //!
-//! Re-exports the layer types and provides utilities used across them, such as
-//! stable sigmoid activation and orthogonal weight initialization
+//! Re-exports the 3 layer types and provides 2 shared helpers. A numerically stable sigmoid
+//! serves the GRU and LSTM gates, and Gram-Schmidt orthogonal initialization serves all 3 layers'
+//! recurrent kernels.
 
 use ndarray::{Array, Array2};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-/// Applies the logistic sigmoid to an array. Used by the LSTM gate blocks on the
-/// non-scalar-candidate fallback path (the scalar-candidate path fuses the sigmoid into the
-/// recurrent GEMM's epilogue)
+/// Applies the logistic sigmoid to an array
 ///
-/// `1/(1 + e^-x)` is finite for any finite `x` (when `e^-x` overflows to `+inf` the result is the
-/// exact limit `0`), and it saturates to `1`/`0` at `+/-inf`, so no input clamping is needed. The
-/// only non-finite output comes from a `NaN` input, which propagates
+/// The GRU and LSTM cells call this on their raw gate pre-activations, after their fused
+/// recurrent GEMM. gemmkit's fused epilogue does not support a sigmoid activation.
+///
+/// `1/(1 + e^-x)` stays finite for any finite `x`. For a very negative `x`, `e^-x` overflows to
+/// positive infinity and the result rounds to the exact limit `0`. The function saturates to `1`
+/// or `0` at positive or negative infinity, so it needs no input clamping. A `NaN` input is the
+/// only source of a non-finite output, and it propagates through unchanged.
 #[inline]
 fn apply_sigmoid(arr: Array2<f32>) -> Array2<f32> {
     arr.mapv(|x| 1.0 / (1.0 + (-x).exp()))
@@ -21,10 +24,10 @@ fn apply_sigmoid(arr: Array2<f32>) -> Array2<f32> {
 
 /// Generates a square orthogonal matrix via Gram-Schmidt orthonormalization of a random matrix
 ///
-/// Unlike independently normalizing each column (which only yields unit-norm columns), this makes
-/// the columns mutually orthonormal. Orthogonal recurrent weights keep the hidden-state transition
-/// norm-preserving, mitigating vanishing/exploding gradients. Used to initialize the recurrent
-/// kernels of SimpleRNN and the GRU/LSTM gates
+/// Independently normalizing each column only yields unit-norm columns. This process instead
+/// makes the columns mutually orthonormal, which keeps the hidden state transition
+/// norm-preserving and reduces vanishing or exploding gradients. SimpleRNN and the GRU and LSTM
+/// gates use this function to initialize their recurrent kernels.
 fn orthogonal_init(size: usize, rng: &mut StdRng) -> Array2<f32> {
     // Random starting matrix
     let mut matrix = Array::random_using((size, size), Uniform::new(-1.0, 1.0).unwrap(), rng);
@@ -32,7 +35,7 @@ fn orthogonal_init(size: usize, rng: &mut StdRng) -> Array2<f32> {
     const EPSILON: f32 = 1e-8;
 
     for i in 0..size {
-        // Orthogonalize column i against all previously finalized (already normalized) columns
+        // Orthogonalize column i against every already-normalized column before it
         for j in 0..i {
             let mut projection = 0.0;
             for k in 0..size {
@@ -43,7 +46,7 @@ fn orthogonal_init(size: usize, rng: &mut StdRng) -> Array2<f32> {
             }
         }
 
-        // Normalize column i; fall back to a standard basis vector if it collapsed
+        // Normalize column i. Fall back to a standard basis vector if it collapsed
         let mut norm = 0.0f32;
         for k in 0..size {
             norm += matrix[[k, i]] * matrix[[k, i]];
@@ -64,15 +67,15 @@ fn orthogonal_init(size: usize, rng: &mut StdRng) -> Array2<f32> {
     matrix
 }
 
-/// Gate structure for recurrent cell operations (GRU, LSTM)
+/// Shared gate parameters and helpers for the GRU and LSTM cells
 pub mod gate;
-/// A GRU (Gated Recurrent Unit) layer implementation
+/// The GRU (Gated Recurrent Unit) layer
 pub mod gru;
-/// A LSTM (Long Short-Term Memory) neural network layer implementation
+/// The LSTM (Long Short-Term Memory) layer
 pub mod lstm;
-/// A Simple Recurrent Neural Network (SimpleRNN) layer implementation
+/// The SimpleRNN layer
 pub mod simple_rnn;
-/// Input validation functions for Recurrent layers
+/// Dimension and shape validators for the recurrent layers
 mod validation;
 
 pub use gru::GRU;
@@ -88,7 +91,7 @@ mod tests {
 
     // orthogonal_init
 
-    /// For size=3, M^T M equals the 3x3 identity within 1e-5
+    /// For size 3, M^T M equals the 3x3 identity within 1e-5
     #[test]
     fn orthogonal_init_size3_columns_are_orthonormal() {
         let m = orthogonal_init(3, &mut StdRng::seed_from_u64(0));
@@ -96,7 +99,7 @@ mod tests {
         // Compute M^T M (should equal I_3)
         let mt_m = m.t().dot(&m);
 
-        // Seeded draw is deterministic, so seed 0 keeps the classical-GS f32 round-off within 1e-5
+        // Seed 0 is deterministic, so Gram-Schmidt keeps the f32 round-off within 1e-5
         for row in 0..3 {
             for col in 0..3 {
                 let expected = if row == col { 1.0_f32 } else { 0.0_f32 };
@@ -105,7 +108,7 @@ mod tests {
         }
     }
 
-    /// For size=1 the single entry has absolute value 1.0 after normalization
+    /// For size 1, the single entry has absolute value 1.0 after normalization
     #[test]
     fn orthogonal_init_size1_abs_is_one() {
         let m = orthogonal_init(1, &mut StdRng::seed_from_u64(0));
@@ -123,7 +126,7 @@ mod tests {
         assert_abs_diff_eq!(output[[0, 0]], 0.5_f32, epsilon = 1e-6);
     }
 
-    /// sigmoid saturates to ~= 1.0 for large positive input with no overflow
+    /// sigmoid saturates to about 1.0 for a large positive input, with no overflow
     #[test]
     fn apply_sigmoid_large_positive_approaches_one() {
         let input = array![[500.0_f32]];
@@ -132,7 +135,7 @@ mod tests {
         assert_abs_diff_eq!(output[[0, 0]], 1.0_f32, epsilon = 1e-6);
     }
 
-    /// Large positive inputs all saturate to the same value (1.0); no clamping is involved
+    /// Large positive inputs all saturate to the same value, 1.0. No clamping is involved
     #[test]
     fn apply_sigmoid_large_positive_inputs_saturate_equally() {
         let out_500 = apply_sigmoid(array![[500.0_f32]]);
@@ -142,7 +145,7 @@ mod tests {
         assert_abs_diff_eq!(out_1000[[0, 0]], 1.0_f32, epsilon = 1e-6);
     }
 
-    /// sigmoid(-1000) saturates to ~= 0.0
+    /// sigmoid(-1000) saturates to about 0.0
     #[test]
     fn apply_sigmoid_large_negative_approaches_zero() {
         let input = array![[-1000.0_f32]];

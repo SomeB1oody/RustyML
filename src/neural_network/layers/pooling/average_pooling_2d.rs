@@ -1,4 +1,5 @@
-//! 2D average pooling layer that downsamples spatial dimensions by averaging over each window
+//! 2D average pooling layer that computes the mean value within each pooling window across
+//! height and width.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -18,11 +19,11 @@ use crate::neural_network::traits::Layer;
 
 /// 2D average pooling layer
 ///
-/// Computes the mean value over each pooling window along the height and width dimensions
+/// Computes the mean value within each pooling window across height and width.
 /// Input tensor shape: `[batch_size, height, width, channels]`. Output tensor shape:
-/// `[batch_size, pooled_height, pooled_width, channels]` where
+/// `[batch_size, pooled_height, pooled_width, channels]`. With `Valid` padding,
 /// `pooled_height = (height - pool_size_h) / stride_h + 1` and
-/// `pooled_width = (width - pool_size_w) / stride_w + 1`
+/// `pooled_width = (width - pool_size_w) / stride_w + 1`.
 ///
 /// # Examples
 ///
@@ -35,10 +36,10 @@ use crate::neural_network::traits::Layer;
 /// use approx::assert_relative_eq;
 ///
 /// // Input tensor: [batch_size, height, width, channels]
-/// // Batch size 2, a 4x4 pixel image, 3 input channels
+/// // batch size 2, a 4x4 pixel image, 3 input channels
 /// let mut input_data = Array4::zeros((2, 4, 4, 3));
 ///
-///  // Set test data to make average pooling results predictable
+///  // Set test data to make the average pooling results predictable
 ///  for b in 0..2 {
 ///     for i in 0..4 {
 ///         for j in 0..4 {
@@ -51,7 +52,7 @@ use crate::neural_network::traits::Layer;
 ///
 ///  let x = input_data.clone().into_dyn();
 ///
-///  // Test AveragePooling with a Sequential model
+///  // Test AveragePooling2D with a Sequential model
 ///  let mut model = Sequential::new();
 ///  model
 ///  // strides default to pool_size (2, 2) and padding defaults to Valid
@@ -62,17 +63,17 @@ use crate::neural_network::traits::Layer;
 ///  let output = model.predict(&x).unwrap();
 ///  assert_eq!(output.shape(), &[2, 2, 2, 3]);
 ///
-///  // Verify correctness of pooling results
-///  // For a 2x2 window with stride 2, the result is the average of the window elements
+///  // Verify the pooling results
+///  // A 2x2 window with stride 2 holds the average of its 4 elements
 ///  for b in 0..2 {
 ///     for c in 0..3 {
-///         // First window (0,0), (0,1), (1,0), (1,1) -> average (0+1+1+2)/4 = 1.0
+///         // First window (0, 0), (0, 1), (1, 0), (1, 1): average (0 + 1 + 1 + 2) / 4 = 1.0
 ///         assert_relative_eq!(output[[b, 0, 0, c]], 1.0);
-///         // Second window (0,2), (0,3), (1,2), (1,3) -> average (2+3+3+4)/4 = 3.0
+///         // Second window (0, 2), (0, 3), (1, 2), (1, 3): average (2 + 3 + 3 + 4) / 4 = 3.0
 ///         assert_relative_eq!(output[[b, 0, 1, c]], 3.0);
-///         // Third window (2,0), (2,1), (3,0), (3,1) -> average (2+3+3+4)/4 = 3.0
+///         // Third window (2, 0), (2, 1), (3, 0), (3, 1): average (2 + 3 + 3 + 4) / 4 = 3.0
 ///         assert_relative_eq!(output[[b, 1, 0, c]], 3.0);
-///         // Fourth window (2,2), (2,3), (3,2), (3,3) -> average (4+5+5+6)/4 = 5.0
+///         // Fourth window (2, 2), (2, 3), (3, 2), (3, 3): average (4 + 5 + 5 + 6) / 4 = 5.0
 ///         assert_relative_eq!(output[[b, 1, 1, c]], 5.0);
 ///     }
 ///  }
@@ -80,9 +81,9 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is gated on the estimated element ops of the whole pass
-/// (`batch * out_positions * channels * window taps`) clearing
-/// [`tuning::pool`](crate::tuning::pool), not on any fixed shape
+/// The pass runs in parallel when its estimated element count
+/// (`batch * out_positions * channels * window taps`) clears the gate in
+/// [`tuning::pool`](crate::tuning::pool). The gate does not depend on any fixed shape.
 #[derive(Debug)]
 pub struct AveragePooling2D {
     /// Size of the pooling window as (height, width)
@@ -93,7 +94,7 @@ pub struct AveragePooling2D {
     input_shape: Vec<usize>,
     /// Padding mode applied around the input before pooling
     padding: PaddingType,
-    /// Shape of the most recent forward input, cached for backpropagation
+    /// Shape of the most recent forward input, cached for the backward pass
     forward_input_shape: Option<Vec<usize>>,
 }
 
@@ -105,23 +106,22 @@ impl AveragePooling2D {
     /// - `pool_size` - Size of the pooling window as (height, width)
     /// - `input_shape` - Input tensor shape `[batch_size, height, width, channels]`
     ///
-    /// # Notes
-    ///
-    /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
-    /// with [`AveragePooling2D::with_strides`] and [`AveragePooling2D::with_padding`]
-    ///
     /// # Returns
     ///
     /// - `Result<AveragePooling2D, Error>` - New layer instance on success
     ///
+    /// # Notes
+    ///
+    /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
+    /// with [`AveragePooling2D::with_strides`] and [`AveragePooling2D::with_padding`].
+    ///
     /// # Errors
     ///
-    /// - [`Error::DimensionMismatch`] if `input_shape` is not 4D
-    /// - [`Error::InvalidInput`] if any `input_shape` dimension is zero
-    /// - [`Error::InvalidParameter`] if `pool_size` has a zero dimension or exceeds the input
-    ///   spatial size
+    /// - `Error::DimensionMismatch` - If `input_shape` is not 4D
+    /// - `Error::InvalidInput` - If any `input_shape` dimension is zero
+    /// - `Error::InvalidParameter` - If `pool_size` has a zero dimension or exceeds the
+    ///   corresponding input dimension
     pub fn new(pool_size: (usize, usize), input_shape: Vec<usize>) -> Result<Self, Error> {
-        // input validation
         validate_input_shape_dims(&input_shape, 4, "AveragePooling2D")?;
         validate_all_dims_positive(&input_shape)?;
         validate_pool_size_2d(pool_size, input_shape[1], input_shape[2])?;
@@ -154,7 +154,8 @@ impl AveragePooling2D {
     ///
     /// # Parameters
     ///
-    /// - `padding` - `Valid` (no padding) or `Same` (pad so the output covers the input)
+    /// - `padding` - `Valid` (no padding) or `Same` (pad so the output covers the input, with
+    ///   padded cells excluded from each window)
     ///
     /// # Returns
     ///
@@ -171,7 +172,7 @@ impl Layer for AveragePooling2D {
             return Err(Error::invalid_input("input tensor is not 4D"));
         }
 
-        // cache the input shape for backward (averaging only needs the shape)
+        // Cache the input shape for the backward pass
         self.forward_input_shape = Some(input.shape().to_vec());
 
         let (output, _) = windowed_pool_forward(
@@ -184,7 +185,7 @@ impl Layer for AveragePooling2D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
+    /// Runs the forward pass for inference. Writes no cache. See [`Layer::predict`].
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));

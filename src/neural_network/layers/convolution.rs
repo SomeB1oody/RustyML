@@ -1,21 +1,21 @@
 //! Convolutional layers and shared padding types
 //!
-//! Re-exports the 1D/2D/3D, depthwise, and separable convolution layers, and
-//! defines the [`PaddingType`] used to control spatial padding
+//! Re-exports the 1D, 2D, and 3D convolution layers, plus the depthwise and separable
+//! convolution layers. Defines [`PaddingType`], which controls spatial padding
 
 /// Padding method used by convolutional and pooling layers
 ///
-/// Determines how the input is padded before the operation is applied. Defaults to
+/// Determines how the layer pads its input before the operation runs. Defaults to
 /// [`PaddingType::Valid`] (no padding)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PaddingType {
-    /// No padding is applied; the convolution is computed only where the filter
-    /// fully overlaps the input, producing an output with reduced dimensions
+    /// Applies no padding. The convolution runs only where the filter fully overlaps the
+    /// input, so the output has smaller spatial dimensions than the input
     #[default]
     Valid,
 
-    /// Zeros are added around the input borders so the output keeps the same
-    /// spatial dimensions as the input (when stride is 1)
+    /// Adds zeros around the input borders so the output keeps the same spatial dimensions
+    /// as the input, when the stride is 1
     Same,
 }
 
@@ -25,13 +25,14 @@ pub mod conv_1d;
 pub mod conv_2d;
 /// 3D convolutional layer
 pub mod conv_3d;
-/// Dimension-generic convolution engine shared by Conv1D, Conv2D, and Conv3D
+/// Dimension-generic convolution engine shared by Conv1D, Conv2D, Conv3D, and the pointwise
+/// stage of SeparableConv2D
 pub(crate) mod convolution_engine;
 /// 2D depthwise convolutional layer
 pub mod depthwise_conv_2d;
 /// 2D separable convolutional layer
 pub mod separable_conv_2d;
-/// Input validation helpers for convolutional layers
+/// Parameter and input-shape validation shared by the convolution layers
 mod validation;
 
 pub use conv_1d::Conv1D;

@@ -1,6 +1,6 @@
 //! Integration tests for BatchNormalization and LayerNormalization forward, eval,
 //! running-stats, and error-path behavior. Expected values come from the mathematical
-//! definition; gradient correctness lives in tests/neural_network/gradient_check.rs
+//! definition. Gradient correctness lives in tests/neural_network/gradient_check.rs.
 
 use ndarray::ArrayD;
 use rustyml::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization;
@@ -44,7 +44,7 @@ fn bn_constructor_rejects_empty_input_shape() {
 /// (>1.0 or <0.0) and for non-positive epsilon (zero or negative)
 #[test]
 fn bn_constructor_rejects_invalid_scalar_params() {
-    // (momentum, epsilon, label) rows; each must yield InvalidParameter
+    // (momentum, epsilon, label) rows. Each must yield InvalidParameter.
     let cases = [
         (1.5, 1e-5, "momentum > 1.0"),
         (-0.1, 1e-5, "momentum < 0.0"),
@@ -84,8 +84,8 @@ fn bn_forward_rejects_wrong_input_shape() {
     );
 }
 
-/// A batch size different from the declared one is accepted: the declared shape's leading axis
-/// is not a property of the layer, and enforcing it would reject every mini-batch
+/// The declared shape's leading axis is not a property of the layer.
+/// Enforcing it would reject every mini-batch, so a different batch size is accepted.
 #[test]
 fn bn_forward_accepts_different_batch_size() {
     let mut bn = BatchNormalization::new(vec![4, 3], 0.9, 1e-5).unwrap();
@@ -102,7 +102,7 @@ fn bn_forward_accepts_different_batch_size() {
 /// with default gamma=1, beta=0
 #[test]
 fn bn_train_output_has_batch_mean_zero_and_var_one() {
-    // 4 samples, 3 features; non-uniform so each column has non-trivial mean and variance
+    // 4 samples, 3 features. Non-uniform, so each column has a non-trivial mean and variance.
     let data = vec![
         2.0f32, 4.0, 6.0, // row 0
         4.0, 2.0, 8.0, // row 1
@@ -125,8 +125,8 @@ fn bn_train_output_has_batch_mean_zero_and_var_one() {
             mean.abs() < 1e-5,
             "feature {feat}: batch mean too far from 0, got {mean}"
         );
-        // var = sigma^2 / (sigma^2 + eps), which is < 1 but very close to 1;
-        // tolerance 5e-4 is generous for eps=1e-5 with typical values
+        // var = sigma^2 / (sigma^2 + eps), which is < 1 but very close to 1.
+        // Tolerance 5e-4 is generous for eps=1e-5 with typical values.
         assert!(
             (var - 1.0).abs() < 5e-4,
             "feature {feat}: batch var too far from 1, got {var}"
@@ -152,7 +152,7 @@ fn bn_train_forward_concrete_values_4x1() {
 
 // Running statistics update after training forward
 
-/// One training-mode forward updates running_mean to 0.5 and running_var to 1.4
+/// 1 training-mode forward updates running_mean to 0.5 and running_var to 1.4
 /// (momentum 0.9), verified through a subsequent eval-mode forward
 #[test]
 fn bn_running_stats_update_after_one_forward() {
@@ -164,7 +164,7 @@ fn bn_running_stats_update_after_one_forward() {
 
     // Switch to eval and feed the declared shape [4,1]
     bn.set_training_if_mode_dependent(false);
-    // All rows = 5.0; each produces the same eval output
+    // All rows = 5.0, so each produces the same eval output
     let input_eval = tensor2(vec![5.0f32, 5.0, 5.0, 5.0], 4, 1);
     let output = bn.forward(&input_eval).unwrap();
 
@@ -225,7 +225,6 @@ fn bn_predict_equals_forward_in_eval_mode() {
     let out_forward = bn.forward(&input).unwrap();
     let out_predict = bn.predict(&input).unwrap();
 
-    // Element-wise exact equality
     assert_allclose(&out_forward, &out_predict, 0.0f32);
 }
 
@@ -280,7 +279,7 @@ fn bn_eval_applies_custom_gamma_and_beta() {
 
 // Multiple training forwards accumulate running stats
 
-/// Two training forwards accumulate running_mean to 0.75 and running_var to 1.0
+/// 2 training forwards accumulate running_mean to 0.75 and running_var to 1.0
 /// (momentum 0.5), verified through an eval-mode forward
 #[test]
 fn bn_running_stats_accumulate_over_multiple_forwards() {
@@ -292,7 +291,7 @@ fn bn_running_stats_accumulate_over_multiple_forwards() {
 
     bn.set_training_if_mode_dependent(false);
 
-    // running_mean ~= 0.75, running_var ~= 1.0; feed shape [2,1] to match input_shape
+    // running_mean ~= 0.75, running_var ~= 1.0. Feed shape [2,1] to match input_shape.
     let x_eval = tensor2(vec![1.0f32, 5.0], 2, 1);
     let output = bn.forward(&x_eval).unwrap();
 
@@ -338,7 +337,7 @@ fn bn_training_and_eval_modes_produce_different_outputs() {
     bn_eval.set_training_if_mode_dependent(false);
     let out_eval = bn_eval.forward(&input).unwrap();
 
-    // The two outputs must differ in at least one element
+    // The 2 outputs must differ in at least 1 element
     let differs = out_train
         .iter()
         .zip(out_eval.iter())
@@ -357,7 +356,7 @@ fn bn_training_and_eval_modes_produce_different_outputs() {
 /// (zero or negative)
 #[test]
 fn ln_constructor_rejects_invalid_epsilon() {
-    // (epsilon, label) rows; each must yield InvalidParameter
+    // (epsilon, label) rows. Each must yield InvalidParameter.
     let cases = [(0.0, "epsilon == 0.0"), (-1e-5, "epsilon < 0.0")];
     for (epsilon, label) in cases {
         let result = LayerNormalization::new(vec![4, 3], epsilon);
@@ -438,7 +437,7 @@ fn ln_default_each_sample_has_mean_zero_and_var_one() {
 
 // Default axis: concrete hand-computed values
 
-/// LN Default produces hand-computed normalized values for two rows of four features
+/// LN Default produces hand-computed normalized values for 2 rows of 4 features
 #[test]
 fn ln_default_forward_concrete_values() {
     let data = vec![
@@ -473,7 +472,7 @@ fn ln_default_forward_concrete_values() {
 /// LN Custom(axis=0) normalizes across rows for each column, matching hand-computed values
 #[test]
 fn ln_custom_axis0_concrete_values() {
-    // rows=3, cols=2; normalize across rows for each column (axis=0)
+    // rows=3, cols=2. Normalizes across rows for each column (axis=0).
     let data = vec![1.0f32, 4.0, 3.0, 2.0, 5.0, 6.0];
     let input = tensor2(data, 3, 2);
     let mut ln = LayerNormalization::new(vec![3, 2], 1e-5)
@@ -552,11 +551,8 @@ fn ln_multiple_axes_output_has_mean_zero_and_var_one() {
     assert!((var - 1.0).abs() < 5e-4, "global var {var} too far from 1");
 }
 
-/// LN Multiple([1]) on a [2, 3, 4] input normalizes the 3 elements of axis=1 for each
-/// (axis-0, axis-2) position, giving mean ~= 0 and var ~= 1 along axis=1
-///
-/// LayerNormalization reduces over whichever axes it is told to, with no channel notion of its
-/// own, so this test is independent of the channels-last convention
+/// LN Multiple([1]) on a [2, 3, 4] input normalizes axis=1's 3 elements for each (axis-0,
+/// axis-2) position. LN reduces whichever axes it is told to, independent of channels-last.
 #[test]
 fn ln_multiple_single_axis_on_3d_input() {
     // shape [2, 3, 4]: axis 0 has 2 entries, axis 1 has 3 (the normalized axis), axis 2 has 4
@@ -572,7 +568,7 @@ fn ln_multiple_single_axis_on_3d_input() {
     let output = ln.forward(&input).unwrap();
     assert_eq!(output.shape(), &[2, 3, 4]);
 
-    // Axis=1 has 3 elements; for each (batch, spatial) pair those 3 values are normalized
+    // Axis=1 has 3 elements. For each (batch, spatial) pair, those 3 values are normalized.
     for b in 0..2 {
         for s in 0..4 {
             let vals: Vec<f32> = (0..3).map(|c| output[[b, c, s]]).collect();
@@ -714,7 +710,6 @@ fn ln_mode_switch_does_not_change_forward_output() {
     ln.set_training_if_mode_dependent(false);
     let out_eval = ln.forward(&input).unwrap();
 
-    // LN forward result must be identical in both modes
     assert_allclose(&out_train, &out_eval, 1e-6);
 }
 
@@ -855,7 +850,7 @@ fn bn_backward_eval_mode_passes_gradient_through() {
     let mut bn = BatchNormalization::new(vec![2, 3], 0.9, 1e-5).unwrap();
     bn.set_training_if_mode_dependent(false);
 
-    // A forward in eval mode (uses running stats); does not affect the passthrough
+    // A forward in eval mode (uses running stats) does not affect the passthrough
     let input = tensor2(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3);
     bn.forward(&input).unwrap();
 
@@ -863,7 +858,7 @@ fn bn_backward_eval_mode_passes_gradient_through() {
     let grad = tensor2(vec![0.5f32, -1.5, 2.0, -3.0, 4.5, -6.0], 2, 3);
     let grad_input = bn.backward(&grad).unwrap();
 
-    // Eval-mode backward returns grad_output.clone(): bit-exact equality
+    // Eval-mode backward returns grad_output.clone()
     assert_allclose(&grad_input, &grad, 0.0f32);
 }
 
@@ -901,8 +896,8 @@ fn bn_new_scalar_param_branch_forward_1d() {
     assert_allclose(&output, &expected, 1e-5);
 }
 
-/// Spatial batch norm (rank > 2): a channels-last [N, H, W, C] input normalizes each channel over
-/// its (N, H, W) values, and the parameters are per-channel (2*C), not per spatial element
+/// Spatial batch norm (rank > 2) normalizes each channel over its (N, H, W) values on a
+/// channels-last [N, H, W, C] input. The parameters are per-channel (2*C), not per spatial element.
 #[test]
 fn bn_spatial_4d_normalizes_per_channel() {
     use rustyml::neural_network::Tensor;
@@ -913,17 +908,18 @@ fn bn_spatial_4d_normalizes_per_channel() {
     // Per-channel (C=2) parameters: gamma[2] + beta[2] = 4 trainable (not 2*C*H*W = 16)
     assert!(matches!(bn.param_count(), TrainingParameters::Trainable(4)));
 
-    // Channels-last row-major order is [h, w, c], so each adjacent pair is one spatial position's
-    // [channel0, channel1]. This lays down channel 0 = {1,2,3,4} and channel 1 = {5,6,7,8}
+    // Channels-last row-major order is [h, w, c], so each adjacent pair holds a single spatial
+    // position's [channel0, channel1]. This lays down channel 0 = {1,2,3,4} and
+    // channel 1 = {5,6,7,8}
     let x: Tensor =
         ArrayD::from_shape_vec(vec![1, 2, 2, 2], vec![1., 5., 2., 6., 3., 7., 4., 8.]).unwrap();
     let out = bn.forward(&x).unwrap();
     assert_eq!(out.shape(), &[1, 2, 2, 2]);
 
-    // Channel 0: mean 2.5, population variance ((-1.5)^2+(-0.5)^2+0.5^2+1.5^2)/4 = 1.25
-    // Channel 1: mean 6.5, same spread, so the same variance 1.25 and the same inverse std.
-    // The centered values of both channels are therefore [-1.5, -0.5, 0.5, 1.5], and the
-    // channels-last interleaving puts the same offset side by side at each position
+    // Channel 0: mean 2.5, population variance ((-1.5)^2+(-0.5)^2+0.5^2+1.5^2)/4 = 1.25.
+    // Channel 1: mean 6.5 with the same spread, so it has the same variance and inverse std.
+    // The centered values of both channels are therefore [-1.5, -0.5, 0.5, 1.5].
+    // Channels-last interleaving puts the same offset side by side at each position.
     let inv = 1.0 / (1.25f32 + 1e-5).sqrt();
     let expected: Tensor = ArrayD::from_shape_vec(
         vec![1, 2, 2, 2],
@@ -942,7 +938,8 @@ fn bn_spatial_4d_normalizes_per_channel() {
     assert_allclose(&out, &expected, 1e-4);
 }
 
-/// Spatial batch-norm backward returns a gradient matching the input shape (folds/unfolds correctly)
+/// Spatial batch-norm backward returns a gradient that matches the input shape
+/// (the fold and unfold steps agree)
 #[test]
 fn bn_spatial_4d_backward_shape() {
     use rustyml::neural_network::Tensor;

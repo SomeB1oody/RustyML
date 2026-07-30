@@ -3,9 +3,9 @@
 //! Groups the kernel-based [`SVC`] (Sequential Minimal Optimization) and the linear,
 //! SGD-trained [`LinearSVC`]
 
-/// Linear Support Vector Classification (Linear SVC)
+/// Linear Support Vector Classifier (LinearSVC)
 pub mod linear_svc;
-/// Support Vector Classification (SVC)
+/// Support Vector Classifier (SVC)
 pub mod svc;
 
 pub use linear_svc::{LinearSVC, Loss};

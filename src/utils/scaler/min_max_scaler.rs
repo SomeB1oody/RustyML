@@ -2,8 +2,9 @@
 //!
 //! Provides [`MinMaxScaler`], which maps each feature onto a fixed interval (`[0, 1]` by
 //! default) using the extrema learned at fit time. Unlike a z-score it makes no distributional
-//! assumption - it is the transform to reach for when a downstream component needs bounded
-//! inputs, such as an image-style pipeline or an activation with a limited useful domain
+//! assumption. It is the transform to reach for when a downstream component needs bounded
+//! inputs. Examples include an image-style pipeline or an activation with a limited useful
+//! domain
 
 use super::{
     column_min_max, fitted, for_each_row, handle_zero_scale, validate_matrix,
@@ -16,7 +17,7 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
 /// Scales features onto a fixed range, learned from the training extrema
 ///
 /// Rows are samples and columns are features. [`fit`](Self::fit) records each feature's minimum
-/// and maximum; [`transform`](Self::transform) maps them onto `feature_range` (default
+/// and maximum. [`transform`](Self::transform) maps them onto `feature_range` (default
 /// `[0.0, 1.0]`) with the affine map
 ///
 /// ```text
@@ -24,13 +25,14 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
 /// x_scaled = x_std * (range_max - range_min) + range_min
 /// ```
 ///
-/// A feature with no spread at all (`data_max == data_min`) would divide by zero; its divisor
-/// is forced to `1.0` instead, so the column lands flat on `range_min` rather than producing
-/// `NaN`. This mirrors scikit-learn's `MinMaxScaler`, including the `clip` option
+/// A feature with no spread at all (`data_max == data_min`) would otherwise divide by zero.
+/// The scaler forces its divisor to `1.0` instead, so the column lands flat on `range_min`
+/// rather than producing `NaN`. This mirrors scikit-learn's `MinMaxScaler`, including the
+/// `clip` option
 ///
-/// Values outside the training extrema land outside `feature_range` - that is a feature, not a
-/// bug: it is how you see that a later batch left the range the model was trained on. Enable
-/// [`with_clip`](Self::with_clip) when a downstream component genuinely requires bounded input
+/// Values outside the training extrema land outside `feature_range`. It shows that a later
+/// batch left the range the model was trained on. Enable [`with_clip`](Self::with_clip) when
+/// a downstream component genuinely requires bounded input
 ///
 /// # Examples
 ///
@@ -44,7 +46,7 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
 /// let z = scaler.fit_transform(&x_train).unwrap();
 /// assert_eq!(z, array![[0.0, 0.0], [0.5, 0.5], [1.0, 1.0]]);
 ///
-/// // A later batch is mapped by the TRAINING extrema, so it may exceed the range
+/// // The scaler maps this later batch using the TRAINING extrema, so it may exceed the range
 /// let z_new = scaler.transform(&array![[4.0, 5.0]]).unwrap();
 /// assert_eq!(z_new, array![[1.5, -0.25]]);
 /// ```
@@ -82,8 +84,8 @@ impl MinMaxScaler {
     ///
     /// # Notes
     ///
-    /// Use [`with_feature_range`](Self::with_feature_range) for another interval (e.g.
-    /// `(-1.0, 1.0)`) and [`with_clip`](Self::with_clip) to clamp out-of-range values
+    /// Use [`with_feature_range`](Self::with_feature_range) for another interval, for example
+    /// `(-1.0, 1.0)`, and [`with_clip`](Self::with_clip) to clamp out-of-range values
     pub fn new() -> Self {
         Self {
             feature_range: (0.0, 1.0),
@@ -177,8 +179,8 @@ impl MinMaxScaler {
 
     /// Fits the scaler, recording each feature's minimum and maximum
     ///
-    /// Any extrema from a previous fit are discarded. Call this on the training matrix only -
-    /// fitting on the full dataset before splitting leaks test-set information into the
+    /// This discards any extrema from a previous fit. Call this on the training matrix only.
+    /// Fitting on the full dataset before splitting leaks test-set information into the
     /// transform
     ///
     /// # Parameters
@@ -214,10 +216,10 @@ impl MinMaxScaler {
 
     /// Folds another batch of samples into the recorded extrema
     ///
-    /// Widens the stored minimum and maximum to cover `x` as well, so a scaler can be fitted
-    /// over data that never exists in memory at once. On an unfitted scaler this behaves
-    /// exactly like [`fit`](Self::fit), and the result after `n` batches is identical to a
-    /// single `fit` over their concatenation
+    /// Widens the stored minimum and maximum to cover `x` as well. This lets a scaler fit over
+    /// data that never exists in memory at once. On an unfitted scaler this behaves exactly
+    /// like [`fit`](Self::fit). The result after `n` batches is identical to a single `fit`
+    /// over their concatenation
     ///
     /// # Parameters
     ///
@@ -230,23 +232,9 @@ impl MinMaxScaler {
     /// # Errors
     ///
     /// - [`Error::EmptyInput`] - If `x` has no rows or no columns
-    /// - [`Error::DimensionMismatch`] - If `x` has a different feature count than the previous batches
+    /// - [`Error::DimensionMismatch`] - If `x` has a different feature count than the previous
+    ///   batches
     /// - [`Error::NonFinite`] - If `x` contains NaN or infinite values
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use ndarray::array;
-    /// use rustyml::utils::MinMaxScaler;
-    ///
-    /// let mut scaler = MinMaxScaler::new();
-    /// scaler.partial_fit(&array![[2.0], [3.0]]).unwrap();
-    /// scaler.partial_fit(&array![[1.0], [5.0]]).unwrap();
-    ///
-    /// assert_eq!(scaler.get_data_min().unwrap()[0], 1.0);
-    /// assert_eq!(scaler.get_data_max().unwrap()[0], 5.0);
-    /// assert_eq!(scaler.get_n_samples_seen(), 4);
-    /// ```
     pub fn partial_fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
@@ -287,7 +275,7 @@ impl MinMaxScaler {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, Error>` - A new scaled matrix; `x` is not modified
+    /// - `Result<Array2<f64>, Error>` - A new scaled matrix. `x` is not modified
     ///
     /// # Errors
     ///
@@ -327,7 +315,7 @@ impl MinMaxScaler {
 
     /// Fits the scaler on `x` and returns the scaled `x`
     ///
-    /// Equivalent to [`fit`](Self::fit) followed by [`transform`](Self::transform); this is the
+    /// Equivalent to [`fit`](Self::fit) followed by [`transform`](Self::transform). This is the
     /// call for the training matrix, after which [`transform`](Self::transform) handles every
     /// other batch
     ///
@@ -337,7 +325,7 @@ impl MinMaxScaler {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, Error>` - A new scaled matrix; `x` is not modified
+    /// - `Result<Array2<f64>, Error>` - A new scaled matrix. `x` is not modified
     ///
     /// # Errors
     ///
@@ -353,9 +341,9 @@ impl MinMaxScaler {
 
     /// Maps scaled data back to the original feature space
     ///
-    /// Applies `(x - min) / scale`, the exact inverse of [`transform`](Self::transform) - as
-    /// long as clipping did not discard information and the feature had a real spread at fit
-    /// time (a flat feature comes back as its training minimum)
+    /// Applies `(x - min) / scale`, the exact inverse of [`transform`](Self::transform). This
+    /// holds as long as clipping did not discard information and the feature had a real spread
+    /// at fit time. A flat feature comes back as its training minimum
     ///
     /// # Parameters
     ///
@@ -363,7 +351,7 @@ impl MinMaxScaler {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, Error>` - A new matrix in the original units; `x` is not modified
+    /// - `Result<Array2<f64>, Error>` - A new matrix in the original units. `x` is not modified
     ///
     /// # Errors
     ///
@@ -437,7 +425,7 @@ mod tests {
         assert_eq!(scaler.get_data_range().unwrap(), array![2.0, 20.0]);
     }
 
-    /// A custom feature range is honoured end to end
+    /// The scaler honors a custom feature range end to end
     #[test]
     fn custom_feature_range() {
         let x = array![[0.0], [10.0]];
@@ -449,7 +437,7 @@ mod tests {
         assert_eq!(scaler.get_feature_range(), (-1.0, 1.0));
     }
 
-    /// An invalid feature range is rejected
+    /// `with_feature_range` rejects an invalid range
     #[test]
     fn invalid_feature_range_is_rejected() {
         for (low, high) in [(1.0, 1.0), (2.0, 1.0), (f64::NAN, 1.0)] {

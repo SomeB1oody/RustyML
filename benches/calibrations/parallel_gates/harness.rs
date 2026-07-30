@@ -9,8 +9,8 @@ use ndarray_rand::rand_distr::Uniform;
 use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 
-/// Nanoseconds per call of `f`: the batch size grows until one batch takes >= 5 ms, then the
-/// minimum over three batches filters scheduler noise
+/// Nanoseconds per call of `f`: the batch size grows until 1 batch takes >= 5 ms, then the
+/// minimum over 3 batches filters scheduler noise
 pub fn time_per_call_ns<F: FnMut()>(mut f: F) -> f64 {
     f(); // warmup
     let mut k = 1usize;
@@ -36,11 +36,15 @@ pub fn time_per_call_ns<F: FnMut()>(mut f: F) -> f64 {
     best
 }
 
-/// One measured ladder rung
+/// 1 measured ladder rung
 pub struct Row {
+    /// Label for this rung, used in the printed table and the markdown report
     pub label: String,
+    /// Work units this rung represents, counted in the section's `work_unit`
     pub work: usize,
+    /// Nanoseconds per call, forced serial
     pub serial_ns: f64,
+    /// Nanoseconds per call, forced parallel
     pub parallel_ns: f64,
 }
 
@@ -50,12 +54,15 @@ impl Row {
     }
 }
 
-/// One calibration table plus the work units its `work` column counts
+/// 1 calibration table plus the work units its `work` column counts
 pub struct Section {
+    /// Heading for this table, printed above its rows
     pub title: &'static str,
+    /// Name of the unit the `work` column counts
     pub work_unit: &'static str,
     /// When true the table is a parameter sweep: report the fastest rung instead of a crossover
     pub pick_fastest: bool,
+    /// The measured ladder rungs, in run order
     pub rows: Vec<Row>,
 }
 
@@ -100,9 +107,10 @@ impl Section {
         }
     }
 
-    /// The work bracket where the parallel path starts winning for good: the rung after the
-    /// *last* rung (in work order) whose speedup stays within the noise margin of losing
-    /// Requiring 1.05x filters ~1.00x ties that would otherwise read as early crossovers
+    /// The work bracket where the parallel path starts winning for good. It is the rung after
+    /// the *last* rung (in work order) whose speedup stays within the noise margin of losing.
+    /// The 1.05x threshold filters out ~1.00x ties that would otherwise read as early
+    /// crossovers.
     fn crossover(&self) -> Option<(usize, usize)> {
         let mut sorted: Vec<&Row> = self.rows.iter().collect();
         sorted.sort_by_key(|r| r.work);

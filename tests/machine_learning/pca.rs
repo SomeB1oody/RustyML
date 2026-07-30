@@ -1,5 +1,6 @@
-//! Integration tests for rustyml::machine_learning::decomposition::pca, covering construction/validation,
-//! error paths, and numerical results across all three SVD solvers
+//! Integration tests for rustyml::machine_learning::decomposition::pca.
+//!
+//! Covers construction, validation, error paths, and numerical results across the 3 SVD solvers.
 
 use ndarray::{Array2, array};
 use rustyml::error::Error;
@@ -7,7 +8,7 @@ use rustyml::machine_learning::decomposition::pca::{PCA, SVDSolver};
 
 use crate::common::assert_allclose;
 
-// Helper
+// Helpers
 
 /// Collinear data: 5 points on y = 2x, rank-1 with first PC along [1/sqrt(5), 2/sqrt(5)]
 /// and sigma_1 = sqrt(50) = 5*sqrt(2)
@@ -160,7 +161,7 @@ fn test_transform_nan_is_non_finite() {
     );
 }
 
-// Collinear data: Full SVD - numerical assertions
+// Numerical assertions for collinear data (Full SVD solver)
 
 /// Explained variance ratio is > 0.999 for 1 component on perfectly collinear data
 #[test]
@@ -332,9 +333,9 @@ fn test_explained_variance_ratio_sums_to_one() {
     assert_abs_diff_eq!(ratio[0].min(ratio[1]), 0.2, epsilon = 1e-4);
 }
 
-// All three SVD solvers - shape agreement and singular-value agreement
+// Shape and singular-value agreement across the 3 SVD solvers
 
-/// All three SVDSolver variants produce the correct output shape
+/// All 3 SVDSolver variants produce the correct output shape
 #[test]
 fn test_all_solvers_produce_correct_output_shape() {
     let x = collinear_data();
@@ -357,7 +358,7 @@ fn test_all_solvers_produce_correct_output_shape() {
     }
 }
 
-/// All three SVDSolver variants agree on the leading singular value (sqrt(50)) for
+/// All 3 SVDSolver variants agree on the leading singular value (sqrt(50)) for
 /// the collinear dataset, with loose tolerance for the approximate solvers
 #[test]
 fn test_all_solvers_agree_on_singular_value() {
@@ -378,14 +379,14 @@ fn test_all_solvers_agree_on_singular_value() {
             sv[0],
             expected_sv,
             epsilon = 1e-2,
-            // 1e-2 absolute tolerance validates the dominant direction was found;
-            // approximate solvers can deviate slightly on a 5-sample problem
+            // A 1e-2 absolute tolerance confirms the dominant direction was found.
+            // The approximate solvers can deviate slightly on a 5-sample problem.
         );
     }
 }
 
-/// All three solvers agree on component signs: each axis is oriented so its largest-magnitude
-/// loading is non-negative, so the solvers produce sign-identical components
+/// All 3 solvers agree on component signs: each axis orients its largest-magnitude loading
+/// as non-negative, so the solvers produce sign-identical components
 #[test]
 fn test_all_solvers_agree_on_component_signs() {
     use approx::assert_abs_diff_eq;
@@ -419,8 +420,8 @@ fn test_all_solvers_agree_on_component_signs() {
         let mut pca = PCA::new(2).unwrap().with_svd_solver(solver);
         pca.fit(&x).unwrap();
         let components = pca.get_components().expect("fitted; components is Some");
-        // A flipped axis would differ by ~2x the loading; 1e-3 catches it while tolerating the
-        // approximate solvers' small numerical drift on the well-separated axes
+        // A flipped axis would differ by about 2x the loading. A tolerance of 1e-3 catches it
+        // while tolerating the approximate solvers' small numerical drift on well-separated axes.
         for (a, b) in reference.rows().into_iter().zip(components.rows()) {
             for (&x_ref, &x_got) in a.iter().zip(b.iter()) {
                 assert_abs_diff_eq!(x_ref, x_got, epsilon = 1e-3);
@@ -503,7 +504,7 @@ fn test_power_iteration_inverse_transform_recovers_collinear() {
     assert_allclose(&reconstructed, &x, 1e-4);
 }
 
-// Explained variance ratio > 99.9% on collinear data (all three solvers)
+// Explained variance ratio > 99.9% on collinear data (all 3 solvers)
 
 /// Each solver captures > 99.9% of variance in 1 component on collinear data
 #[test]
@@ -552,7 +553,7 @@ fn test_save_load_roundtrip_preserves_transform() {
     let _ = fs::remove_file(path);
 }
 
-/// load_from_path on a non-existent file returns Err (IoError)
+/// load_from_path on a non-existent file returns Err(Error::Io)
 #[test]
 fn test_load_nonexistent_path_is_error() {
     let result = PCA::load_from_path("/tmp/rustyml_pca_no_such_file_xyz.bin");

@@ -1,6 +1,10 @@
-//! Integration tests for the neural-network loss functions: hand-computed forward
-//! and gradient values, perfect-prediction zero loss/grad, numerical stability under
-//! clipping, shape-mismatch errors, and SCCE label validation
+//! Integration tests for the neural-network loss functions.
+//!
+//! Covers hand-computed forward and gradient values, perfect-prediction zero loss and gradient,
+//! numerical stability under clipping, shape-mismatch errors, and SCCE label validation.
+//!
+//! Also covers the from_logits path, row-scaling invariance of CCE and SCCE, renormalization
+//! above rank 2, and gradient values checked against finite differences.
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
@@ -221,7 +225,8 @@ fn bce_perfect_prediction_near_zero_loss_and_finite_grad() {
         .into_dyn();
 
     let loss = bce.compute_loss(&y_true, &y_pred).unwrap();
-    // After clipping at eps=1e-7 each element is -ln(1-eps) ~= 1e-7; mean ~= 1e-7
+    // After clipping at eps=1e-7, each element is -ln(1-eps), about 1e-7.
+    // The mean is about 1e-7 too.
     assert!(
         loss.is_finite(),
         "BCE loss must not be NaN or Inf at extreme predictions"
@@ -293,7 +298,8 @@ fn bce_shape_mismatch_returns_err() {
 
 // Categorical Cross-Entropy
 
-/// CCE forward value is the mean per-sample cross-entropy, divided by batch size (not element count)
+/// CCE forward value is the mean per-sample cross-entropy, divided by batch size, not element
+/// count
 #[test]
 fn cce_forward_value_divided_by_batch() {
     let cce = CategoricalCrossEntropy::new(false);
@@ -316,11 +322,8 @@ fn cce_forward_value_divided_by_batch() {
     assert_abs_diff_eq!(loss, 0.31216_f32, epsilon = 1e-4);
 }
 
-/// CCE gradient equals `(sum(y_true) / row_sum - y_true / y_pred) / batch_size`
-///
-/// Differentiating Keras' row-normalizer adds a term that is constant across each row, so unlike
-/// the pre-normalization form the gradient is dense: the classes with a zero target carry that
-/// constant rather than zero. Here every row already sums to 1, so the constant is exactly `1/3`
+/// CCE gradient equals `(sum(y_true) / row_sum - y_true / y_pred) / batch_size`. This is dense
+/// because Keras' row-normalizer adds the same constant term to every class in a row
 #[test]
 fn cce_gradient_value() {
     let cce = CategoricalCrossEntropy::new(false);
@@ -344,7 +347,7 @@ fn cce_gradient_value() {
     let flat: Vec<f32> = grad.iter().cloned().collect();
     assert_eq!(flat.len(), 9);
 
-    // The row-constant term every class receives, target or not
+    // Every row here sums to 1, so the row-constant term every class receives is exactly 1/3
     let row_constant = 1.0_f32 / 3.0;
 
     // Row 0: class 0 is the target
@@ -371,7 +374,7 @@ fn cce_perfect_prediction_near_zero_loss_and_finite_grad() {
     let y_true: Tensor = Array::from_shape_vec(vec![2, 2], vec![1.0_f32, 0.0, 0.0, 1.0])
         .unwrap()
         .into_dyn();
-    // Exact 0.0 / 1.0 predictions are clipped internally
+    // Exact 0.0 and 1.0 predictions are clipped internally
     let y_pred: Tensor = Array::from_shape_vec(vec![2, 2], vec![1.0_f32, 0.0, 0.0, 1.0])
         .unwrap()
         .into_dyn();
@@ -401,7 +404,7 @@ fn cce_perfect_prediction_near_zero_loss_and_finite_grad() {
 fn cce_extreme_predictions_clipped_to_finite() {
     let cce = CategoricalCrossEntropy::new(false);
 
-    // One sample, 3 classes; predicted probability at 0.0 on a hot class
+    // 1 sample, 3 classes. The predicted probability is 0.0 on the hot class.
     let y_true: Tensor = Array::from_shape_vec(vec![1, 3], vec![1.0_f32, 0.0, 0.0])
         .unwrap()
         .into_dyn();
@@ -470,7 +473,7 @@ fn cce_empty_input_returns_err() {
 }
 
 /// 1D inputs are rejected: `shape()[0]` would be the element count rather than the batch size,
-/// silently rescaling the loss/gradient
+/// silently rescaling the loss and gradient
 #[test]
 fn cce_rejects_1d_input() {
     let cce = CategoricalCrossEntropy::new(false);
@@ -490,8 +493,8 @@ fn cce_rejects_1d_input() {
     ));
 }
 
-/// from_logits CCE applies softmax internally: its loss matches probability-mode CCE on the same
-/// softmax, and its gradient is the fused `(softmax(z) - y) / batch`
+/// from_logits CCE applies softmax internally. Its loss matches probability-mode CCE on the
+/// same softmax, and its gradient is the fused `(softmax(z) - y) / batch`
 #[test]
 fn cce_from_logits_loss_and_grad() {
     let logits: Tensor = Array::from_shape_vec(vec![1, 3], vec![1.0_f32, 2.0, 0.5])
@@ -553,9 +556,7 @@ fn scce_forward_value_equals_cce_equivalent() {
 }
 
 /// SCCE gradient is `(1 / row_sum - 1 / y_pred) / batch` at the true class and `1 / (row_sum *
-/// batch)` elsewhere
-///
-/// Same row-constant term as CCE: the normalizer is differentiated, so the gradient is dense
+/// batch)` elsewhere. It stays dense for the same differentiated-normalizer reason as CCE.
 #[test]
 fn scce_gradient_value() {
     let scce = SparseCategoricalCrossEntropy::new(false);
@@ -705,7 +706,6 @@ fn scce_out_of_range_label_returns_err() {
 fn scce_wrong_label_shape_returns_err() {
     let scce = SparseCategoricalCrossEntropy::new(false);
 
-    // Labels are 1D - must be [batch, 1]
     let y_true_1d: Tensor = Array::from_shape_vec(vec![2], vec![0.0_f32, 1.0])
         .unwrap()
         .into_dyn();
@@ -718,7 +718,6 @@ fn scce_wrong_label_shape_returns_err() {
         "1D labels must return an Err"
     );
 
-    // Labels are [batch, 2] - wrong second dimension
     let y_true_wrong: Tensor = Array::from_shape_vec(vec![2, 2], vec![0.0_f32, 0.0, 1.0, 0.0])
         .unwrap()
         .into_dyn();
@@ -762,7 +761,6 @@ fn scce_non_2d_predictions_returns_err() {
     let y_true: Tensor = Array::from_shape_vec(vec![2, 1], vec![0.0_f32, 1.0])
         .unwrap()
         .into_dyn();
-    // 3-D predictions - must be rejected
     let y_pred: Tensor = Array::from_shape_vec(vec![2, 2, 3], vec![0.1_f32; 12])
         .unwrap()
         .into_dyn();
@@ -776,7 +774,7 @@ fn scce_non_2d_predictions_returns_err() {
     );
 }
 
-// Cross-loss consistency: SCCE loss == CCE loss (batch normalisation)
+// Cross-loss consistency: SCCE loss == CCE loss (batch normalization)
 
 /// SCCE(integer labels) loss equals CCE(equivalent one-hot) loss, confirming a shared
 /// divide-by-batch_size convention
@@ -843,8 +841,8 @@ fn scce_from_logits_loss_and_grad() {
 
 // Keras' probability-path renormalization
 
-/// CCE renormalizes each row along the class axis before clipping, so scaling a row by a positive
-/// constant leaves the loss unchanged: the row is scored as the distribution it implies
+/// CCE renormalizes each row along the class axis before clipping. Scaling a row by a positive
+/// constant leaves the loss unchanged, because the row is scored as the distribution it implies
 #[test]
 fn cce_loss_is_invariant_to_row_scaling() {
     let cce = CategoricalCrossEntropy::new(false);
@@ -856,7 +854,8 @@ fn cce_loss_is_invariant_to_row_scaling() {
         Array::from_shape_vec(vec![2, 3], vec![0.5_f32, 0.3, 0.2, 0.1, 0.6, 0.3])
             .unwrap()
             .into_dyn();
-    // Row 0 scaled by 4, row 1 by 1/4 - different factors, so this cannot pass by a global rescale
+    // Row 0 is scaled by 4 and row 1 by 1/4. Different factors, so a global rescale bug would
+    // not pass.
     let scaled: Tensor =
         Array::from_shape_vec(vec![2, 3], vec![2.0_f32, 1.2, 0.8, 0.025, 0.15, 0.075])
             .unwrap()
@@ -911,14 +910,14 @@ fn scce_loss_is_invariant_to_row_scaling() {
 fn cce_renormalizes_each_site_independently_above_rank_2() {
     let cce = CategoricalCrossEntropy::new(false);
 
-    // [1, 2, 2] - one batch item, two spatial positions, two classes
+    // [1, 2, 2]: 1 batch item, 2 spatial positions, 2 classes
     let y_true: Tensor =
         Array::from_shape_vec(vec![1, 2, 2], vec![1.0_f32, 0.0, 0.0, 1.0]).unwrap();
-    // Site 0 sums to 1, site 1 sums to 10; renormalized they are the same distribution
+    // Site 0 sums to 1 and site 1 sums to 10. Renormalized, they give the same distribution.
     let y_pred: Tensor =
         Array::from_shape_vec(vec![1, 2, 2], vec![0.8_f32, 0.2, 2.0, 8.0]).unwrap();
 
-    // Site 0 contributes -ln(0.8), site 1 contributes -ln(8/10); divisor is 2 sites
+    // Site 0 contributes -ln(0.8) and site 1 contributes -ln(8/10). The divisor is 2 sites.
     let expected = -(0.8_f32.ln() + 0.8_f32.ln()) / 2.0;
     assert_abs_diff_eq!(
         cce.compute_loss(&y_true, &y_pred).unwrap(),
@@ -927,11 +926,8 @@ fn cce_renormalizes_each_site_independently_above_rank_2() {
     );
 }
 
-/// CCE's probability-path gradient is the true gradient of its loss, normalizer included
-///
-/// Also pinned against a transcription of Keras' own `categorical_crossentropy` (`output /
-/// sum(output, axis, keepdims=True)`, then `clip`), so this checks agreement with Keras and not
-/// merely self-consistency between `compute_loss` and `compute_grad`
+/// CCE's probability-path gradient matches a finite-difference estimate, and also matches Keras'
+/// reference values, so this confirms agreement with Keras, not just internal self-consistency
 #[test]
 fn cce_probability_gradient_matches_finite_difference() {
     let cce = CategoricalCrossEntropy::new(false);
@@ -939,14 +935,14 @@ fn cce_probability_gradient_matches_finite_difference() {
     let y_true: Tensor = Array::from_shape_vec(vec![2, 3], vec![1.0_f32, 0.0, 0.0, 0.0, 1.0, 0.0])
         .unwrap()
         .into_dyn();
-    // Deliberately unnormalized, so the row-sum divisor is exercised rather than being 1
+    // y_pred rows do not sum to 1, so the row-sum divisor applies
     let y_pred: Tensor = Array::from_shape_vec(vec![2, 3], vec![0.5_f32, 0.3, 0.4, 0.2, 0.7, 0.3])
         .unwrap()
         .into_dyn();
 
     let grad = cce.compute_grad(&y_true, &y_pred).unwrap();
 
-    // Both rows sum to 1.2; Keras' reference values for this input
+    // Both rows sum to 1.2. These are Keras' reference values for this input.
     let expected: Tensor = Array::from_shape_vec(
         vec![2, 3],
         vec![
@@ -1027,9 +1023,8 @@ fn scce_probability_gradient_matches_finite_difference() {
     }
 }
 
-/// The term the normalizer adds is constant across each row, and a softmax backward annihilates
-/// row-constant vectors - so a softmax head sees the exact same gradient it saw before Keras'
-/// renormalization was adopted. This is why the change is invisible to every training test
+/// A softmax backward pass cancels any row-constant vector in its gradient. A softmax head's
+/// gradient is therefore the same, whether or not CCE's added row-constant term is present
 #[test]
 fn cce_row_constant_term_vanishes_through_softmax_backward() {
     let cce = CategoricalCrossEntropy::new(false);

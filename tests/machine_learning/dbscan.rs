@@ -9,11 +9,8 @@ use rustyml::machine_learning::DistanceCalculationMetric;
 
 // Helpers
 
-/// Build the canonical 2-blob + 1-noise dataset used throughout these tests
-///
-/// Rows 0..=3 are blob A near (0,0), rows 4..=7 are blob B near (10,10), and row
-/// 8 is isolated noise at (5,5). With eps=0.5 and min_samples=2, BFS top-to-bottom
-/// assigns blob A cluster 0, blob B cluster 1, and the isolated point -1
+/// Builds a 9-point dataset: blob A near (0,0) (rows 0-3), blob B near (10,10) (rows 4-7),
+/// and 1 isolated noise point at (5,5) (row 8).
 fn two_blobs_noise() -> Array2<f64> {
     Array2::from_shape_vec(
         (9, 2),
@@ -174,8 +171,8 @@ fn predict_non_finite_in_new_data_returns_non_finite() {
 
 // Correctness: fit + cluster structure (Euclidean metric)
 
-/// Fitting the 2-blob+noise dataset labels each blob with a distinct non-negative
-/// cluster (blob A -> 0, blob B -> 1) and the isolated point as noise (-1)
+/// Fitting the 2-blob+noise dataset assigns each blob a distinct, non-negative cluster
+/// (blob A -> 0, blob B -> 1). The isolated point gets noise (-1).
 #[test]
 fn fit_euclidean_correct_labels_two_blobs_noise() {
     let data = two_blobs_noise();
@@ -199,13 +196,11 @@ fn fit_euclidean_correct_labels_two_blobs_noise() {
     assert_eq!(labels[6], label_b);
     assert_eq!(labels[7], label_b);
 
-    // Two blobs get distinct labels
     assert_ne!(
         label_a, label_b,
         "the two blobs must have different cluster labels"
     );
 
-    // Noise point is -1
     assert_eq!(labels[8], -1, "isolated noise point must be labelled -1");
 
     // BFS processes rows in ascending order, so blob A is found first (cluster 0)
@@ -214,12 +209,12 @@ fn fit_euclidean_correct_labels_two_blobs_noise() {
     assert_eq!(label_b, 1, "blob B should be cluster 1 (discovered second)");
 }
 
-/// Above 16 features DBSCAN falls back from the kd-tree to the brute-force scan; the
-/// clustering result must remain correct on that path
+/// Above 8 features, DBSCAN falls back from the kd-tree to a brute-force scan.
+/// The clustering result must stay correct on that path.
 #[test]
 fn fit_high_dimensional_falls_back_to_brute_force() {
-    let n_features = 18; // above the kd-tree dimensionality cutoff (16)
-    // Two tight blobs (rows 0..=3 near 0, rows 4..=7 near 10) and one far noise point (row 8)
+    let n_features = 18; // above the kd-tree dimensionality cutoff (8)
+    // 2 tight blobs (rows 0..=3 near 0, rows 4..=7 near 10) and 1 far noise point (row 8)
     let mut data = Array2::<f64>::zeros((9, n_features));
     for i in 0..4 {
         for j in 0..n_features {
@@ -281,8 +276,8 @@ fn fit_euclidean_core_indices_sorted_and_non_noise() {
         );
     }
 
-    // With min_samples=2 on 4-point blobs all 8 blob points are core points;
-    // the isolated noise point is not a core point
+    // With min_samples=2 on 4-point blobs, all 8 blob points are core points.
+    // The isolated noise point is not a core point.
     assert_eq!(
         core_indices.len(),
         8,
@@ -343,7 +338,7 @@ fn predict_new_point_near_blob_b_returns_label_1() {
     let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&data).unwrap();
 
-    // (10.05, 10.05) is at Euclidean distance ~= 0.07 from (10,10), well inside eps=0.5
+    // (10.05, 10.05) is at Euclidean distance about 0.07 from (10,10), well inside eps=0.5
     let new_point = array![[10.05f64, 10.05]];
     let preds = m.predict(&new_point).unwrap();
     assert_eq!(
@@ -359,7 +354,7 @@ fn predict_far_point_returns_noise() {
     let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&data).unwrap();
 
-    // (5, 5) is far from both blobs; Euclidean distance to nearest core point ~= 7.07
+    // (5, 5) is far from both blobs. The Euclidean distance to the nearest core point is about 7.07
     let far_point = array![[5.0f64, 5.0]];
     let preds = m.predict(&far_point).unwrap();
     assert_eq!(
@@ -377,8 +372,8 @@ fn predict_point_at_eps_boundary_inclusive() {
     let mut m = DBSCAN::new(0.5, 1).unwrap();
     m.fit(&train).unwrap();
 
-    // (0.5, 0.0): Euclidean distance to (0,0) = 0.5 exactly = eps; the dist <= eps
-    // contract puts this in cluster 0
+    // (0.5, 0.0): Euclidean distance to (0,0) equals eps (0.5) exactly. The dist <= eps
+    // contract puts this point in cluster 0.
     let boundary_point = array![[0.5f64, 0.0]];
     let preds = m.predict(&boundary_point).unwrap();
     assert_eq!(
@@ -387,7 +382,7 @@ fn predict_point_at_eps_boundary_inclusive() {
     );
 }
 
-/// A point just beyond eps is labelled noise (single core (0,0), eps=0.5, query at 0.65)
+/// A point just beyond eps is labeled noise (single core (0,0), eps=0.5, query at 0.65)
 #[test]
 fn predict_point_just_beyond_eps_is_noise() {
     let train = array![[0.0f64, 0.0]];
@@ -402,9 +397,9 @@ fn predict_point_just_beyond_eps_is_noise() {
     );
 }
 
-// Correctness: distance metrics - Euclidean, Manhattan, Minkowski(p)
+// Correctness: distance metrics (Euclidean, Manhattan, Minkowski(p))
 
-/// Euclidean metric clusters the two blobs into 0, 1, and noise
+/// Euclidean metric clusters the 2 blobs into 0, 1, and noise
 #[test]
 fn clustering_euclidean_metric_two_blobs_noise() {
     let data = two_blobs_noise();
@@ -420,7 +415,7 @@ fn clustering_euclidean_metric_two_blobs_noise() {
     assert_eq!(labels[8], -1);
 }
 
-/// Manhattan metric clusters the two blobs the same way as Euclidean on this data
+/// Manhattan metric clusters the 2 blobs the same way as Euclidean on this data
 #[test]
 fn clustering_manhattan_metric_two_blobs_noise() {
     let data = two_blobs_noise();
@@ -444,7 +439,7 @@ fn clustering_manhattan_metric_two_blobs_noise() {
     assert_eq!(labels[8], -1);
 }
 
-/// Minkowski(p=3) metric clusters the two blobs into distinct labels plus noise
+/// Minkowski(p=3) metric clusters the 2 blobs into distinct labels plus noise
 #[test]
 fn clustering_minkowski_p3_metric_two_blobs_noise() {
     let data = two_blobs_noise();
@@ -536,7 +531,7 @@ fn fit_predict_equals_fit_then_get_labels() {
 
 // Edge cases
 
-/// A single-point dataset with min_samples=1 yields one core point and one cluster (0)
+/// A single-point dataset with min_samples=1 yields 1 core point and 1 cluster (0)
 #[test]
 fn single_point_min_samples_1_is_core_cluster_0() {
     let data = array![[1.0f64, 2.0]];
@@ -559,8 +554,8 @@ fn single_point_min_samples_1_is_core_cluster_0() {
 /// core_sample_indices is empty
 #[test]
 fn all_noise_when_eps_tiny() {
-    // 4 points spread 1 unit apart; with eps=0.01 and min_samples=3 no point
-    // has enough neighbours, so all are noise
+    // 4 points spread 1 unit apart. With eps=0.01 and min_samples=3, no point
+    // has enough neighbors, so all are noise
     let data = array![[0.0f64, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]];
     let mut m = DBSCAN::new(0.01, 3).unwrap();
     m.fit(&data).unwrap();
@@ -580,11 +575,11 @@ fn all_noise_when_eps_tiny() {
     );
 }
 
-/// When eps is large enough that every point neighbours every other, the result
+/// When eps is large enough that every point neighbors every other, the result
 /// is a single cluster (label 0 for all)
 #[test]
 fn all_connected_single_cluster() {
-    // 4 points all within 0.5 of each other; eps=5.0 is more than sufficient
+    // 4 points all within 0.5 of each other. eps=5.0 is more than enough
     let data = array![[0.0f64, 0.0], [0.1, 0.0], [0.2, 0.0], [0.3, 0.0]];
     let mut m = DBSCAN::new(5.0, 2).unwrap();
     m.fit(&data).unwrap();
@@ -603,7 +598,7 @@ fn default_constructor_model_is_usable() {
     let data = two_blobs_noise();
     let mut m = DBSCAN::default();
     // The blobs have 4 points each, so with default min_samples=5 they miss the
-    // core criterion; this only checks that fit succeeds, not the cluster shape
+    // core criterion. This only checks that fit succeeds, not the cluster shape.
     assert!(
         m.fit(&data).is_ok(),
         "fit with default parameters should not error"
@@ -612,11 +607,11 @@ fn default_constructor_model_is_usable() {
 
 // predict: nearest-wins semantics (not any-within-eps)
 
-/// predict assigns the nearest core's label, not an arbitrary within-eps core:
-/// with cores A=(0,0) and B=(2,0) both within eps of query (0.6,0), A wins (cluster 0)
+/// predict assigns the nearest core's label, not an arbitrary within-eps core.
+/// With cores A=(0,0) and B=(2,0) both within eps of query (0.6,0), A wins (cluster 0).
 #[test]
 fn predict_assigns_nearest_core_label_not_arbitrary() {
-    // Two isolated single-point clusters
+    // 2 isolated single-point clusters
     let train = array![[0.0f64, 0.0], [2.0, 0.0]];
     let mut m = DBSCAN::new(1.5, 1).unwrap();
     m.fit(&train).unwrap();
@@ -639,7 +634,7 @@ fn predict_assigns_nearest_core_label_not_arbitrary() {
 /// core A=(0,0), eps=1.5, query at (2,0) gives dist 2.0 > 1.5
 #[test]
 fn predict_nearest_core_outside_eps_returns_noise() {
-    // Single core at origin; query sits 2 units away, beyond eps=1.5
+    // Single core at origin. Query sits 2 units away, beyond eps=1.5
     let train = array![[0.0f64, 0.0]];
     let mut m = DBSCAN::new(1.5, 1).unwrap();
     m.fit(&train).unwrap();
@@ -712,15 +707,15 @@ fn save_load_round_trip_preserves_state_and_predictions() {
 
 // Label domain: labels are isize, cluster ids >= 0, noise = -1
 
-/// predict returns the correct label values for the canonical three-case scenario
+/// predict returns the correct label values for the canonical 3-case scenario
 #[test]
 fn predict_label_values_canonical_three_cases() {
     let data = two_blobs_noise();
     let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&data).unwrap();
 
-    // Three test points with unambiguous labels: (0.05,0.05) in blob A -> 0,
-    // (10.05,10.05) in blob B -> 1, and (5,5) far from all cores -> noise
+    // 3 test points with unambiguous labels. (0.05,0.05) is in blob A (label 0),
+    // (10.05,10.05) is in blob B (label 1), and (5,5) is far from all cores (noise).
     let test_points = array![[0.05f64, 0.05], [10.05, 10.05], [5.0, 5.0]];
     let preds = m.predict(&test_points).unwrap();
 
@@ -731,7 +726,7 @@ fn predict_label_values_canonical_three_cases() {
 }
 
 /// The metric stored after construction matches the requested variant for all
-/// three enum arms (Euclidean, Manhattan, Minkowski)
+/// 3 enum arms (Euclidean, Manhattan, Minkowski)
 #[test]
 fn all_three_metric_variants_stored_correctly() {
     let m_euc = DBSCAN::new(0.5, 2).unwrap();
@@ -751,16 +746,10 @@ fn all_three_metric_variants_stored_correctly() {
         DistanceCalculationMetric::Minkowski(4.0)
     );
 }
-// Large-dataset parallel branch coverage (>= 1000 samples)
+// Large-dataset coverage (>= 1000 samples)
 
-/// Build 1200 points (3 tight, well-separated blobs of 400 each) with deterministic
-/// jitter and no RNG
-///
-/// Rows are blob-contiguous: 0..=399 around (0,0), 400..=799 around (50,0), and
-/// 800..=1199 around (25,50). With eps=1.0 and min_samples=5 the within-blob spread
-/// (~0.538) keeps each blob fully connected while the >= 49.6 inter-blob gap prevents
-/// any crossing edge, so discovery order fixes blob 0 -> 0, blob 1 -> 1, blob 2 -> 2;
-/// 1200 >= DBSCAN_PARALLEL_THRESHOLD (1000), so fit takes the parallel region_query branch
+/// Builds 1200 points in 3 tight, row-contiguous blobs of 400, with deterministic jitter.
+/// Blobs are far enough apart that discovery order maps blob i to cluster i.
 fn three_blobs_1200() -> Array2<f64> {
     let centers = [(0.0_f64, 0.0_f64), (50.0, 0.0), (25.0, 50.0)];
     let mut v = Vec::with_capacity(1200 * 2);
@@ -773,8 +762,8 @@ fn three_blobs_1200() -> Array2<f64> {
     Array2::from_shape_vec((1200, 2), v).unwrap()
 }
 
-/// fit's parallel region-query branch on the 1200-point, 3-blob dataset yields
-/// exactly 3 clusters, no noise, and blob i in cluster i
+/// Checks clustering correctness at 1200 points across 3 blobs: exactly 3 clusters, no
+/// noise, and blob i in cluster i. With 2 features, this uses the sequential kd-tree path.
 #[test]
 fn fit_parallel_branch_three_blobs_1200_correct_structure() {
     let data = three_blobs_1200();
@@ -814,7 +803,7 @@ fn fit_parallel_branch_three_blobs_1200_correct_structure() {
         }
     }
 
-    // All 1200 points are core points (every blob point has >= min_samples neighbours)
+    // All 1200 points are core points (every blob point has >= min_samples neighbors)
     let core = m.get_core_sample_indices().unwrap();
     assert_eq!(core.len(), 1200, "all 1200 points should be core points");
 }
@@ -856,7 +845,6 @@ fn predict_parallel_branch_large_heldout_matches_blobs() {
         }
     }
 
-    // An isolated query far from every core is noise
     let far = array![[100.0f64, 100.0]];
     let far_pred = m.predict(&far).unwrap();
     assert_eq!(far_pred[0], -1, "point at (100,100) must be noise (-1)");

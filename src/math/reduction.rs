@@ -1,49 +1,45 @@
 //! Deterministic blocked reductions
 //!
 //! A bare rayon `par_iter().sum::<f64>()` (or `fold().reduce()`) groups its partial sums by
-//! work-stealing, so the float accumulation order - and therefore the rounded result - varies
-//! from run to run and with the thread count. The helpers here fix the grouping instead: the
-//! input is cut into fixed-size blocks, each block is folded serially, the per-block results are
-//! collected in block order (rayon's indexed `collect` preserves it), and the blocks are merged
-//! sequentially. The grouping depends only on
-//! [`DET_REDUCE_BLOCK`](crate::math::reduction::DET_REDUCE_BLOCK), never on scheduling or the
-//! `parallel` flag, so re-running on the same machine reproduces the result (not necessarily
-//! bit-for-bit): the flag is a performance hint, deciding only whether the blocks run on rayon
-//! or sequentially. A caller that instead pairs these helpers with some other serial kernel
-//! below a size threshold makes that switch part of its own reproducibility surface
+//! work-stealing. The float accumulation order, and therefore the rounded result, then varies
+//! from run to run and with the thread count. The helpers here fix the grouping instead. The
+//! input is cut into fixed-size blocks. Each block folds serially, and rayon's indexed
+//! `collect` gathers the per-block results in block order before they merge sequentially. The
+//! grouping depends only on [`DET_REDUCE_BLOCK`](crate::math::reduction::DET_REDUCE_BLOCK),
+//! never on scheduling or the `parallel` flag. Re-running on the same machine reproduces the
+//! result, though not necessarily bit-for-bit. The flag is a performance hint that only decides
+//! whether the blocks run on rayon or in sequence. A caller that pairs these helpers with some
+//! other serial kernel below a size threshold makes that switch part of its own reproducibility
+//! surface.
 //!
-//! [`det_reduce`](crate::math::reduction::det_reduce) folds a slice;
-//! [`det_reduce_range`](crate::math::reduction::det_reduce_range) folds fixed blocks
-//! of an index range instead, for reductions that read several arrays at once or accumulate
-//! something richer than a scalar. The fixed grouping carries no speed penalty against a bare
-//! rayon reduction: the blocked fold is faster below ~64 MB working sets (uniform 16 Ki blocks
-//! balance better than rayon's adaptive splitting) and identical once memory-bandwidth-bound
+//! [`det_reduce`](crate::math::reduction::det_reduce) folds a slice.
+//! [`det_reduce_range`](crate::math::reduction::det_reduce_range) folds fixed blocks of an
+//! index range instead, for reductions that read several arrays at once or accumulate
+//! something richer than a scalar.
 
 use rayon::prelude::{IntoParallelIterator, ParallelIterator, ParallelSlice};
 use std::ops::Range;
 
-/// Fixed reduction block size (elements)
+/// Fixed reduction block size (elements).
 ///
-/// A 4.2M-element sum-of-squares plateaus over 4K-64K-element blocks (17.4-17.9x speedup) with
-/// 16K fastest, degrading at 256K (too few blocks to balance). The constant counts **elements**,
-/// not bytes, and is shared by every element type: 16K `f32` elements (64 KB/block) sit
-/// mid-plateau too. Changing this value changes the (deterministic) result grouping, so it is
-/// part of the reproducibility surface - bump it only deliberately
+/// The constant counts elements, not bytes, and is shared by every element type. Changing this
+/// value changes the deterministic result grouping, so it is part of the reproducibility
+/// surface. Bump it only on purpose.
 pub const DET_REDUCE_BLOCK: usize = 16_384;
 
 /// Folds `slice` with a deterministic, scheduling-independent grouping, on rayon or
-/// sequentially per the `parallel` flag
+/// sequentially per the `parallel` flag.
 ///
 /// Both paths fold the same [`DET_REDUCE_BLOCK`]-sized blocks in the same order, so the flag
-/// never changes the result - pass the side of a calibrated size gate (or `false` when in
-/// doubt; an input shorter than one block gains nothing from rayon)
+/// never changes the result. Pass the side of a calibrated size gate, or `false` when in doubt.
+/// An input shorter than one block gains nothing from rayon.
 ///
 /// # Parameters
 ///
 /// - `slice` - The values to reduce
 /// - `parallel` - Whether the blocks run on rayon (a performance hint)
 /// - `fold_block` - Serial fold over one block
-/// - `merge` - Combines two partial results; applied left-to-right in block order
+/// - `merge` - Combines 2 partial results, applied left-to-right in block order
 /// - `identity` - The fold identity (returned for an empty slice)
 ///
 /// # Returns
@@ -101,22 +97,22 @@ where
 }
 
 /// Folds the index range `0..n` over fixed [`DET_REDUCE_BLOCK`]-sized blocks, on rayon or
-/// sequentially per the `parallel` flag
+/// sequentially per the `parallel` flag.
 ///
-/// The index-range twin of [`det_reduce`], for reductions that cannot be expressed over a
-/// single slice: zipping several arrays, indexing rows of a matrix, or accumulating a
-/// compound state (per-bucket sums, running moments, ...). `fold_block` receives each block's
-/// index sub-range and folds it serially; the per-block results are merged left-to-right in
-/// block order. Both paths use the same grouping, so the flag never changes the result bits -
-/// pass the side of a calibrated work gate (which may count more than the index range, e.g.
-/// indices x per-index cost)
+/// The index-range twin of [`det_reduce`] handles reductions that cannot use a single slice.
+/// Examples include zipping several arrays, indexing rows of a matrix, or accumulating a
+/// compound state such as per-bucket sums or running moments. `fold_block` receives each
+/// block's index sub-range and folds it serially. The per-block results merge left-to-right
+/// in block order. Both paths use the same grouping, so the flag never changes the result
+/// bits. Pass the side of a calibrated work gate, which may count more than the index range
+/// (for example indices times per-index cost).
 ///
 /// # Parameters
 ///
 /// - `n` - The exclusive upper bound of the index range
 /// - `parallel` - Whether the blocks run on rayon (a performance hint)
 /// - `fold_block` - Serial fold over one block's index range
-/// - `merge` - Combines two partial results; applied left-to-right in block order
+/// - `merge` - Combines 2 partial results, applied left-to-right in block order
 /// - `identity` - The fold identity (returned when `n == 0`)
 ///
 /// # Returns
@@ -169,12 +165,13 @@ where
     }
 }
 
+/// Unit tests for the deterministic blocked reductions.
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// The `parallel` flag is a pure performance hint: both paths of both helpers produce
-    /// identical results across length edge cases (empty, sub-block, multi-block)
+    /// identical results across length edge cases (empty, sub-block, multi-block).
     #[test]
     fn parallel_flag_does_not_change_bits() {
         for len in [0usize, 1, 100, DET_REDUCE_BLOCK, DET_REDUCE_BLOCK * 3 + 17] {
@@ -199,7 +196,7 @@ mod tests {
     }
 
     /// The blocked fold gives the same result as a hand-rolled serial fold over the same
-    /// blocks, for both flag values
+    /// blocks, for both flag values.
     #[test]
     fn det_reduce_matches_serial_blocked_fold() {
         for len in [0usize, 1, 100, DET_REDUCE_BLOCK, DET_REDUCE_BLOCK * 3 + 17] {
@@ -228,7 +225,7 @@ mod tests {
     }
 
     /// The range fold visits every index exactly once, in the same block grouping as the
-    /// slice fold, across the same length edge cases
+    /// slice fold, across the same length edge cases.
     #[test]
     fn det_reduce_range_matches_serial_blocked_fold() {
         for len in [0usize, 1, 100, DET_REDUCE_BLOCK, DET_REDUCE_BLOCK * 3 + 17] {
@@ -256,8 +253,8 @@ mod tests {
         }
     }
 
-    /// Compound accumulators work through the range fold: per-bucket sums + counts merge in
-    /// block order and match a fully serial scatter
+    /// Compound accumulators work through the range fold: per-bucket sums and counts merge
+    /// in block order and match a fully serial scatter.
     #[test]
     fn det_reduce_range_compound_accumulator() {
         let n = DET_REDUCE_BLOCK * 2 + 333;

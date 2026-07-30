@@ -10,10 +10,8 @@ use rustyml::machine_learning::{Contamination, IsolationForest};
 
 #[test]
 fn test_new_rejects_invalid_scalar_arguments() {
-    // Each row: a constructor/builder invocation that supplies one invalid scalar
-    // argument, plus the parameter name the InvalidParameter error must carry.
-    // n_estimators=0 and max_samples=0 go through `new`; max_depth=Some(0) goes
-    // through the `with_max_depth` builder.
+    // Each row supplies 1 invalid scalar, and its InvalidParameter error must carry that name.
+    // n_estimators and max_samples go through `new`, max_depth through `with_max_depth`
     type Case = (&'static str, fn() -> Error);
     let cases: [Case; 3] = [
         ("n_estimators", || IsolationForest::new(0, 256).unwrap_err()),
@@ -162,7 +160,7 @@ fn test_predict_wrong_feature_count_returns_dimension_mismatch() {
     let train = array![[1.0, 2.0], [3.0, 4.0]];
     model.fit(&train).unwrap();
 
-    // training had 2 features; predict with 3
+    // training had 2 features, predict is given 3
     let x_wrong = array![[1.0, 2.0, 3.0]];
     let err = model.predict(&x_wrong).unwrap_err();
     assert!(
@@ -199,7 +197,7 @@ fn test_score_sample_wrong_dim_returns_dimension_mismatch() {
     let train = array![[1.0, 2.0], [3.0, 4.0]];
     model.fit(&train).unwrap();
 
-    // training had 2 features; score with 3
+    // training had 2 features, score is given 3
     let err = model.score_sample(&[1.0, 2.0, 3.0]).unwrap_err();
     assert!(
         matches!(
@@ -241,11 +239,11 @@ fn test_fit_stores_exactly_n_estimators_trees() {
     );
 }
 
-// Scores in [0, 1]
+// Scores in [-1, 0)
 
 #[test]
 fn test_scores_are_in_negative_unit_interval() {
-    // anomaly scores must lie in [0, 1] by design: 2^(-E/c) with E, c > 0
+    // anomaly scores lie in [-1, 0) by design: -(2^(-E/c)) with E, c > 0
     let mut model = IsolationForest::new(50, 64).unwrap().with_random_state(7);
     let train = array![
         [0.0, 0.0],
@@ -286,11 +284,11 @@ fn test_score_sample_is_in_negative_unit_interval() {
 }
 
 // Outlier detection correctness: anomalous points (far from the bulk) are
-// isolated in fewer steps and so get higher anomaly scores than inliers
+// isolated in fewer steps and so get lower (more negative) anomaly scores than inliers
 
 #[test]
 fn test_outlier_score_exceeds_all_inlier_scores() {
-    // 10 inliers clustered near (0, 0); 1 outlier far away at (1000, 1000)
+    // 10 inliers clustered near (0, 0), plus 1 outlier far away at (1000, 1000)
     let inliers = array![
         [0.0, 0.0],
         [0.1, 0.0],
@@ -366,7 +364,7 @@ fn test_outlier_score_sample_is_below_inlier_via_single_sample_api() {
 
 #[test]
 fn test_identical_points_have_equal_scores() {
-    // two identical rows must be scored identically under a seeded (deterministic) model
+    // 2 identical rows must be scored identically under a seeded (deterministic) model
     let data = array![
         [1.0, 2.0],
         [3.0, 4.0],
@@ -383,7 +381,7 @@ fn test_identical_points_have_equal_scores() {
     );
 }
 
-// Determinism: same seed => identical scores
+// Determinism: same seed -> identical scores
 
 #[test]
 fn test_same_seed_produces_identical_scores() {
@@ -405,8 +403,8 @@ fn test_same_seed_produces_identical_scores() {
 
 #[test]
 fn test_different_seeds_may_produce_different_scores() {
-    // distinct seeds with enough trees almost certainly differ on at least one
-    // sample; guards against the seed being ignored
+    // distinct seeds with enough trees almost certainly differ on at least 1
+    // sample. This guards against the seed being ignored
     let data = array![[0.0, 0.0], [0.5, 0.5], [1.0, 1.0], [2.0, 2.0], [50.0, 50.0]];
 
     let mut model_a = IsolationForest::new(50, 32).unwrap().with_random_state(1);
@@ -450,7 +448,7 @@ fn test_fit_predict_matches_fit_then_predict() {
 
 #[test]
 fn test_fit_and_predict_on_single_sample() {
-    // one training row gives a size-1 leaf with path length 0, so score = -(2^0) = -1.0
+    // 1 training row gives a size-1 leaf with path length 0, so score = -(2^0) = -1.0
     let mut model = IsolationForest::new(5, 10).unwrap().with_random_state(1);
     let data = array![[3.0, 4.0]];
     model.fit(&data).unwrap();
@@ -494,7 +492,7 @@ fn test_fit_with_fewer_rows_than_max_samples_succeeds() {
 
 #[test]
 fn test_fit_with_constant_feature_column_does_not_panic() {
-    // column 1 is constant; the tree builder makes a leaf when max_val - min_val < 1e-10
+    // column 1 is constant. The tree builder makes a leaf when max_val - min_val < 1e-10
     let mut model = IsolationForest::new(10, 32).unwrap().with_random_state(42);
     let data = array![[1.0, 5.0], [2.0, 5.0], [3.0, 5.0], [4.0, 5.0], [5.0, 5.0]];
     model.fit(&data).unwrap();
@@ -507,7 +505,7 @@ fn test_fit_with_constant_feature_column_does_not_panic() {
 #[test]
 fn test_fit_and_predict_with_single_feature() {
     let mut model = IsolationForest::new(20, 32).unwrap().with_random_state(42);
-    // values clustered near 0 except one far outlier at 999
+    // values clustered near 0 except 1 far outlier at 999
     let data = array![[0.0], [0.1], [-0.1], [0.2], [999.0]];
     model.fit(&data).unwrap();
     assert_eq!(model.get_n_features(), 1);
@@ -591,13 +589,13 @@ fn test_load_from_nonexistent_path_returns_io_error() {
         "expected Io error when loading from missing file, got: {err:?}"
     );
 }
-// Closed-form anomaly score on identical points: every tree is one leaf, so the
-// score is 2^(-c(sample_size)/c(max_samples)) with c(n) = 2*H_{n-1} - 2(n-1)/n
+// Closed-form anomaly score on identical points: every tree is 1 leaf, and the
+// path-length correction cancels to score = -0.5, using c(n) = 2*H_{n-1} - 2(n-1)/n
 
 /// max_samples == n_rows gives score = -2^(-c(max_samples)/c(max_samples)) = -0.5, exactly
 #[test]
 fn test_identical_points_score_equals_one_half_when_sample_size_equals_max_samples() {
-    // 4 identical rows; max_samples = 4 == n_rows, so sample_size = min(4,4) = 4
+    // 4 identical rows, max_samples = 4 == n_rows, so sample_size = min(4,4) = 4
     let data = array![[2.0, 7.0], [2.0, 7.0], [2.0, 7.0], [2.0, 7.0]];
     let mut model = IsolationForest::new(20, 4).unwrap().with_random_state(123);
     model.fit(&data).unwrap();
@@ -612,21 +610,19 @@ fn test_identical_points_score_equals_one_half_when_sample_size_equals_max_sampl
     }
 }
 
-/// max_samples > n_rows: each tree is built on sample_size = n_rows points, so the score
-/// normalization must use c(sample_size), NOT c(max_samples) (Liu et al. normalise by the
-/// actual sub-sampling size). For identical points the leaf size equals sample_size, hence
-/// score = -2^(-c(n_rows)/c(n_rows)) = -0.5, so identical points are not anomalies
+/// max_samples > n_rows makes sample_size = n_rows, so normalization must use
+/// c(sample_size), not c(max_samples), giving score = -2^(-c(n_rows)/c(n_rows)) = -0.5
 #[test]
 fn test_identical_points_score_matches_closed_form_when_sample_size_below_max_samples() {
-    // 4 identical rows; max_samples = 8 > 4, so sample_size = min(8,4) = 4 (leaf size = 4)
+    // 4 identical rows, max_samples = 8 > 4, so sample_size = min(8,4) = 4 (leaf size = 4)
     let data = array![[1.0, -3.0], [1.0, -3.0], [1.0, -3.0], [1.0, -3.0]];
     let mut model = IsolationForest::new(25, 8).unwrap().with_random_state(7);
     model.fit(&data).unwrap();
     let scores = model.score_samples(&data).unwrap();
 
-    // Path length c(4) is normalised by c(sample_size) = c(4): score = -2^(-c(4)/c(4)) = -0.5,
-    // normalising by c(max_samples) = c(8) would wrongly yield ~0.6459, flagging identical
-    // points as anomalous
+    // Path length c(4) is normalized by c(sample_size) = c(4): score = -2^(-c(4)/c(4)) = -0.5.
+    // Normalizing by c(max_samples) = c(8) instead would wrongly yield about -0.6459, making
+    // identical points look more anomalous than they are
     for (i, &s) in scores.iter().enumerate() {
         assert!(
             (s + 0.5).abs() < 1e-12,
@@ -635,17 +631,16 @@ fn test_identical_points_score_matches_closed_form_when_sample_size_below_max_sa
     }
 }
 
-/// A sample landing exactly on the cutoff is an inlier, as in scikit-learn
-///
-/// Under `Contamination::Auto` an undifferentiated dataset scores exactly `-0.5`, which is exactly
-/// the offset, so every decision value is `0.0`. scikit-learn's rule is `decision < 0 -> -1`, so
-/// these rows are inliers; the `score >= offset` rule this replaced labelled them all outliers
+/// A sample landing exactly on the cutoff is an inlier, matching scikit-learn's
+/// `decision < 0 -> -1` rule
 #[test]
 fn samples_exactly_on_the_cutoff_are_inliers() {
     let data = array![[2.0, 7.0], [2.0, 7.0], [2.0, 7.0], [2.0, 7.0]];
     let mut model = IsolationForest::new(20, 4).unwrap().with_random_state(123);
     model.fit(&data).unwrap();
 
+    // These identical rows score exactly -0.5 (see the closed-form tests above), which
+    // equals the Auto cutoff, so every decision value is 0.0
     let decision = model.decision_function(&data).unwrap();
     for (i, &d) in decision.iter().enumerate() {
         assert!(d.abs() < 1e-12, "row {i}: decision should be 0.0, got {d}");
@@ -658,7 +653,7 @@ fn samples_exactly_on_the_cutoff_are_inliers() {
 }
 
 /// `predict` must accept inputs whose rows are not contiguous in memory (e.g. a
-/// transposed view) instead of panicking inside `as_slice().unwrap()`
+/// transposed view) without panicking
 #[test]
 fn predict_handles_non_contiguous_input() {
     // Train on ordinary contiguous data
@@ -668,7 +663,7 @@ fn predict_handles_non_contiguous_input() {
 
     // A (features, samples) array transposed to (samples, features) has non-contiguous rows
     let ft = array![[0.0, 0.1, 5.0], [0.0, 0.1, 5.0]]; // shape (2, 3)
-    let x = ft.t(); // shape (3, 2); rows stride across memory, so they are not contiguous
+    let x = ft.t(); // shape (3, 2), rows stride across memory, so they are not contiguous
     assert!(
         x.row(0).as_slice().is_none(),
         "test setup: transposed rows must be non-contiguous to exercise the bug"
@@ -749,7 +744,7 @@ fn predict_count_matches_contamination() {
     }
 }
 
-/// A contamination fraction outside (0.0, 0.5] (or non-finite) is rejected by the builder,
+/// The builder rejects a contamination fraction outside (0.0, 0.5] (or non-finite),
 /// before any fitting happens
 #[test]
 fn with_contamination_rejects_invalid_fraction() {
@@ -770,9 +765,8 @@ fn with_contamination_rejects_invalid_fraction() {
     );
 }
 
-/// The decision threshold is model state fitted from the TRAINING scores, so a sample gets
-/// the same label whether it is predicted alone, in a slice, or in the whole batch. The old
-/// per-call contamination quantile failed all three of these.
+/// The decision threshold is fitted model state. So a sample gets the same label whether
+/// it is predicted alone, in a slice, or in the whole batch
 #[test]
 fn predict_label_is_independent_of_batching() {
     let x = array![
@@ -796,7 +790,7 @@ fn predict_label_is_independent_of_batching() {
 
     let whole = model.predict(&x).unwrap();
 
-    // One row at a time must agree with the full-batch labelling
+    // 1 row at a time must agree with the full-batch labeling
     for i in 0..x.nrows() {
         let row = x.slice(s![i..i + 1, ..]).to_owned();
         let single = model.predict(&row).unwrap();
@@ -807,7 +801,7 @@ fn predict_label_is_independent_of_batching() {
         );
     }
 
-    // And so must an arbitrary split into two halves
+    // And so must an arbitrary split into 2 halves
     let first = model.predict(&x.slice(s![..4, ..]).to_owned()).unwrap();
     let second = model.predict(&x.slice(s![4.., ..]).to_owned()).unwrap();
     let halves: Vec<i32> = first.iter().chain(second.iter()).copied().collect();
@@ -818,8 +812,7 @@ fn predict_label_is_independent_of_batching() {
     );
 }
 
-/// A lone inlier-looking sample is not automatically an outlier. Under the old per-batch
-/// quantile a single-row predict always returned -1, since ceil(c*1) clamps to 1.
+/// A lone inlier-looking sample is not automatically labeled an outlier
 #[test]
 fn predict_on_single_sample_is_not_forced_to_outlier() {
     let x = array![
@@ -892,11 +885,8 @@ fn contamination_auto_uses_paper_threshold() {
     }
 }
 
-/// A Fraction offset is the NumPy-style percentile of the training scores
-///
-/// With `n = 10` and `c = 0.2` the position is `(10 - 1) * 0.2 = 1.8`, a fractional index, so the
-/// cutoff interpolates between the second and third smallest scores rather than landing on one of
-/// them - which is what makes it equal to scikit-learn's `offset_`
+/// A Fraction offset is the NumPy-style percentile of the training scores, matching
+/// scikit-learn's `offset_`
 #[test]
 fn contamination_fraction_offset_is_the_training_score_percentile() {
     let x = array![
@@ -922,6 +912,8 @@ fn contamination_fraction_offset_is_the_training_score_percentile() {
     let mut sorted = model.score_samples(&x).unwrap().to_vec();
     sorted.sort_unstable_by(f64::total_cmp);
 
+    // n=10, c=0.2 gives position (10 - 1) * 0.2 = 1.8, a fractional index that interpolates
+    // between the 2nd and 3rd smallest scores (indices 1 and 2)
     let expected = sorted[1] + 0.8 * (sorted[2] - sorted[1]);
     assert!(
         (offset - expected).abs() < 1e-12,

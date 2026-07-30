@@ -1,55 +1,53 @@
 //! Crate-wide control of pseudo-random number generation for reproducibility
 //!
 //! Most randomized components in the crate draw their RNG through `make_rng` (or its sibling
-//! `make_rng_opt`, for callers that stay deterministic unless explicitly seeded), so a single
-//! [`set_global_seed`] call can make them reproducible together. This routes the
-//! neural-network components (weight initialization, dropout/noise masks, and the
-//! [`Sequential`](crate::neural_network::sequential::Sequential) minibatch shuffle), the
-//! machine-learning estimators (k-means, SVC/LinearSVC, MeanShift, Isolation Forest, etc.), and the
-//! utilities (`train_test_split`, t-SNE) all through this one entry point
+//! `make_rng_opt`, for callers that stay deterministic unless explicitly seeded). A single
+//! [`set_global_seed`] call makes them reproducible together. This routes randomness through one
+//! entry point for:
+//!
+//! - neural-network components: weight initialization, dropout/noise masks, and the
+//!   [`Sequential`](crate::neural_network::sequential::Sequential) minibatch shuffle
+//! - machine-learning estimators: k-means, SVC/LinearSVC, MeanShift, Isolation Forest, and others
+//! - utilities: `train_test_split`, t-SNE
 //!
 //! # Seed resolution
 //!
 //! `make_rng` resolves a per-consumer `random_state: Option<u64>` against the process-global
 //! (thread-local) seed as follows:
 //!
-//! - `Some(seed)` - use that seed; the global is **ignored and left untouched**
-//! - `None` + a global seed is set - derive an independent sub-seed from the global stream
-//! - `None` + no global seed - seed from entropy (non-reproducible)
+//! - `Some(seed)`: use that seed. The global stays untouched
+//! - `None`, with a global seed set: derive an independent sub-seed from the global stream
+//! - `None`, with no global seed: seed from entropy (not reproducible)
 //!
-//! Because an explicit `Some` seed never consumes the global stream, adding or removing an
-//! explicitly-seeded component does not perturb the seeds handed to the unseeded ones. Unseeded
-//! components, by contrast, draw from the shared stream in construction order, so their
-//! reproducibility is order-sensitive (this matches Keras' global-seed behavior)
+//! Because an explicit `Some` seed never consumes the global stream, adding or removing a seeded
+//! component does not change the seeds the unseeded ones get. Unseeded components, by contrast,
+//! draw from the shared stream in construction order, so their reproducibility is order-sensitive
+//! (this matches Keras' global-seed behavior)
 //!
 //! # Threading
 //!
 //! The global seed is **thread-local**: [`set_global_seed`] only affects the thread that calls
 //! it, so set the seed on the same thread that constructs your models. This is lock-free, and
-//! because the default test harness spawns a fresh thread per test, each test starts unseeded
-//! Under `--test-threads=1`, however, all tests share one thread, so a test that sets a global
-//! seed should [`clear_global_seed`] afterwards (ideally panic-safely, e.g. via a drop guard)
-//! to avoid leaking it into a later test that relies on unseeded behavior
+//! because the default test harness spawns a fresh thread per test, each test starts unseeded.
+//! Under `--test-threads=1`, however, all tests share one thread. A test that sets a global seed
+//! should call [`clear_global_seed`] afterwards, ideally with a drop guard so it runs even on
+//! panic. This avoids leaking the seed into a later test that expects unseeded behavior
 //!
 //! # Intentional exclusions
 //!
-//! Not every pseudo-random draw in the crate is routed here. A draw is worth seeding through this
-//! module only when it has a real, persistent effect on the result. The `utils` dimensionality
-//! reducers (`pca`, `kernel_pca`) are deliberately left out, for two reasons:
+//! Not every pseudo-random draw in the crate goes through this module. A draw is worth routing
+//! here only when it has a real, lasting effect on the result. The `utils` dimensionality
+//! reducers (`pca`, `kernel_pca`) are left out, for 2 reasons:
 //!
-//! - Their **iterative eigensolvers** (power iteration and Lanczos: `pca`'s `PowerIteration` solver
-//!   and `kernel_pca`'s `Lanczos` / `PowerIteration` solvers) seed a random *starting vector* with a
-//!   fixed constant. Such methods converge to the same eigenvectors regardless of the (generic)
-//!   starting vector, so the seed is observationally inert: it only pins otherwise-arbitrary
-//!   eigenvector signs, and exists purely to make the solver deterministic. Routing it through the
-//!   global seed would make that sign choice depend on ambient global state (*less* reproducible)
-//!   for no observable benefit
-//! - **Randomized SVD** (`pca`'s `SVDSolver::Randomized(u64)`) takes its seed as part of the public
-//!   solver variant, so the caller always supplies it explicitly: there is no unseeded (`None`) path
-//!   for the global to fill, and the result is already reproducible by construction
+//! - Their iterative eigensolvers (PCA's `PowerIteration`, and KernelPCA's `Lanczos` and
+//!   `PowerIteration`) seed a starting vector with a fixed constant. These methods converge to the
+//!   same eigenvectors regardless of the starting vector, so the seed only pins an arbitrary
+//!   eigenvector sign. It has no effect on reproducibility worth routing through the global seed
+//! - Randomized SVD (`SVDSolver::Randomized(u64)`) takes its seed as a public argument, so the
+//!   caller always supplies it. There is no unseeded path for the global to fill
 //!
-//! The general rule: route a draw through this module only when it makes a pseudo-random choice that
-//! changes the result; a draw whose result converges (or whose seed the user already pins) stays out
+//! General rule: route a draw through this module only when an unseeded call would make a
+//! pseudo-random choice that changes the result
 
 use ndarray_rand::rand::{RngCore, SeedableRng, rng, rngs::StdRng};
 use std::cell::RefCell;
@@ -79,13 +77,13 @@ pub fn clear_global_seed() {
     GLOBAL_SEED_RNG.with(|cell| *cell.borrow_mut() = None);
 }
 
-/// Resolves a `random_state` into an RNG **only when a seed is in effect**, returning `None`
-/// when there is none (`random_state` is `None` AND no global seed is set)
+/// Resolves a `random_state` into an RNG only when a seed is in effect. Returns `None` when
+/// there is none (`random_state` is `None` and no global seed is set)
 ///
 /// This is for callers that should stay deterministic unless randomness is explicitly requested,
 /// e.g. a decision tree that breaks split ties randomly only when seeded. `Some(seed)` uses that
-/// seed (ignoring the global); `None` derives a sub-seed from the thread-local global if one is set,
-/// otherwise returns `None` (the signal: "no randomization requested")
+/// seed and ignores the global. `None` derives a sub-seed from the thread-local global if one is
+/// set, or returns `None` otherwise (the signal: no randomization requested)
 ///
 /// # Parameters
 ///
@@ -109,8 +107,9 @@ pub(crate) fn make_rng_opt(random_state: Option<u64>) -> Option<StdRng> {
 
 /// Resolves a `random_state` into a concrete RNG (see the [module docs](self) for the rules)
 ///
-/// This is the single entry point for all randomness in the crate: `Some` uses the given seed,
-/// `None` consults the thread-local global (deriving a sub-seed from it if set, else entropy)
+/// This is the single entry point for all randomness in the crate. `Some` uses the given seed.
+/// `None` consults the thread-local global, deriving a sub-seed from it if one is set, or falls
+/// back to entropy
 ///
 /// # Parameters
 ///

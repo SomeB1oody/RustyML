@@ -27,7 +27,7 @@ fn sigmoid(z: f64) -> f64 {
 
 /// Logistic regression model for binary classification
 ///
-/// Trained with gradient descent to minimize the logistic loss
+/// Trains by gradient descent to minimize the logistic loss
 ///
 /// # Examples
 ///
@@ -70,7 +70,7 @@ pub struct LogisticRegression {
     learning_rate: f64,
     /// Maximum number of gradient descent iterations
     max_iter: usize,
-    /// Convergence tolerance; iteration stops when the loss change is smaller than this value
+    /// Convergence tolerance. Iteration stops when the loss change is smaller than this value
     tol: f64,
     /// Number of iterations actually run after fitting, `None` before training
     n_iter: Option<usize>,
@@ -83,10 +83,16 @@ impl Default for LogisticRegression {
     ///
     /// # Default Values
     ///
-    /// - `fit_intercept`: `true` - include a bias/intercept term
-    /// - `learning_rate`: `0.01` - a moderate rate giving stable convergence for most problems
-    /// - `max_iter`: `100` - maximum number of gradient descent iterations
-    /// - `tol`: `1e-4` - convergence tolerance; training stops when the loss change between iterations is smaller than this value
+    /// - `fit_intercept` - `true` - include an intercept term (bias)
+    /// - `learning_rate` - `0.01` - a moderate rate that gives stable convergence for most
+    ///   problems
+    /// - `max_iter` - `100` - maximum number of gradient descent iterations
+    /// - `tol` - `1e-4` - stops training when the loss change between iterations is smaller
+    ///   than this value
+    ///
+    /// # Returns
+    ///
+    /// - `LogisticRegression` - a new instance with default parameters
     fn default() -> Self {
         LogisticRegression {
             weights: None,
@@ -106,9 +112,10 @@ impl LogisticRegression {
     /// # Parameters
     ///
     /// - `fit_intercept` - whether to add an intercept term (bias)
-    /// - `learning_rate` - learning rate for gradient descent, must be positive and finite
+    /// - `learning_rate` - gradient descent step size, must be positive and finite
     /// - `max_iterations` - maximum number of iterations, must be greater than 0
-    /// - `tolerance` - convergence tolerance, stops when the loss change is below this value, must be positive and finite
+    /// - `tolerance` - stops training when the loss change is below this value, must be
+    ///   positive and finite
     ///
     /// # Returns
     ///
@@ -116,12 +123,13 @@ impl LogisticRegression {
     ///
     /// # Notes
     ///
-    /// No regularization is applied by default. To add L1/L2 regularization, use
+    /// By default, this sets no regularization. To add L1 or L2 regularization, use
     /// [`with_regularization`](Self::with_regularization)
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - if any parameter is invalid (e.g. non-positive learning rate)
+    /// - `Error::InvalidParameter` - if any parameter is invalid, for example a non-positive
+    ///   learning rate
     pub fn new(
         fit_intercept: bool,
         learning_rate: f64,
@@ -145,16 +153,18 @@ impl LogisticRegression {
 
     /// Enables L1 or L2 regularization to prevent overfitting (default: no regularization)
     ///
-    /// The penalty is added to the mean log-loss as `alpha * R(w)` (with `R = ||w||_1` for L1
-    /// and `R = 0.5 * ||w||^2` for L2), not divided by the sample count
+    /// Training adds the penalty to the mean log-loss as `alpha * R(w)`. It uses `R = ||w||_1`
+    /// for L1 and `R = 0.5 * ||w||^2` for L2. It does not divide the penalty by the sample
+    /// count
     ///
     /// # Parameters
     ///
-    /// - `regularization` - the regularization variant and strength ([`RegularizationType::L1`] or [`RegularizationType::L2`])
+    /// - `regularization` - the regularization variant and strength
+    ///   ([`RegularizationType::L1`] or [`RegularizationType::L2`])
     ///
     /// # Returns
     ///
-    /// - `Ok(Self)` - the updated instance, for method chaining
+    /// - `Result<Self, Error>` - the updated instance, for method chaining
     ///
     /// # Errors
     ///
@@ -199,14 +209,15 @@ impl LogisticRegression {
     /// - `Error::EmptyInput` - if `x` has no rows
     /// - `Error::DimensionMismatch` - if `y.len()` does not equal `x.nrows()`
     /// - `Error::InvalidInput` - if the target vector contains values other than `0.0` or `1.0`
-    /// - `Error::NonFinite` - if `x` contains NaN/Infinity, or numerical issues occur during training
+    /// - `Error::NonFinite` - if `x` contains NaN/Infinity, or numerical issues occur
+    ///   during training
     ///
     /// # Performance
     ///
-    /// The per-iteration logits and gradient run as parallel GEMVs above their FLOPs
-    /// gates, the sigmoid above the exp-map gate, and the loss as a deterministic blocked fold
-    /// above its exp-reduction gate, so re-running on the
-    /// same machine reproduces the result (not necessarily bit-for-bit)
+    /// The per-iteration logits and gradient run as parallel GEMVs above their FLOPs gates. The
+    /// sigmoid runs above the exp-map gate. The loss uses a deterministic blocked fold above its
+    /// exp-reduction gate. Re-running on the same machine reproduces the result, though not
+    /// necessarily bit-for-bit
     pub fn fit<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -286,9 +297,8 @@ impl LogisticRegression {
                 return Err(Error::non_finite("gradient calculation"));
             }
 
-            // L1 is deliberately absent here: it is applied after the step by the proximal
-            // operator below, so that penalized coefficients reach exactly 0.0 instead of only
-            // approaching it
+            // L1 is absent here. The proximal operator below applies it after the step, so
+            // penalized coefficients reach exactly 0.0 instead of only approaching it.
             if let Some(RegularizationType::L2(regularization_strength)) = &self.regularization_type
             {
                 let start_idx = if self.fit_intercept { 1 } else { 0 };
@@ -297,7 +307,7 @@ impl LogisticRegression {
                 }
             }
 
-            // Loss at the CURRENT weights (before this step's update)
+            // Loss at the current weights (before this step's update)
             let loss_term =
                 |z: f64, label: f64| z.max(0.0) - z * label + (1.0 + (-z.abs()).exp()).ln();
             let total_loss = match (predictions.as_slice(), y.as_slice()) {
@@ -336,10 +346,10 @@ impl LogisticRegression {
             // In-place gradient step, avoiding a fresh weight array every iteration
             weights.scaled_add(-self.learning_rate, &gradients);
 
-            // Proximal step for L1 (ISTA): soft-thresholding by `learning_rate * alpha` is the
-            // exact minimizer of `0.5 * ||w - v||^2 + learning_rate * alpha * ||w||_1`, so an
-            // unsupported coefficient lands on exactly 0.0. The intercept at index 0 is skipped,
-            // since it carries no penalty
+            // Proximal step for L1 (ISTA). Soft-thresholding by `learning_rate * alpha` is the
+            // exact minimizer of `0.5 * ||w - v||^2 + learning_rate * alpha * ||w||_1`. An
+            // unsupported coefficient lands on exactly 0.0. This loop skips the intercept at
+            // index 0, since it carries no penalty.
             if let Some(RegularizationType::L1(regularization_strength)) = &self.regularization_type
             {
                 let start_idx = if self.fit_intercept { 1 } else { 0 };
@@ -411,11 +421,13 @@ impl LogisticRegression {
     ///
     /// # Parameters
     ///
-    /// - `x` - feature matrix where each row is a sample and each column is a feature (without bias term)
+    /// - `x` - feature matrix where each row is a sample and each column is a feature
+    ///   (without bias term)
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, Error>` - a 1D array containing predicted class labels (`0.0` or `1.0`)
+    /// - `Result<Array1<f64>, Error>` - a 1D array containing predicted class labels
+    ///   (`0.0` or `1.0`)
     ///
     /// # Notes
     ///
@@ -426,8 +438,9 @@ impl LogisticRegression {
     /// # Errors
     ///
     /// - `Error::NotFitted` - if the model has not been fitted yet
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::NonFinite` - if input is empty, dimensions mismatch, or contains invalid values
-    /// - `Error::NonFinite` - if numerical issues occur during probability calculation
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - if `x` is empty or its dimensions
+    ///   do not match the trained model
+    /// - `Error::NonFinite` - if `x` or the computed probabilities contain non-finite values
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -446,7 +459,8 @@ impl LogisticRegression {
     ///
     /// # Parameters
     ///
-    /// - `x` - feature matrix where each row is a sample and each column is a feature (without the bias term)
+    /// - `x` - feature matrix where each row is a sample and each column is a feature
+    ///   (without the bias term)
     ///
     /// # Returns
     ///
@@ -455,8 +469,9 @@ impl LogisticRegression {
     /// # Errors
     ///
     /// - `Error::NotFitted` - if the model has not been fitted yet
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::NonFinite` - if input is empty, dimensions mismatch, or data contains non-finite values
-    /// - `Error::NonFinite` - if numerical issues occur during probability calculation
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - if `x` is empty or its dimensions
+    ///   do not match the trained model
+    /// - `Error::NonFinite` - if `x` or the computed probabilities contain non-finite values
     pub fn predict_proba<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -466,7 +481,8 @@ impl LogisticRegression {
             .as_ref()
             .ok_or_else(|| Error::not_fitted("LogisticRegression"))?;
 
-        // Validate against trained feature count, excluding the implicit bias column when an intercept was fitted
+        // Validates against the trained feature count, excluding the implicit bias column when
+        // an intercept was fitted
         let expected_features = if self.fit_intercept {
             weights.len() - 1
         } else {
@@ -493,7 +509,7 @@ impl LogisticRegression {
 
     /// Applies the sigmoid to the raw linear decision values `x.dot(weights)`
     ///
-    /// `x` must already include the bias column when an intercept was fitted; this
+    /// `x` must already include the bias column when an intercept was fitted. This
     /// is an internal helper used by [`Self::predict_proba`]
     ///
     /// # Parameters
@@ -510,7 +526,7 @@ impl LogisticRegression {
         let weights = self.weights.as_ref().unwrap();
         let mut predictions = matvec(x, weights, Parallelism::Rayon(0));
 
-        // Apply sigmoid with conditional parallelization (mutate in place; exp-map class)
+        // Applies the sigmoid with conditional parallelization, mutating in place (exp-map class)
         if predictions.len() >= exp_map_f64_parallel_threshold() {
             predictions.par_mapv_inplace(sigmoid);
         } else {
@@ -531,12 +547,16 @@ impl LogisticRegression {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, Error>` - predicted class labels (`0.0` or `1.0`) for the training samples
+    /// - `Result<Array1<f64>, Error>` - predicted class labels (`0.0` or `1.0`) for the
+    ///   training samples
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - if input data does not match expectations
-    /// - `Error::NonFinite` - if numerical issues occur during fitting or prediction
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - if `train_x` and `train_y` do not
+    ///   agree in shape
+    /// - `Error::InvalidInput` - if `train_y` contains values other than `0.0` or `1.0`
+    /// - `Error::NonFinite` - if `train_x` contains non-finite values, or numerical issues
+    ///   occur during fitting or prediction
     pub fn fit_predict<S1, S2>(
         &mut self,
         train_x: &ArrayBase<S1, Ix2>,
@@ -565,7 +585,13 @@ impl LogisticRegression {
 ///
 /// # Returns
 ///
-/// - `Array2<f64>` - a new feature matrix of polynomial combinations of the input features, with shape (n_samples, n_output_features)
+/// - `Array2<f64>` - a new feature matrix of polynomial combinations of the input features, with
+///   shape (n_samples, n_output_features)
+///
+/// # Notes
+///
+/// The output has no constant (bias) column. Degree 1 keeps the original features, and each
+/// higher degree up to `degree` adds its own monomials
 ///
 /// # Examples
 ///
@@ -632,7 +658,8 @@ where
     if degree >= 2 {
         let mut col_idx = n_features;
 
-        // Recursive combination helper: the argument count is inherent to the recursion, so the lint is allowed
+        // Recursive combination helper. The recursion needs this many arguments, so the
+        // attribute below allows the lint.
         #[allow(clippy::too_many_arguments)]
         fn add_combinations<S>(
             x: &ArrayBase<S, Ix2>,

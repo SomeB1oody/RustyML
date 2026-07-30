@@ -1,7 +1,7 @@
 //! K-Nearest Neighbors (KNN) classification
 //!
-//! Provides the [`KNN`] classifier and the [`WeightingStrategy`] enum that controls how
-//! neighbor votes are weighted
+//! Provides the [`KNN`] classifier and the [`WeightingStrategy`] enum, which controls the
+//! weight of each neighbor's vote
 
 use crate::error::Error;
 pub use crate::machine_learning::DistanceCalculationMetric;
@@ -19,12 +19,8 @@ use std::sync::OnceLock;
 
 /// Feature-count ceiling for using the kd-tree neighbor index
 ///
-/// Above this many features the tree no longer prunes effectively, so the brute-force search
-/// is used instead. On uniform data (20k points, k = 8) the kd-tree beats the brute-force scan
-/// up to d = 8 (2.6x at d = 8) and loses from d = 12 on (2.2-2.6x slower), so the ceiling sits
-/// at the proven-win end of the 8-12 bracket. The boundary shifts with data distribution
-/// (clustered data favors the tree) and dataset size, so this is a single-shape calibration,
-/// not a universal constant
+/// Above this many features, the tree no longer prunes effectively. The brute-force search
+/// runs instead.
 const KNN_KD_TREE_MAX_DIMS: usize = 8;
 
 /// Selects the class with the greatest accumulated score (vote count or summed weight),
@@ -47,10 +43,11 @@ where
 /// Strategy used for weighting neighbors in the KNN algorithm
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WeightingStrategy {
-    /// Each neighbor is weighted equally
+    /// Every neighbor gets the same weight
     #[default]
     Uniform,
-    /// Neighbors are weighted by the inverse of their distance, so closer neighbors have greater influence
+    /// Each neighbor's weight equals the inverse of its distance. Closer neighbors get more
+    /// influence.
     Distance,
 }
 
@@ -101,22 +98,23 @@ pub struct KNN<T> {
     /// Encoded training labels as indices for efficient parallel computation
     y_train_encoded: Option<Array1<usize>>,
 
-    /// Bidirectional mapping between original labels and their encoded indices: (label -> index, index -> label)
+    /// Bidirectional mapping between original labels and their encoded indices: label to index,
+    /// and index to label
     #[serde(bound(
         serialize = "T: Serialize + Eq + std::hash::Hash",
         deserialize = "T: Deserialize<'de> + Eq + std::hash::Hash"
     ))]
     label_map: Option<(AHashMap<T, usize>, Vec<T>)>,
 
-    /// Weight function for neighbor votes
+    /// Weighting strategy for neighbor votes
     weighting_strategy: WeightingStrategy,
     /// Distance metric used for finding neighbors
     metric: DistanceCalculationMetric,
 
-    /// Lazily-built kd-tree over the training data, accelerating neighbor search in low
-    /// dimensions. Derived from `x_train`, so it is not serialized; it is rebuilt on first use
-    /// after loading. `Some(None)` records "high-dimensional, use brute force" so the decision
-    /// is made once
+    /// Lazily built kd-tree over the training data. It speeds up neighbor search in low
+    /// dimensions. The tree derives from `x_train`, so serialization skips it, and the
+    /// classifier rebuilds it on first use after loading. `Some(None)` records
+    /// "high-dimensional, use brute force" so the decision runs once.
     #[serde(skip)]
     tree: OnceLock<Option<KdTree>>,
 }
@@ -151,20 +149,21 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Returns
     ///
-    /// - `Ok(Self)` - A new KNN classifier instance
+    /// - `Result<Self, Error>` - A new KNN classifier instance
+    ///
+    /// # Notes
+    ///
+    /// Neighbor votes default to uniform weighting and the Euclidean distance metric. Override
+    /// either with the builder methods below (`with_metric` returns `Result` because it
+    /// validates the Minkowski order):
+    ///
+    /// - [`with_weighting_strategy`](Self::with_weighting_strategy) - uniform or
+    ///   distance-weighted votes
+    /// - [`with_metric`](Self::with_metric) - distance metric: Euclidean, Manhattan, or Minkowski
     ///
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `k` is 0
-    ///
-    /// # Notes
-    ///
-    /// Neighbor votes default to uniform weighting and the Euclidean distance
-    /// metric. Override either with the builder methods below (`with_metric` returns
-    /// `Result` because the Minkowski order is validated):
-    ///
-    /// - [`with_weighting_strategy`](Self::with_weighting_strategy) - uniform or distance-weighted votes
-    /// - [`with_metric`](Self::with_metric) - distance metric: Euclidean, Manhattan, or Minkowski
     pub fn new(k: usize) -> Result<Self, Error> {
         if k == 0 {
             return Err(Error::invalid_parameter("k", "must be greater than 0"));
@@ -203,12 +202,12 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Returns
     ///
-    /// - `Ok(Self)` - the updated instance, for method chaining
+    /// - `Result<Self, Error>` - the updated instance, for method chaining
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - if Minkowski `p` is less than 1 or not finite; orders below 1
-    ///   are not valid metrics and would break kd-tree pruning
+    /// - `Error::InvalidParameter` - if Minkowski `p` is less than 1 or not finite. Orders below
+    ///   1 break the triangle inequality that the metric depends on
     pub fn with_metric(mut self, metric: DistanceCalculationMetric) -> Result<Self, Error> {
         // Reject NaN/inf (not finite) and orders below 1, which break the triangle inequality
         if let DistanceCalculationMetric::Minkowski(p) = metric
@@ -235,8 +234,8 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
 
     /// Fits the KNN classifier to the training data
     ///
-    /// KNN is a lazy learning algorithm, and the actual calculation is done in the prediction phase;
-    /// labels are internally encoded as indices for efficient parallel computation
+    /// KNN is a lazy learning algorithm, so the prediction phase does the actual computation.
+    /// `fit` encodes labels internally as indices for parallel computation.
     ///
     /// # Parameters
     ///
@@ -245,13 +244,14 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Returns
     ///
-    /// - `Ok(&mut Self)` - The instance of KNN after being fitted
+    /// - `Result<&mut Self, Error>` - The trained KNN instance
     ///
     /// # Errors
     ///
     /// - `Error::EmptyInput` - If `x` has no rows
     /// - `Error::NonFinite` - If `x` contains NaN or infinite values
-    /// - `Error::DimensionMismatch` - If the number of labels in `y` differs from the number of rows in `x`
+    /// - `Error::DimensionMismatch` - If the number of labels in `y` differs from the number of
+    ///   rows in `x`
     /// - `Error::InvalidInput` - If the number of samples is less than k
     pub fn fit<S1, S2>(
         &mut self,
@@ -264,8 +264,9 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     {
         preliminary_check(x, None)?;
 
-        // `preliminary_check` cannot validate generic labels `T`, so check row counts here:
-        // a mismatched `y` is otherwise silently stored and panics out-of-bounds at predict time
+        // `preliminary_check` cannot validate generic labels `T`, so this checks row counts here.
+        // Otherwise `fit` stores a mismatched `y` silently, and `predict` panics later with an
+        // out-of-bounds index.
         if y.len() != x.nrows() {
             return Err(Error::dimension_mismatch(x.nrows(), y.len()));
         }
@@ -297,7 +298,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         self.x_train = Some(x.to_owned());
         self.y_train_encoded = Some(Array1::from(encoded_labels));
         self.label_map = Some((label_to_idx, idx_to_label));
-        // Drop any kd-tree built from previous training data so it is rebuilt lazily on demand
+        // Drop the kd-tree from previous training data. It rebuilds lazily on next use.
         self.tree = OnceLock::new();
 
         Ok(self)
@@ -305,9 +306,8 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
 
     /// Predicts class labels for input samples (sequential version)
     ///
-    /// This method works with any type `T` without requiring `Sync + Send` bounds;
-    /// for large datasets with types that implement `Sync + Send`, consider using
-    /// `predict_parallel` for better performance
+    /// This method works with any type `T` and does not require `Sync + Send` bounds. For large
+    /// datasets with types that implement `Sync + Send`, use `predict_parallel` instead.
     ///
     /// # Parameters
     ///
@@ -315,19 +315,19 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<T>)` - Predicted labels for each input sample
+    /// - `Result<Array1<T>, Error>` - Predicted labels for each input sample
     ///
     /// # Errors
     ///
     /// - `Error::NotFitted` - If the model has not been trained using `fit`
     /// - `Error::EmptyInput` - If `x` has no elements
-    /// - `Error::DimensionMismatch` - If the number of features in `x` differs from the training data
+    /// - `Error::DimensionMismatch` - If the number of features in `x` differs from the
+    ///   training data
     /// - `Error::NonFinite` - If `x` contains NaN or infinite values
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<T>, Error>
     where
         S: Data<Elem = f64>,
     {
-        // check if model is fitted, then validate the prediction input
         check_is_fitted(
             self.x_train.is_some() && self.y_train_encoded.is_some() && self.label_map.is_some(),
             "KNN",
@@ -402,8 +402,8 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
 impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
     /// Predicts class labels for input samples (parallel version)
     ///
-    /// This method uses parallel computation for faster prediction on large datasets;
-    /// requires `T` to implement `Sync + Send` for thread safety
+    /// This method uses parallel computation for large datasets. It requires `T` to implement
+    /// `Sync + Send` for thread safety.
     ///
     /// # Parameters
     ///
@@ -411,19 +411,19 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<T>)` - Predicted labels for each input sample
+    /// - `Result<Array1<T>, Error>` - Predicted labels for each input sample
     ///
     /// # Errors
     ///
     /// - `Error::NotFitted` - If the model has not been trained
     /// - `Error::EmptyInput` - If `x` has no elements
-    /// - `Error::DimensionMismatch` - If the number of features in `x` differs from the training data
+    /// - `Error::DimensionMismatch` - If the number of features in `x` differs from the
+    ///   training data
     /// - `Error::NonFinite` - If `x` contains NaN or infinite values
     pub fn predict_parallel<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<T>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        // check if model is fitted, then validate the prediction input
         check_is_fitted(
             self.x_train.is_some() && self.y_train_encoded.is_some() && self.label_map.is_some(),
             "KNN",
@@ -436,8 +436,8 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
 
         // Neighbor index built once (single-threaded) before the parallel queries fan out
         let tree = self.neighbor_tree(x_train.view());
-        // Training squared norms feed the brute-force Euclidean fast path; skip them when the
-        // tree handles the search
+        // Training squared norms feed the brute-force Euclidean fast path.
+        // Skip them when the tree handles the search.
         let train_sq_norms = if tree.is_some() {
             None
         } else {
@@ -502,10 +502,11 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
 }
 
 impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
-    /// Precomputes per-training-sample squared norms for the Euclidean fast path,
-    /// or `None` for metrics (Manhattan / Minkowski) that have no GEMV form
+    /// Precomputes per-training-sample squared norms for the Euclidean fast path.
+    /// Returns `None` for metrics (Manhattan, Minkowski) that have no GEMV form.
     ///
-    /// Shared across every query, so the `||t||^2` term is paid once, not per query
+    /// `predict` calls this once per invocation and every query reuses the result, so the
+    /// `||t||^2` term costs once, not once per query.
     fn euclidean_train_sq_norms<S>(&self, x_train: &ArrayBase<S, Ix2>) -> Option<Array1<f64>>
     where
         S: Data<Elem = f64>,
@@ -535,11 +536,12 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
 
     /// Predicts the encoded class index for a single data point
     ///
-    /// `euclidean_fast` carries the brute-force Euclidean fast path's inputs: the training
-    /// squared norms, plus this query's projection row `X_train . x` when the caller
-    /// precomputed it through a chunked GEMM (the cache-overflow path); `None` in the second
-    /// slot computes the projection here as one GEMV against the cache-resident training
-    /// matrix. A `None` overall selects the kd-tree path or the per-pair metric scan
+    /// `euclidean_fast` carries the brute-force Euclidean fast path's inputs. The first element
+    /// holds the training squared norms. The second element holds this query's projection row
+    /// `X_train . x`, already computed as a chunked GEMM when the cache-overflow path applies.
+    /// The second element is `None` when this method computes the projection here as 1 GEMV
+    /// against the cache-resident training matrix. `euclidean_fast` as a whole is `None` when
+    /// the kd-tree path or the per-pair metric scan runs instead.
     fn predict_one(
         &self,
         x: ArrayView1<f64>,
@@ -549,7 +551,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         tree: Option<&KdTree>,
     ) -> Result<usize, Error> {
         let n_samples = x_train.nrows();
-        let k = self.k.min(n_samples); // Ensure k doesn't exceed available samples
+        let k = self.k.min(n_samples); // Make sure k does not exceed available samples
 
         let k_neighbors_owned: Vec<(f64, usize)> = if let Some(tree) = tree {
             tree.k_nearest(x, k)
@@ -639,7 +641,8 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
 
     /// Fits the model with the training data and immediately predicts on the given training data
     ///
-    /// This is a convenience method that combines the `fit` and `predict` steps into one operation
+    /// This is a convenience method that combines the `fit` and `predict` steps into a single
+    /// operation
     ///
     /// # Parameters
     ///
@@ -648,7 +651,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<T>)` - Array of predicted values for the training data
+    /// - `Result<Array1<T>, Error>` - Array of predicted values for the training data
     ///
     /// # Errors
     ///

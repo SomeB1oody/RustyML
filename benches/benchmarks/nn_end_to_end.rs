@@ -41,12 +41,12 @@ fn conv2d_forward_batch1(c: &mut Criterion) {
     });
 }
 
-/// Conv2D forward + backward across two batch regimes, where `fwd_bwd - forward` approximates the
-/// backward cost. The backward pass parallelizes over the batch and runs a per-item im2col + two
-/// GEMMs; at this scale each per-item GEMM is itself large enough to fork rayon, so the two regimes
-/// probe the batch-vs-GEMM parallelism split:
-/// - batch 16 < 32 threads: the batch axis alone cannot fill the pool
-/// - batch 32 == threads: the batch axis fills the pool, leaving no slack for an inner GEMM fork
+/// Conv2D forward and backward across 2 batch sizes, where `fwd_bwd - forward` approximates the
+/// backward cost. The backward pass parallelizes over the batch and runs a per-item im2col plus
+/// 2 GEMMs. At this scale, each per-item GEMM is large enough to fork rayon on its own. The 2
+/// batch sizes probe how batch parallelism and GEMM parallelism interact:
+/// - batch 16: too few tasks to fill the thread pool from the batch axis alone
+/// - batch 32: enough tasks to fill the thread pool, leaving no slack for an inner GEMM fork
 fn conv2d_backward(c: &mut Criterion) {
     let mut group = c.benchmark_group("conv2d_backward");
     group.sample_size(10);
@@ -87,8 +87,8 @@ fn lstm_forward(c: &mut Criterion) {
     });
 }
 
-/// Spatial BatchNorm forward at conv scale (training mode): per-channel plane folds plus the
-/// per-plane center/normalize passes on the native [B, C, *spatial] layout
+/// Spatial BatchNorm forward at conv scale (training mode): per-channel column-stat folds plus
+/// the center/normalize passes on the native [B, *spatial, C] layout
 fn batchnorm_forward_spatial(c: &mut Criterion) {
     let mut layer = BatchNormalization::new(vec![32, 64, 64, 64], 0.99, 1e-5).unwrap();
     let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
@@ -100,8 +100,8 @@ fn batchnorm_forward_spatial(c: &mut Criterion) {
     });
 }
 
-/// Spatial BatchNorm backward at the same scale: five per-channel plane folds plus two
-/// per-plane elementwise passes over the cached forward tensors
+/// Spatial BatchNorm backward at the same scale: 5 per-channel column-stat folds plus 2
+/// elementwise passes over the cached forward tensors
 fn batchnorm_backward_spatial(c: &mut Criterion) {
     let mut layer = BatchNormalization::new(vec![32, 64, 64, 64], 0.99, 1e-5).unwrap();
     let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
@@ -165,8 +165,8 @@ fn layernorm_forward_multi(c: &mut Criterion) {
     });
 }
 
-/// GroupNorm forward at conv scale (channels-first, 8 groups): per-instance group statistics
-/// over contiguous [channels/groups x spatial] blocks
+/// GroupNorm forward at conv scale (channels-last, 8 groups): per-instance group statistics
+/// folded from contiguous per-position channel runs
 fn groupnorm_forward(c: &mut Criterion) {
     let mut layer = GroupNormalization::new(vec![32, 64, 64, 64], 8, 1e-5).unwrap();
     let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
@@ -196,7 +196,7 @@ fn groupnorm_backward(c: &mut Criterion) {
     });
 }
 
-/// InstanceNorm forward at the same scale (one group per channel: many small instances)
+/// InstanceNorm forward at the same scale (1 group per channel: many small instances)
 fn instancenorm_forward(c: &mut Criterion) {
     let mut layer = InstanceNormalization::new(vec![32, 64, 64, 64], 1e-5).unwrap();
     let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
@@ -209,7 +209,7 @@ fn instancenorm_forward(c: &mut Criterion) {
 }
 
 /// SpatialDropout1D forward at conv scale (training mode): the per-channel mask is broadcast
-/// across the length dimension to the full [B, C, L] shape
+/// across the length dimension to the full [B, L, C] shape
 fn spatial_dropout_1d_forward(c: &mut Criterion) {
     let mut layer = SpatialDropout1D::new(0.2, vec![32, 64, 4096])
         .unwrap()
@@ -221,7 +221,7 @@ fn spatial_dropout_1d_forward(c: &mut Criterion) {
 }
 
 /// SpatialDropout2D forward at conv scale (training mode): the per-channel mask is broadcast
-/// across the spatial dimensions to the full [B, C, H, W] shape
+/// across the spatial dimensions to the full [B, H, W, C] shape
 fn spatial_dropout_2d_forward(c: &mut Criterion) {
     let mut layer = SpatialDropout2D::new(0.2, vec![32, 64, 64, 64])
         .unwrap()
@@ -233,7 +233,7 @@ fn spatial_dropout_2d_forward(c: &mut Criterion) {
 }
 
 /// SpatialDropout3D forward at conv scale (training mode): the per-channel mask is broadcast
-/// across the spatial dimensions to the full [B, C, D, H, W] shape
+/// across the spatial dimensions to the full [B, D, H, W, C] shape
 fn spatial_dropout_3d_forward(c: &mut Criterion) {
     let mut layer = SpatialDropout3D::new(0.2, vec![8, 64, 16, 32, 32])
         .unwrap()
@@ -270,8 +270,8 @@ fn spatial_dropout_3d_backward(c: &mut Criterion) {
     });
 }
 
-/// DepthwiseConv2D and SeparableConv2D at MobileNet-ish scale (64 channels over a 56x56 map),
-/// where `forward` is the inference cost and `fwd_bwd` re-runs the forward then backward each
+/// DepthwiseConv2D and SeparableConv2D at MobileNet-ish scale (64 channels over a 56x56 map).
+/// `forward` is the inference cost. `fwd_bwd` re-runs the forward then backward each
 /// iteration, so `fwd_bwd - forward` approximates the backward cost
 fn depthwise_separable_conv(c: &mut Criterion) {
     let mut group = c.benchmark_group("conv_depthwise_separable");
@@ -319,7 +319,7 @@ fn depthwise_separable_conv(c: &mut Criterion) {
     group.finish();
 }
 
-/// One epoch of MLP training: forward + loss + backward + optimizer across the whole stack
+/// 1 epoch of MLP training: forward + loss + backward + optimizer across the whole stack
 fn mlp_fit_epoch(c: &mut Criterion) {
     let x = Array::from_elem((512, 256), 0.5f32).into_dyn();
     let y = Array::from_elem((512, 10), 1.0f32).into_dyn();

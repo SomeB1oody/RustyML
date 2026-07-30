@@ -15,13 +15,12 @@ use std::borrow::Cow;
 
 /// Dense (fully connected) layer for neural networks
 ///
-/// Performs a linear transformation using a weight matrix and bias vector, optionally
-/// followed by an activation function: output = activation(input * weights + bias). Input shape
-/// is (batch_size, input_dim) and output shape is (batch_size, output_dim)
+/// Applies a linear transform with a weight matrix and a bias vector, then an optional
+/// activation: `output = activation(input * weights + bias)`. The input shape is
+/// `(batch_size, input_dim)` and the output shape is `(batch_size, output_dim)`
 ///
-/// Weights are initialized with Xavier/Glorot initialization and biases start at zeros. During
-/// training, the layer caches intermediate values for backpropagation and supports SGD, Adam,
-/// and RMSprop optimizers
+/// Weights start from Xavier/Glorot initialization, and biases start at 0. During training,
+/// the layer caches intermediate values for the backward pass
 ///
 /// # Examples
 ///
@@ -84,14 +83,14 @@ impl Dense {
     /// - `activation` - Activation applied to the linear output (any value convertible into
     ///   [`Activation`], e.g. `Activation::ReLU` or a standalone activation layer)
     ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - New `Dense` layer instance with initialized parameters
+    ///
     /// # Notes
     ///
     /// Weights are seeded from the global seed or entropy by default. For reproducible
     /// initialization, set a seed with [`Dense::with_random_state`]
-    ///
-    /// # Returns
-    ///
-    /// - `Result<Self, Error>` - New `Dense` layer instance with initialized parameters
     ///
     /// # Errors
     ///
@@ -127,7 +126,7 @@ impl Dense {
 
     /// Sets the seed used to initialize the weights and re-initializes them deterministically
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`])
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
     /// This re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
     /// assigning custom weights or training. The bias stays zero-initialized
     ///
@@ -166,6 +165,10 @@ impl Dense {
     /// - `weights` - Weight matrix with shape (input_dim, output_dim)
     /// - `bias` - Bias vector with shape (1, output_dim)
     ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - Ok when `weights` and `bias` match the layer's configured shape
+    ///
     /// # Errors
     ///
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` do not match the
@@ -179,47 +182,43 @@ impl Dense {
         Ok(())
     }
 
-    /// The layer's whole forward transform - `activation(input @ weights + bias)` - shared by
+    /// The layer's full forward transform, `activation(input * weights + bias)`. Shared by
     /// [`Layer::forward`] and [`Layer::predict`]
     ///
-    /// The bias add rides the GEMM's epilogue, on the accumulator value the plain kernel would
-    /// have stored, so the pre-activation is written exactly once: no separate broadcast add of
-    /// the `[1, output_dim]` bias. The bias is the per-column addend (its length is `output_dim`,
-    /// the output's column count), which is why it lowers to [`Bias::PerCol`]
+    /// The bias add rides the GEMM epilogue, so the pre-activation is written exactly once,
+    /// with no separate broadcast add of the bias. The bias is the per-column addend, so it
+    /// lowers to [`Bias::PerCol`]
     ///
-    /// The activation stays a fused epilogue only where the backend has a vectorized one -
-    /// `ReLU` ([`FusedActivation::Relu`]). The exp-based maps (`Sigmoid`/`Tanh`) and the
-    /// row-global `Softmax` run as the separate vectorized [`Activation::forward`] pass instead:
-    /// a per-element closure epilogue (`gemm_map`) would drop to one indirect scalar call per
-    /// output element, which measures far slower than the extra pass it saves
+    /// The activation stays a fused epilogue only where the backend has a vectorized one,
+    /// `ReLU` ([`FusedActivation::Relu`]). `Sigmoid`, `Tanh`, and `Softmax` run as a separate
+    /// [`Activation::forward`] pass instead
     ///
-    /// For `f32` a fused epilogue is bit-identical to the plain product followed by the same scalar
-    /// bias-add and map, so fusing changes no output value - with one exception: gemmkit's `Relu`
-    /// maps `NaN` to `0.0`, where this crate's scalar `relu` (`if x <= 0.0 { 0.0 } else { x }`)
-    /// propagates it. A `NaN` pre-activation is already a diverged model, and the cached-output ReLU
-    /// derivative treats the resulting `0.0` as a dead unit
+    /// A fused `f32` epilogue matches the unfused product plus scalar activation bit for bit,
+    /// with 1 exception. gemmkit's fused `Relu` maps `NaN` to `0.0`, while this crate's
+    /// scalar `relu` propagates `NaN`. A `NaN` pre-activation already means a diverged model,
+    /// and the cached-output ReLU derivative then treats the resulting `0.0` as a dead unit
     ///
     /// # Parameters
     ///
-    /// - `input` - Input view with shape `[batch_size, input_dim]`; any strides work (gemmkit reads
-    ///   the operand in place, so a transposed or sliced view is not copied)
+    /// - `input` - Input view with shape `[batch_size, input_dim]`. Any stride works, since
+    ///   gemmkit reads the operand in place rather than copying it
     ///
     /// # Returns
     ///
     /// - `Result<Tensor, Error>` - Activated output with shape `[batch_size, output_dim]`
     ///
+    /// # Panics
+    ///
+    /// - If the input column count differs from `input_dim`
+    /// - If the bias is not contiguous (it is always stored in standard layout)
+    ///
     /// # Errors
     ///
     /// - `Error::Computation` - Softmax failed to reshape the fused pre-activation
-    ///
-    /// # Panics
-    ///
-    /// - If `input`'s column count differs from `input_dim`
-    /// - If the bias is not contiguous (it is always stored in standard layout)
     fn project(&self, input: &ArrayView2<'_, f32>) -> Result<Tensor, Error> {
         let bias = self.bias.as_slice().expect("bias must be contiguous");
-        // `beta == 0` means the fill is never read - this only allocates the destination the
-        // epilogue writes into
+        // `beta == 0` means the fill value is never read. This only allocates the destination
+        // the epilogue writes into
         let mut output = Array2::from_elem((input.nrows(), self.output_dim), 0.0);
         let fused_act = match self.activation {
             Activation::ReLU => Some(FusedActivation::Relu),
@@ -247,9 +246,8 @@ impl Dense {
 impl Layer for Dense {
     /// Training forward: caches the input and the activated output for the backward pass
     ///
-    /// The linear product and the bias add are one fused gemmkit call, with ReLU riding the same
-    /// epilogue (see `Dense::project`, which also documents the `NaN` handling of the fused
-    /// `ReLU`)
+    /// Fuses the linear product, bias add, and (for `ReLU`) the activation into one gemmkit
+    /// call. See `Dense::project` for the `NaN` handling of the fused `ReLU`
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         if input.ndim() != 2 {
             return Err(Error::invalid_input("input tensor is not 2D"));
@@ -318,7 +316,7 @@ impl Layer for Dense {
         self.grad_weights = Some(grad_w.as_standard_layout().to_owned());
         self.grad_bias = Some(grad_b.as_standard_layout().to_owned());
 
-        // Gradient w.r.t. the input
+        // Gradient with respect to the input
         let grad_input = dot(&grad_upstream_2d, &self.weights.t());
 
         Ok(grad_input.into_dyn())

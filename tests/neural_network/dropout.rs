@@ -38,7 +38,7 @@ fn filled(shape: &[usize], value: f32) -> Tensor {
 
 #[test]
 fn dropout_rate_zero_is_identity_in_training_mode() {
-    // rate=0 -> no units dropped -> output == input (dedicated early-return path)
+    // rate=0 takes the dedicated early-return path, so no units drop
     let mut layer = Dropout::new(0.0, vec![3, 4]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -57,7 +57,7 @@ fn dropout_rate_zero_is_identity_in_training_mode() {
 
 #[test]
 fn dropout_rate_one_yields_zeros_in_training_mode() {
-    // rate=1 -> every unit dropped -> output = zeros
+    // rate=1 takes the dedicated early-return path, giving all zeros
     let mut layer = Dropout::new(1.0, vec![2, 5]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -69,7 +69,7 @@ fn dropout_rate_one_yields_zeros_in_training_mode() {
 
 #[test]
 fn dropout_eval_mode_is_exact_identity() {
-    // Inverted dropout: inference passes input through unchanged
+    // Inverted dropout: inference passes the input through unchanged
     let mut layer = Dropout::new(0.5, vec![2, 3]).unwrap();
     layer.set_training_if_mode_dependent(false);
 
@@ -82,7 +82,6 @@ fn dropout_eval_mode_is_exact_identity() {
 
 #[test]
 fn dropout_predict_equals_forward_in_eval_mode() {
-    // predict() must equal forward() in eval mode (both are identity)
     let mut layer = Dropout::new(0.3, vec![2, 4]).unwrap();
     layer.set_training_if_mode_dependent(false);
 
@@ -93,13 +92,11 @@ fn dropout_predict_equals_forward_in_eval_mode() {
     let out_forward = layer.forward(&input).unwrap();
     let out_predict = layer.predict(&input).unwrap();
     assert_allclose(&out_forward, &out_predict, 1e-6_f32);
-    // Both must equal input exactly
     assert_allclose(&out_forward, &input, 1e-6_f32);
 }
 
 #[test]
 fn dropout_predict_is_identity_in_training_mode() {
-    // predict() is always identity, regardless of training flag
     let mut layer = Dropout::new(0.9, vec![3]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -112,7 +109,7 @@ fn dropout_predict_is_identity_in_training_mode() {
 
 #[test]
 fn dropout_training_inverted_scaling_on_kept_units() {
-    // Inverted dropout: kept units scaled by 1/(1-rate); with rate=0.5, scale = 2.0
+    // Inverted dropout scales kept units by 1/(1-rate). With rate=0.5, scale = 2.0.
     let mut layer = Dropout::new(0.5, vec![200]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -124,11 +121,11 @@ fn dropout_training_inverted_scaling_on_kept_units() {
         if v == 0.0 {
             zero_count += 1;
         } else {
-            // Kept element == input * 1/(1-0.5) = 2.0
+            // Kept element equals input * 1/(1-0.5) = 2.0
             approx::assert_abs_diff_eq!(v, 2.0_f32, epsilon = 1e-5);
         }
     }
-    // Loose window [20%, 80%] keeps the ~50% zeroed-fraction check statistically robust
+    // The wide [20%, 80%] window tolerates randomness around the ~50% expected zero fraction
     let zero_frac = zero_count as f32 / 200.0;
     assert!(
         (0.20..=0.80).contains(&zero_frac),
@@ -139,7 +136,7 @@ fn dropout_training_inverted_scaling_on_kept_units() {
 
 #[test]
 fn dropout_rate_one_backward_returns_zeros() {
-    // rate=1 -> forward zeros, backward returns zeros (distinct early-return path)
+    // rate=1 zeroes the forward output. Backward returns zeros too, from its own early-return path
     let mut layer = Dropout::new(1.0, vec![2, 3]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -186,8 +183,8 @@ fn dropout_eval_backward_passes_gradient_through() {
 
 #[test]
 fn dropout_backward_kept_units_scaled_correctly() {
-    // Kept units in backward receive grad_output * 1/(1-rate); with rate=0.5 and
-    // all-ones input, kept output == 2.0 and kept gradient == 2.0, dropped == 0.0
+    // Backward multiplies grad_output by 1/(1-rate). With rate=0.5 and all-ones input,
+    // kept output and kept gradient both equal 2.0, and dropped units give 0.0
     let mut layer = Dropout::new(0.5, vec![50]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -198,10 +195,9 @@ fn dropout_backward_kept_units_scaled_correctly() {
 
     for (i, (&out_v, &grad_v)) in output.iter().zip(grad_in.iter()).enumerate() {
         if out_v == 0.0 {
-            // Dropped unit: gradient must be 0
             approx::assert_abs_diff_eq!(grad_v, 0.0_f32, epsilon = 1e-5);
         } else {
-            // Kept unit: output = 2.0 and gradient = 1.0 * 2.0 = 2.0 (same scale factor)
+            // Kept unit: gradient = grad_upstream * scale = 1.0 * 2.0
             assert!(
                 (grad_v - 2.0_f32).abs() < 1e-5,
                 "index {i}: kept unit gradient should be 2.0, got {grad_v}"
@@ -214,8 +210,7 @@ fn dropout_backward_kept_units_scaled_correctly() {
 
 #[test]
 fn dropout_constructor_rejects_invalid_rate() {
-    // Folds negative-rate and above-one-rate fan-out: same constructor, same error,
-    // differing only by the invalid scalar
+    // Same constructor and error for a negative rate and a rate above 1
     for rate in [-0.1_f32, 1.5_f32] {
         let err = Dropout::new(rate, vec![10]).unwrap_err();
         assert!(
@@ -304,8 +299,8 @@ fn dropout_forward_rejects_shape_mismatch() {
     );
 }
 
-/// Varying the batch size is allowed on both paths: the declared shape's leading axis is set at
-/// construction from the whole dataset, so enforcing it would reject every mini-batch
+/// The declared shape's leading axis is fixed at construction from the whole dataset.
+/// Enforcing it on each call would reject every mini-batch, so both paths accept any batch size.
 #[test]
 fn dropout_accepts_any_batch_size() {
     let mut layer = Dropout::new(0.5, vec![8, 4]).unwrap();
@@ -393,8 +388,8 @@ fn spatial_dropout_1d_predict_is_identity() {
 
 #[test]
 fn spatial_dropout_1d_channel_consistency() {
-    // For each (batch, channel), all length positions share one value: either 0 (dropped)
-    // or input * scale (kept); all-ones input gives kept value 1/(1-rate), dropped value 0
+    // For each (batch, channel), all length positions share a single value, either 0 (dropped)
+    // or input * scale (kept). All-ones input gives kept value 1/(1-rate) and dropped value 0.
     // Channels-last layout: (batch, length, channels)
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate); // = 2.0
@@ -411,13 +406,11 @@ fn spatial_dropout_1d_channel_consistency() {
 
     for b in 0..batch_size {
         for c in 0..channels {
-            // State is taken from the first position: must be 0 (dropped) or scale (kept)
             let first = output[[b, 0, c]];
             assert!(
                 first == 0.0 || (first - scale).abs() < 1e-5,
                 "channel ({b},{c}) first element {first} is neither 0 nor {scale}"
             );
-            // All other positions in this channel must match
             for l in 1..length {
                 let v = output[[b, l, c]];
                 assert!(
@@ -431,8 +424,8 @@ fn spatial_dropout_1d_channel_consistency() {
 
 #[test]
 fn spatial_dropout_1d_kept_channel_exact_scale() {
-    // Kept channel: output = input * 1/(1-rate); distinct per-position values catch
-    // partial masking
+    // Kept channel: output = input * 1/(1-rate). Distinct per-position values catch
+    // partial masking.
     let rate = 0.4_f32;
     let scale = 1.0 / (1.0 - rate); // ~=1.6667
 
@@ -463,10 +456,10 @@ fn spatial_dropout_1d_kept_channel_exact_scale() {
         }
     }
     // With rate=0.4 and 10 channels, the chance of all channels being dropped is
-    // 0.4^10 ~= 0.0001, so at least one kept channel is expected; failure signals a bug
+    // 0.4^10 ~= 0.0001. At least 1 kept channel is expected, so a failure signals a bug.
     assert!(
         found_kept,
-        "all channels were dropped — likely a bug (rate=0.4, 10 channels)"
+        "all channels were dropped, likely a bug (rate=0.4, 10 channels)"
     );
 }
 
@@ -487,13 +480,11 @@ fn spatial_dropout_1d_backward_channel_consistency() {
     for c in 0..6 {
         let out_first = output[[0, 0, c]];
         let grad_first = grad_in[[0, 0, c]];
-        // Dropped channel: gradient must be 0
         if out_first == 0.0 {
             for l in 0..4 {
                 approx::assert_abs_diff_eq!(grad_in[[0, l, c]], 0.0_f32, epsilon = 1e-5);
             }
         } else {
-            // Kept channel: gradient = upstream * scale
             approx::assert_abs_diff_eq!(grad_first, scale, epsilon = 1e-4);
             for l in 1..4 {
                 approx::assert_abs_diff_eq!(grad_in[[0, l, c]], grad_first, epsilon = 1e-5);
@@ -669,8 +660,8 @@ fn spatial_dropout_2d_backward_before_forward_returns_error() {
 
 #[test]
 fn spatial_dropout_2d_backward_channel_consistency() {
-    // Backward: dropped-channel gradient == 0 at all (h,w); kept-channel gradient ==
-    // upstream * scale at all (h,w)
+    // Backward: dropped-channel gradient is 0 at every (h,w). Kept-channel gradient is
+    // upstream * scale at every (h,w).
     // Channels-last layout: (batch=1, height=3, width=3, channels=6)
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate);
@@ -842,8 +833,8 @@ fn spatial_dropout_3d_backward_channel_consistency() {
     }
 }
 
-// Cross-type: predict() never caches a mask; backward after predict uses the mask
-// from the previous forward(), not the predict call
+// Cross-type: predict() never caches a mask. Backward after predict uses the mask
+// from the previous forward() call, not the predict call.
 
 #[test]
 fn dropout_predict_does_not_overwrite_mask_from_forward() {

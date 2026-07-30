@@ -2,7 +2,8 @@
 
 use crate::neural_network::layers::convolution::PaddingType;
 
-/// Output size of one pooling axis: `(in - pool)/stride + 1` for `Valid`, `ceil(in/stride)` for `Same`
+/// Output size of one pooling axis: `(in - pool)/stride + 1` for `Valid`, `ceil(in/stride)` for
+/// `Same`
 fn pool_out_dim(input: usize, pool: usize, stride: usize, padding: PaddingType) -> usize {
     match padding {
         PaddingType::Valid => (input - pool) / stride + 1,
@@ -70,14 +71,16 @@ pub(super) fn calculate_output_shape_2d_pooling(
 ///
 /// # Parameters
 ///
-/// - `input_shape` - Shape of the input tensor, in format `[batch_size, depth, height, width, channels]`
+/// - `input_shape` - Shape of the input tensor, in format
+///   `[batch_size, depth, height, width, channels]`
 /// - `pool_size` - Size of the pooling window as a tuple (depth, height, width)
 /// - `strides` - Step size for the pooling window as a tuple (depth_step, height_step, width_step)
 /// - `padding` - Padding strategy (Valid or Same)
 ///
 /// # Returns
 ///
-/// - `Vec<usize>` - Output shape in format `[batch_size, output_depth, output_height, output_width, channels]`
+/// - `Vec<usize>` - Output shape in format
+///   `[batch_size, output_depth, output_height, output_width, channels]`
 pub(super) fn calculate_output_shape_3d_pooling(
     input_shape: &[usize],
     pool_size: (usize, usize, usize),
@@ -194,7 +197,7 @@ mod tests {
     // Valid padding/pooling: out = floor((in - window) / stride) + 1
     // Same padding: out = ceil(in / stride)
 
-    /// 1D pooling output length, with batch and channel axes passing through unchanged
+    /// 1D pooling output length, with the batch and channel axes unchanged
     #[test]
     fn test_calculate_output_shape_1d_pooling() {
         let out = calculate_output_shape_1d_pooling(&[8, 10, 5], 3, 2, PaddingType::Valid);
@@ -210,9 +213,9 @@ mod tests {
 
     /// 2D pooling output shape for distinct window sizes and strides per axis
     ///
-    /// Every axis has a different extent, so reading one for another would show up: batch 4,
-    /// height 6, width 7, channels 8 pools to height `(6 - 2) / 2 + 1 = 3` and width
-    /// `(7 - 3) / 1 + 1 = 5`, with the batch and channel axes riding through unchanged
+    /// Every axis has a different extent, so a mix-up between axes would appear in the result.
+    /// Batch 4, height 6, width 7, and channels 8 pool to height `(6 - 2) / 2 + 1 = 3`. Width
+    /// pools to `(7 - 3) / 1 + 1 = 5`. The batch and channel axes stay unchanged
     #[test]
     fn test_calculate_output_shape_2d_pooling() {
         let out =
@@ -222,8 +225,8 @@ mod tests {
 
     /// 3D pooling output shape across depth, height, and width axes
     ///
-    /// Batch 2, depth 4, height 5, width 6, channels 9 pools to depth `(4 - 2) / 1 + 1 = 3`,
-    /// height `(5 - 2) / 2 + 1 = 2` and width `(6 - 3) / 3 + 1 = 2`
+    /// Batch 2, depth 4, height 5, width 6, and channels 9 pool to depth `(4 - 2) / 1 + 1 = 3`.
+    /// Height pools to `(5 - 2) / 2 + 1 = 2`. Width pools to `(6 - 3) / 3 + 1 = 2`
     #[test]
     fn test_calculate_output_shape_3d_pooling() {
         let out = calculate_output_shape_3d_pooling(
@@ -242,7 +245,8 @@ mod tests {
         assert_eq!((h, w), (3, 3));
     }
 
-    /// `Same` padding yields the input divided by the stride (rounded up), independent of the kernel
+    /// `Same` padding yields the input divided by the stride (rounded up), independent of the
+    /// kernel
     #[test]
     fn test_calculate_output_height_and_weight_same() {
         let (h, w) = calculate_output_height_and_weight(PaddingType::Same, 7, 8, (3, 3), (2, 3));
@@ -256,9 +260,10 @@ mod tests {
         assert_eq!((h, w), (5, 5));
     }
 
-    /// `calculate_output_shape_2d` passes batch/channels through and delegates spatial extents
-    /// to the formula, here with Valid padding. The channel count is the trailing axis and rides
-    /// through untouched, so an asymmetric shape pins that it is not read as a spatial extent
+    /// `calculate_output_shape_2d` keeps the batch size and channel count unchanged and
+    /// delegates the spatial extents to the formula, here with Valid padding. The channel count
+    /// is the trailing axis and stays the same. An asymmetric shape confirms the channel count
+    /// is not read as a spatial extent
     #[test]
     fn test_calculate_output_shape_2d_valid() {
         let out = calculate_output_shape_2d(&[2, 5, 5, 4], (3, 3), (1, 1), &PaddingType::Valid);

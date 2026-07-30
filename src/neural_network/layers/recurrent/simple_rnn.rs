@@ -20,8 +20,8 @@ use std::borrow::Cow;
 /// Simple Recurrent Neural Network (SimpleRNN) layer
 ///
 /// Processes a 3D input tensor with shape (batch_size, timesteps, input_dim) and returns
-/// the last hidden state with shape (batch_size, units). The activation is provided by
-/// the activation module
+/// the last hidden state with shape (batch_size, units). It applies an activation from the
+/// activation module at each timestep
 ///
 /// # Examples
 ///
@@ -37,7 +37,7 @@ use std::borrow::Cow;
 /// let x = Array::ones((2, 5, 4)).into_dyn();
 /// let y = Array::ones((2, 3)).into_dyn();
 ///
-/// // Build model: one SimpleRnn layer with Tanh activation
+/// // Build model: 1 SimpleRNN layer with Tanh activation
 /// let mut model = Sequential::new();
 /// model
 /// .add(SimpleRNN::new(4, 3, Activation::Tanh).unwrap())
@@ -86,7 +86,8 @@ impl SimpleRNN {
     ///
     /// - `input_dim` - Size of each input sample
     /// - `units` - Number of output units
-    /// - `activation` - Activation function from the activation module (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `activation` - Activation function from the activation module (Linear, ReLU, Sigmoid,
+    ///   Tanh, or Softmax)
     ///
     /// # Returns
     ///
@@ -94,8 +95,8 @@ impl SimpleRNN {
     ///
     /// # Notes
     ///
-    /// Weights are seeded from the global seed or entropy by default. For reproducible
-    /// initialization, set a seed with [`SimpleRNN::with_random_state`]
+    /// By default, the constructor seeds weights from the global seed or entropy. Set a seed
+    /// with [`SimpleRNN::with_random_state`] for reproducible initialization.
     ///
     /// # Errors
     ///
@@ -126,10 +127,10 @@ impl SimpleRNN {
 
     /// Sets the seed used to initialize the weights and re-initializes them deterministically
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`])
-    /// This re-runs the kernel (Xavier/Glorot) and recurrent-kernel (orthogonal) initialization
-    /// with `random_state`, so call it before assigning custom weights or training. The bias stays
-    /// zero-initialized
+    /// By default, `SimpleRNN::new` seeds the weights from the global seed or entropy (see
+    /// [`crate::random`]). This method re-runs the kernel (Xavier/Glorot) and recurrent-kernel
+    /// (orthogonal) initialization with `random_state`, so call it before assigning custom
+    /// weights or training. The bias stays zero-initialized.
     ///
     /// # Parameters
     ///
@@ -148,8 +149,8 @@ impl SimpleRNN {
 
     /// Initializes the input kernel (Xavier/Glorot) and recurrent kernel (orthogonal) from a seed
     ///
-    /// Both draws share one RNG (kernel first, then recurrent kernel) so a given seed reproduces the
-    /// exact same pair of matrices
+    /// Both draws share a single RNG, kernel first and then recurrent kernel, so a given seed
+    /// reproduces the exact same pair of matrices.
     fn init_weights_arrays(
         input_dim: usize,
         units: usize,
@@ -176,12 +177,18 @@ impl SimpleRNN {
     /// # Parameters
     ///
     /// - `kernel` - Weight matrix connecting inputs to the layer with shape (input_dim, units)
-    /// - `recurrent_kernel` - Weight matrix connecting previous hidden states with shape (units, units)
+    /// - `recurrent_kernel` - Weight matrix connecting previous hidden states with shape
+    ///   (units, units)
     /// - `bias` - Bias vector with shape (1, units)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - `Ok(())` when every matrix matches the layer's existing shape
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any supplied matrix does not match the layer's existing shape
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any supplied matrix does not match the
+    ///   layer's existing shape
     pub fn set_weights(
         &mut self,
         kernel: Array2<f32>,
@@ -202,10 +209,10 @@ impl SimpleRNN {
     }
 
     /// Batched input projection: `x3 [batch, timesteps, input_dim] @ kernel` for all timesteps in a
-    /// single gemm, returning `[batch, timesteps, units]`
+    /// single GEMM, returning `[batch, timesteps, units]`
     ///
-    /// Collapsing the (batch, timesteps) axes into one matmul beats `timesteps` separate small gemms
-    /// on cache/SIMD utilization
+    /// Collapsing the (batch, timesteps) axes into 1 matmul improves cache and SIMD use over
+    /// `timesteps` separate small GEMMs.
     fn project_input(&self, x3: &ndarray::ArrayView3<f32>) -> Array3<f32> {
         crate::neural_network::layers::recurrent::gate::project_input(&self.kernel, x3)
     }
@@ -213,24 +220,27 @@ impl SimpleRNN {
     /// Runs the recurrence and returns the last hidden state, the shared numeric body of
     /// [`Layer::forward`] and [`Layer::predict`]
     ///
-    /// When `hidden_states` is `Some`, every hidden state (with `h_0 = 0` prepended) is recorded for
-    /// the backward pass; `predict` passes `None` and skips both the recording and its clones
+    /// When `hidden_states` is `Some`, this method records every hidden state, with `h_0 = 0`
+    /// prepended, for the backward pass. `predict` passes `None` and skips both the recording
+    /// and its clones.
     ///
-    /// One timestep is one GEMM call plus at most one activation sweep: the timestep buffer
-    /// starts as the pre-projected `x_t @ kernel` slice, the recurrent product accumulates into
-    /// it (`beta = 1`), and the bias add rides the kernel's own store as a fused epilogue - that
-    /// removes the two allocating broadcast adds. `ReLU` also fuses, on the backend's vectorized
-    /// `Relu` epilogue (which maps `NaN` to `0` where this crate's scalar closure propagates it);
-    /// the exp-based `Sigmoid`/`Tanh` and the row-global `Softmax` stay a separate vectorized
-    /// [`Activation::forward`] pass, because a per-element closure epilogue (`gemm_map`) would
-    /// drop them to one indirect scalar call per element, far slower than the pass it saves.
-    /// The fused bias add is bitwise-identical to the plain product followed by the same
-    /// broadcast adds, so every recorded hidden state is unchanged
+    /// A timestep needs 1 GEMM call and at most 1 activation sweep. The timestep buffer starts
+    /// as the pre-projected `x_t @ kernel` slice. The recurrent product accumulates into it
+    /// because `beta = 1`, and the bias add rides the same GEMM epilogue. This removes 2
+    /// separate allocating broadcast adds that unfused code would need. `ReLU` also fuses into
+    /// the backend's vectorized `Relu` epilogue. `Sigmoid`, `Tanh`, and `Softmax` instead run as
+    /// a separate vectorized [`Activation::forward`] pass. They run this way because a
+    /// per-element closure epilogue (`gemm_map`) would need 1 indirect scalar call per element.
     ///
-    /// Every call passes gemmkit's auto parallelism: a timestep product is `batch * units * units`
-    /// of work, which at small layer sizes sits below the backend's work gate and stays on the
-    /// calling thread, so the tight loop pays no parallel dispatch; wider layers cross the gate
-    /// and the backend spreads them itself
+    /// A fused `f32` epilogue matches the unfused product plus scalar activation bit for bit,
+    /// with 1 exception. gemmkit's fused `Relu` maps `NaN` to `0`, while this crate's scalar
+    /// closure propagates `NaN` instead. Outside that case, fusion changes no recorded hidden
+    /// state.
+    ///
+    /// Each call uses gemmkit's automatic parallelism. A timestep product is
+    /// `batch * units * units` of work. At small layer sizes, this sits below the backend's
+    /// work gate and stays on the calling thread, so the tight loop pays no parallel dispatch.
+    /// Wider layers cross the gate, and the backend spreads them itself.
     fn run(
         &self,
         x3: &ndarray::ArrayView3<f32>,
@@ -245,7 +255,7 @@ impl SimpleRNN {
             hs.push(h_prev.clone());
         }
 
-        // Sequential timestep processing is required for an RNN
+        // An RNN requires sequential timestep processing
         for t in 0..timesteps {
             // z = x_t @ W + h_{t-1} @ U + b, with `x_t @ W` prefilled as the accumulator
             let mut z = xw.index_axis(Axis(1), t).to_owned();
@@ -292,7 +302,7 @@ impl Layer for SimpleRNN {
         Ok(h_last.into_dyn())
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
+    /// Inference forward pass. Runs in eval mode and writes no caches. See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_3d(input)?;
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
@@ -323,7 +333,7 @@ impl Layer for SimpleRNN {
         let timesteps = x3.shape()[1];
         let feat = x3.shape()[2];
 
-        // Per-timestep d_z, stored so the input-side reductions can batch into single gemms
+        // Per-timestep d_z, stored so the input-side reductions can batch into single GEMMs
         let mut dz_all = Array3::<f32>::zeros((batch, timesteps, self.units));
         let mut grad_h = grad_h_t;
         // backpropagation through time (BPTT)
@@ -335,7 +345,8 @@ impl Layer for SimpleRNN {
                 grad_z_dyn.into_dimensionality::<ndarray::Ix2>().unwrap()
             };
 
-            // gradient w.r.t. previous hidden state, used by the next iteration (sequential)
+            // gradient with respect to the previous hidden state, used by the next iteration
+            // (sequential)
             grad_h = dot(&d_z, &self.recurrent_kernel.t());
             dz_all.index_axis_mut(Axis(1), t).assign(&d_z);
         }

@@ -1,7 +1,7 @@
-//! Integration tests for [`rustyml::machine_learning::LinearRegression`]
+//! Integration tests for [`rustyml::machine_learning::LinearRegression`].
 //!
-//! Every expected value is derived from the problem design or a closed-form analytic result,
-//! never recorded from model output
+//! Every expected value comes from the problem design or a closed-form analytic result,
+//! never from recording the model's output.
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
@@ -106,7 +106,7 @@ fn constructor_getters_round_trip() {
         })
         .unwrap();
     assert!(!model.get_fit_intercept());
-    // The gradient-descent settings are carried by the solver variant, not by the model
+    // The solver variant carries the gradient-descent settings, not the model
     match model.get_solver() {
         LeastSquaresSolver::GradientDescent {
             learning_rate,
@@ -311,7 +311,7 @@ fn univariate_y_equals_2x_plus_1_coefficient_and_intercept() {
     assert_abs_diff_eq!(intercept, 1.0, epsilon = 3e-3);
 }
 
-/// predict on x=6 -> 13.0; predict on x=0 -> 1.0
+/// predict on x=6 -> 13.0, and predict on x=0 -> 1.0
 #[test]
 fn univariate_y_equals_2x_plus_1_predictions() {
     let mut model = LinearRegression::new(true)
@@ -325,7 +325,6 @@ fn univariate_y_equals_2x_plus_1_predictions() {
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
     model.fit(&x, &y).unwrap();
 
-    // predict x=6 -> 13.0, predict x=0 -> 1.0
     let preds = model.predict(&array![[6.0], [0.0]]).unwrap();
     let expected = array![13.0, 1.0];
     assert_allclose(&preds, &expected, 1e-3);
@@ -405,7 +404,6 @@ fn multivariate_predictions_match_closed_form() {
     let y = array![6.0, 8.0, 9.0, 13.0, 14.0, 12.0];
     model.fit(&x, &y).unwrap();
 
-    // predict at (1,1) -> 6.0, (2,3) -> 14.0
     let x_new = array![[1.0, 1.0], [2.0, 3.0]];
     let preds = model.predict(&x_new).unwrap();
     let expected = array![6.0, 14.0];
@@ -561,7 +559,8 @@ fn fit_predict_values_match_known_true_values() {
 }
 
 // Regularization: L2 shrinks the coefficient
-// Ridge alpha > 0 makes |w_ridge| strictly smaller than |w_ols|; only that inequality is asserted
+// Ridge alpha > 0 makes |w_ridge| strictly smaller than |w_ols|.
+// The test checks only that inequality.
 
 /// L2 regularization shrinks the L2-norm of coefficients below the unregularized value
 #[test]
@@ -651,7 +650,7 @@ fn l2_regularization_intercept_within_reasonable_range() {
         .unwrap();
     ridge.fit(&x, &y).unwrap();
 
-    // With small alpha=0.1 the intercept stays close to 1.0 (within +/- 0.5)
+    // alpha=0.1 is small, so it should only mildly shrink the intercept away from 1.0
     let intercept = ridge.get_intercept().unwrap();
     assert!(
         (intercept - 1.0).abs() < 0.5,
@@ -662,7 +661,7 @@ fn l2_regularization_intercept_within_reasonable_range() {
 // Determinism: same data -> identical results
 // Gradient descent has no internal randomness, so identical runs are bit-identical
 
-/// Two identical LinearRegression models trained on the same data produce identical predictions
+/// 2 identical LinearRegression models trained on the same data produce identical predictions
 #[test]
 fn determinism_same_data_identical_predictions() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
@@ -744,10 +743,9 @@ fn save_load_preserves_model_state() {
     let loaded = LinearRegression::load_from_path(path).unwrap();
 
     assert_eq!(loaded.get_fit_intercept(), model.get_fit_intercept());
-    // The solver, with its settings, round-trips as one value
+    // The solver, with its settings, round-trips as 1 value
     assert_eq!(loaded.get_solver(), model.get_solver());
 
-    // Coefficients must survive the round-trip exactly
     let orig_coeff = model.get_coefficients().unwrap();
     let load_coeff = loaded.get_coefficients().unwrap();
     assert_allclose(orig_coeff, load_coeff, 0.0);
@@ -763,7 +761,7 @@ fn default_constructor_has_expected_hyperparameters() {
     let model = LinearRegression::default();
     assert!(model.get_fit_intercept());
     assert_eq!(model.get_solver(), LeastSquaresSolver::Normal);
-    // The two constructors must agree, so that neither can silently build a different algorithm
+    // The 2 constructors must agree, so that neither can silently build a different algorithm
     assert_eq!(model.get_solver(), LinearRegression::new(true).get_solver());
     assert!(model.get_coefficients().is_none());
     assert!(model.get_intercept().is_none());
@@ -810,8 +808,8 @@ fn clone_of_fitted_model_makes_identical_predictions() {
 // In-loop NonFinite divergence guards
 // A huge learning_rate overshoots to +/- inf inside the loop, tripping the in-loop finiteness guard
 
-/// fit() on finite, valid data but with a huge learning_rate diverges to +/- inf inside the
-/// gradient-descent loop -> Error::NonFinite (in-loop guard, not the up-front X check)
+/// fit() on finite, valid data with a huge learning_rate diverges to +/- inf inside the loop.
+/// This trips the in-loop guard and returns Error::NonFinite, not the up-front check on x.
 #[test]
 fn fit_huge_learning_rate_diverges_returns_non_finite() {
     // learning_rate = 1e8 is positive and finite, so the constructor accepts it
@@ -838,7 +836,7 @@ fn fit_huge_learning_rate_diverges_returns_non_finite() {
 // L1 regularization with many features (n_features = 200)
 // Column 0 carries the signal (y=3*x0), the remaining 199 columns are noise
 
-/// L1 regularization with 200 features: the one informative feature (column 0, y = 3*x0)
+/// L1 regularization with 200 features: the 1 informative feature (column 0, y = 3*x0)
 /// ends up with the dominant coefficient over the noise columns
 #[test]
 fn l1_regularization_many_features_recovers_informative_feature() {
@@ -859,7 +857,7 @@ fn l1_regularization_many_features_recovers_informative_feature() {
     // y depends only on column 0: y = 3 * x0 (no intercept needed)
     let y = Array1::from_shape_fn(n_samples, |i| 3.0 * ((i as f64) - 5.5));
 
-    // weak L1 so the dominant coefficient is shrunk only slightly; fit_intercept = false
+    // weak L1 shrinks the dominant coefficient only slightly. fit_intercept = false
     let mut model = LinearRegression::new(false)
         .with_solver(LeastSquaresSolver::GradientDescent {
             learning_rate: 0.01,
@@ -887,8 +885,8 @@ fn l1_regularization_many_features_recovers_informative_feature() {
         "informative coefficient[0] = {c0} should be a large positive value (true slope 3.0)"
     );
 
-    // (b) every noise coefficient stays small; the 0.5 bound sits above what the bounded
-    // (|x_j| <= 0.03) noise columns can earn yet far below coefficient[0]
+    // (b) every noise coefficient stays small. The 0.5 bound sits above what the bounded
+    // (|x_j| <= 0.03) noise columns can earn, yet far below coefficient[0]
     let max_other = coeffs
         .iter()
         .skip(1)
@@ -907,9 +905,9 @@ fn l1_regularization_many_features_recovers_informative_feature() {
     );
 }
 
-// score (coefficient of determination R²)
+// score (coefficient of determination R^2)
 
-/// On exactly-linear data (y = 3x0 - 2x1 + 5) a converged model achieves R² ≈ 1
+/// On exactly-linear data (y = 3x0 - 2x1 + 5) a converged model achieves R^2 about 1.
 #[test]
 fn score_is_one_on_perfectly_linear_data() {
     let x = array![
@@ -937,11 +935,11 @@ fn score_is_one_on_perfectly_linear_data() {
     );
 }
 
-/// score equals the textbook R² definition computed independently from predict()
+/// score equals the textbook R^2 definition computed independently from predict()
 #[test]
 fn score_matches_r2_definition() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
-    let y = array![2.1, 3.9, 6.2, 7.8, 10.1]; // noisy linear, R² strictly < 1
+    let y = array![2.1, 3.9, 6.2, 7.8, 10.1]; // noisy linear, R^2 strictly < 1
     let mut model = LinearRegression::new(true)
         .with_solver(LeastSquaresSolver::GradientDescent {
             learning_rate: 0.01,
@@ -966,12 +964,12 @@ fn score_matches_r2_definition() {
     assert!(r2 < 1.0, "noisy data must score strictly below 1, got {r2}");
 }
 
-/// A model that predicts the mean of y scores R² = 0. Here zero coefficients + an
-/// intercept fitted on mean-centered features converges to predicting ȳ.
+/// A model that predicts the mean of y scores R^2 = 0. Here zero coefficients plus an
+/// intercept fitted on mean-centered features converges to predicting y_bar.
 #[test]
 fn score_mean_predictor_is_about_zero() {
     // Feature is uninformative about y (y alternates independently of x), so the best
-    // linear fit is ŷ ≈ ȳ and R² ≈ 0
+    // linear fit is y_hat about y_bar and R^2 about 0
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]];
     let y = array![1.0, 0.0, 1.0, 0.0, 1.0, 0.0];
     let mut model = LinearRegression::new(true)
@@ -1046,8 +1044,8 @@ fn normal_solver_recovers_exact_coefficients() {
     ];
     let y = array![6.0, 11.0, -1.0, 13.0, 12.0, 0.0];
 
-    // Selecting the closed form leaves no iteration settings to carry: `LeastSquaresSolver::Normal` has no
-    // fields, so a learning rate cannot even be handed to it
+    // Selecting the closed form leaves no iteration settings to carry.
+    // `LeastSquaresSolver::Normal` has no fields, so it cannot even accept a learning rate.
     let mut model = LinearRegression::new(true)
         .with_solver(LeastSquaresSolver::Normal)
         .unwrap();
@@ -1062,8 +1060,7 @@ fn normal_solver_recovers_exact_coefficients() {
 }
 
 /// The closed-form L2 (ridge) solution matches what gradient descent converges to on the
-/// same objective: the GD cost uses penalty (alpha/2)||w||^2, so the closed form uses
-/// ridge lambda = n*alpha. Agreement validates that matching.
+/// same objective. GD uses penalty (alpha/2)||w||^2, so the closed form uses lambda = n*alpha.
 #[test]
 fn normal_solver_l2_matches_gradient_descent() {
     let x = array![
@@ -1206,11 +1203,8 @@ fn normal_solver_ridge_shrinks_coefficients() {
 
 // scikit-learn parity
 
-/// `LinearRegression::default()` is exact OLS, like Python's `LinearRegression()`
-///
-/// Reference from scikit-learn 1.9.0: `LinearRegression().fit(X, y)` on this data gives
-/// `coef_ = [1.11666667, 0.93333333]` and `intercept_ = 0.05`. The old default of gradient
-/// descent could not reproduce those numbers at any iteration count the tests could afford
+/// `LinearRegression::default()` is exact OLS, like Python's `LinearRegression()`. scikit-learn
+/// 1.9.0 gives `coef_ = [1.11666667, 0.93333333]` and `intercept_ = 0.05` on this data.
 #[test]
 fn default_solver_is_exact_ols_matching_scikit_learn() {
     let x: Array2<f64> = array![[1.0, 1.0], [2.0, 1.0], [3.0, 2.0], [4.0, 3.0], [5.0, 5.0]];
@@ -1229,14 +1223,12 @@ fn default_solver_is_exact_ols_matching_scikit_learn() {
     );
 }
 
-/// L1 drives an unsupported coefficient to exactly `0.0`, not merely close to it
+/// L1 drives an unsupported coefficient to exactly `0.0`, not merely close to it.
 ///
-/// The proximal (soft-thresholding) step is what makes L1 a feature selector. The sub-gradient
-/// update it replaced could only approach zero asymptotically, so `Lasso`-style sparsity was
-/// unreachable however long the fit ran
+/// The proximal (soft-thresholding) step makes L1 a feature selector by reaching exact zero.
 #[test]
 fn l1_regularization_produces_exact_zeros() {
-    // Feature 0 explains y exactly; feature 1 is noise
+    // Feature 0 explains y exactly. Feature 1 is noise.
     let x: Array2<f64> = array![
         [1.0, 0.3],
         [2.0, -0.7],

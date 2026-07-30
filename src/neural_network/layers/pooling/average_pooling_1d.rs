@@ -1,4 +1,5 @@
-//! 1D average pooling layer that computes the mean over each window along the length dimension
+//! 1D average pooling layer that computes the mean value within each pooling window along the
+//! length dimension.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -18,10 +19,10 @@ use crate::neural_network::traits::Layer;
 
 /// 1D average pooling layer
 ///
-/// Computes the mean value over each pooling window along the length dimension
+/// Computes the mean value within each pooling window along the length dimension.
 /// Input tensor shape: `[batch_size, length, channels]`. Output tensor shape:
-/// `[batch_size, pooled_length, channels]` where
-/// `pooled_length = (length - pool_size) / stride + 1`
+/// `[batch_size, pooled_length, channels]`. With `Valid` padding,
+/// `pooled_length = (length - pool_size) / stride + 1`.
 ///
 /// # Examples
 ///
@@ -34,10 +35,10 @@ use crate::neural_network::traits::Layer;
 /// use approx::assert_relative_eq;
 ///
 /// // Create a simple input tensor: [batch_size, length, channels]
-/// // Batch size=2, 8 elements along the length axis, 3 input channels
+/// // batch size 2, 8 elements along the length axis, 3 input channels
 /// let mut input_data = Array3::zeros((2, 8, 3));
 ///
-/// // Set test data to make average pooling results predictable
+/// // Set test data to make the average pooling results predictable
 /// for b in 0..2 {
 ///     for i in 0..8 {
 ///         for c in 0..3 {
@@ -59,21 +60,27 @@ use crate::neural_network::traits::Layer;
 /// let output = model.predict(&x).unwrap();
 /// assert_eq!(output.shape(), &[2, 4, 3]);
 ///
-/// // Verify correctness of pooling results
-/// // For window size of 2 and stride of 2, the average of elements in each window
+/// // Verify the pooling results
+/// // Window size 2 and stride 2: each window holds the average of its elements
 /// for b in 0..2 {
 ///     for c in 0..3 {
-///         // First window (0,1) -> average should be (0+1)/2 = 0.5
+///         // First window (0, 1): average (0 + 1) / 2 = 0.5
 ///         assert_relative_eq!(output[[b, 0, c]], 0.5);
-///         // Second window (2,3) -> average should be (2+3)/2 = 2.5
+///         // Second window (2, 3): average (2 + 3) / 2 = 2.5
 ///         assert_relative_eq!(output[[b, 1, c]], 2.5);
-///         // Third window (4,5) -> average should be (4+5)/2 = 4.5
+///         // Third window (4, 5): average (4 + 5) / 2 = 4.5
 ///         assert_relative_eq!(output[[b, 2, c]], 4.5);
-///         // Fourth window (6,7) -> average should be (6+7)/2 = 6.5
+///         // Fourth window (6, 7): average (6 + 7) / 2 = 6.5
 ///         assert_relative_eq!(output[[b, 3, c]], 6.5);
 ///     }
 /// }
 /// ```
+///
+/// # Performance
+///
+/// The pass runs in parallel when its estimated element count
+/// (`batch * out_positions * channels * window taps`) clears the gate in
+/// [`tuning::pool`](crate::tuning::pool). The gate does not depend on any fixed shape.
 #[derive(Debug)]
 pub struct AveragePooling1D {
     /// Size of the pooling window
@@ -84,7 +91,7 @@ pub struct AveragePooling1D {
     input_shape: Vec<usize>,
     /// Padding mode applied around the input before pooling
     padding: PaddingType,
-    /// Shape of the most recent forward input, cached for backpropagation
+    /// Shape of the most recent forward input, cached for the backward pass
     forward_input_shape: Option<Vec<usize>>,
 }
 
@@ -96,20 +103,20 @@ impl AveragePooling1D {
     /// - `pool_size` - Size of the pooling window
     /// - `input_shape` - Input tensor shape `[batch_size, length, channels]`
     ///
-    /// # Notes
-    ///
-    /// The stride defaults to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override
-    /// them with [`AveragePooling1D::with_stride`] and [`AveragePooling1D::with_padding`]
-    ///
     /// # Returns
     ///
     /// - `Result<AveragePooling1D, Error>` - New layer instance on success
     ///
+    /// # Notes
+    ///
+    /// The stride defaults to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override
+    /// them with [`AveragePooling1D::with_stride`] and [`AveragePooling1D::with_padding`].
+    ///
     /// # Errors
     ///
-    /// - [`Error::DimensionMismatch`] if `input_shape` is not 3D
-    /// - [`Error::InvalidInput`] if `input_shape` contains non-positive dimensions
-    /// - [`Error::InvalidParameter`] if `pool_size` is zero or larger than the input length
+    /// - `Error::DimensionMismatch` - If `input_shape` is not 3D
+    /// - `Error::InvalidInput` - If any `input_shape` dimension is zero
+    /// - `Error::InvalidParameter` - If `pool_size` is zero or larger than the input length
     pub fn new(pool_size: usize, input_shape: Vec<usize>) -> Result<Self, Error> {
         validate_input_shape_dims(&input_shape, 3, "AveragePooling1D")?;
         validate_all_dims_positive(&input_shape)?;
@@ -143,7 +150,8 @@ impl AveragePooling1D {
     ///
     /// # Parameters
     ///
-    /// - `padding` - `Valid` (no padding) or `Same` (pad so the output covers the input)
+    /// - `padding` - `Valid` (no padding) or `Same` (pad so the output covers the input, with
+    ///   padded cells excluded from each window)
     ///
     /// # Returns
     ///
@@ -160,7 +168,7 @@ impl Layer for AveragePooling1D {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }
 
-        // Average pooling only needs the input shape to redistribute gradients in backward
+        // Cache the input shape for the backward pass
         self.forward_input_shape = Some(input.shape().to_vec());
 
         let (output, _) = windowed_pool_forward(
@@ -173,7 +181,7 @@ impl Layer for AveragePooling1D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
+    /// Runs the forward pass for inference. Writes no cache. See [`Layer::predict`].
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         if input.ndim() != 3 {
             return Err(Error::invalid_input("input tensor is not 3D"));

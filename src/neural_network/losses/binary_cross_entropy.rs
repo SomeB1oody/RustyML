@@ -1,11 +1,11 @@
-//! Binary cross-entropy loss for binary classification
+//! Binary cross-entropy loss for binary classification.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::losses::{clip_probabilities, validate_same_shape};
 use crate::neural_network::traits::Loss;
 
-/// Binary cross-entropy loss for binary classification
+/// Binary cross-entropy loss for binary classification.
 ///
 /// # Examples
 ///
@@ -36,7 +36,7 @@ use crate::neural_network::traits::Loss;
 pub struct BinaryCrossEntropy;
 
 impl BinaryCrossEntropy {
-    /// Creates a new `BinaryCrossEntropy`
+    /// Creates a new `BinaryCrossEntropy`.
     ///
     /// # Returns
     ///

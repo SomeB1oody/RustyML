@@ -24,8 +24,8 @@ use std::borrow::Cow;
 /// kernel size, stride, and padding
 ///
 /// The dimension-generic convolution math lives in
-/// [`convolution_engine`](crate::neural_network::layers::convolution); this layer holds the
-/// weights, activation, and caches, and delegates the forward/backward numerics to it
+/// [`convolution_engine`](crate::neural_network::layers::convolution). This layer holds the
+/// weights, activation, and caches, and delegates the forward/backward numerics to it.
 ///
 /// # Examples
 ///
@@ -40,7 +40,7 @@ use std::borrow::Cow;
 /// // Batch size=2, 10 time steps, 1 input channel
 /// let x = Array3::ones((2, 10, 1)).into_dyn();
 ///
-/// // Create target tensor - output length 8 with 3 filters
+/// // Create target tensor (output length 8, 3 filters)
 /// let y = Array3::ones((2, 8, 3)).into_dyn();
 ///
 /// // Build model: add a Conv1D layer with 3 filters and kernel size 3
@@ -65,7 +65,7 @@ use std::borrow::Cow;
 /// let prediction = model.predict(&x).unwrap();
 /// println!("Convolution layer prediction results: {:?}", prediction);
 ///
-/// // Check if output shape is correct - should be [2, 8, 3]
+/// // Check if output shape is correct (should be [2, 8, 3])
 /// assert_eq!(prediction.shape(), &[2, 8, 3]);
 /// ```
 #[derive(Debug)]
@@ -105,17 +105,17 @@ impl Conv1D {
     /// - `kernel_size` - Size of the convolution kernel
     /// - `input_shape` - Shape of input tensor \[batch_size, length, channels\]
     /// - `stride` - Stride for the convolution operation
-    /// - `activation` - Activation function (ReLU, Sigmoid, Tanh, Softmax)
-    ///
-    /// # Notes
-    ///
-    /// Padding defaults to [`PaddingType::Valid`]; choose [`PaddingType::Same`] with
-    /// [`Conv1D::with_padding`]. Weights are seeded from the global seed or entropy by default; for
-    /// reproducible initialization, set a seed with [`Conv1D::with_random_state`]
+    /// - `activation` - Activation applied to the convolution output
     ///
     /// # Returns
     ///
     /// - `Result<Self, Error>` - A new `Conv1D` layer instance or an error
+    ///
+    /// # Notes
+    ///
+    /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
+    /// [`Conv1D::with_padding`]. By default, the layer seeds weights from the global seed or
+    /// entropy. For reproducible initialization, set a seed with [`Conv1D::with_random_state`].
     ///
     /// # Errors
     ///
@@ -168,11 +168,13 @@ impl Conv1D {
         self
     }
 
-    /// Sets the seed used to initialize the filter weights and re-initializes them deterministically
+    /// Sets the seed used to initialize the filter weights and re-initializes them
+    /// deterministically
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`])
-    /// This re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
-    /// assigning custom weights or training. The bias stays zero-initialized
+    /// By default, the layer seeds weights from the global seed or entropy (see
+    /// [`crate::random`]). This method re-runs Xavier/Glorot uniform initialization with
+    /// `random_state`. Call it before assigning custom weights or training. The bias stays
+    /// zero-initialized
     ///
     /// # Parameters
     ///
@@ -212,14 +214,6 @@ impl Conv1D {
     }
 
     /// Calculates the output length after convolution
-    ///
-    /// # Parameters
-    ///
-    /// - `input_length` - Length of the input sequence
-    ///
-    /// # Returns
-    ///
-    /// - `usize` - Output length after convolution
     fn calculate_output_length(&self, input_length: usize) -> usize {
         match self.padding {
             PaddingType::Valid => (input_length - self.kernel_size) / self.stride + 1,

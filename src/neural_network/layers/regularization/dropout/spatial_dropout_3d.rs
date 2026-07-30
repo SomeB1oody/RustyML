@@ -1,4 +1,4 @@
-//! Spatial dropout layer for 5D (3D convolutional) data, dropping entire channels
+//! Spatial dropout layer for 5D (3D convolutional) data. Drops entire channels.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -72,8 +72,8 @@ impl SpatialDropout3D {
     ///
     /// # Notes
     ///
-    /// The mask RNG is seeded from the global seed or entropy by default. For reproducible masks,
-    /// set a seed with [`SpatialDropout3D::with_random_state`]
+    /// By default, `new` seeds the mask RNG from the global seed or entropy. For reproducible
+    /// masks, set a seed with [`SpatialDropout3D::with_random_state`]
     ///
     /// # Errors
     ///
@@ -92,8 +92,8 @@ impl SpatialDropout3D {
 
     /// Sets the seed for reproducible mask sampling
     ///
-    /// By default the RNG is seeded from the global seed or entropy (see [`crate::random`]). This
-    /// re-seeds it deterministically from `random_state`
+    /// By default, `new` seeds the RNG from the global seed or entropy (see [`crate::random`]).
+    /// This method re-seeds it deterministically from `random_state`
     ///
     /// # Parameters
     ///
@@ -138,7 +138,7 @@ impl Layer for SpatialDropout3D {
         let batch_size = shape[0];
         let channels = shape[shape.len() - 1];
 
-        // Per-channel mask of shape (batch_size, channels): one keep/drop value per channel
+        // Per-channel mask of shape (batch_size, channels): 1 keep/drop value per channel
         let mut mask_2d = Tensor::random_using(
             IxDyn(&[batch_size, channels]),
             Uniform::new(0.0, 1.0).unwrap(),
@@ -162,9 +162,9 @@ impl Layer for SpatialDropout3D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches); see [`Layer::predict`]
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` was validated in `new()`; only the runtime input needs checking
+        // `rate` was validated in `new()`. Only the runtime input needs a check.
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_input_ndim(
             input.ndim(),

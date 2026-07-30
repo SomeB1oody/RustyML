@@ -1,26 +1,27 @@
-//! Runtime overrides for the crate's parallel/serial gate thresholds
+//! Runtime overrides for the crate's parallel and serial gate thresholds
 //!
-//! Every parallelized kernel decides serial vs. rayon (and, for GEMM, which parallel strategy)
-//! by comparing a work estimate against a calibrated threshold. The defaults are tuned on the
-//! maintainer's machine; this module overrides them at runtime, without a recompile, to match a
-//! different machine's core count, cache sizes, or memory bandwidth
+//! Every parallelized kernel picks serial execution or rayon, and for GEMM picks a parallel
+//! strategy, by comparing a work estimate against a calibrated threshold. This module overrides
+//! the defaults at runtime, without a recompile, to match a different machine's core count,
+//! cache size, or memory bandwidth. The defaults come from calibration on an AMD Ryzen 9 9950X
+//! with 16 cores, 32 threads, and 64 MiB L3.
 //!
 //! # What a gate does and does not change
 //!
-//! A gate only selects an execution strategy; it never changes what is computed. The elementwise
-//! and reduction gates give the same result serial or parallel. The matrix-product scheduling
-//! itself lives in the `gemmkit` backend (see the `matmul` submodule), whose results are reproducible on the
-//! same machine for a fixed configuration regardless of worker count; the `matmul` gates kept
-//! here only shape caller-side tiling. Retuning the gates does not change this
+//! A gate only picks an execution strategy. It never changes what the code computes. The
+//! elementwise and reduction gates give the same result serial or parallel. The matrix-product
+//! scheduling lives in the `gemmkit` backend (see the `matmul` submodule). Its results reproduce
+//! on the same machine for a fixed configuration regardless of worker count. The `matmul` gates
+//! kept here only shape caller-side tiling. Retuning a gate does not change any result.
 //!
 //! # Storage vs. API
 //!
-//! The default and atomic backing store for each gate lives next to the code (and calibration
-//! comment) it governs; this module is the discoverable public entry point that forwards to those
-//! per-site setters. Each setter is a single relaxed atomic store and each getter a single relaxed
-//! load that sits on the kernels' hot paths
+//! The default and the atomic backing store for each gate live next to the code they govern.
+//! This module is the discoverable public entry point that forwards to those per-site setters.
+//! Each setter makes a single relaxed atomic store. Each getter makes a single relaxed load on
+//! the kernel's hot path.
 //!
-//! # Example
+//! # Examples
 //!
 //! ```ignore
 //! // Retune the GEMM serial/parallel work gate for a machine with fewer, faster cores
@@ -30,11 +31,11 @@
 //! rustyml::tuning::matmul::set_cache_resident_max_bytes(32 * 1024 * 1024);
 //! ```
 
-/// Generates a `set_*` / `get_*` forwarding pair that delegates to a per-site gate's
-/// `pub(crate)` setter/getter
+/// Generates a `set_*` / `get_*` forwarding pair that calls a per-site gate's `pub(crate)`
+/// setter and getter.
 ///
-/// The `$what` string is spliced into the generated docs ("Sets {what}" / "Returns the current
-/// {what}"), so it should read as a noun phrase
+/// The `$what` string fills the generated docs ("Sets {what}" / "Returns the current {what}").
+/// Write it as a noun phrase.
 ///
 /// # Usage and expansion
 ///
@@ -58,7 +59,7 @@
 /// pub fn get_chunk_elems() -> usize { b::gemm_chunk_elems() }
 /// ```
 ///
-/// Prefix the invocation with `#[cfg(...)]` to gate both generated functions together
+/// Prefix the invocation with `#[cfg(...)]` to gate both generated functions together.
 macro_rules! fwd {
     ($set:ident => $bset:path, $get:ident => $bget:path, $what:expr) => {
         #[doc = concat!("Sets ", $what)]
@@ -74,28 +75,28 @@ macro_rules! fwd {
 }
 
 /// Tiling policy for the matrix-product callers, plus the `backend` alias to gemmkit's own
-/// tuning surface (see [`crate::math::matmul`])
+/// tuning surface (see [`crate::math::matmul`]).
 ///
-/// The GEMM/GEMV serial-vs-parallel crossovers, worker ramps, and kernel blocking all live in
-/// the [`gemmkit`](https://docs.rs/gemmkit) backend now. Retune them one of three ways:
+/// The GEMM/GEMV serial-vs-parallel crossovers, worker ramps, and kernel blocking live in the
+/// [`gemmkit`](https://docs.rs/gemmkit) backend. Retune them one of 3 ways.
 ///
 /// - **Env profile** (no recompile): every backend knob is a `GEMMKIT_*` environment variable,
-///   read once per process. `cargo install gemmkit-tune` and run `gemmkit-tune` on the target
-///   machine to sweep them and emit a ready-to-`source` profile
-/// - **Programmatically**: through the `backend` alias, e.g.
-///   `tuning::matmul::backend::set_parallel_threshold(..)` (an in-code setter beats the env var)
-/// - **Per call**: not exposed publicly - the estimators pass the backend's automatic
-///   parallelism (or force serial inside already-parallel regions) at each call site
+///   read once per process. Run `cargo install gemmkit-tune`, then `gemmkit-tune` on the target
+///   machine, to sweep them and emit a ready-to-source profile.
+/// - **Programmatically**: through the `backend` alias, for example
+///   `tuning::matmul::backend::set_parallel_threshold(..)`. An in-code setter beats the env var.
+/// - **Per call**: not exposed publicly. The estimators pass the backend's automatic
+///   parallelism, or force serial inside an already-parallel region, at each call site.
 ///
-/// What remains here is the caller-side tiling policy: `chunk_elems` sizes the row-chunks of a
-/// tiled product and `cache_resident_max_bytes` picks GEMV-swarm vs tiled-GEMM; set the latter
-/// to the machine's actual shared-L3 size
+/// What remains here is the caller-side tiling policy. `chunk_elems` sizes the row-chunks of a
+/// tiled product. `cache_resident_max_bytes` picks a GEMV-swarm or a tiled GEMM. Set it to the
+/// machine's actual shared L3 size.
 #[cfg(feature = "math")]
 pub mod matmul {
     use crate::math::matmul as b;
 
     /// gemmkit's own tuning module, re-exported so backend knobs are reachable without adding a
-    /// direct `gemmkit` dependency: every `GEMMKIT_*` env var has a `set_*`/getter pair here
+    /// direct `gemmkit` dependency. Every `GEMMKIT_*` env var has a `set_*`/getter pair here.
     pub use gemmkit::tuning as backend;
 
     fwd!(
@@ -111,8 +112,8 @@ pub mod matmul {
     );
 }
 
-/// Elementwise-map parallelism gates (memory-bound and exp-dominated maps); see
-/// `crate::parallel_gates`. Moving these never changes a result bit
+/// Elementwise-map parallelism gates (memory-bound and exp-dominated maps). See
+/// `crate::parallel_gates`. Moving a gate never changes a result bit.
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
@@ -159,9 +160,9 @@ pub mod elementwise {
     );
 }
 
-/// Deterministic-reduction parallelism gates; see `crate::parallel_gates` and
+/// Deterministic-reduction parallelism gates. See `crate::parallel_gates` and
 /// [`crate::math::reduction`]. The blocked fold gives the same result serial or parallel, so
-/// moving these never changes a result
+/// moving a gate never changes a result.
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
@@ -195,8 +196,8 @@ pub mod reduction {
     );
 }
 
-/// Tree-walk and split-search parallelism gates for the tree models; see
-/// `crate::parallel_gates`
+/// Tree-walk and split-search parallelism gates for the tree models. See
+/// `crate::parallel_gates`.
 #[cfg(feature = "machine_learning")]
 pub mod tree {
     fwd!(
@@ -211,7 +212,7 @@ pub mod tree {
     );
 }
 
-/// Convolution-engine parallelism gates; see `crate::neural_network::layers::convolution`
+/// Convolution-engine parallelism gates. See `crate::neural_network::layers::convolution`.
 #[cfg(feature = "neural_network")]
 pub mod conv {
     fwd!(
@@ -226,7 +227,7 @@ pub mod conv {
     );
 }
 
-/// Pooling-engine parallelism gate; see `crate::neural_network::layers::pooling`
+/// Pooling-engine parallelism gate. See `crate::neural_network::layers::pooling`.
 #[cfg(feature = "neural_network")]
 pub mod pool {
     fwd!(
@@ -236,7 +237,7 @@ pub mod pool {
     );
 }
 
-/// Normalization-layer parallelism gates (BatchNorm, LayerNorm, GroupNorm)
+/// Normalization-layer parallelism gates (BatchNorm, LayerNorm, GroupNorm).
 #[cfg(feature = "neural_network")]
 pub mod norm {
     use crate::neural_network::layers::regularization::normalization as gn;
@@ -280,7 +281,7 @@ pub mod norm {
     );
 }
 
-/// Metrics parallelism gate (silhouette score); see [`crate::metrics`]
+/// Metrics parallelism gate (silhouette score). See [`crate::metrics`].
 #[cfg(feature = "metrics")]
 pub mod metrics {
     fwd!(
@@ -290,10 +291,11 @@ pub mod metrics {
     );
 }
 
+/// Round-trip test for the gate forwarding macro.
 #[cfg(all(test, feature = "math"))]
 mod tests {
-    /// A public setter reaches the per-site atomic and the getter reads it back (the full
-    /// facade -> `pub(crate)` backing -> atomic path)
+    /// A public setter reaches the per-site atomic, and the getter reads it back (the full
+    /// facade -> `pub(crate)` backing -> atomic path).
     #[test]
     fn matmul_chunk_elems_gate_roundtrips() {
         let orig = super::matmul::get_chunk_elems();

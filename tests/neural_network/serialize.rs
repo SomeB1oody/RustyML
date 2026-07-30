@@ -1,12 +1,13 @@
-//! Integration tests for Sequential model save/load round-trips
+//! Integration tests for Sequential model save/load round-trips.
 //!
-//! Each test builds a model (with known injected weights or trained a few steps),
-//! saves and reloads it into a fresh model of the same architecture, and asserts
-//! that predict output matches element-wise (within ~1e-6) across the round-trip
+//! Each test builds a model, either with known injected weights or trained for a few steps. It
+//! saves the model and reloads it into a fresh model of the same architecture. Then it checks
+//! that predict output matches element-wise (within ~1e-6) across the round-trip.
+//!
 //! Error paths cover layer-count, layer-type, and weight-shape mismatches (all
-//! ModelStructureMismatch), a nonexistent file (IoError::Std), corrupt binary
+//! ModelStructureMismatch). They also cover a nonexistent file (IoError::Std), corrupt binary
 //! data (IoError::Serialization), and a wrong magic tag or format version
-//! (IoError::UnsupportedModelFormat)
+//! (IoError::UnsupportedModelFormat).
 
 use crate::common::assert_allclose;
 use ndarray::Array;
@@ -146,7 +147,8 @@ fn dense_scaled_identity_value_check_and_round_trip() {
     assert_allclose(&after, &expected, 1e-6_f32);
 }
 
-// Dense with zero weights (W = 0): output is the bias broadcast over the batch, and survives a round-trip
+// Dense with zero weights (W = 0): output is the bias broadcast over the batch, and survives
+// a round-trip
 #[test]
 fn dense_zero_weights_bias_only_value_check_and_round_trip() {
     let tmp = TempFile::new("dense_zero_w");
@@ -184,7 +186,7 @@ fn dense_zero_weights_bias_only_value_check_and_round_trip() {
     assert_allclose(&after, &expected, 1e-6_f32);
 }
 
-// Two-layer Dense model trained a few steps round-trips
+// 2-layer Dense model trained a few steps round-trips
 #[test]
 fn dense_two_layer_trained_round_trip() {
     let tmp = TempFile::new("dense2");
@@ -454,7 +456,7 @@ fn batch_normalization_trained_round_trip_preserves_running_stats() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-/// predict() is deterministic: two calls on the same fresh eval-mode model return the same tensor
+/// predict() is deterministic: 2 calls on the same fresh eval-mode model return the same tensor
 #[test]
 fn batch_normalization_predict_is_deterministic_after_round_trip() {
     let tmp = TempFile::new("batchnorm_det");
@@ -485,7 +487,7 @@ fn batch_normalization_predict_is_deterministic_after_round_trip() {
     let mut fresh = make_arch();
     fresh.load_from_path(tmp.path()).unwrap();
 
-    // Two calls to predict must agree element-wise
+    // 2 calls to predict must agree element-wise
     let p1 = fresh.predict(&x).unwrap();
     let p2 = fresh.predict(&x).unwrap();
     assert_allclose(&p2, &p1, 1e-7_f32);
@@ -569,8 +571,8 @@ fn instance_normalization_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// Mixed model Dense -> Dropout -> Dense: round-trips a parameterless layer (Dropout is
-// transparent in eval mode); empty input_shape skips shape validation, so batch size is not baked in
+// Dense -> Dropout -> Dense round-trips a parameterless layer (Dropout is transparent in eval
+// mode). An empty input_shape skips shape validation, so batch size is not fixed.
 #[test]
 fn mixed_model_with_dropout_round_trip() {
     let tmp = TempFile::new("mixed_dropout");
@@ -578,7 +580,7 @@ fn mixed_model_with_dropout_round_trip() {
     let make_arch = || {
         let mut m = Sequential::new();
         m.add(Dense::new(3, 4, Linear::new()).unwrap())
-            // empty input_shape => Dropout's shape validator is skipped at runtime
+            // empty input_shape => Dropout skips its shape validator at runtime
             .add(Dropout::new(0.3, vec![]).unwrap())
             .add(Dense::new(4, 2, Linear::new()).unwrap());
         m
@@ -616,7 +618,7 @@ fn mixed_model_trained_round_trip() {
         MeanSquaredError::new(),
     );
 
-    // Consistent batch size; Dropout shape validation is off (empty vec)
+    // Consistent batch size. Dropout shape validation is off (empty vec).
     let x: Tensor = Array::from_shape_vec((2, 3), vec![0.5f32, -1.0, 1.5, -0.5, 1.0, -1.5])
         .unwrap()
         .into_dyn();
@@ -646,12 +648,8 @@ fn load_from_nonexistent_file_gives_io_error() {
     }
 }
 
-/// A valid header followed by corrupt data gives Error::Io(IoError::Serialization)
-///
-/// The header is checked before the body, so reaching the body deserializer at all now requires a
-/// well-formed magic and version. This pins the failure mode that remains once it does: a
-/// truncated or damaged body. Data that is not a model file at all is rejected earlier, by
-/// `load_wrong_magic_gives_unsupported_format_error`
+/// A valid header followed by corrupt data gives Error::Io(IoError::Serialization). The loader
+/// checks the header first, so this pins the failure mode for a truncated or damaged body.
 #[test]
 fn load_from_invalid_data_gives_serialization_error() {
     let tmp = TempFile::new("invalid_data");
@@ -692,7 +690,8 @@ fn load_layer_count_mismatch_gives_structure_error() {
     }
 }
 
-/// Layer-type mismatch (Dense saved, Conv1D target) gives Error::Io(IoError::ModelStructureMismatch)
+/// Layer-type mismatch (Dense saved, Conv1D target) gives
+/// Error::Io(IoError::ModelStructureMismatch)
 #[test]
 fn load_layer_type_mismatch_gives_structure_error() {
     let tmp = TempFile::new("type_mismatch");
@@ -711,7 +710,8 @@ fn load_layer_type_mismatch_gives_structure_error() {
     }
 }
 
-/// Weight-shape mismatch (Dense 2->2 saved, Dense 3->3 target) gives Error::Io(IoError::ModelStructureMismatch)
+/// Weight-shape mismatch (Dense 2->2 saved, Dense 3->3 target) gives
+/// Error::Io(IoError::ModelStructureMismatch)
 #[test]
 fn load_weight_shape_mismatch_gives_structure_error() {
     let tmp = TempFile::new("shape_mismatch");
@@ -730,11 +730,8 @@ fn load_weight_shape_mismatch_gives_structure_error() {
     }
 }
 
-/// A file whose magic tag does not match gives Error::Io(IoError::UnsupportedModelFormat)
-///
-/// This is what stops a model saved before the format carried a header from being read as
-/// current-layout weights: such a file begins with its layer count, so a small integer is exactly
-/// what the loader finds where the tag is now expected
+/// A file whose magic tag does not match gives Error::Io(IoError::UnsupportedModelFormat). This
+/// catches a pre-header file, which began with its layer count where the tag is now expected.
 #[test]
 fn load_wrong_magic_gives_unsupported_format_error() {
     let tmp = TempFile::new("wrong_magic");
@@ -755,12 +752,8 @@ fn load_wrong_magic_gives_unsupported_format_error() {
     }
 }
 
-/// A file with the right magic but a different format version gives
-/// Error::Io(IoError::UnsupportedModelFormat)
-///
-/// The saved and target models here are the same architecture, so the layer count, the layer type
-/// name and every weight extent match: the version is the only thing standing between a stale
-/// checkpoint and a silently wrong prediction
+/// A file with the right magic but the wrong format version gives
+/// Error::Io(IoError::UnsupportedModelFormat), even when every layer and weight shape matches.
 #[test]
 fn load_wrong_format_version_gives_unsupported_format_error() {
     let tmp = TempFile::new("wrong_version");

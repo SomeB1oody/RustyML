@@ -3,8 +3,8 @@
 //! [`NnError`] enumerates the failures specific to the neural-network framework (layer state,
 //! weight shapes, model compilation). Callers receive it through the crate-wide
 //! [`Error::NeuralNetwork`](crate::error::Error::NeuralNetwork) variant, into which it converts via
-//! `?` (a `#[from]` bridge). See [`crate::error`] for the unified [`Error`](crate::error::Error) that
-//! aggregates the per-domain error enums
+//! `?` (a `#[from]` bridge). See [`crate::error`] for the unified
+//! [`Error`](crate::error::Error) that aggregates the per-domain error enums
 
 use crate::error::Error;
 
@@ -50,6 +50,7 @@ impl Error {
     }
 }
 
+/// Unit tests for `NnError` display formatting and the `forward_pass_not_run` constructor
 #[cfg(test)]
 mod tests {
     use super::NnError;

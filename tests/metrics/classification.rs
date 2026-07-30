@@ -8,7 +8,7 @@ use rustyml::metrics::{
     log_loss, precision_recall_curve, roc_auc, roc_curve, top_k_accuracy,
 };
 
-// ConfusionMatrix::new - TP/FP/TN/FN counting
+// ConfusionMatrix::new: TP/FP/TN/FN counting
 
 #[test]
 fn cm_new_perfect_predictions() {
@@ -37,7 +37,8 @@ fn cm_new_mixed() {
     assert_eq!(cm.get_counts(), (3, 1, 2, 2));
 }
 
-/// Probabilities are rejected rather than binarized, like scikit-learn's `confusion_matrix`
+/// The constructor rejects probabilities instead of binarizing them, like scikit-learn's
+/// `confusion_matrix`.
 #[test]
 #[should_panic(expected = "must hold only 0 or 1")]
 fn cm_new_rejects_probabilities() {
@@ -46,7 +47,8 @@ fn cm_new_rejects_probabilities() {
     let _ = ConfusionMatrix::new(&y_true, &y_pred);
 }
 
-/// `y_true` is never thresholded: a probabilistic ground truth is an error, not a coercion
+/// The constructor never thresholds `y_true`. A probabilistic ground truth is an error, not a
+/// coercion.
 #[test]
 #[should_panic(expected = "y_true must hold only 0 or 1")]
 fn cm_new_rejects_soft_ground_truth() {
@@ -64,7 +66,7 @@ fn cm_new_with_labels_handles_plus_minus_one() {
     assert_eq!(cm.get_counts(), (3, 1, 2, 2));
 }
 
-/// The two label values must differ
+/// The 2 label values must differ.
 #[test]
 #[should_panic(expected = "must differ")]
 fn cm_new_with_labels_rejects_equal_labels() {
@@ -73,7 +75,7 @@ fn cm_new_with_labels_rejects_equal_labels() {
     let _ = ConfusionMatrix::new_with_labels(&y_true, &y_pred, 1.0, 1.0);
 }
 
-/// `NaN` is rejected instead of being silently counted as negative
+/// The constructor rejects `NaN` instead of silently counting it as negative.
 #[test]
 #[should_panic(expected = "must hold only 0 or 1")]
 fn cm_new_rejects_nan() {
@@ -82,7 +84,7 @@ fn cm_new_rejects_nan() {
     let _ = ConfusionMatrix::new(&y_true, &y_pred);
 }
 
-/// `y_true` and `y_pred` may now use different storage types
+/// `y_true` and `y_pred` may use different storage types, such as an owned array and a view.
 #[test]
 fn cm_new_accepts_mixed_storage() {
     let y_true = array![1.0, 0.0, 1.0, 0.0];
@@ -226,7 +228,7 @@ fn cm_f1_zero_precision_and_recall() {
 #[test]
 fn cm_mcc_partial() {
     // mcc = (TP*TN - FP*FN) / sqrt((TP+FP)(TP+FN)(TN+FP)(TN+FN))
-    //     = 4 / sqrt(240) ~= 0.25820
+    //     = 4 / sqrt(240) ~ 0.25820
     let cm = cm_3_1_2_2();
     let expected = 4.0 / (240.0_f64).sqrt();
     assert_abs_diff_eq!(cm.mcc(), expected, epsilon = 1e-9);
@@ -413,7 +415,7 @@ fn roc_auc_with_all_tied_scores() {
 
 #[test]
 fn roc_auc_partial_ties() {
-    // Two tie groups (scores=[0.8,0.8,0.2,0.2], labels=[T,F,T,F]) with averaged
+    // 2 tie groups (scores=[0.8,0.8,0.2,0.2], labels=[T,F,T,F]) with averaged
     // ranks 1.5 and 3.5 per group -> AUC = 0.5
     let labels = array![true, false, true, false];
     let scores = array![0.8, 0.8, 0.2, 0.2];
@@ -540,17 +542,21 @@ fn mcm_per_class_f1() {
     assert_abs_diff_eq!(f1[2], 0.8, epsilon = 1e-12);
 }
 
+/// Selects which `MulticlassConfusionMatrix` metric a table-driven test case exercises.
 #[derive(Clone, Copy)]
 enum MetricKind {
+    /// Selects `MulticlassConfusionMatrix::precision`.
     Precision,
+    /// Selects `MulticlassConfusionMatrix::recall`.
     Recall,
+    /// Selects `MulticlassConfusionMatrix::f1`.
     F1,
 }
 
 #[test]
 fn mcm_aggregated_precision_recall_f1() {
     // Table-driven (metric, average, expected) over the same mcm_3class() fixture.
-    // Per-class precision=[1.0,1.0,2/3], recall=[1.0,0.5,1.0], f1=[1.0,2/3,4/5];
+    // Per-class precision=[1.0,1.0,2/3], recall=[1.0,0.5,1.0], f1=[1.0,2/3,4/5].
     // support=[1,2,2], total=5.
     let cm = mcm_3class();
     let cases = [
@@ -654,7 +660,7 @@ fn mcm_empty_panics() {
 #[test]
 fn log_loss_two_samples() {
     // y_true=[0,1], y_prob=[[0.9,0.1],[0.2,0.8]]
-    // loss = -(ln(0.9) + ln(0.8)) / 2 ~= 0.16425203348
+    // loss = -(ln(0.9) + ln(0.8)) / 2 ~ 0.16425203348
     let y_true = array![0usize, 1];
     let y_prob = arr2(&[[0.9, 0.1], [0.2, 0.8]]);
     let expected = -(0.9_f64.ln() + 0.8_f64.ln()) / 2.0;
@@ -663,8 +669,8 @@ fn log_loss_two_samples() {
 
 #[test]
 fn log_loss_perfect_probs() {
-    // Perfect probs clamped to 1-EPS (EPS = f64::EPSILON)
-    // -> loss = -ln(1 - f64::EPSILON) ~= 2.2e-16 (finite, not inf)
+    // log_loss clamps a perfect probability to 1-EPS (EPS = f64::EPSILON)
+    // -> loss = -ln(1 - f64::EPSILON) ~ 2.2e-16 (finite, not inf)
     let y_true = array![0usize, 1];
     let y_prob = arr2(&[[1.0, 0.0], [0.0, 1.0]]);
     let loss = log_loss(&y_true, &y_prob);
@@ -674,19 +680,20 @@ fn log_loss_perfect_probs() {
 
 #[test]
 fn log_loss_zero_prob_clamped() {
-    // p=0.0 for the true class clamps to EPS = f64::EPSILON
-    // -> loss = -ln(f64::EPSILON) ~= 36.0, finite (not +inf)
+    // log_loss clamps p=0.0 for the true class to EPS = f64::EPSILON
+    // -> loss = -ln(f64::EPSILON) ~ 36.0, finite (not +inf)
     let y_true = array![0usize];
     let y_prob = arr2(&[[0.0, 1.0]]);
     let loss = log_loss(&y_true, &y_prob);
     assert!(loss.is_finite());
-    assert!(loss > 30.0); // -ln(f64::EPSILON) ~= 36.0
+    assert!(loss > 30.0); // -ln(f64::EPSILON) ~ 36.0
 }
 
 #[test]
 fn log_loss_renormalizes_rows() {
-    // Row [2,2] does not sum to 1; renormalizing to [0.5, 0.5] makes the loss for true
-    // class 0 equal -ln(0.5) = ln(2). Without renormalization it would clamp 2.0 -> ~1 and give ~0
+    // Row [2, 2] does not sum to 1. Renormalizing it to [0.5, 0.5] makes the loss for true
+    // class 0 equal -ln(0.5), which is ln(2). Without renormalization the code would clamp 2.0
+    // to about 1 and give a loss near 0
     let y_true = array![0usize];
     let y_prob = arr2(&[[2.0, 2.0]]);
     let expected = 2.0_f64.ln();
@@ -820,7 +827,7 @@ fn top_k_accuracy_k_ge_n_classes() {
 
 #[test]
 fn top_k_accuracy_all_wrong_top1() {
-    // Both samples have two classes scoring higher than the true class -> top1 = 0.0
+    // Both samples have 2 classes scoring higher than the true class -> top1 = 0.0
     let y_true = array![0usize, 1];
     let y_prob = arr2(&[[0.1, 0.5, 0.4], [0.5, 0.1, 0.4]]);
     assert_abs_diff_eq!(top_k_accuracy(&y_true, &y_prob, 1), 0.0, epsilon = 1e-12);
@@ -870,7 +877,8 @@ fn top_k_accuracy_label_out_of_range_panics() {
 #[test]
 #[should_panic(expected = "must not contain NaN")]
 fn top_k_accuracy_nan_true_prob_panics() {
-    // A NaN true-class probability must be rejected, not miscounted as a hit (n_greater = 0)
+    // `top_k_accuracy` rejects a NaN true-class probability instead of miscounting it as a hit
+    // (n_greater = 0)
     let y_true = array![0usize];
     let y_prob = arr2(&[[f64::NAN, 0.9]]);
     let _ = top_k_accuracy(&y_true, &y_prob, 1);
@@ -880,7 +888,7 @@ fn top_k_accuracy_nan_true_prob_panics() {
 
 #[test]
 fn average_precision_known_value() {
-    // labels=[T,F,T,F], scores=[0.9,0.6,0.4,0.1]; ranked descending the positive
+    // labels=[T,F,T,F], scores=[0.9,0.6,0.4,0.1]. Ranked in descending order, the positive
     // thresholds contribute 0.5 and 1/3 -> AP = 5/6
     let labels = array![true, false, true, false];
     let scores = array![0.9, 0.6, 0.4, 0.1];
@@ -953,11 +961,8 @@ fn average_precision_empty_panics() {
 
 // roc_curve
 
-/// Matches `sklearn.metrics.roc_curve` element for element
-///
-/// Reference values from scikit-learn 1.9.0: `roc_curve([1,0,1,0], [0.9,0.6,0.4,0.1])` gives
-/// `fpr = [0, 0, 0.5, 0.5, 1]`, `tpr = [0, 0.5, 0.5, 1, 1]`,
-/// `thresholds = [inf, 0.9, 0.6, 0.4, 0.1]`
+/// Matches `sklearn.metrics.roc_curve` values from scikit-learn 1.9.0: fpr = [0, 0, 0.5, 0.5, 1],
+/// tpr = [0, 0.5, 0.5, 1, 1], thresholds = [inf, 0.9, 0.6, 0.4, 0.1].
 #[test]
 fn roc_curve_specific_points() {
     let labels = array![true, false, true, false];
@@ -1052,12 +1057,8 @@ fn roc_curve_no_negative_panics() {
 
 // precision_recall_curve
 
-/// Matches `sklearn.metrics.precision_recall_curve` element for element
-///
-/// Reference values from scikit-learn 1.9.0:
-/// `precision_recall_curve([1,0,1,0], [0.9,0.6,0.4,0.1])` gives
-/// `precision = [0.5, 2/3, 0.5, 1, 1]`, `recall = [1, 1, 0.5, 0.5, 0]`,
-/// `thresholds = [0.1, 0.4, 0.6, 0.9]`
+/// Matches `sklearn.metrics.precision_recall_curve` values from scikit-learn 1.9.0 for
+/// `y_true=[1,0,1,0]`: precision = [0.5, 2/3, 0.5, 1, 1], recall = [1, 1, 0.5, 0.5, 0].
 #[test]
 fn precision_recall_curve_specific_points() {
     let labels = array![true, false, true, false];
@@ -1106,11 +1107,8 @@ fn precision_recall_curve_is_ordered_like_scikit_learn() {
     }
 }
 
-/// Matches scikit-learn when the positives separate cleanly from the negatives
-///
-/// Reference values from scikit-learn 1.9.0:
-/// `precision_recall_curve([1,1,0,0], [0.9,0.8,0.3,0.1])` gives
-/// `precision = [0.5, 2/3, 1, 1, 1]`, `recall = [1, 1, 1, 0.5, 0]`
+/// Matches scikit-learn 1.9.0 when the positives separate cleanly from the negatives:
+/// precision = [0.5, 2/3, 1, 1, 1], recall = [1, 1, 1, 0.5, 0].
 #[test]
 fn precision_recall_curve_perfect() {
     let labels = array![true, true, false, false];

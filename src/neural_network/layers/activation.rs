@@ -1,8 +1,8 @@
 //! Element-wise activation functions and the standalone activation layers
 //!
-//! Defines the [`Activation`] enum (the single source of truth for each
-//! activation's forward transform and derivative) along with the thin
-//! [`Linear`], [`ReLU`], [`Sigmoid`], [`Tanh`], and [`Softmax`] layer wrappers
+//! Defines the [`Activation`] enum, the single source of truth for each activation's forward
+//! transform and derivative. The thin [`Linear`], [`ReLU`], [`Sigmoid`], [`Tanh`], and
+//! [`Softmax`] layer wrappers delegate their math to it
 
 use crate::error::{Context, Error};
 use crate::neural_network::Tensor;
@@ -11,15 +11,7 @@ use crate::{Deserialize, Serialize};
 use ndarray::{Array2, ArrayView1, ArrayViewMut1, Axis, Zip};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-/// Formats a shape slice as a parenthesized tuple, e.g. `"(2, 3)"`
-///
-/// # Parameters
-///
-/// - `shape` - Dimension sizes to format
-///
-/// # Returns
-///
-/// - `String` - The shape rendered as `"(d0, d1, ...)"`
+/// Formats a shape slice as a parenthesized tuple, for example `"(2, 3)"`
 fn format_shape(shape: &[usize]) -> String {
     format!(
         "({})",
@@ -31,15 +23,7 @@ fn format_shape(shape: &[usize]) -> String {
     )
 }
 
-/// Formats the cached output shape for activation layers
-///
-/// # Parameters
-///
-/// - `cached_tensor` - The layer's cached output, if any
-///
-/// # Returns
-///
-/// - `String` - The cached tensor's shape, or `"Unknown"` if nothing is cached
+/// Formats the cached output shape for activation layers, or "Unknown" if nothing is cached
 fn format_output_shape(cached_tensor: &Option<Tensor>) -> String {
     match cached_tensor {
         Some(tensor) => format_shape(tensor.shape()),
@@ -66,33 +50,35 @@ pub use tanh::Tanh;
 
 /// The element-wise activation functions that trainable layers can embed
 ///
-/// Dense, the convolutional layers, and the recurrent layers each carry an
-/// `Activation` value instead of a generic activation type parameter. A runtime
-/// enum keeps the host layers non-generic, which removes monomorphization bloat
-/// and lets weight deserialization downcast every layer to a single concrete type
-/// rather than probing each `Layer<Act>` pairing
+/// Dense, the convolutional layers, and the recurrent layers each carry an `Activation` value
+/// instead of a generic activation type parameter. A runtime enum keeps the host layers
+/// non-generic. This removes monomorphization bloat and lets weight deserialization downcast
+/// every layer to a single concrete type, instead of probing each `Layer<Act>` pairing
 ///
 /// The standalone activation *layers* ([`Linear`], [`ReLU`], [`Sigmoid`], [`Tanh`],
-/// [`Softmax`]) delegate their math here, so this enum is the single source of
-/// truth for both the forward transform and its derivative
+/// [`Softmax`]) delegate their math here. This enum is the single source of truth for both
+/// the forward transform and its derivative
 ///
 /// # Adding a new activation
 ///
-/// Implement the math **here on the enum**, not in a layer:
+/// Implement the math on the enum, not in a layer.
+///
 /// 1. Add a variant to this enum
 /// 2. Handle it in [`Activation::forward`] (the transform) and [`Activation::backward`] (the
-///    derivative, expressed in terms of the *activated output* `a`, not the pre-activation `z`)
-/// 3. Add a thin standalone layer struct mirroring [`ReLU`] - a `{ output_cache }` field whose
-///    `Layer` impl validates, caches the output, and delegates to this enum - plus a
-///    `From<NewLayer> for Activation` impl so it works as an `impl Into<Activation>` argument
+///    derivative, expressed by the *activated output* `a`, not the pre-activation `z`)
+/// 3. Add a thin standalone layer struct that mirrors [`ReLU`]. Give it an `output_cache`
+///    field. Its `Layer` impl validates the input, caches the output, and delegates to this
+///    enum. Add a `From<NewLayer> for Activation` impl so the layer works as an
+///    `impl Into<Activation>` argument
 ///
-/// The algorithm lives on the enum, not in the layer `impl`s, because the trainable layers
-/// (Dense, the convolutional layers, the recurrent layers) store an `Activation` *value* and call
-/// these **pure, stateless** methods inside their own forward/backward. A stateful `Layer` impl
-/// (which caches `output` and takes `&mut self`) cannot serve that embedded, value-typed use
-/// without reintroducing a generic activation type parameter or `Box<dyn Layer>`, and would
-/// duplicate the algorithm. The standalone structs are therefore thin wrappers, never the source
-/// of truth
+/// The algorithm lives on the enum, not in the layer `impl` blocks. The trainable layers
+/// (Dense, the convolutional layers, the recurrent layers) store an `Activation` value. Each
+/// layer calls these pure, stateless methods inside its own forward and backward passes.
+///
+/// A stateful `Layer` impl caches `output` and takes `&mut self`. It cannot serve that
+/// embedded, value-typed use without a generic activation type parameter or `Box<dyn Layer>`.
+/// Either option would duplicate the algorithm. The standalone structs stay thin wrappers,
+/// never the source of truth
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Activation {
     /// Identity activation, `f(x) = x`
@@ -108,7 +94,7 @@ pub enum Activation {
 }
 
 impl Activation {
-    /// Applies the activation to a pre-activation tensor `z`, returning the activated output
+    /// Applies the activation to a pre-activation tensor `z` and returns the activated output
     ///
     /// # Parameters
     ///
@@ -183,7 +169,7 @@ impl Activation {
         match self {
             Activation::Linear => Ok(grad_output.clone()),
             Activation::ReLU => {
-                // ReLU'(z) = 1 where z > 0. Since a = max(0, z), `a > 0` iff `z > 0`
+                // ReLU'(z) = 1 when z > 0. Since a = max(0, z), `a > 0` exactly when `z > 0`
                 let mut grad = grad_output.clone();
                 let relu_grad = |g: &mut f32, &a: &f32| {
                     if a <= 0.0 {
@@ -273,7 +259,7 @@ fn softmax_forward(input: &Tensor) -> Result<Tensor, Error> {
         )));
     }
 
-    // Flatten to [batch, features]; softmax runs over the last axis
+    // Flatten to [batch, features]. Softmax runs over the last axis
     let batch_size: usize = shape[..ndim - 1].iter().product();
     let num_features = shape[ndim - 1];
 
@@ -286,7 +272,7 @@ fn softmax_forward(input: &Tensor) -> Result<Tensor, Error> {
         // Subtract the row max so every exp argument is <= 0 (no overflow)
         let max_val = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         row.map_inplace(|x| *x = (*x - max_val).exp());
-        // The max-shift guarantees one term is exp(0)=1.0, so the sum is always >= 1.0
+        // The max-shift guarantees one of the terms is exp(0)=1.0, so the sum is always >= 1.0
         let sum = row.sum();
         row.map_inplace(|x| *x /= sum);
     };
@@ -356,6 +342,7 @@ fn softmax_backward(output: &Tensor, grad_output: &Tensor) -> Result<Tensor, Err
         .into_dyn())
 }
 
+/// Unit tests for the activation layer helpers and the `Activation` enum
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -393,7 +380,7 @@ mod tests {
         assert_abs_diff_eq!(sum, 1.0_f32, epsilon = 1e-6);
     }
 
-    /// A row of equal large values stays numerically stable, yielding a uniform distribution
+    /// A row of equal large values stays numerically stable and produces a uniform distribution
     #[test]
     fn softmax_forward_large_equal_values_stable() {
         let input = tensor2(1, 3, vec![1000.0, 1000.0, 1000.0]);
@@ -439,7 +426,7 @@ mod tests {
         assert_abs_diff_eq!(vals[2], -0.125_f32, epsilon = 1e-6);
     }
 
-    /// The gradient row sums to (approximately) zero, since softmax Jacobian rows sum to zero
+    /// The gradient row sums to about zero, since the softmax Jacobian rows sum to zero
     #[test]
     fn softmax_backward_row_sums_to_zero() {
         let output = tensor2(1, 3, vec![0.25, 0.25, 0.5]);
@@ -449,7 +436,7 @@ mod tests {
         assert_abs_diff_eq!(row_sum, 0.0_f32, epsilon = 1e-6);
     }
 
-    // Activation enum - round-trip through the public API
+    // Round-trip tests for the Activation enum's public API
 
     /// Activation::Softmax forward delegates to softmax_forward
     #[test]

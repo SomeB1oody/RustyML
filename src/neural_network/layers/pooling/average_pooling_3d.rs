@@ -1,4 +1,5 @@
-//! 3D average pooling layer that averages over each window across depth, height, and width
+//! 3D average pooling layer that computes the mean value within each pooling window across
+//! depth, height, and width.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -18,13 +19,12 @@ use crate::neural_network::traits::Layer;
 
 /// 3D average pooling layer
 ///
-/// Computes the mean value over each pooling window across depth, height, and width
-///
+/// Computes the mean value within each pooling window across depth, height, and width.
 /// Input tensor shape: `[batch_size, depth, height, width, channels]`. Output tensor shape:
-/// `[batch_size, pooled_depth, pooled_height, pooled_width, channels]` where
-/// `pooled_depth = (depth - pool_size_d) / stride_d + 1`,
-/// `pooled_height = (height - pool_size_h) / stride_h + 1`, and
-/// `pooled_width = (width - pool_size_w) / stride_w + 1`
+/// `[batch_size, pooled_depth, pooled_height, pooled_width, channels]`. With `Valid` padding,
+/// `pooled_depth = (depth - pool_size_d) / stride_d + 1`. The same rule gives
+/// `pooled_height = (height - pool_size_h) / stride_h + 1` and
+/// `pooled_width = (width - pool_size_w) / stride_w + 1`.
 ///
 /// # Examples
 ///
@@ -48,7 +48,7 @@ use crate::neural_network::traits::Layer;
 ///     MeanSquaredError::new()            // Mean squared error loss
 /// );
 ///
-/// // Create example 3D input data (e.g., 3D medical imaging or volume data)
+/// // Create example 3D input data, for example 3D medical imaging or volume data
 /// // Input: [1 batch, 32x32x32 3D volume, 16 channels]
 /// let input_data = Array5::from_shape_fn((1, 32, 32, 32, 16), |(b, d, h, w, c)| {
 ///     // Generate example data with spatial patterns
@@ -67,25 +67,25 @@ use crate::neural_network::traits::Layer;
 /// // Make predictions on new data
 /// let predictions = model.predict(&input_data).unwrap();
 /// println!("Output shape after average pooling: {:?}", predictions.shape());
-/// // Expected output: [1, 16, 16, 16, 16] (spatial dimensions are halved)
+/// // Expected output: [1, 16, 16, 16, 16], spatial dimensions halved
 /// ```
 ///
 /// # Performance
 ///
-/// Parallel execution is gated on the estimated element ops of the whole pass
-/// (`batch * out_positions * channels * window taps`) clearing
-/// [`tuning::pool`](crate::tuning::pool), not on any fixed shape
+/// The pass runs in parallel when its estimated element count
+/// (`batch * out_positions * channels * window taps`) clears the gate in
+/// [`tuning::pool`](crate::tuning::pool). The gate does not depend on any fixed shape.
 #[derive(Debug)]
 pub struct AveragePooling3D {
     /// Size of the pooling window as (depth, height, width)
     pool_size: (usize, usize, usize),
-    /// Step size of the pooling operation as (depth_stride, height_stride, width_stride)
+    /// Step size of the pooling operation as (depth, height, width)
     strides: (usize, usize, usize),
     /// Shape of the input tensor declared at construction time
     input_shape: Vec<usize>,
     /// Padding mode applied around the input before pooling
     padding: PaddingType,
-    /// Shape of the most recent forward input, cached for backpropagation
+    /// Shape of the most recent forward input, cached for the backward pass
     forward_input_shape: Option<Vec<usize>>,
 }
 
@@ -97,21 +97,21 @@ impl AveragePooling3D {
     /// - `pool_size` - Size of the pooling window as (depth, height, width)
     /// - `input_shape` - Input tensor shape `[batch_size, depth, height, width, channels]`
     ///
-    /// # Notes
-    ///
-    /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
-    /// with [`AveragePooling3D::with_strides`] and [`AveragePooling3D::with_padding`]
-    ///
     /// # Returns
     ///
     /// - `Result<AveragePooling3D, Error>` - New layer instance on success
     ///
+    /// # Notes
+    ///
+    /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
+    /// with [`AveragePooling3D::with_strides`] and [`AveragePooling3D::with_padding`].
+    ///
     /// # Errors
     ///
-    /// - [`Error::DimensionMismatch`] if `input_shape` is not 5D
-    /// - [`Error::InvalidInput`] if any `input_shape` dimension is zero
-    /// - [`Error::InvalidParameter`] if `pool_size` has a zero dimension or exceeds the input
-    ///   spatial size
+    /// - `Error::DimensionMismatch` - If `input_shape` is not 5D
+    /// - `Error::InvalidInput` - If any `input_shape` dimension is zero
+    /// - `Error::InvalidParameter` - If `pool_size` has a zero dimension or exceeds the
+    ///   corresponding input dimension
     pub fn new(pool_size: (usize, usize, usize), input_shape: Vec<usize>) -> Result<Self, Error> {
         validate_input_shape_dims(&input_shape, 5, "AveragePooling3D")?;
         validate_all_dims_positive(&input_shape)?;
@@ -145,7 +145,8 @@ impl AveragePooling3D {
     ///
     /// # Parameters
     ///
-    /// - `padding` - `Valid` (no padding) or `Same` (pad so the output covers the input)
+    /// - `padding` - `Valid` (no padding) or `Same` (pad so the output covers the input, with
+    ///   padded cells excluded from each window)
     ///
     /// # Returns
     ///
@@ -162,7 +163,7 @@ impl Layer for AveragePooling3D {
             return Err(Error::invalid_input("input tensor is not 5D"));
         }
 
-        // Only the shape is needed to redistribute gradients in backward
+        // Cache the input shape for the backward pass
         self.forward_input_shape = Some(input.shape().to_vec());
 
         let (output, _) = windowed_pool_forward(
@@ -175,7 +176,7 @@ impl Layer for AveragePooling3D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
+    /// Runs the forward pass for inference. Writes no cache. See [`Layer::predict`].
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         if input.ndim() != 5 {
             return Err(Error::invalid_input("input tensor is not 5D"));

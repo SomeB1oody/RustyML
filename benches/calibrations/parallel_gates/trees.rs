@@ -65,7 +65,7 @@ pub fn calibrate_tree_traversal() -> Section {
 }
 
 /// Synthetic split-search kernel: per-feature copy + sort + scan over the node's samples, the
-/// shape of DecisionTree's `find_best_split` (one task per feature)
+/// shape of DecisionTree's `find_best_split` (1 task per feature)
 pub fn calibrate_sort_scan() -> Section {
     let features = 8usize;
     let mut rows = Vec::new();
@@ -181,10 +181,10 @@ pub fn calibrate_tree_build() -> Section {
 
 // kd-tree vs brute force by dimension: KNN/DBSCAN_KD_TREE_MAX_DIMS
 
-/// The "serial" column is the kd-tree path and the "parallel" column the brute-force scan, so
-/// the crossover reads "the dimension bracket where brute force starts winning for good"
-/// Uniform data; clustered data shifts the boundary, so this is a same-distribution comparison,
-/// not a universal constant
+/// The "serial" column is the kd-tree path. The "parallel" column is the brute-force scan, so
+/// the crossover reads as the dimension bracket where brute force starts winning for good.
+/// This ladder uses uniform data. Clustered data shifts the boundary, so this is a
+/// same-distribution comparison, not a universal constant
 pub fn calibrate_kd_tree_dims() -> Section {
     let n_train = 20_000usize;
     let n_query = 512usize;

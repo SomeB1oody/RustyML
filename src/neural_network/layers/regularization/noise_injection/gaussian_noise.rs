@@ -32,7 +32,7 @@ use ndarray_rand::rand_distr::Normal;
 ///
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
-/// // During training, Gaussian noise with stddev=0.1 is added
+/// // During training, the layer adds Gaussian noise with stddev=0.1
 /// let output = noise_layer.forward(&input).unwrap();
 /// ```
 #[derive(Debug)]
@@ -61,8 +61,8 @@ impl GaussianNoise {
     ///
     /// # Notes
     ///
-    /// The noise RNG is seeded from the global seed or entropy by default. For reproducible noise,
-    /// set a seed with [`GaussianNoise::with_random_state`]
+    /// By default, `new` seeds the noise RNG from the global seed or entropy. For reproducible
+    /// noise, set a seed with [`GaussianNoise::with_random_state`]
     ///
     /// # Errors
     ///
@@ -82,8 +82,8 @@ impl GaussianNoise {
 
     /// Sets the seed for reproducible noise sampling
     ///
-    /// By default the RNG is seeded from the global seed or entropy (see [`crate::random`]). This
-    /// re-seeds it deterministically from `random_state`
+    /// By default, `new` seeds the RNG from the global seed or entropy (see [`crate::random`]).
+    /// This method re-seeds it deterministically from `random_state`
     ///
     /// # Parameters
     ///
@@ -102,7 +102,7 @@ impl GaussianNoise {
 
 impl Layer for GaussianNoise {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // `stddev` was validated in `new()`; only the runtime input needs checking
+        // `stddev` was validated in `new()`. Only the runtime input needs a check.
         validate_input_shape(input.shape(), &self.input_shape)?;
 
         // During inference or when stddev is 0, pass input through unchanged
@@ -121,9 +121,9 @@ impl Layer for GaussianNoise {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches), see [`Layer::predict`]
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `stddev` was validated in `new()`; only the runtime input needs checking
+        // `stddev` was validated in `new()`. Only the runtime input needs a check.
         validate_input_shape(input.shape(), &self.input_shape)?;
 
         // Inference is identity: pass input through without sampling noise
@@ -131,7 +131,8 @@ impl Layer for GaussianNoise {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // Gradient passes through unchanged since d/dx(x + noise) = 1 (noise is independent of the input)
+        // The gradient passes through unchanged, since noise does not depend on x and
+        // d/dx(x + noise) = 1
         Ok(grad_output.clone())
     }
 

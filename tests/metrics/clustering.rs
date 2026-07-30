@@ -98,7 +98,7 @@ fn test_nmi_identical_clustering() {
 fn test_nmi_canonical_pair() {
     let t = array![0isize, 0, 1, 1, 2, 2];
     let p = array![0isize, 0, 1, 2, 1, 2];
-    // 1/3 + (2/3)*ln(1.5)/ln(3) ~= 0.5793801642857
+    // 1/3 + (2/3)*ln(1.5)/ln(3) ~ 0.5793801642857
     let expected = 1.0 / 3.0 + (2.0 / 3.0) * (1.5_f64).ln() / (3.0_f64).ln();
     let nmi = normalized_mutual_info(&t, &p);
     assert_abs_diff_eq!(nmi, expected, epsilon = 1e-9);
@@ -140,7 +140,7 @@ fn test_nmi_symmetry() {
 fn test_nmi_asymmetric_case() {
     let t = array![0isize, 0, 1, 1];
     let p = array![0isize, 1, 2, 3];
-    let expected = 2.0_f64 / 3.0; // normalized by the arithmetic mean of the two entropies
+    let expected = 2.0_f64 / 3.0; // normalized by the arithmetic mean of the 2 entropies
     assert_abs_diff_eq!(normalized_mutual_info(&t, &p), expected, epsilon = 1e-9);
 }
 
@@ -234,7 +234,7 @@ fn test_ami_empty_panics() {
 
 // homogeneity_score
 
-/// Each cluster a pure subset of one class gives homogeneity = 1.0
+/// Each cluster is a pure subset of 1 class, so homogeneity equals 1.0.
 #[test]
 fn test_homogeneity_perfect() {
     let t = array![0isize, 0, 1, 1];
@@ -286,7 +286,7 @@ fn test_homogeneity_empty_panics() {
 
 // completeness_score
 
-/// All members of each class in one cluster gives completeness = 1.0
+/// All members of each class fall in 1 cluster, so completeness equals 1.0.
 #[test]
 fn test_completeness_perfect() {
     let t = array![0isize, 1, 2, 3];
@@ -318,7 +318,7 @@ fn test_completeness_asymmetric_differs_from_homogeneity() {
     let c = completeness_score(&t, &p);
     assert_abs_diff_eq!(h, 1.0, epsilon = 1e-12);
     assert_abs_diff_eq!(c, 0.5, epsilon = 1e-12);
-    // Confirm they differ - swapping would give (0.5, 1.0) instead of (1.0, 0.5)
+    // Confirm they differ. Swapping would give (0.5, 1.0) instead of (1.0, 0.5)
     assert!((h - c).abs() > 0.4);
 }
 
@@ -358,7 +358,7 @@ fn test_v_measure_identical() {
     assert_abs_diff_eq!(v_measure_score(&labels, &labels), 1.0, epsilon = 1e-12);
 }
 
-/// V-measure is the harmonic mean of h and c; h=1.0, c=0.5 give 2/3
+/// V-measure is the harmonic mean of h and c. Here h = 1.0 and c = 0.5 give 2/3.
 #[test]
 fn test_v_measure_asymmetric_two_thirds() {
     let t = array![0isize, 0, 1, 1];
@@ -493,7 +493,7 @@ fn test_fmi_empty_panics() {
 
 // silhouette_score
 
-/// Well-separated 1-D clusters give silhouette = 359/399 (~= 0.8997)
+/// Well-separated 1-D clusters give silhouette = 359/399 (~ 0.8997)
 #[test]
 fn test_silhouette_well_separated() {
     let x = array![[0.0, 0.0], [1.0, 0.0], [10.0, 0.0], [11.0, 0.0]];
@@ -505,13 +505,13 @@ fn test_silhouette_well_separated() {
     assert!((-1.0 - 1e-12..=1.0 + 1e-12).contains(&s));
 }
 
-/// The metric is honoured: Manhattan distances give a different (closed-form) score than the
-/// Euclidean one on the same 2-D points
+/// `silhouette_score` honors the metric argument. Manhattan distances give a different,
+/// closed-form score than Euclidean distances give on the same 2-D points.
 #[test]
 fn test_silhouette_respects_manhattan_metric() {
     let x = array![[0.0, 0.0], [0.0, 1.0], [10.0, 10.0], [10.0, 11.0]];
     let labels = array![0isize, 0, 1, 1];
-    // Manhattan: each a = 1; b for p0/p3 = 20.5, for p1/p2 = 19.5 -> mean = (39/41 + 37/39) / 2
+    // Manhattan: each a = 1. b for p0/p3 = 20.5, for p1/p2 = 19.5 -> mean = (39/41 + 37/39) / 2
     let expected = (39.0_f64 / 41.0 + 37.0_f64 / 39.0) / 2.0;
     let manhattan = silhouette_score(&x, &labels, DistanceCalculationMetric::Manhattan);
     assert_abs_diff_eq!(manhattan, expected, epsilon = 1e-9);
@@ -520,8 +520,8 @@ fn test_silhouette_respects_manhattan_metric() {
     assert!((manhattan - euclidean).abs() > 1e-3);
 }
 
-/// Exercises the parallel path (n >= the internal threshold). Two well-separated clusters of
-/// coincident points give a == 0 and b == const for every sample, so the silhouette is exactly 1.0
+/// 128 coincident-point samples in 2 well-separated clusters give a == 0 and a constant b for
+/// every sample, so the silhouette is exactly 1.0.
 #[test]
 fn test_silhouette_parallel_path_large_n() {
     // 128 samples: 64 at the origin (cluster 0), 64 at (10, 0) (cluster 1)
@@ -550,7 +550,7 @@ fn test_silhouette_mislabeled_negative() {
     );
 }
 
-/// A lone singleton cluster contributes 0 to the mean; score = 1/6 here
+/// A lone singleton cluster contributes 0 to the mean. The score is 1/6 here.
 #[test]
 fn test_silhouette_lone_cluster_contributes_zero() {
     let x = array![[0.0, 0.0], [5.0, 0.0], [10.0, 0.0]];
@@ -584,7 +584,7 @@ fn test_silhouette_all_singletons_panics() {
     let _ = silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean);
 }
 
-/// Silhouette panics when only one distinct cluster is present
+/// Silhouette panics when only 1 distinct cluster is present.
 #[test]
 #[should_panic(expected = "invalid input: number of clusters")]
 fn test_silhouette_single_cluster_panics() {
@@ -629,7 +629,7 @@ fn test_db_perfect_compact_zero() {
     assert_abs_diff_eq!(davies_bouldin_score(&x, &labels), 0.0, epsilon = 1e-12);
 }
 
-/// Three tight 1-D clusters give DB = 0.04 (= 1/25)
+/// 3 tight 1-D clusters give DB = 0.04 (= 1/25).
 #[test]
 fn test_db_three_tight_clusters() {
     let x = array![
@@ -698,7 +698,7 @@ fn test_ch_well_separated_exact() {
     assert_abs_diff_eq!(calinski_harabasz_score(&x, &labels), 200.0, epsilon = 1e-9);
 }
 
-/// Three tight clusters give CH = 2500.0
+/// 3 tight clusters give CH = 2500.0.
 #[test]
 fn test_ch_three_tight_clusters() {
     let x = array![

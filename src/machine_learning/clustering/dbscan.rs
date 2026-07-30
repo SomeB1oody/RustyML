@@ -17,11 +17,8 @@ use std::collections::VecDeque;
 
 /// Feature-count ceiling for using the kd-tree neighbor index
 ///
-/// Above this many features the tree no longer prunes effectively, so the brute-force search
-/// is used instead. On uniform data (20k points, k = 8) the kd-tree beats the brute-force scan
-/// up to d = 8 (2.6x at d = 8) and loses from d = 12 on (2.2-2.6x slower), so the ceiling sits
-/// at the proven-win end of the 8-12 bracket. The boundary shifts with data distribution
-/// (clustered data favors the tree) and dataset size
+/// Above this many features the tree no longer prunes effectively, so DBSCAN falls back to a
+/// brute-force scan instead
 const DBSCAN_KD_TREE_MAX_DIMS: usize = 8;
 
 /// DBSCAN (Density-Based Spatial Clustering of Applications with Noise) algorithm implementation
@@ -43,7 +40,7 @@ const DBSCAN_KD_TREE_MAX_DIMS: usize = 8;
 ///     2.0, 2.0,
 /// ]).unwrap();
 ///
-/// // Euclidean distance is the default; override it via `with_metric`
+/// // Euclidean distance is the default. Override it via `with_metric`
 /// let mut dbscan = DBSCAN::new(0.5, 2).unwrap();
 /// let labels = dbscan.fit_predict(&data).unwrap();
 /// ```
@@ -102,8 +99,8 @@ impl DBSCAN {
     /// # Notes
     ///
     /// The distance metric defaults to Euclidean. To use another metric, override it after
-    /// construction with [`with_metric`](Self::with_metric), which returns `Result` because the
-    /// Minkowski order is validated
+    /// construction with [`with_metric`](Self::with_metric), which returns `Result` because it
+    /// validates the Minkowski order
     ///
     /// # Errors
     ///
@@ -173,11 +170,11 @@ impl DBSCAN {
         Option<&Array1<usize>>
     );
 
-    /// Finds all neighbors of point `p` (points within `eps` distance)
+    /// Finds all neighbors of point `p`, meaning all points within `eps` distance
     ///
-    /// When `tree` is provided the query uses the kd-tree (about O(log n) average); otherwise it
-    /// falls back to a brute-force scan (parallel above the calibrated scan-class gate). Both
-    /// paths return indices sorted ascending, so cluster expansion order is identical
+    /// Uses the kd-tree when the caller provides one. Otherwise, it falls back to a
+    /// brute-force scan that runs in parallel above the calibrated scan-class gate. Both paths
+    /// return indices in ascending order, so cluster expansion order stays identical
     fn region_query<S>(
         &self,
         data: &ArrayBase<S, Ix2>,
@@ -199,7 +196,7 @@ impl DBSCAN {
         let eps = self.eps;
 
         if let Some(tree) = tree {
-            // kd-tree radius query; results are already sorted ascending by index
+            // kd-tree radius query
             return Ok(tree.radius_neighbors(p_row, eps));
         }
 
@@ -233,7 +230,7 @@ impl DBSCAN {
     /// # Errors
     ///
     /// - `Error::EmptyInput` - If the dataset is empty
-    /// - `Error::InvalidInput` - If the dataset fails validation
+    /// - `Error::NonFinite` - If the dataset contains NaN or infinite values
     /// - `Error::Computation` - If the number of discovered clusters reaches `isize::MAX`
     ///
     /// # Performance
@@ -248,8 +245,8 @@ impl DBSCAN {
 
         let n_samples = data.nrows();
 
-        // Build a kd-tree once to accelerate the O(n^2) brute-force region queries, except in
-        // high dimensions where the tree no longer prunes effectively (then fall back to brute force)
+        // Build a kd-tree once, to speed up the region queries below.
+        // In high dimensions the tree no longer prunes effectively, so fall back to brute force
         let tree: Option<KdTree> = if data.ncols() <= DBSCAN_KD_TREE_MAX_DIMS {
             Some(KdTree::build(data.view(), self.metric))
         } else {
@@ -284,7 +281,7 @@ impl DBSCAN {
                 .context("region query failed")?;
 
             if neighbors.len() < self.min_samples {
-                labels[p] = -1; // Mark as noise
+                labels[p] = -1;
                 continue;
             }
 
@@ -295,8 +292,8 @@ impl DBSCAN {
 
             // Expand the cluster
             while let Some(q) = seeds.pop_front() {
-                // Skip any point already in a cluster; only noise/unvisited points (label -1)
-                // may be absorbed as border points, so an earlier cluster is never stolen from
+                // Skip any point already in a cluster. Only noise or unvisited points (label -1)
+                // can become border points, so the pass never takes a point from an earlier cluster
                 if labels[q] >= 0 {
                     continue;
                 }
@@ -367,10 +364,9 @@ impl DBSCAN {
 
     /// Predicts cluster labels for new data points based on the trained model
     ///
-    /// Each new point is assigned to the cluster of its nearest core point when that
-    /// core point is within `eps`; otherwise it is labeled as noise (`-1`). Only the
-    /// core points found during `fit` are needed, so the original training set does
-    /// not have to be passed in
+    /// `predict` assigns each new point to the cluster of its nearest core point when that core
+    /// point is within `eps`. Otherwise, it labels the point noise (`-1`). It needs only the
+    /// core points found during `fit`, not the original training set
     ///
     /// # Parameters
     ///
@@ -383,12 +379,12 @@ impl DBSCAN {
     /// # Errors
     ///
     /// - `Error::NotFitted` - If the model has not been fitted yet
-    /// - `Error::DimensionMismatch` - If feature dimensions don't match
+    /// - `Error::DimensionMismatch` - If feature dimensions do not match
     /// - `Error::NonFinite` - If the data contains non-finite values
     ///
     /// # Performance
     ///
-    /// New points are scored in parallel when the number of samples is large
+    /// Runs in parallel above the calibrated scan-class gate (see `crate::parallel_gates`)
     pub fn predict<S>(&self, new_data: &ArrayBase<S, Ix2>) -> Result<Array1<isize>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -466,6 +462,7 @@ impl DBSCAN {
     model_save_and_load_methods!(DBSCAN);
 }
 
+/// Unit tests for `DBSCAN`'s internal `region_query` bounds check
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,9 +1,9 @@
 //! Integration tests for the AveragePooling and GlobalAveragePooling layers, covering forward
 //! values, output shape, predict()==forward(), backward-before-forward and wrong-rank errors,
-//! layer_type()/output_shape(), and constructor validation
+//! layer_type()/output_shape(), and constructor validation.
 //!
-//! Gradient correctness is not checked here; that is covered by the finite-difference harness
-//! in tests/neural_network/gradient_check.rs
+//! Gradient correctness is not checked here. The finite-difference harness in
+//! tests/neural_network/gradient_check.rs covers that.
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
@@ -39,7 +39,7 @@ fn avg_pool_1d_forward_values_pool2_stride2() {
     assert_abs_diff_eq!(out[[0, 2, 0]], 5.5_f32, epsilon = 1e-5);
 }
 
-/// Forward mean values for a moving window: pool_size=3, stride=1 over two identical channels
+/// Forward mean values for a moving window: pool_size=3, stride=1 over 2 identical channels
 #[test]
 fn avg_pool_1d_forward_values_pool3_stride1() {
     let mut layer = AveragePooling1D::new(3, vec![1, 6, 2])
@@ -65,7 +65,7 @@ fn avg_pool_1d_forward_values_pool3_stride1() {
     }
 }
 
-/// Pooling acts per-batch on independent values across a two-batch input
+/// Pooling acts per-batch on independent values across a 2-batch input
 #[test]
 fn avg_pool_1d_forward_multi_batch() {
     let mut layer = AveragePooling1D::new(2, vec![2, 4, 1])
@@ -186,7 +186,7 @@ fn avg_pool_1d_layer_type_and_output_shape() {
     assert_eq!(shape_str, "(1, 3, 1)");
 }
 
-/// Stride defaults to pool_size when None is passed
+/// Stride defaults to pool_size when the caller passes None
 #[test]
 fn avg_pool_1d_default_stride_equals_pool_size() {
     let layer = AveragePooling1D::new(3, vec![1, 6, 1]).unwrap();
@@ -194,7 +194,8 @@ fn avg_pool_1d_default_stride_equals_pool_size() {
 }
 
 // AveragePooling2D, input [batch, height, width, channels]
-// pooled_h = (h - pool_h) / stride_h + 1; pooled_w = (w - pool_w) / stride_w + 1
+// pooled_h = (h - pool_h) / stride_h + 1
+// pooled_w = (w - pool_w) / stride_w + 1
 
 /// Forward mean values for a 4x4 input, pool=(2,2), stride=(2,2)
 #[test]
@@ -229,7 +230,7 @@ fn avg_pool_2d_forward_values_nonsquare_pool() {
         .into_dyn();
     let out = layer.forward(&x).unwrap();
     assert_eq!(out.shape(), &[1, 2, 3, 1]);
-    // Rows are [0..4], [5..9], [10..14]; each window is 2 rows x 3 cols
+    // Rows are [0..4], [5..9], [10..14]. Each window is 2 rows x 3 cols.
     assert_abs_diff_eq!(out[[0, 0, 0, 0]], 3.5_f32, epsilon = 1e-5); // (0+1+2+5+6+7)/6
     assert_abs_diff_eq!(out[[0, 0, 1, 0]], 4.5_f32, epsilon = 1e-5); // (1+2+3+6+7+8)/6
     assert_abs_diff_eq!(out[[0, 0, 2, 0]], 5.5_f32, epsilon = 1e-5); // (2+3+4+7+8+9)/6
@@ -238,16 +239,16 @@ fn avg_pool_2d_forward_values_nonsquare_pool() {
     assert_abs_diff_eq!(out[[0, 1, 2, 0]], 10.5_f32, epsilon = 1e-5); // (7+8+9+12+13+14)/6
 }
 
-/// Channels are pooled independently in 2D, and each channel varies over the spatial grid so a
-/// height/width/channel transposition changes the values (not just the shape)
+/// The layer pools channels independently in 2D. Each channel varies over the spatial grid, so a
+/// height/width/channel transposition changes the values, not just the shape.
 #[test]
 fn avg_pool_2d_forward_multi_channel_independence() {
     let mut layer = AveragePooling2D::new((2, 2), vec![1, 4, 4, 2])
         .unwrap()
         .with_strides((2, 2))
         .unwrap();
-    // value(h, w, c) = 4*h + w + 100*c, channels interleaved on the last axis:
-    // channel 0 holds 0..15 row-major over the 4x4 grid, channel 1 holds the same plus 100
+    // value(h, w, c) = 4*h + w + 100*c. Channels interleave on the last axis.
+    // Channel 0 holds 0..15 row-major over the 4x4 grid. Channel 1 holds the same plus 100.
     let mut vals = Vec::with_capacity(4 * 4 * 2);
     for h in 0..4usize {
         for w in 0..4usize {
@@ -357,7 +358,8 @@ fn avg_pool_2d_constructor_rejects_oversized_pool() {
     assert!(result.is_err(), "pool_h > input_h must be rejected");
 }
 
-/// Constructor rejects a zero batch or channel dimension (regression guard: must fail at construction, not forward)
+/// Constructor rejects a zero batch or channel dimension. The check happens at construction,
+/// not at forward.
 #[test]
 fn avg_pool_2d_constructor_rejects_zero_batch_or_channel() {
     assert!(
@@ -381,7 +383,7 @@ fn avg_pool_2d_layer_type_and_output_shape() {
     assert_eq!(layer.output_shape(), "(1, 2, 2, 1)");
 }
 
-/// Strides default to pool_size when None is passed
+/// Strides default to pool_size when the caller passes None
 #[test]
 fn avg_pool_2d_default_stride_equals_pool_size() {
     let layer = AveragePooling2D::new((2, 2), vec![1, 6, 6, 1]).unwrap();
@@ -408,7 +410,7 @@ fn avg_pool_3d_forward_values_single_window() {
     assert_abs_diff_eq!(out[[0, 0, 0, 0, 0]], 3.5_f32, epsilon = 1e-5);
 }
 
-/// Forward mean values for two depth windows: pool=(2,2,2), stride_d=2 on a [1,4,2,2,1] input
+/// Forward mean values for 2 depth windows: pool=(2,2,2), stride_d=2 on a [1,4,2,2,1] input
 #[test]
 fn avg_pool_3d_forward_values_two_depth_windows() {
     let mut layer = AveragePooling3D::new((2, 2, 2), vec![1, 4, 2, 2, 1])
@@ -501,7 +503,8 @@ fn avg_pool_3d_constructor_rejects_zero_stride() {
     assert!(result.is_err(), "zero depth stride must be rejected");
 }
 
-/// Constructor rejects a zero batch or channel dimension (regression guard: must fail at construction, not forward)
+/// Constructor rejects a zero batch or channel dimension. The check happens at construction,
+/// not at forward.
 #[test]
 fn avg_pool_3d_constructor_rejects_zero_batch_or_channel() {
     assert!(
@@ -525,7 +528,7 @@ fn avg_pool_3d_layer_type_and_output_shape() {
     assert_eq!(layer.output_shape(), "(1, 2, 2, 2, 1)");
 }
 
-/// Strides default to pool_size when None is passed for 3D
+/// For 3D, strides default to pool_size when the caller passes None
 #[test]
 fn avg_pool_3d_default_stride_equals_pool_size() {
     let layer = AveragePooling3D::new((2, 2, 2), vec![1, 4, 4, 4, 1]).unwrap();
@@ -539,7 +542,7 @@ fn avg_pool_3d_default_stride_equals_pool_size() {
 #[test]
 fn global_avg_pool_1d_forward_distinct_channels() {
     let mut layer = GlobalAveragePooling1D::new();
-    // Channel 0 carries 1..5, channel 1 carries 10..50; channels interleave along the last axis
+    // Channel 0 carries 1..5, channel 1 carries 10..50. Channels interleave along the last axis.
     let vals = vec![
         1.0f32, 10.0, // length 0
         2.0, 20.0, // length 1
@@ -568,7 +571,7 @@ fn global_avg_pool_1d_forward_all_ones() {
     }
 }
 
-/// Mean is computed independently per batch
+/// The layer computes the mean independently per batch
 #[test]
 fn global_avg_pool_1d_forward_multi_batch() {
     let mut layer = GlobalAveragePooling1D::new();
@@ -655,7 +658,7 @@ fn global_avg_pool_1d_output_shape() {
 #[test]
 fn global_avg_pool_2d_forward_distinct_channels() {
     let mut layer = GlobalAveragePooling2D::new();
-    // 2x3 spatial extent; channel 0 carries 1..6, channel 1 carries 10..60
+    // 2x3 spatial extent. Channel 0 carries 1..6, channel 1 carries 10..60.
     let vals = vec![
         1.0f32, 10.0, // (h=0, w=0)
         2.0, 20.0, // (h=0, w=1)
@@ -687,7 +690,7 @@ fn global_avg_pool_2d_forward_all_ones() {
     }
 }
 
-/// Spatial mean is computed independently per batch
+/// The layer computes the spatial mean independently per batch
 #[test]
 fn global_avg_pool_2d_forward_multi_batch() {
     let mut layer = GlobalAveragePooling2D::new();
@@ -706,7 +709,7 @@ fn global_avg_pool_2d_forward_multi_batch() {
 #[test]
 fn global_avg_pool_2d_forward_single_spatial_pixel() {
     let mut layer = GlobalAveragePooling2D::new();
-    // 2 batches, 1x1 spatial, 3 channels; value at (b, c) is (b*3 + c + 1)
+    // 2 batches, 1x1 spatial, 3 channels. Value at (b, c) is (b*3 + c + 1).
     let vals: Vec<f32> = (0..6).map(|i| (i + 1) as f32).collect();
     let x: Tensor = Array::from_shape_vec((2, 1, 1, 3), vals)
         .unwrap()
@@ -811,7 +814,7 @@ fn global_avg_pool_3d_forward_all_ones() {
     }
 }
 
-/// Channels are pooled independently in 3D
+/// The layer pools channels independently in 3D
 #[test]
 fn global_avg_pool_3d_forward_multi_channel() {
     let mut layer = GlobalAveragePooling3D::new();
@@ -830,7 +833,7 @@ fn global_avg_pool_3d_forward_multi_channel() {
     assert_abs_diff_eq!(out[[0, 1]], 9.0_f32, epsilon = 1e-5);
 }
 
-/// Volume mean is computed independently per batch
+/// The layer computes the volume mean independently per batch
 #[test]
 fn global_avg_pool_3d_forward_multi_batch() {
     let mut layer = GlobalAveragePooling3D::new();
@@ -908,8 +911,8 @@ fn global_avg_pool_3d_output_shape() {
     assert_eq!(layer.output_shape(), "(2, 5)");
 }
 
-/// Same padding excludes padded cells from the average divisor (Keras count_include_pad=False):
-/// for a 3x3 input, pool 2x2, stride 2, the trailing windows divide by their in-bounds count
+/// Same padding excludes padded cells from the average divisor (Keras count_include_pad=False).
+/// For a 3x3 input, pool 2x2, stride 2, the trailing windows divide by their in-bounds count.
 #[test]
 fn avg_pool_2d_same_padding_excludes_padding() {
     let mut layer = AveragePooling2D::new((2, 2), vec![1, 3, 3, 1])

@@ -9,19 +9,20 @@ use crate::neural_network::layers::layer_weight::LayerWeight;
 /// A single trainable parameter tensor paired with its gradient, exposed as flat slices
 ///
 /// Layers yield their trainable tensors (weights, biases, kernels, gamma/beta, ...) as
-/// `ParamGrad`s so that optimizers can update any parameter shape with one flat-slice kernel,
+/// `ParamGrad`s. This lets optimizers update any parameter shape with 1 flat-slice kernel,
 /// instead of every layer/optimizer pair re-implementing the update. `value` and `grad` always
 /// have the same length and the same element ordering
 ///
-/// Construct one with [`ParamGrad::weight`] for tensors that decoupled weight decay applies to
-/// (weight matrices, conv/recurrent kernels) and [`ParamGrad::no_decay`] for tensors it skips
-/// (biases and normalization scale/shift `gamma`/`beta`), so the optimizer never has to guess
+/// Construct one with [`ParamGrad::weight`] for a tensor that decoupled weight decay applies to
+/// (weight matrices, conv/recurrent kernels). Use [`ParamGrad::no_decay`] for a tensor it skips
+/// (biases and normalization scale/shift `gamma`/`beta`). The `decays` flag tells the optimizer
+/// which rule applies, so it never has to guess
 pub struct ParamGrad<'a> {
-    /// Mutable view of the parameter's contiguous data, updated in place by the optimizer
+    /// Mutable view of the parameter's contiguous data that the optimizer updates in place
     pub value: &'a mut [f32],
     /// The corresponding gradient data (same length and ordering as `value`)
     pub grad: &'a [f32],
-    /// Whether decoupled (AdamW/SGDW-style) weight decay applies to this tensor; `true` for
+    /// Whether decoupled (AdamW/SGDW-style) weight decay applies to this tensor. `true` for
     /// weight matrices and conv/recurrent kernels, `false` for biases and normalization
     /// scale/shift (`gamma`/`beta`)
     pub decays: bool,
@@ -51,11 +52,11 @@ impl<'a> ParamGrad<'a> {
 
 /// Defines the interface for neural network layers
 ///
-/// Covers the core functionality that all neural network layers must implement, including
-/// forward and backward propagation, plus exposing trainable parameters and their gradients
-/// to the optimizer via [`parameters`](Layer::parameters)
+/// Covers the core functionality every neural network layer must implement: forward and
+/// backward propagation. It also exposes trainable parameters and their gradients to the
+/// optimizer via [`parameters`](Layer::parameters)
 pub trait Layer: std::any::Any + Send + Sync {
-    /// Performs forward propagation through the layer
+    /// Runs the forward pass through the layer
     ///
     /// # Parameters
     ///
@@ -63,20 +64,20 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///
     /// # Returns
     ///
-    /// - `Tensor` - The output tensor after forward computation
+    /// - `Tensor` - The layer's output
     ///
     /// # Errors
     ///
-    /// - `Error` - If the forward computation fails (e.g. shape mismatch)
+    /// - `Error` - If the forward pass fails (e.g. shape mismatch)
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error>;
 
     /// Runs the forward pass in inference (eval) mode, taking `&self`
     ///
     /// Unlike [`forward`](Layer::forward), this does **not** record any state for
-    /// backpropagation (it writes no caches) and mode-dependent layers (dropout, batch norm, ...)
+    /// backpropagation and writes no caches. Mode-dependent layers (dropout, batch norm, ...)
     /// always use their inference behavior. Because it borrows `&self`, a model can be shared for
-    /// concurrent inference. Use it for prediction/serving where no backward pass follows; use
-    /// [`forward`](Layer::forward) during training
+    /// concurrent inference. Use it for prediction or serving, where no backward pass follows.
+    /// Use [`forward`](Layer::forward) during training
     ///
     /// # Parameters
     ///
@@ -88,19 +89,10 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///
     /// # Errors
     ///
-    /// - `Error` - If the inference computation fails (e.g. shape mismatch)
+    /// - `Error` - If the inference pass fails (e.g. shape mismatch)
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error>;
 
-    /// Performs backward propagation through the layer
-    ///
-    /// # Numerical policy
-    ///
-    /// Backward is pure math: it does **not** sanitize NaN/Inf (no zeroing, no element-wise
-    /// clamping). Such values are propagated, not masked, and surface loudly at the
-    /// next forward pass (which rejects non-finite input) or as a NaN loss. To tame large-but-finite
-    /// gradients, enable clip-by-global-norm on the optimizer
-    /// ([`Optimizer::global_clipnorm`]) rather than
-    /// clamping inside a layer, since global-norm scaling preserves gradient direction
+    /// Runs the backward pass through the layer
     ///
     /// # Parameters
     ///
@@ -108,7 +100,16 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///
     /// # Returns
     ///
-    /// - `Tensor` - The gradient tensor to be passed to the previous layer
+    /// - `Tensor` - The gradient to pass to the previous layer
+    ///
+    /// # Numerical policy
+    ///
+    /// Backward is pure math: it does **not** sanitize NaN/Inf (no zeroing, no element-wise
+    /// clamping). The backward pass propagates such values instead of masking them. They
+    /// surface loudly at the next forward pass (which rejects non-finite input) or as a NaN
+    /// loss. To tame large-but-finite gradients, enable clip-by-global-norm on the optimizer
+    /// ([`Optimizer::global_clipnorm`]) instead of clamping inside a layer. Global-norm scaling
+    /// preserves gradient direction, unlike per-element clamping
     ///
     /// # Errors
     ///
@@ -144,22 +145,23 @@ pub trait Layer: std::any::Any + Send + Sync {
     /// Exposes the layer's trainable parameters and their gradients to the optimizer
     ///
     /// Each returned [`ParamGrad`] pairs a parameter tensor's flat data with its gradient. Layers
-    /// without trainable parameters (or before a backward pass has produced gradients) return an
-    /// empty vector - the default implementation. The order of the returned entries must be stable
-    /// across calls, because step-based optimizers key their per-parameter state by position
+    /// without trainable parameters (or before a backward pass has produced gradients) return
+    /// the empty vector that the default implementation gives. The order of the returned entries
+    /// must stay stable across calls, because step-based optimizers key their per-parameter
+    /// state by position
     ///
     /// # Returns
     ///
-    /// - `Vec<ParamGrad<'_>>` - One entry per trainable tensor that currently has a gradient
+    /// - `Vec<ParamGrad<'_>>` - 1 entry per trainable tensor that currently has a gradient
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
         Vec::new()
     }
 
     /// Returns a borrowing view of all weights in the layer
     ///
-    /// Provides access to all weight matrices and bias vectors used by the layer. Each array is
-    /// returned as a `Cow::Borrowed` over the layer's live data, so no weights are cloned; the same
-    /// enum doubles as the on-disk weight format (owned when deserialized)
+    /// Exposes all weight matrices and bias vectors the layer uses. Each array comes back as a
+    /// `Cow::Borrowed` over the layer's live data, so no weights are cloned. The same enum
+    /// doubles as the on-disk weight format (owned when deserialized)
     ///
     /// # Returns
     ///
@@ -168,54 +170,64 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///     - `LayerWeight::SimpleRNN` for SimpleRNN layers with kernel, recurrent_kernel, and bias
     ///     - `LayerWeight::LSTM` / `LayerWeight::GRU` for recurrent layers with fused kernel,
     ///       recurrent_kernel, and bias (gate column blocks `[i | f | g | o]` / `[z | r | h]`)
-    ///     - `LayerWeight::Conv1D`, `LayerWeight::Conv2D`, `LayerWeight::Conv3D` for convolutional layers
+    ///     - `LayerWeight::Conv1D`, `LayerWeight::Conv2D`, `LayerWeight::Conv3D` for
+    ///       convolutional layers
+    ///     - `LayerWeight::SeparableConv2D` for the separable 2D convolution, with a depthwise
+    ///       kernel, a pointwise kernel, and a bias
+    ///     - `LayerWeight::DepthwiseConv2D` for the depthwise 2D convolution, with a kernel and
+    ///       a bias
+    ///     - `LayerWeight::BatchNormalization` for batch normalization, with gamma, beta, and
+    ///       the running mean and variance
+    ///     - `LayerWeight::LayerNormalization`, `LayerWeight::InstanceNormalization`, and
+    ///       `LayerWeight::GroupNormalization` for their respective layers, each with gamma and
+    ///       beta
     ///     - `LayerWeight::Empty` for layers with no trainable parameters
     fn get_weights(&self) -> LayerWeight<'_>;
 
     /// Sets the training mode if the layer is mode-dependent
     ///
     /// Lets layers that behave differently during training and inference switch between
-    /// modes. Layers that don't depend on training mode (Dense, Activation, Pooling) can
+    /// modes. Layers that do not depend on training mode (Dense, Activation, Pooling) can
     /// use the default no-op implementation
     ///
     /// Mode-dependent layers (Dropout, BatchNormalization, etc.) override this method to
-    /// forward `is_training` to their own `set_training()`. In this crate that override is
-    /// generated by the `mode_dependent_layer_trait!` macro (see the `regularization`
+    /// forward `is_training` to their own `set_training()`. In this crate, the
+    /// `mode_dependent_layer_trait!` macro generates that override (see the `regularization`
     /// module), so layers do not implement it by hand
     ///
     /// # Parameters
     ///
     /// - `_is_training` - `true` for training mode, `false` for inference mode
     fn set_training_if_mode_dependent(&mut self, _is_training: bool) {
-        // No-op by default; only mode-dependent layers override this
+        // No-op by default. Only mode-dependent layers override this
     }
 }
 
 /// Defines the interface for loss functions used in neural network training
 ///
-/// Provides methods to compute both the loss value and its gradient with respect to
+/// An implementation computes both the loss value and its gradient with respect to
 /// the predicted values
 ///
 /// # Averaging convention
 ///
-/// Each loss normalizes by what is natural for its family, so the conventions differ on purpose:
-/// `compute_grad` is always exactly the gradient of `compute_loss`, but switching loss families
-/// rescales the gradient magnitude (and thus the effective learning rate):
+/// Each loss normalizes by what is natural for its family, so the conventions differ on
+/// purpose. `compute_grad` is always exactly the gradient of `compute_loss`. Switching loss
+/// families rescales the gradient magnitude, and thus the effective learning rate:
 ///
 /// - [`MeanSquaredError`](crate::neural_network::losses::MeanSquaredError),
 ///   [`MeanAbsoluteError`](crate::neural_network::losses::MeanAbsoluteError) and
 ///   [`BinaryCrossEntropy`](crate::neural_network::losses::BinaryCrossEntropy) average over
 ///   **every element** (`y.len()`), treating each output as an independent target
-/// - [`CategoricalCrossEntropy`](crate::neural_network::losses::CategoricalCrossEntropy) sums over
-///   the trailing **class** axis and averages over every **prediction site** - the product of all
-///   leading axes. For a `[batch, classes]` target that divisor is the batch, and for the
-///   `[batch, height, width, classes]` output of a channels-last softmax conv head it is
-///   `batch * height * width`, one site per pixel
+/// - [`CategoricalCrossEntropy`](crate::neural_network::losses::CategoricalCrossEntropy) sums
+///   over the trailing **class** axis and averages over every **prediction site** (the product
+///   of all leading axes). For a `[batch, classes]` target, that divisor is the batch. For the
+///   `[batch, height, width, classes]` output of a channels-last softmax conv head, the divisor
+///   is `batch * height * width`, 1 site per pixel
 /// - [`SparseCategoricalCrossEntropy`](crate::neural_network::losses::SparseCategoricalCrossEntropy)
 ///   is the same per-sample categorical cross-entropy, but accepts only rank-2
 ///   `[batch, classes]` predictions, so its divisor is always the batch
 ///
-/// The two categorical losses additionally renormalize `y_pred` along the class axis before
+/// The 2 categorical losses also renormalize `y_pred` along the class axis before
 /// clipping when `from_logits` is off, as Keras does. That leaves the loss value alone for an
 /// already-normalized head but contributes a row-constant term to the gradient, which a softmax
 /// backward annihilates
@@ -256,31 +268,33 @@ pub trait Loss {
 
 /// Defines the interface for optimization algorithms
 ///
-/// Provides methods to update layer parameters during the training process
+/// An implementation updates layer parameters during training
 pub trait Optimizer {
     /// Advances the optimizer's global training step
     ///
-    /// Called exactly once per batch (before the per-layer [`update`](Optimizer::update) calls)
+    /// Called exactly once per batch, before the per-layer [`update`](Optimizer::update) calls.
     /// Step-dependent optimizers such as Adam use this to advance their bias-correction timestep
     /// once per training step rather than once per layer. The default implementation is a no-op,
-    /// but every optimizer in this crate overrides it: SGD, RMSprop and AdaGrad rewind the cursor
-    /// that walks their per-parameter state buffers, and Adam / AdamW additionally advance the
-    /// timestep. Any optimizer carrying per-parameter state has to do the same, or the cursor
-    /// keeps climbing into the next batch and every layer reads the wrong slot
+    /// but every optimizer in this crate overrides it. SGD, RMSprop, and AdaGrad rewind the
+    /// cursor that walks their per-parameter state buffers. Adam and AdamW also advance
+    /// the timestep. Any optimizer carrying per-parameter state must do the same. Otherwise the
+    /// cursor keeps climbing into the next batch, and every layer reads the wrong slot
     fn step(&mut self) {}
 
     /// The global gradient-norm clip threshold, or `None` (the default) to disable clipping
     ///
-    /// When `Some(max_norm)`, the training loop computes the global L2 norm across **all** of the
-    /// model's gradients and, if it exceeds `max_norm`, scales every gradient by
+    /// When `Some(max_norm)`, the training loop computes the global L2 norm across **all** of
+    /// the model's gradients. If the norm exceeds `max_norm`, it scales every gradient by
     /// `max_norm / global_norm` before [`update`](Optimizer::update). This single uniform factor
-    /// preserves gradient direction (unlike per-element clamping). A non-finite global norm is left
-    /// unscaled so divergence still surfaces rather than being masked
+    /// preserves gradient direction (unlike per-element clamping). When the global norm is
+    /// non-finite, the clip leaves gradients unscaled, so divergence still surfaces instead of
+    /// being masked
     ///
-    /// The name is Keras' `global_clipnorm`, and it is deliberate: Keras also has a `clipnorm`,
-    /// which renormalizes each variable's gradient *independently* against the threshold. The two
-    /// give different directions whenever more than one tensor is over the limit, so a threshold
-    /// tuned for one is not a threshold for the other. Only the global form exists here
+    /// The name is Keras' `global_clipnorm`, and it is deliberate. Keras also has a `clipnorm`,
+    /// which renormalizes each variable's gradient *independently* against the threshold. The 2
+    /// give different directions whenever more than 1 tensor is over the limit. A
+    /// threshold tuned for one is therefore not a threshold for the other. Only the global form
+    /// exists here
     fn global_clipnorm(&self) -> Option<f32> {
         None
     }
@@ -290,24 +304,24 @@ pub trait Optimizer {
     /// # Parameters
     ///
     /// - `layer` - The layer whose parameters should be updated
-    /// - `grad_scale` - Uniform factor applied to every gradient before the update, supplied by the
-    ///   training loop to implement clip-by-global-norm. Pass `1.0` for an unscaled update
+    /// - `grad_scale` - Uniform factor that the training loop applies to every gradient before
+    ///   the update, to implement clip-by-global-norm. Pass `1.0` for an unscaled update
     fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32);
 
     /// The current learning rate
     ///
-    /// The read half of the scheduling pair. A schedule that derives the next step size from the
-    /// current one - exponential decay, cosine annealing, warmup restarts - needs this rather
-    /// than a copy of the rate kept alongside the model, which drifts the moment anything else
-    /// retunes the optimizer. Reports whatever was last set: unlike the constructors,
-    /// [`set_learning_rate`](Optimizer::set_learning_rate) does not validate, so a rate that was
-    /// set to zero or to a negative value comes back unchanged
+    /// The read half of the scheduling pair. A schedule (exponential decay, cosine annealing,
+    /// warmup restarts) derives its next step size from the current one. It needs this method
+    /// for that, rather than a copy of the rate kept alongside the model. A separate copy would
+    /// drift the moment anything else retunes the optimizer. Reports whatever was last set.
+    /// Unlike the constructors, [`set_learning_rate`](Optimizer::set_learning_rate) does not
+    /// validate, so a rate set to 0 or to a negative value comes back unchanged
     fn learning_rate(&self) -> f32;
 
     /// Sets the learning rate, the hook for external learning-rate scheduling
     ///
-    /// Call between batches or epochs (e.g. for step decay or warmup) to retune the step size
-    /// without rebuilding the optimizer, preserving its accumulated state
+    /// Call this between batches or epochs, for step decay or warmup, to retune the step size
+    /// without rebuilding the optimizer. The optimizer keeps its accumulated state
     ///
     /// # Parameters
     ///
@@ -317,9 +331,9 @@ pub trait Optimizer {
 
 /// Trait for applying serialized weights to a specific layer type
 ///
-/// Implemented by serializable weight structures to apply their contained weights to the
-/// corresponding layer type. Provides a uniform interface for weight deserialization and
-/// application across all layer types
+/// A serializable weight structure implements this to apply its contained weights to the
+/// corresponding layer type. Gives every layer type the same interface for deserializing and
+/// applying weights
 ///
 /// # Type Parameters
 ///

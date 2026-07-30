@@ -1,30 +1,30 @@
 //! Stateful feature scalers that remember their training statistics
 //!
-//! Houses the `fit`/`transform` counterparts to the stateless [`standardize`] and
+//! Houses the `fit` and `transform` counterparts to the stateless [`standardize`] and
 //! [`normalize`] functions, mirroring scikit-learn's `sklearn.preprocessing` scalers. Each
-//! one learns its per-feature statistics once, on the training matrix, and reuses those
-//! frozen numbers for every later batch - the test split, a validation fold, or a single
-//! sample arriving at inference time. That is what keeps a train/test boundary honest:
-//! rescaling a test set by its own column statistics applies a different linear map than
-//! the one the model was trained under
+//! one learns its per-feature statistics once, on the training matrix. It reuses those
+//! frozen numbers for every later batch: the test split, a validation fold, or a single
+//! sample arriving at inference time. This keeps a train-test boundary honest. Rescaling a
+//! test set by its own column statistics applies a different linear map than the one the
+//! model was trained under.
 //!
 //! | Scaler | Maps each feature by | Reach for it when |
 //! |---|---|---|
 //! | [`StandardScaler`] | `(x - mean) / std` | the default for distance- and gradient-based models |
 //! | [`MinMaxScaler`] | `(x - min) / (max - min)`, rescaled into a target range | you need values bounded to `[0, 1]` (or any range) |
-//! | [`MaxAbsScaler`] | `x / max(\|x\|)` | zeros and signs must survive, e.g. sparse-ish data |
+//! | [`MaxAbsScaler`] | `x / max(\|x\|)` | zeros and signs must survive, for example sparse data |
 //! | [`RobustScaler`] | `(x - median) / IQR` | outliers you do not want to remove |
 //! | [`Normalizer`] | each *sample* divided by its own norm | only a sample's direction carries signal |
 //!
-//! [`Normalizer`] is the odd one out: it rescales samples (rows), not features (columns), so
-//! it learns nothing beyond the feature count - it exists so row normalization composes with
-//! the same [`Fit`](crate::traits::Fit) / [`Transform`](crate::traits::Transform) contract as
-//! the rest. The other four are per-feature and stateful in the full sense; all but
-//! [`RobustScaler`] also support `partial_fit`, whose statistics merge exactly across batches
-//! (quantiles do not)
+//! [`Normalizer`] is the odd one out. It rescales samples (rows), not features (columns), so
+//! it learns nothing beyond the feature count. It exists so row normalization uses the same
+//! [`Fit`](crate::traits::Fit) and [`Transform`](crate::traits::Transform) contract as the
+//! rest. The other 4 are per-feature and stateful in the full sense. All but
+//! [`RobustScaler`] also support `partial_fit`. Their statistics merge exactly across batches,
+//! but quantiles do not.
 //!
-//! Every scaler here is 2-D and per-feature, exactly like scikit-learn's. Row-wise or
-//! whole-array standardization, and N-D arrays, remain the free functions' territory
+//! Every scaler here is 2-D and per-feature, exactly like scikit-learn's. The free functions
+//! handle row-wise or whole-array standardization, and N-D arrays.
 //!
 //! [`standardize`]: crate::utils::standardize::standardize
 //! [`normalize`]: crate::utils::normalize::normalize
@@ -53,19 +53,20 @@ pub use standard_scaler::StandardScaler;
 
 /// A divisor at or below this magnitude is treated as degenerate and replaced by `1.0`
 ///
-/// The same threshold [`normalize`](crate::utils::normalize::normalize) uses for a near-zero
-/// lane, and scikit-learn's `_handle_zeros_in_scale` rule
+/// [`normalize`](crate::utils::normalize::normalize) uses the same threshold for a near-zero
+/// lane. It also matches scikit-learn's `_handle_zeros_in_scale` rule
 const DEGENERATE_SCALE_THRESHOLD: f64 = 10.0 * f64::EPSILON;
 
 /// Replaces a degenerate divisor with `1.0`
 ///
-/// A feature with no spread (a constant column for [`MinMaxScaler`] or [`RobustScaler`], an
-/// all-zero column for [`MaxAbsScaler`]) would otherwise be divided by ~0 and blow up to
-/// `NaN`/`Inf`. Dividing by `1.0` instead leaves it at whatever its centered value already is
+/// A feature with no spread otherwise divides by about zero and blows up to `NaN` or `Inf`.
+/// This happens for a constant column in [`MinMaxScaler`] or [`RobustScaler`], and for an
+/// all-zero column in [`MaxAbsScaler`]. A divisor of `1.0` instead leaves the value unchanged
+/// after centering
 ///
-/// [`StandardScaler`] does *not* use this rule: it detects a constant feature from the variance
-/// itself (a magnitude-relative bound), which is the finer test scikit-learn also reserves for
-/// the standard scaler
+/// [`StandardScaler`] does not use this rule. It detects a constant feature from the variance
+/// itself, a magnitude-relative bound. scikit-learn reserves this finer test for the standard
+/// scaler too
 #[inline]
 fn handle_zero_scale(scale: f64) -> f64 {
     if scale.abs() < DEGENERATE_SCALE_THRESHOLD {
@@ -78,7 +79,7 @@ fn handle_zero_scale(scale: f64) -> f64 {
 /// Computes the per-feature `(min, max)` over the rows of `x`
 ///
 /// Columns are folded independently, so the serial and parallel paths produce identical
-/// results - the gate only decides who does the work
+/// results. The gate only decides who does the work
 fn column_min_max(x: &ArrayView2<f64>) -> Vec<(f64, f64)> {
     let fold_lane = |lane: ArrayView1<f64>| {
         lane.iter()
@@ -99,18 +100,18 @@ fn column_min_max(x: &ArrayView2<f64>) -> Vec<(f64, f64)> {
 
 /// Computes the requested quantiles of every feature
 ///
-/// `quantiles` holds fractions in `[0, 1]`; the returned vector has one entry per feature,
-/// each listing that feature's quantiles in the order requested. Each column is copied out,
-/// sorted once, and then read at every requested position, so asking for three quantiles costs
-/// one sort rather than three passes
+/// `quantiles` holds fractions in `[0, 1]`. The returned vector has one entry per feature,
+/// each listing that feature's quantiles in the order requested. The function copies each
+/// column out, sorts it once, and reads it at every requested position. Asking for 3
+/// quantiles this way costs one sort rather than 3 passes
 ///
-/// Interpolates linearly between the two order statistics that bracket a fractional position -
-/// NumPy's default `linear` method, which is what scikit-learn's `RobustScaler` uses, so
-/// quantiles line up with a ported pipeline
+/// Interpolates linearly between the 2 order statistics that bracket a fractional position.
+/// This is NumPy's default `linear` method, the same one scikit-learn's `RobustScaler` uses,
+/// so its quantiles line up with a ported pipeline
 ///
-/// Columns are handled independently, so the serial and parallel paths produce identical
-/// results - the gate only decides who does the work. Only one column at a time is copied per
-/// worker, so the extra memory is `threads * n_samples`, not a second copy of the matrix
+/// Each column is handled independently, so the serial and parallel paths produce identical
+/// results. The gate only decides who does the work. Each worker copies only one column at a
+/// time, so the extra memory is `threads * n_samples`, not a second copy of the matrix
 fn column_quantiles(x: &ArrayView2<f64>, quantiles: &[f64]) -> Vec<Vec<f64>> {
     let lane_quantiles = |lane: ArrayView1<f64>| {
         // A borrowed lane is strided and cannot be sorted in place, so sort an owned copy
@@ -134,15 +135,15 @@ fn column_quantiles(x: &ArrayView2<f64>, quantiles: &[f64]) -> Vec<Vec<f64>> {
 
 /// Reads the `q`-quantile (a fraction in `[0, 1]`) out of an ascending slice
 ///
-/// The position is `(n - 1) * q`; a fractional position interpolates linearly between its two
-/// neighbours. `sorted` must be non-empty
+/// The position is `(n - 1) * q`. A fractional position interpolates linearly between its 2
+/// neighbors. `sorted` must be non-empty
 #[inline]
 fn quantile_of_sorted(sorted: &[f64], q: f64) -> f64 {
     let position = (sorted.len() - 1) as f64 * q;
     let lower = position.floor() as usize;
     let fraction = position - lower as f64;
 
-    // An exact hit, or the top of the range, has no upper neighbour to interpolate towards
+    // An exact hit, or the top of the range, has no upper neighbor to interpolate toward
     if fraction == 0.0 || lower + 1 >= sorted.len() {
         sorted[lower]
     } else {

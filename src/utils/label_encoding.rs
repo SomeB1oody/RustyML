@@ -10,14 +10,14 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 
 /// Converts sparse categorical labels to one-hot encoded format
 ///
-/// Takes a 1D array of integer labels and produces a 2D one-hot encoded matrix
-/// where each row is a sample and each column is a class. The value is 1.0 for
+/// Takes a 1D array of integer labels and produces a 2D one-hot encoded matrix.
+/// Each row is a sample, and each column is a class. The value is 1.0 for
 /// the corresponding class and 0.0 for all other classes
 ///
 /// # Parameters
 ///
 /// - `labels` - A 1D array of integer labels (e.g. \[0, 1, 2, 1, 0\])
-/// - `num_classes` - Optional class count; if None, inferred from the maximum label value + 1
+/// - `num_classes` - Optional class count. If `None`, this is the maximum label value plus 1
 ///
 /// # Returns
 ///
@@ -105,11 +105,12 @@ where
 /// # Parameters
 ///
 /// - `labels` - A slice of labels that can be compared and hashed
-/// - `num_classes` - Optional class count; if None, inferred from the number of unique labels
+/// - `num_classes` - Optional class count. If `None`, this is the number of unique labels
 ///
 /// # Returns
 ///
-/// - `Result<(Array2<f64>, AHashMap<T, usize>), Error>` - The one-hot encoded matrix paired with the mapping from original labels to class indices
+/// - `Result<(Array2<f64>, AHashMap<T, usize>), Error>` - The one-hot matrix, paired with
+///   the mapping from each label to its class index
 ///
 /// # Examples
 ///
@@ -177,7 +178,7 @@ where
 ///
 /// Inverse of `to_categorical`. Each row is reduced to the index of its highest
 /// value, which turns model predictions back into class labels. Ties resolve to
-/// the first (lowest) index, matching numpy/keras `argmax`
+/// the first (lowest) index, matching NumPy's `argmax`
 ///
 /// # Parameters
 ///

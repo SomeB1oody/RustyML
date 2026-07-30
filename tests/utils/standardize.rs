@@ -26,8 +26,8 @@ fn test_global_closed_form_2d() {
     assert_allclose(&result, &expected, 1e-7);
 }
 
-/// A healthy feature is divided by the raw sqrt(variance), giving exact z-scores with no
-/// stability bias, since a healthy feature is never perturbed
+/// A healthy feature divides by the raw sqrt(variance), giving exact z-scores. The
+/// constant-feature stability clamp never touches a feature with real variance
 #[test]
 fn test_healthy_feature_exact_zscores() {
     let data: Array1<f64> = array![1.0, 3.0];

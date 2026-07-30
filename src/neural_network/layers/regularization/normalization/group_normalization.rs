@@ -21,9 +21,9 @@ use std::borrow::Cow;
 
 /// Group Normalization layer for neural networks
 ///
-/// Divides channels into groups and normalizes within each group per sample,
-/// reducing dependence on batch size. Channel divisibility is validated during
-/// the forward pass
+/// Divides channels into groups and normalizes within each group per sample, reducing
+/// dependence on batch size. Channel divisibility is validated on every `forward` or `predict`
+/// call
 ///
 /// # Examples
 ///
@@ -83,7 +83,7 @@ impl GroupNormalization {
     ///
     /// - `Error::EmptyInput` - If `input_shape` is empty
     /// - `Error::InvalidParameter` - If `num_groups` is 0
-    /// - `Error::InvalidParameter` - If `epsilon` is not positive
+    /// - `Error::InvalidParameter` - If `epsilon` is not positive or not finite
     pub fn new(input_shape: Vec<usize>, num_groups: usize, epsilon: f32) -> Result<Self, Error> {
         validate_input_shape_not_empty(&input_shape)?;
         validate_num_groups_positive(num_groups)?;
@@ -92,7 +92,8 @@ impl GroupNormalization {
         // Parameters have the shape of the channel dimension
         let param_shape = if input_shape.len() > 1 {
             let num_channels = input_shape[input_shape.len() - 1];
-            // Divisibility is checked in forward() instead, matching the other layers' error pattern
+            // Divisibility is checked in forward() instead, matching the other layers' error
+            // pattern
             vec![num_channels]
         } else {
             vec![1]
@@ -125,7 +126,8 @@ impl GroupNormalization {
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `gamma` or `beta` does not match the stored parameter shape
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `gamma` or `beta` does not match the
+    ///   stored parameter shape
     pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) -> Result<(), Error> {
         validate_weight_shape("gamma", self.gamma.shape(), gamma.shape())?;
         validate_weight_shape("beta", self.beta.shape(), beta.shape())?;

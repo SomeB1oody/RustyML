@@ -1,15 +1,18 @@
 //! Clustering evaluation metrics
 //!
-//! Provides extrinsic metrics that compare a clustering against ground-truth labels (NMI, AMI, ARI,
-//! homogeneity, completeness, V-measure, Fowlkes-Mallows) and intrinsic metrics that score a
-//! clustering from the feature geometry alone (silhouette, Davies-Bouldin, Calinski-Harabasz)
+//! Provides extrinsic metrics that compare a clustering against ground-truth labels: NMI, AMI, ARI,
+//! homogeneity, completeness, V-measure, and Fowlkes-Mallows. It also provides intrinsic metrics
+//! that score a clustering from the feature geometry alone: silhouette, Davies-Bouldin, and
+//! Calinski-Harabasz
 //!
-//! Every metric here takes `isize` labels, which is what the crate's clustering estimators emit -
-//! so `KMeans`, `DBSCAN` and `MeanShift` output feeds any of them directly. Label *values* carry
-//! no meaning beyond distinguishing clusters; they are densified internally, so non-contiguous ids
-//! and the `-1` noise marker are accepted. Note that `-1` is then scored as an ordinary cluster of
-//! its own, which is rarely what you want: filter the noise points out of both arrays first if the
-//! score is meant to describe only the clustered samples
+//! Every metric here takes `isize` labels, the type the crate's clustering estimators emit, so
+//! `KMeans`, `DBSCAN`, and `MeanShift` output feeds any of them directly. Label values carry no
+//! meaning beyond distinguishing clusters. They are densified internally, so non-contiguous ids and
+//! the `-1` noise marker are accepted.
+//!
+//! The `-1` marker is then scored as an ordinary cluster of its own, which is rarely what you want.
+//! Filter the noise points out of both arrays first if the score should describe only the clustered
+//! samples
 
 use ahash::AHashMap;
 use ndarray::{Array2, ArrayBase, Axis, Data, Ix1, Ix2};
@@ -19,17 +22,17 @@ use super::validate_pair;
 use crate::math::DistanceCalculationMetric;
 use crate::math::squared_euclidean_distance_row;
 
-/// Denominator magnitude below which an AMI/ARI normaliser is treated as a degenerate (perfect)
+/// Denominator magnitude below which an AMI/ARI normalizer is treated as a degenerate (perfect)
 /// clustering and the score is defined to be `1.0`
 const DEGENERATE_DENOM: f64 = 1e-10;
 
 tunable_gate! {
     /// Total scanned-element work (`n * n * d`) at or above which [`silhouette_score`] fills its
-    /// pairwise-distance matrix in parallel; below it the serial path is used
+    /// pairwise-distance matrix in parallel. Below the gate, the fill uses the serial path
     ///
-    /// The fill is n tasks of an O(n * d) distance-row scan each, the same cost class as the crate's
-    /// calibrated f64 row-scan gate (crossover bracket 65K-262K scanned elements). The constant is
-    /// restated here rather than imported because `metrics` stays a lightweight leaf module
+    /// The fill runs `n` tasks of an `O(n * d)` distance-row scan each, the same cost class as the
+    /// crate's calibrated f64 row-scan gate. The constant is restated here instead of imported
+    /// because `metrics` stays a lightweight leaf module
     ///
     /// Overridable via [`crate::tuning`]
     pub(crate) SILHOUETTE_PARALLEL_MIN_ELEMS => silhouette_parallel_min_elems / set_silhouette_parallel_min_elems = 262_144
@@ -45,7 +48,7 @@ fn label_index(labels: &[isize]) -> AHashMap<isize, usize> {
     index
 }
 
-/// Builds the contingency matrix of two label assignments together with its row and column sums
+/// Builds the contingency matrix of 2 label assignments together with its row and column sums
 /// (the cluster sizes in `labels_true` and `labels_pred` respectively)
 fn contingency_matrix(
     labels_true: &[isize],
@@ -115,25 +118,25 @@ fn ln_factorial_table(n_max: usize) -> Vec<f64> {
 /// Computes the expected mutual information (EMI) under the hypergeometric model of random
 /// clusterings with the given cluster sizes
 ///
-/// For each pair of clusters `(a_i, b_j)` the overlap `n_ij` follows a hypergeometric distribution;
+/// For each pair of clusters `(a_i, b_j)` the overlap `n_ij` follows a hypergeometric distribution.
 /// EMI sums `P(n_ij = k) * (k/n) * ln(n*k / (a_i*b_j))` over its support. All binomial coefficients
 /// are evaluated in log space from a shared log-factorial table, so the whole computation is
 /// `O(R*C*range)` with `O(1)` inner work
 fn expected_mutual_information(row_sums: &[usize], col_sums: &[usize], n: usize) -> f64 {
     let n_f = n as f64;
     let ln_fact = ln_factorial_table(n);
-    // log C(a, b) = ln(a!) - ln(b!) - ln((a-b)!); valid for 0 <= b <= a <= n
+    // log C(a, b) = ln(a!) - ln(b!) - ln((a-b)!), valid for 0 <= b <= a <= n
     let log_binom = |a: usize, b: usize| ln_fact[a] - ln_fact[b] - ln_fact[a - b];
 
     let mut emi = 0.0;
     for &a_i in row_sums {
         for &b_j in col_sums {
-            // Hypergeometric support max(0, a_i + b_j - n) <= k <= min(a_i, b_j); k = 0 adds nothing
-            // to MI, so start from 1
+            // Hypergeometric support is max(0, a_i + b_j - n) <= k <= min(a_i, b_j)
+            // k = 0 adds nothing to MI, so the range starts from 1
             let lower = (a_i + b_j).saturating_sub(n).max(1);
             let upper = a_i.min(b_j);
 
-            // log C(n, b_j) is constant across k for this pair; hoist it out of the loop
+            // log C(n, b_j) is constant across k for this pair, so it is hoisted out of the loop
             let log_c_n_bj = log_binom(n, b_j);
             for k in lower..=upper {
                 // ln P(k) = log C(a_i, k) + log C(n - a_i, b_j - k) - log C(n, b_j)
@@ -148,10 +151,10 @@ fn expected_mutual_information(row_sums: &[usize], col_sums: &[usize], n: usize)
 
 /// Collects a label array into a contiguous `Vec`, tolerating non-contiguous views
 ///
-/// Labels are `isize` because that is what the crate's clustering estimators emit, and because
-/// `-1` is the conventional noise/orphan marker (scikit-learn uses it the same way). Everything
-/// downstream goes through [`label_index`], which densifies whatever values appear, so a negative
-/// label is just another distinct cluster id here
+/// Labels are `isize` because that is what the crate's clustering estimators emit. `-1` is the
+/// conventional noise marker, the same convention scikit-learn uses. Everything downstream goes
+/// through [`label_index`], which densifies whatever values appear, so a negative label is just
+/// another distinct cluster id here
 fn to_label_vec<S>(labels: &ArrayBase<S, Ix1>) -> Vec<isize>
 where
     S: Data<Elem = isize>,
@@ -159,9 +162,9 @@ where
     labels.iter().copied().collect()
 }
 
-/// Calculates the Normalized Mutual Information (NMI) between two cluster assignments
+/// Calculates the Normalized Mutual Information (NMI) between 2 cluster assignments
 ///
-/// NMI normalizes the mutual information by the arithmetic mean of the two clusterings' entropies,
+/// NMI normalizes the mutual information by the arithmetic mean of the 2 clusterings' entropies,
 /// giving `0.0` for independent assignments and `1.0` for identical ones. If either clustering has
 /// zero entropy (a single cluster), NMI is defined as `0.0`
 ///
@@ -174,11 +177,6 @@ where
 ///
 /// - `f64` - Normalized mutual information in `[0.0, 1.0]`
 ///
-/// # Panics
-///
-/// - Panics if `labels_true` and `labels_pred` have different lengths
-/// - Panics if the inputs are empty
-///
 /// # Examples
 ///
 /// ```rust
@@ -190,6 +188,11 @@ where
 /// let nmi = normalized_mutual_info(&labels_true, &labels_pred);
 /// println!("Normalized Mutual Information: {:.4}", nmi);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `labels_true` and `labels_pred` have different lengths
+/// - Panics if the inputs are empty
 pub fn normalized_mutual_info<S>(
     labels_true: &ArrayBase<S, Ix1>,
     labels_pred: &ArrayBase<S, Ix1>,
@@ -221,12 +224,12 @@ where
     }
 }
 
-/// Calculates the Adjusted Mutual Information (AMI) between two cluster assignments
+/// Calculates the Adjusted Mutual Information (AMI) between 2 cluster assignments
 ///
-/// AMI corrects the mutual information for the agreement expected by chance, scoring `1.0` for
-/// identical clusterings and about `0.0` for independent ones (it can be slightly negative). When
-/// the normaliser is degenerate (e.g. both clusterings put every sample in one cluster) the score
-/// is defined as `1.0`
+/// AMI corrects the mutual information for the agreement expected by chance. It scores `1.0` for
+/// identical clusterings and about `0.0` for independent ones, and it can go slightly negative.
+/// When the normalizer is degenerate (for example, both clusterings put every sample in one
+/// cluster), the score is defined as `1.0`
 ///
 /// # Parameters
 ///
@@ -236,11 +239,6 @@ where
 /// # Returns
 ///
 /// - `f64` - Adjusted mutual information (typically in `[-1.0, 1.0]`)
-///
-/// # Panics
-///
-/// - Panics if `labels_true` and `labels_pred` have different lengths
-/// - Panics if the inputs are empty
 ///
 /// # Examples
 ///
@@ -253,6 +251,11 @@ where
 /// let ami = adjusted_mutual_info(&labels_true, &labels_pred);
 /// println!("Adjusted Mutual Information: {:.4}", ami);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `labels_true` and `labels_pred` have different lengths
+/// - Panics if the inputs are empty
 pub fn adjusted_mutual_info<S>(
     labels_true: &ArrayBase<S, Ix1>,
     labels_pred: &ArrayBase<S, Ix1>,
@@ -284,13 +287,13 @@ where
     }
 }
 
-/// Calculates the Adjusted Rand Index (ARI) between two cluster assignments
+/// Calculates the Adjusted Rand Index (ARI) between 2 cluster assignments
 ///
-/// ARI is the Rand index (the fraction of sample pairs that two clusterings agree on, whether by
-/// grouping them together or apart) corrected for chance: `1.0` for identical clusterings, about
-/// `0.0` for independent ones, and possibly negative for worse-than-random agreement. When the
-/// normaliser is degenerate (e.g. fewer than two samples, or both clusterings trivial) the score
-/// is defined as `1.0`
+/// ARI is the Rand index corrected for chance. The Rand index is the fraction of sample pairs that
+/// 2 clusterings agree on, whether by grouping them together or apart. ARI scores `1.0` for
+/// identical clusterings, about `0.0` for independent ones, and can go negative for
+/// worse-than-random agreement. When the normalizer is degenerate (for example, fewer than 2
+/// samples, or both clusterings trivial), the score is defined as `1.0`
 ///
 /// # Parameters
 ///
@@ -300,11 +303,6 @@ where
 /// # Returns
 ///
 /// - `f64` - Adjusted Rand Index (typically in `[-0.5, 1.0]`)
-///
-/// # Panics
-///
-/// - Panics if `labels_true` and `labels_pred` have different lengths
-/// - Panics if the inputs are empty
 ///
 /// # Examples
 ///
@@ -317,6 +315,11 @@ where
 /// let ari = adjusted_rand_index(&labels_true, &labels_pred);
 /// println!("Adjusted Rand Index: {:.4}", ari);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `labels_true` and `labels_pred` have different lengths
+/// - Panics if the inputs are empty
 pub fn adjusted_rand_index<S>(
     labels_true: &ArrayBase<S, Ix1>,
     labels_pred: &ArrayBase<S, Ix1>,
@@ -363,11 +366,13 @@ where
 }
 
 /// Accumulates the symmetric pairwise-distance contributions of the upper-triangle rows in `rows`
-/// into `acc`: for each `i` in `rows` and each `j > i`, the single distance `d(i, j)` is added to
-/// both `acc[[i, cluster[j]]]` and `acc[[j, cluster[i]]]`
+/// into `acc`
 ///
-/// Visiting only `j > i` (and relying on `d` being symmetric) computes each unordered pair once
-/// The skipped diagonal term `d(i, i) = 0` is a no-op for the running sum, so the result is
+/// For each `i` in `rows` and each `j > i`, it adds the single distance `d(i, j)` to both
+/// `acc[[i, cluster[j]]]` and `acc[[j, cluster[i]]]`
+///
+/// Visiting only `j > i` (and relying on `d` being symmetric) computes each unordered pair once.
+/// The skipped diagonal term `d(i, i) = 0` is a no-op for the running sum. So the result is
 /// identical to a full `n x n` scan
 fn accumulate_upper_triangle<S>(
     acc: &mut Array2<f64>,
@@ -389,21 +394,26 @@ fn accumulate_upper_triangle<S>(
     }
 }
 
-/// Builds `dist_to_cluster[[i, c]]` = total distance from sample `i` to every sample in cluster
-/// `c`, exploiting distance symmetry so each unordered pair is evaluated once (halving the metric
-/// calls versus a full `n x n` scan)
+/// Builds `dist_to_cluster[[i, c]]`, the total distance from sample `i` to every sample in cluster
+/// `c`
 ///
-/// Below the scanned-element gate the upper triangle is folded serially, matching a full-scan fill
-/// (the only difference, the `d(i, i) = 0` self term, adds nothing to a sum of non-negative
-/// distances). At or above the gate the upper-triangle rows are dealt round-robin into
-/// `current_num_threads()` buckets, since row `i` does `n - 1 - i` pair evaluations and interleaving
-/// balances the buckets better than contiguous splits; each bucket folds into its own `(n, k)`
-/// accumulator and the buckets are then summed in order
+/// It exploits distance symmetry, so each unordered pair is evaluated once, halving the metric
+/// calls compared to a full `n x n` scan
+///
+/// Below the scanned-element gate, the upper triangle is folded serially, matching a full-scan
+/// fill. The only difference is the `d(i, i) = 0` self term, which adds nothing to a sum of
+/// non-negative distances.
+///
+/// At or above the gate the upper-triangle rows are dealt round-robin into
+/// `current_num_threads()` buckets. Row `i` does `n - 1 - i` pair evaluations, so interleaving
+/// balances the buckets better than contiguous splits. Each bucket folds into its own `(n, k)`
+/// accumulator, and the buckets are then summed in order
 ///
 /// # Notes
 ///
-/// The parallel result matches the serial fill numerically, and rerunning on the same machine gives
-/// the same result (not necessarily bit-for-bit)
+/// The parallel result matches the serial fill numerically, but not necessarily bit-for-bit.
+/// Rerunning the parallel path on the same machine reproduces the same result bit-for-bit, because
+/// the bucket grouping is fixed
 fn pairwise_cluster_distances<S>(
     x: &ArrayBase<S, Ix2>,
     cluster: &[usize],
@@ -443,11 +453,11 @@ where
 
 /// Calculates the mean Silhouette Coefficient over all samples under the given distance metric
 ///
-/// For each sample, the silhouette `s = (b - a) / max(a, b)` compares the mean intra-cluster
-/// distance `a` with the mean distance `b` to the nearest other cluster; it ranges from `-1`
-/// (likely misassigned) through `0` (on a cluster boundary) to `+1` (well clustered). Samples that
-/// are the sole member of their cluster contribute `0`. The returned score is the mean over all
-/// samples
+/// For each sample, the silhouette compares the mean intra-cluster distance `a` with the mean
+/// distance `b` to the nearest other cluster. The formula is `s = (b - a) / max(a, b)`. The score
+/// ranges from `-1` (likely misassigned) through `0` (on a cluster boundary) to `+1` (well
+/// clustered). Samples that are the sole member of their cluster contribute `0`. The returned score
+/// is the mean over all samples
 ///
 /// Pairwise distances go through [`DistanceCalculationMetric`], the same dispatch point used by the
 /// estimators, so any of `Euclidean`, `Manhattan`, or `Minkowski(p)` works. Pass
@@ -463,13 +473,6 @@ where
 ///
 /// - `f64` - Mean silhouette coefficient in `[-1.0, 1.0]`
 ///
-/// # Panics
-///
-/// - Panics if the number of rows in `x` differs from the length of `labels`
-/// - Panics if the inputs are empty
-/// - Panics if the number of distinct clusters is not in `2..=n_samples - 1`
-/// - Panics if `metric` is `Minkowski(p)` with `p < 1`
-///
 /// # Examples
 ///
 /// ```rust
@@ -482,6 +485,13 @@ where
 /// let score = silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean);
 /// assert!(score > 0.8);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if the number of rows in `x` differs from the length of `labels`
+/// - Panics if the inputs are empty
+/// - Panics if the number of distinct clusters is not in `2..=n_samples - 1`
+/// - Panics if `metric` is `Minkowski(p)` with `p < 1`
 pub fn silhouette_score<S1, S2>(
     x: &ArrayBase<S1, Ix2>,
     labels: &ArrayBase<S2, Ix1>,
@@ -531,8 +541,10 @@ where
 }
 
 /// Densifies labels to `0..k` and validates them against an `x` of `n_rows` rows for an internal
-/// clustering metric: equal length, non-empty, and `2..=n_rows - 1` distinct clusters. Returns the
-/// dense cluster index of each sample and the cluster count `k`
+/// clustering metric
+///
+/// The check requires equal length, non-empty input, and `2..=n_rows - 1` distinct clusters.
+/// Returns the dense cluster index of each sample and the cluster count `k`
 fn validate_clustering_inputs(n_rows: usize, labels: &[isize]) -> (Vec<usize>, usize) {
     if n_rows != labels.len() {
         panic!(
@@ -579,11 +591,11 @@ where
     (centroids, sizes)
 }
 
-/// Returns `(homogeneity, completeness)` for two label assignments
+/// Returns `(homogeneity, completeness)` for 2 label assignments
 ///
-/// Both reuse the mutual information and entropies already defined above: with `C` the classes
-/// (`labels_true`) and `K` the clusters (`labels_pred`), homogeneity is `MI / H(C)` and
-/// completeness is `MI / H(K)`. A zero entropy (single cluster) makes its score 1.0
+/// Both reuse [`mutual_information`] and [`entropy_nats`]. With `C` the classes (`labels_true`) and
+/// `K` the clusters (`labels_pred`), homogeneity is `MI / H(C)` and completeness is `MI / H(K)`. A
+/// zero entropy (single cluster) makes its score 1.0
 fn homogeneity_completeness(labels_true: &[isize], labels_pred: &[isize], n: usize) -> (f64, f64) {
     let (contingency, row_sums, col_sums) = contingency_matrix(labels_true, labels_pred);
     let mi = mutual_information(&contingency, n, &row_sums, &col_sums);
@@ -617,11 +629,6 @@ fn homogeneity_completeness(labels_true: &[isize], labels_pred: &[isize], n: usi
 ///
 /// - `f64` - Homogeneity score in `[0.0, 1.0]`
 ///
-/// # Panics
-///
-/// - Panics if `labels_true` and `labels_pred` have different lengths
-/// - Panics if the inputs are empty
-///
 /// # Examples
 ///
 /// ```rust
@@ -632,6 +639,11 @@ fn homogeneity_completeness(labels_true: &[isize], labels_pred: &[isize], n: usi
 /// let labels_pred = array![0, 0, 1, 1];
 /// assert!((homogeneity_score(&labels_true, &labels_pred) - 1.0).abs() < 1e-12);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `labels_true` and `labels_pred` have different lengths
+/// - Panics if the inputs are empty
 pub fn homogeneity_score<S>(labels_true: &ArrayBase<S, Ix1>, labels_pred: &ArrayBase<S, Ix1>) -> f64
 where
     S: Data<Elem = isize>,
@@ -649,7 +661,7 @@ where
 /// ground-truth class are assigned to the same cluster
 ///
 /// Scores range from 0.0 to 1.0, with 1.0 for perfectly complete clusters. Completeness is the
-/// dual of [`homogeneity_score`] (swapping the roles of the two labelings)
+/// dual of [`homogeneity_score`] (swapping the roles of the 2 labelings)
 ///
 /// # Parameters
 ///
@@ -659,11 +671,6 @@ where
 /// # Returns
 ///
 /// - `f64` - Completeness score in `[0.0, 1.0]`
-///
-/// # Panics
-///
-/// - Panics if `labels_true` and `labels_pred` have different lengths
-/// - Panics if the inputs are empty
 ///
 /// # Examples
 ///
@@ -675,6 +682,11 @@ where
 /// let labels_pred = array![0, 0, 1, 1];
 /// assert!((completeness_score(&labels_true, &labels_pred) - 1.0).abs() < 1e-12);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `labels_true` and `labels_pred` have different lengths
+/// - Panics if the inputs are empty
 pub fn completeness_score<S>(
     labels_true: &ArrayBase<S, Ix1>,
     labels_pred: &ArrayBase<S, Ix1>,
@@ -693,7 +705,7 @@ where
 
 /// Calculates the V-measure: the harmonic mean of [`homogeneity_score`] and [`completeness_score`]
 ///
-/// V-measure is symmetric in the two labelings and equals the [`normalized_mutual_info`] computed
+/// V-measure is symmetric in the 2 labelings and equals the [`normalized_mutual_info`] computed
 /// with arithmetic-mean normalization. Scores range from 0.0 to 1.0
 ///
 /// # Parameters
@@ -705,11 +717,6 @@ where
 ///
 /// - `f64` - V-measure score in `[0.0, 1.0]`
 ///
-/// # Panics
-///
-/// - Panics if `labels_true` and `labels_pred` have different lengths
-/// - Panics if the inputs are empty
-///
 /// # Examples
 ///
 /// ```rust
@@ -720,6 +727,11 @@ where
 /// let labels_pred = array![0, 0, 1, 1, 2, 2];
 /// assert!((v_measure_score(&labels_true, &labels_pred) - 1.0).abs() < 1e-12);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `labels_true` and `labels_pred` have different lengths
+/// - Panics if the inputs are empty
 pub fn v_measure_score<S>(labels_true: &ArrayBase<S, Ix1>, labels_pred: &ArrayBase<S, Ix1>) -> f64
 where
     S: Data<Elem = isize>,
@@ -740,10 +752,10 @@ where
     }
 }
 
-/// Calculates the Fowlkes-Mallows index (FMI) between two cluster assignments
+/// Calculates the Fowlkes-Mallows index (FMI) between 2 cluster assignments
 ///
-/// FMI is the geometric mean of the pairwise precision and recall over sample pairs:
-/// `TP / sqrt((TP + FP) * (TP + FN))`, where the counts are over pairs grouped together by each
+/// FMI is the geometric mean of the pairwise precision and recall over sample pairs. The formula is
+/// `TP / sqrt((TP + FP) * (TP + FN))`, where the counts are pairs grouped together by each
 /// clustering. Scores range from 0.0 to 1.0, with 1.0 for identical clusterings
 ///
 /// # Parameters
@@ -755,11 +767,6 @@ where
 ///
 /// - `f64` - Fowlkes-Mallows index in `[0.0, 1.0]`
 ///
-/// # Panics
-///
-/// - Panics if `labels_true` and `labels_pred` have different lengths
-/// - Panics if the inputs are empty
-///
 /// # Examples
 ///
 /// ```rust
@@ -770,6 +777,11 @@ where
 /// let labels_pred = array![0, 0, 1, 1];
 /// assert!((fowlkes_mallows_score(&labels_true, &labels_pred) - 1.0).abs() < 1e-12);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `labels_true` and `labels_pred` have different lengths
+/// - Panics if the inputs are empty
 pub fn fowlkes_mallows_score<S>(
     labels_true: &ArrayBase<S, Ix1>,
     labels_pred: &ArrayBase<S, Ix1>,
@@ -805,10 +817,11 @@ where
 
 /// Calculates the Davies-Bouldin index of a clustering using Euclidean distance
 ///
-/// Each cluster's worst-case similarity to another is `(s_i + s_j) / d(c_i, c_j)`, where `s` is the
-/// mean distance of a cluster's points to its centroid `c` and `d` is the centroid distance; the
-/// index is the average of these maxima. **Lower is better** (0.0 is ideal), making it a cheaper
-/// `O(n * k)` complement to [`silhouette_score`] for evaluating a clustering without ground truth
+/// Each cluster's worst-case similarity to another cluster is `(s_i + s_j) / d(c_i, c_j)`. Here,
+/// `s` is the mean distance of a cluster's points to its centroid `c`, and `d` is the distance
+/// between 2 centroids. The index is the average of these per-cluster maxima. Lower is better,
+/// with 0.0 as the ideal. It compares each sample only to its own cluster centroid, so it is a
+/// cheaper complement to [`silhouette_score`] for evaluating a clustering without ground truth
 ///
 /// # Parameters
 ///
@@ -817,13 +830,7 @@ where
 ///
 /// # Returns
 ///
-/// - `f64` - Davies-Bouldin index (>= 0.0; lower is better)
-///
-/// # Panics
-///
-/// - Panics if the number of rows in `x` differs from the length of `labels`
-/// - Panics if the inputs are empty
-/// - Panics if the number of distinct clusters is not in `2..=n_samples - 1`
+/// - `f64` - Davies-Bouldin index (>= 0.0, lower is better)
 ///
 /// # Examples
 ///
@@ -835,6 +842,12 @@ where
 /// let labels = array![0, 0, 1, 1];
 /// assert!(davies_bouldin_score(&x, &labels) < 0.1); // well separated
 /// ```
+///
+/// # Panics
+///
+/// - Panics if the number of rows in `x` differs from the length of `labels`
+/// - Panics if the inputs are empty
+/// - Panics if the number of distinct clusters is not in `2..=n_samples - 1`
 pub fn davies_bouldin_score<S1, S2>(x: &ArrayBase<S1, Ix2>, labels: &ArrayBase<S2, Ix1>) -> f64
 where
     S1: Data<Elem = f64>,
@@ -874,8 +887,8 @@ where
 
 /// Calculates the Calinski-Harabasz index (variance ratio criterion) of a clustering
 ///
-/// The ratio of between-cluster dispersion to within-cluster dispersion, scaled by
-/// `(n - k) / (k - 1)`. **Higher is better**: well-separated, compact clusters score high. Returns
+/// It is the ratio of between-cluster dispersion to within-cluster dispersion, scaled by
+/// `(n - k) / (k - 1)`. Higher is better. Well-separated, compact clusters score high. Returns
 /// 1.0 in the degenerate case where every point coincides with its centroid (zero within-cluster
 /// dispersion)
 ///
@@ -886,13 +899,7 @@ where
 ///
 /// # Returns
 ///
-/// - `f64` - Calinski-Harabasz index (>= 0.0; higher is better)
-///
-/// # Panics
-///
-/// - Panics if the number of rows in `x` differs from the length of `labels`
-/// - Panics if the inputs are empty
-/// - Panics if the number of distinct clusters is not in `2..=n_samples - 1`
+/// - `f64` - Calinski-Harabasz index (>= 0.0, higher is better)
 ///
 /// # Examples
 ///
@@ -904,6 +911,12 @@ where
 /// let labels = array![0, 0, 1, 1];
 /// assert!(calinski_harabasz_score(&x, &labels) > 100.0); // well separated
 /// ```
+///
+/// # Panics
+///
+/// - Panics if the number of rows in `x` differs from the length of `labels`
+/// - Panics if the inputs are empty
+/// - Panics if the number of distinct clusters is not in `2..=n_samples - 1`
 pub fn calinski_harabasz_score<S1, S2>(x: &ArrayBase<S1, Ix2>, labels: &ArrayBase<S2, Ix1>) -> f64
 where
     S1: Data<Elem = f64>,
@@ -930,6 +943,7 @@ where
     (between / within) * ((n - k) as f64 / (k - 1) as f64)
 }
 
+/// Unit tests for the clustering metrics helpers and public scoring functions
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -997,7 +1011,7 @@ mod tests {
 
     // entropy_nats
 
-    /// Two equal clusters give H = ln(2)
+    /// 2 equal clusters give H = ln(2)
     #[test]
     fn test_entropy_nats_two_equal_clusters() {
         let h = entropy_nats(&[2, 2], 4);
@@ -1011,7 +1025,7 @@ mod tests {
         assert_abs_diff_eq!(h, 0.0, epsilon = 1e-10);
     }
 
-    /// Four equal singleton clusters give H = ln(4)
+    /// 4 equal singleton clusters give H = ln(4)
     #[test]
     fn test_entropy_nats_four_equal_clusters() {
         let h = entropy_nats(&[1, 1, 1, 1], 4);
@@ -1066,7 +1080,8 @@ mod tests {
         assert_abs_diff_eq!(c, 1.0, epsilon = 1e-10);
     }
 
-    /// Swapping the roles of the pure-clusters case swaps the scores: homogeneity 0.5, completeness 1.0
+    /// Swapping the roles of the pure-clusters case swaps the scores: homogeneity 0.5,
+    /// completeness 1.0
     #[test]
     fn test_homogeneity_completeness_swapped_roles() {
         let labels_true = [0isize, 1, 2, 3];
@@ -1090,7 +1105,7 @@ mod tests {
 
     // mutual_information: non-trivial case
 
-    /// Four pure clusters over two true classes give MI = ln(2)
+    /// 4 pure clusters over 2 true classes give MI = ln(2)
     #[test]
     fn test_mutual_information_pure_clusters() {
         // build contingency directly to avoid depending on contingency_matrix correctness
@@ -1147,7 +1162,8 @@ mod tests {
         })
     }
 
-    /// Independent full `n x n` scan reference (computes every ordered pair, including the diagonal)
+    /// Independent full `n x n` scan reference (computes every ordered pair, including
+    /// the diagonal)
     fn brute_force_dist_to_cluster(
         x: &Array2<f64>,
         cluster: &[usize],
@@ -1164,8 +1180,9 @@ mod tests {
         dist
     }
 
-    /// The serial path (input below the parallel gate) matches the full `n x n` scan: the only
-    /// difference, the `d(i, i) = 0` self term, adds nothing to a sum of non-negative distances
+    /// The serial path (input below the parallel gate) matches the full `n x n` scan. The only
+    /// difference is the `d(i, i) = 0` self term, which adds nothing to a sum of non-negative
+    /// distances
     #[test]
     fn test_pairwise_cluster_distances_serial_matches_full_scan_bitwise() {
         let x = pseudo_random_matrix(12, 5, 1); // 12*12*5 = 720 < gate -> serial

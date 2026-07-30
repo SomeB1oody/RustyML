@@ -19,12 +19,15 @@ pub use crate::machine_learning::{Gamma, KernelType};
 /// Eigen solver strategy for computing eigenpairs of the centered kernel matrix
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub enum EigenSolver {
-    /// Exact dense symmetric eigendecomposition (in-house Householder + QL solver); best for small to mid-sized kernel matrices
+    /// Exact dense symmetric eigendecomposition (an in-house Householder and QL solver). Best
+    /// for small to mid-sized kernel matrices
     #[default]
     Dense,
-    /// Krylov-subspace iterative solver (the pure-Rust counterpart of the symmetric solver behind ARPACK); accurate for a few leading components of a large kernel matrix
+    /// Krylov-subspace Lanczos iteration with full reorthogonalization. Accurate for a few
+    /// leading components of a large kernel matrix
     Lanczos,
-    /// Power iteration with Hotelling deflation, extracting one component at a time; simplest iterative option
+    /// Power iteration with Hotelling deflation, extracting one component at a time. The
+    /// simplest iterative option
     PowerIteration,
 }
 
@@ -32,8 +35,9 @@ impl EigenSolver {
     /// Computes the top `n_components` eigenpairs of the symmetric centered kernel matrix
     ///
     /// Returns eigenvalues alongside eigenvectors stored as columns, the layout the
-    /// projection step expects. Single dispatch point over the solver strategies; the
-    /// eigenvalue positivity check Kernel PCA additionally requires is applied by the caller
+    /// projection step expects. This is the single dispatch point over the solver strategies.
+    /// The caller applies the finiteness check Kernel PCA also requires on the
+    /// eigenvalues
     fn decompose(
         &self,
         kernel_centered: &Array2<f64>,
@@ -94,7 +98,8 @@ impl EigenSolver {
         Ok((Array1::from_vec(eigenvalues), eigenvectors))
     }
 
-    /// Iterative path shared by Lanczos and power iteration: arrange the returned eigenvectors as the columns of an `(n_samples x n_components)` matrix
+    /// Iterative path shared by Lanczos and power iteration. Arranges the returned eigenvectors
+    /// as the columns of an `(n_samples x n_components)` matrix
     fn columns_from_pairs(
         pairs: (Vec<f64>, Vec<Array1<f64>>),
         n_samples: usize,
@@ -122,7 +127,9 @@ impl EigenSolver {
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::machine_learning::decomposition::kernel_pca::{EigenSolver, Gamma, KernelPCA, KernelType};
+/// use rustyml::machine_learning::decomposition::kernel_pca::{
+///     EigenSolver, Gamma, KernelPCA, KernelType,
+/// };
 /// use ndarray::array;
 ///
 /// let mut kpca = KernelPCA::new(KernelType::RBF { gamma: Gamma::Value(0.1) }, 2).unwrap();
@@ -186,18 +193,18 @@ impl KernelPCA {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A new `KernelPCA` instance or validation error
-    ///
-    /// # Errors
-    ///
-    /// - `Error::InvalidParameter` - If `n_components` is 0 or kernel parameters are invalid
+    /// - `Result<Self, Error>` - A new `KernelPCA` instance or a validation error
     ///
     /// # Notes
     ///
-    /// The eigen solver defaults to `EigenSolver::Dense`. To pick another strategy (e.g. a
-    /// Lanczos solver for a few components on large data), use the builder method:
+    /// The eigen solver defaults to `EigenSolver::Dense`. To pick another strategy, for example
+    /// a Lanczos solver for a few components on large data, use the builder method.
     ///
     /// - [`with_eigen_solver`](Self::with_eigen_solver) - eigen solver strategy
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If `n_components` is 0 or a kernel parameter is invalid
     pub fn new(kernel: KernelType, n_components: usize) -> Result<Self, Error> {
         if n_components == 0 {
             return Err(Error::invalid_parameter(
@@ -259,9 +266,13 @@ impl KernelPCA {
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` / `Error::InvalidInput` - If the input is empty or invalid
+    /// - `Error::EmptyInput` - If `x` has no rows or no feature columns
+    /// - `Error::InvalidInput` - If `x` has fewer than 2 samples, or `Gamma::Scale` cannot be
+    ///   resolved because the data has zero variance
     /// - `Error::InvalidParameter` - If `n_components` exceeds the number of samples
-    /// - `Error::NonFinite` / `Error::Computation` - If kernel computation or eigendecomposition fails
+    /// - `Error::NonFinite` / `Error::Computation` - If kernel computation or eigendecomposition
+    ///   fails
+    /// - `Error::NotConverged` - If the Lanczos or power-iteration eigen solver fails to converge
     ///
     /// # Performance
     ///
@@ -290,12 +301,16 @@ impl KernelPCA {
     /// # Errors
     ///
     /// - `Error::NotFitted` - If the model has not been fitted
-    /// - `Error::InvalidInput` / `Error::DimensionMismatch` - If the input is invalid
-    /// - `Error::NonFinite` / `Error::Computation` - If kernel centering or projection fails
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If `x` is empty or its feature count
+    ///   does not match the fitted model
+    /// - `Error::NonFinite` - If `x` or the computed kernel matrix contains a NaN or infinite
+    ///   value
+    /// - `Error::Computation` - If kernel centering fails, or the fitted eigen state is
+    ///   inconsistent
     ///
     /// # Performance
     ///
-    /// The kernel-matrix GEMM runs parallel above its FLOPs gate; the scans and
+    /// The kernel-matrix GEMM runs in parallel above an internal size gate. The scans and
     /// centering parallelize above the calibrated class gates (see `crate::parallel_gates`)
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
@@ -318,13 +333,17 @@ impl KernelPCA {
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` / `Error::InvalidInput` - If the input is invalid
+    /// - `Error::EmptyInput` - If `x` has no rows or no feature columns
+    /// - `Error::InvalidInput` - If `x` has fewer than 2 samples, or `Gamma::Scale` cannot be
+    ///   resolved because the data has zero variance
     /// - `Error::InvalidParameter` - If `n_components` exceeds the number of samples
-    /// - `Error::NonFinite` / `Error::Computation` - If kernel computation or eigendecomposition fails
+    /// - `Error::NonFinite` / `Error::Computation` - If kernel computation or eigendecomposition
+    ///   fails
+    /// - `Error::NotConverged` - If the Lanczos or power-iteration eigen solver fails to converge
     ///
     /// # Performance
     ///
-    /// The kernel-matrix GEMM runs parallel above its FLOPs gate; the scans and
+    /// The kernel-matrix GEMM runs in parallel above an internal size gate. The scans and
     /// centering parallelize above the calibrated class gates (see `crate::parallel_gates`)
     pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
@@ -389,7 +408,7 @@ impl KernelPCA {
             progress_bar.set_message("Computing kernel matrix");
         }
 
-        // Resolve a data-dependent gamma (Scale/Auto) to a concrete value
+        // Resolve a data-dependent gamma (Scale or Auto) to a concrete value
         let x_mean = x.mean().unwrap_or(0.0);
         let x_variance = x.iter().map(|&v| (v - x_mean).powi(2)).sum::<f64>() / x.len() as f64;
         self.kernel = self.kernel.resolve_gamma(x.ncols(), x_variance)?;
@@ -414,7 +433,7 @@ impl KernelPCA {
             progress_bar.set_message("Computing eigen decomposition");
         }
 
-        // Extract eigenpairs, then enforce Kernel PCA's eigenvalue positivity requirement
+        // Extract eigenpairs, then enforce Kernel PCA's eigenvalue finiteness requirement
         let (eigenvalues, eigenvectors) = self
             .eigen_solver
             .decompose(&kernel_matrix, self.n_components)?;
@@ -730,11 +749,11 @@ impl KernelPCA {
 
     /// Validates that eigenvalues are finite
     ///
-    /// Only non-finite eigenvalues (NaN/Inf) indicate a genuine numerical failure. Non-positive
-    /// eigenvalues are tolerated: a centered kernel (Gram) matrix is only PSD up to round-off,
-    /// and non-Mercer kernels such as `Sigmoid` produce near-zero or slightly negative trailing
-    /// eigenvalues. Those components carry no information and are zeroed out at projection time
-    /// (see [`compute_scaling_factors`]), rather than failing the whole fit
+    /// Only non-finite eigenvalues (NaN or Inf) indicate a genuine numerical failure.
+    /// Non-positive eigenvalues are tolerated. A centered kernel (Gram) matrix is only PSD up to
+    /// round-off, and non-Mercer kernels such as `Sigmoid` produce near-zero or slightly
+    /// negative trailing eigenvalues. Those components carry no information and are zeroed out
+    /// at projection time (see [`compute_scaling_factors`]), rather than failing the whole fit
     fn validate_eigenvalues(eigenvalues: &Array1<f64>) -> Result<(), Error> {
         for &value in eigenvalues.iter() {
             if !value.is_finite() {
@@ -750,8 +769,8 @@ impl KernelPCA {
     /// Computes the `1/sqrt(lambda)` projection scaling factors from eigenvalues
     ///
     /// Components whose eigenvalue is not meaningfully positive (near-zero from round-off, or
-    /// negative from a non-PSD kernel) get a scale of `0.0`, which zeroes their projection
-    /// instead of producing `Inf`/`NaN`. This preserves the requested `n_components`
+    /// negative from a non-PSD kernel) get a scale of `0.0`. This zeroes the component's
+    /// projection instead of producing `Inf` or `NaN`, preserving the requested `n_components`
     /// dimensionality while ignoring degenerate directions
     fn compute_scaling_factors(eigenvalues: &Array1<f64>) -> Result<Vec<f64>, Error> {
         // Relative threshold below which an eigenvalue is treated as non-informative

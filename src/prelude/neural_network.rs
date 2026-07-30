@@ -1,4 +1,4 @@
-//! Prelude re-exporting the common neural network types: tensors, layers, losses, and optimizers
+//! Prelude re-exports for the neural network module: tensors, layers, losses, and optimizers
 
 pub use crate::neural_network::Tensor;
 pub use crate::neural_network::layers::activation::*;

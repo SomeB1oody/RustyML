@@ -22,13 +22,13 @@ use std::borrow::Cow;
 /// A 2D convolutional layer for neural networks
 ///
 /// Applies a convolution operation to grid-like data such as images. Input shape is
-/// \[batch_size, height, width, channels\] and output shape is
-/// \[batch_size, output_height, output_width, filters\], where output dimensions depend on
-/// input size, kernel size, strides, and padding
+/// \[batch_size, height, width, channels\]. Output shape is
+/// \[batch_size, output_height, output_width, filters\]. Output dimensions depend on input
+/// size, kernel size, strides, and padding
 ///
 /// The dimension-generic convolution math lives in
-/// [`convolution_engine`](crate::neural_network::layers::convolution); this layer holds the
-/// weights, activation, and caches, and delegates the forward/backward numerics to it
+/// [`convolution_engine`](crate::neural_network::layers::convolution). This layer holds the
+/// weights, activation, and caches, and delegates the forward/backward numerics to it.
 ///
 /// # Examples
 ///
@@ -43,7 +43,7 @@ use std::borrow::Cow;
 /// // Batch size=2, 5x5 pixels, 1 input channel
 /// let x = Array4::ones((2, 5, 5, 1)).into_dyn();
 ///
-/// // Create target tensor - assuming 3 filters with output size 3x3
+/// // Create target tensor (assuming 3 filters with output size 3x3)
 /// let y = Array4::ones((2, 3, 3, 3)).into_dyn();
 ///
 /// // Build model: add a Conv2D layer with 3 filters and 3x3 kernel
@@ -68,7 +68,7 @@ use std::borrow::Cow;
 /// let prediction = model.predict(&x).unwrap();
 /// println!("Convolution layer prediction results: {:?}", prediction);
 ///
-/// // Check if output shape is correct - should be [2, 3, 3, 3]
+/// // Check if output shape is correct (should be [2, 3, 3, 3])
 /// assert_eq!(prediction.shape(), &[2, 3, 3, 3]);
 /// ```
 #[derive(Debug)]
@@ -102,7 +102,8 @@ pub struct Conv2D {
 impl Conv2D {
     /// Creates a new 2D convolutional layer with the specified parameters
     ///
-    /// Weights are initialized with Xavier (Glorot) uniform initialization; biases are zeros
+    /// The constructor initializes weights with Xavier (Glorot) uniform initialization and sets
+    /// biases to 0
     ///
     /// # Parameters
     ///
@@ -110,17 +111,17 @@ impl Conv2D {
     /// - `kernel_size` - Size of the convolution kernel as (height, width)
     /// - `input_shape` - Shape of the input tensor as \[batch_size, height, width, channels\]
     /// - `strides` - Stride values for the convolution operation as (vertical, horizontal)
-    /// - `activation` - Activation layer (ReLU, Sigmoid, Tanh, Softmax)
-    ///
-    /// # Notes
-    ///
-    /// Padding defaults to [`PaddingType::Valid`]; choose [`PaddingType::Same`] with
-    /// [`Conv2D::with_padding`]. Weights are seeded from the global seed or entropy by default; for
-    /// reproducible initialization, set a seed with [`Conv2D::with_random_state`]
+    /// - `activation` - Activation applied to the convolution output
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A new `Conv2D` layer with randomly initialized weights, or an error
+    /// - `Result<Self, Error>` - A new `Conv2D` layer instance or an error
+    ///
+    /// # Notes
+    ///
+    /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
+    /// [`Conv2D::with_padding`]. By default, the layer seeds weights from the global seed or
+    /// entropy. For reproducible initialization, set a seed with [`Conv2D::with_random_state`].
     ///
     /// # Errors
     ///
@@ -175,11 +176,13 @@ impl Conv2D {
         self
     }
 
-    /// Sets the seed used to initialize the filter weights and re-initializes them deterministically
+    /// Sets the seed used to initialize the filter weights and re-initializes them
+    /// deterministically
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`])
-    /// This re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
-    /// assigning custom weights or training. The bias stays zero-initialized
+    /// By default, the layer seeds weights from the global seed or entropy (see
+    /// [`crate::random`]). This method re-runs Xavier/Glorot uniform initialization with
+    /// `random_state`. Call it before assigning custom weights or training. The bias stays
+    /// zero-initialized
     ///
     /// # Parameters
     ///
@@ -241,12 +244,14 @@ impl Conv2D {
     ///
     /// # Parameters
     ///
-    /// - `weights` - 4D array of filter weights with shape \[kernel_height, kernel_width, channels, filters\]
+    /// - `weights` - 4D array of filter weights with shape \[kernel_height, kernel_width,
+    ///   channels, filters\]
     /// - `bias` - 1D array of bias values with shape \[filters\]
     ///
     /// # Errors
     ///
-    /// Returns an error if `weights` or `bias` do not match the existing weight or bias shapes
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` does not match the
+    ///   layer's expected shape
     pub fn set_weights(&mut self, weights: Array4<f32>, bias: Array1<f32>) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;

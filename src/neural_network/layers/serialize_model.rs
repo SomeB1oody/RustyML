@@ -30,11 +30,11 @@ pub const MODEL_MAGIC: u32 = 0x524D_4C4D;
 
 /// On-disk model format version written by this build
 ///
-/// Bump this on any change to a weight container's tensor layout, rank, or field order. The load
-/// path's structural checks - layer count, layer type name, weight extents - all pass for a file
-/// whose weights are laid out for a different release whenever the extents happen to coincide, so
-/// this version is what actually makes a stale checkpoint fail instead of silently producing
-/// wrong predictions
+/// Bump this on any change to a weight container's tensor layout, rank, or field order. The
+/// load path checks structural details: layer count, layer type name, and weight extents.
+/// These checks can all pass for a file whose weights suit a different release, when the
+/// extents happen to match. This version number is what makes a stale checkpoint fail,
+/// instead of it silently producing wrong predictions
 pub const MODEL_FORMAT_VERSION: u32 = 1;
 
 /// Serializable layer metadata
@@ -64,19 +64,19 @@ pub struct SerializableLayer<'a> {
 /// when loading
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableSequential<'a> {
-    /// Magic tag identifying a RustyML model file; see [`MODEL_MAGIC`]
+    /// Magic tag identifying a RustyML model file. See [`MODEL_MAGIC`]
     ///
-    /// First so that a file written before the header existed mis-reads its leading layer count
-    /// as the tag and is rejected, rather than parsing far enough to apply weights
+    /// This field comes first, so a file written before this header existed misreads its
+    /// leading layer count as the tag. Load then rejects it before it can apply any weights
     pub magic: u32,
-    /// On-disk format version of this file; see [`MODEL_FORMAT_VERSION`]
+    /// On-disk format version of this file. See [`MODEL_FORMAT_VERSION`]
     pub format_version: u32,
     /// Ordered list of layers with metadata and weights
     pub layers: Vec<SerializableLayer<'a>>,
 }
 
-/// Downcasts a layer to the given type and applies weights, surfacing a structural
-/// mismatch error if the downcast fails
+/// Downcasts a layer to the given type and applies weights. Returns a structural mismatch
+/// error if the downcast fails
 ///
 /// # Parameters
 ///
@@ -114,7 +114,8 @@ macro_rules! apply_weights_simple {
 ///
 /// # Errors
 ///
-/// - `Error::Io(IoError::ModelStructureMismatch)` - Layer type mismatch or invalid weight shape during conversion
+/// - `Error::Io(IoError::ModelStructureMismatch)` - Layer type mismatch or invalid weight
+///   shape during conversion
 pub fn apply_weights_to_layer(
     layer: &mut dyn Layer,
     weights: &LayerWeight<'_>,
@@ -124,7 +125,6 @@ pub fn apply_weights_to_layer(
     let layer_any: &mut dyn Any = layer;
 
     match weights {
-        // No weights to set for empty layers
         LayerWeight::Empty => {}
 
         LayerWeight::Dense(w) => {

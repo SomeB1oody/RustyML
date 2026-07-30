@@ -1,23 +1,23 @@
-//! Classification evaluation metrics
+//! Classification evaluation metrics.
 //!
-//! Provides binary and multi-class confusion matrices and the scores derived from them (accuracy,
-//! precision, recall, F1, MCC, balanced accuracy, Cohen's kappa, log loss, top-k accuracy) plus
-//! threshold-curve tools (ROC AUC, ROC curve, average precision, precision-recall curve)
+//! Provides binary and multi-class confusion matrices, plus the metrics derived from them.
+//! These include accuracy, precision, recall, F1, MCC, balanced accuracy, Cohen's kappa, log loss,
+//! and top-k accuracy. It also provides threshold-curve tools: ROC AUC, the ROC curve, average
+//! precision, and the precision-recall curve.
 
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Axis, Data, Ix1, Ix2};
 
 use super::validate_pair;
 
-/// Denominator magnitude below which a chance-corrected score is treated as degenerate (perfect)
+/// Denominator magnitude below which a chance-corrected score is treated as degenerate (perfect).
 const DEGENERATE_DENOM: f64 = 1e-10;
 
-/// Decides which side of a binary problem a label falls on, rejecting anything that is neither
+/// Decides which side of a binary problem a label falls on. Rejects a value that is neither
+/// `negative` nor `positive`.
 ///
-/// Exact equality is the right test here: `0.0`, `1.0` and `-1.0` are all exactly representable and
-/// every label producer in the crate emits them exactly, so a near-miss is a bug worth surfacing
-/// rather than rounding away. It also rejects `NaN` for free, which the `>= 0.5` threshold this
-/// replaced silently counted as negative
+/// Uses exact equality: `0.0`, `1.0`, and `-1.0` are all exactly representable, and the crate's
+/// label producers emit them exactly. This also rejects `NaN`, which cannot equal either label.
 #[inline]
 fn label_is_positive(value: f64, negative: f64, positive: f64, which: &str) -> bool {
     if value == positive {
@@ -29,29 +29,32 @@ fn label_is_positive(value: f64, negative: f64, positive: f64, which: &str) -> b
     }
 }
 
-/// Cold, out-of-line panic path for [`label_is_positive`], keeping its inlined hot path down to the
-/// two comparisons
+/// Out-of-line panic path for [`label_is_positive`], marked `#[cold]` so the caller's hot path
+/// stays down to 2 comparisons.
 #[cold]
 #[inline(never)]
 fn fail_label(value: f64, negative: f64, positive: f64, which: &str) -> ! {
     panic!("invalid input: {which} must hold only {negative} or {positive}, found {value}");
 }
 
-/// Averaging strategy for multi-class precision, recall, and F1
+/// Averaging strategy for multi-class precision, recall, and F1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Average {
-    /// Unweighted mean of the per-class scores - every class counts equally regardless of size
+    /// Unweighted mean of the per-class scores. Every class counts equally, regardless of size.
     Macro,
-    /// Score from the pooled counts across all classes; for single-label data it equals accuracy
+    /// Score from the pooled counts across all classes. For single-label data, this equals
+    /// accuracy.
     Micro,
-    /// Mean of the per-class scores weighted by each class's support (its number of true samples)
+    /// Mean of the per-class scores, weighted by each class's support (its count of true
+    /// samples).
     Weighted,
 }
 
-/// Confusion matrix for binary classification evaluation
+/// Confusion matrix for binary classification evaluation.
 ///
-/// Stores the counts of true positives, false positives, true negatives, and false negatives, and
-/// exposes the metrics derived from them (accuracy, precision, recall, ...)
+/// Stores the counts of true positives, false positives, true negatives, and false negatives.
+/// Exposes the metrics derived from those counts: accuracy, precision, recall, specificity, F1,
+/// error rate, balanced accuracy, and MCC.
 ///
 /// # Examples
 ///
@@ -60,7 +63,7 @@ pub enum Average {
 /// use rustyml::metrics::ConfusionMatrix;
 ///
 /// let y_true = arr1(&[1.0, 0.0, 1.0, 0.0, 1.0]);
-/// // Hard labels only. Threshold your scores first - the constructor will not do it for you
+/// // Hard labels only. Threshold your scores first. The constructor does not do it for you.
 /// let probabilities = arr1(&[0.9, 0.2, 0.8, 0.1, 0.7]);
 /// let y_pred = probabilities.mapv(|p| if p >= 0.5 { 1.0 } else { 0.0 });
 /// let cm = ConfusionMatrix::new(&y_true, &y_pred);
@@ -76,19 +79,23 @@ pub enum Average {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConfusionMatrix {
+    /// Count of true positives.
     tp: usize,
+    /// Count of false positives.
     fp: usize,
+    /// Count of true negatives.
     tn: usize,
+    /// Count of false negatives.
     fn_: usize,
 }
 
 impl ConfusionMatrix {
-    /// Builds a confusion matrix from hard binary labels
+    /// Builds a confusion matrix from hard binary labels.
     ///
-    /// Both arrays must hold only `0.0` and `1.0`. Nothing is binarized: a probability, an
-    /// unbounded decision-function score, or a `-1`/`+1` label is rejected rather than silently
-    /// coerced. scikit-learn's `confusion_matrix` likewise requires hard labels. For a different
-    /// label pair, use [`new_with_labels`](Self::new_with_labels)
+    /// Both arrays must hold only `0.0` and `1.0`. Nothing is binarized. The constructor rejects
+    /// a probability, an unbounded decision-function score, or a `-1`/`+1` label rather than
+    /// silently coercing it. scikit-learn's `confusion_matrix` likewise requires hard labels. For
+    /// a different label pair, use [`new_with_labels`](Self::new_with_labels).
     ///
     /// # Parameters
     ///
@@ -101,9 +108,9 @@ impl ConfusionMatrix {
     ///
     /// # Panics
     ///
-    /// - Panics if `y_true` and `y_pred` have different lengths
-    /// - Panics if the inputs are empty
-    /// - Panics if either array holds a value other than `0.0` or `1.0`
+    /// - Panics if `y_true` and `y_pred` have different lengths.
+    /// - Panics if the inputs are empty.
+    /// - Panics if either array holds a value other than `0.0` or `1.0`.
     pub fn new<S1, S2>(y_true: &ArrayBase<S1, Ix1>, y_pred: &ArrayBase<S2, Ix1>) -> Self
     where
         S1: Data<Elem = f64>,
@@ -112,11 +119,12 @@ impl ConfusionMatrix {
         Self::new_with_labels(y_true, y_pred, 0.0, 1.0)
     }
 
-    /// Builds a confusion matrix from an explicit pair of label values
+    /// Builds a confusion matrix from an explicit pair of label values.
     ///
     /// The binary counterpart of scikit-learn's
     /// `confusion_matrix(y_true, y_pred, labels=[negative_label, positive_label])`. Reach for it
-    /// when the labels are not `0.0`/`1.0` - the `-1.0`/`+1.0` a margin classifier emits, say
+    /// when the labels are not `0.0`/`1.0`, for example the `-1.0`/`+1.0` a margin classifier
+    /// emits.
     ///
     /// # Parameters
     ///
@@ -131,23 +139,10 @@ impl ConfusionMatrix {
     ///
     /// # Panics
     ///
-    /// - Panics if `y_true` and `y_pred` have different lengths
-    /// - Panics if the inputs are empty
-    /// - Panics if the two label values are equal
-    /// - Panics if either array holds a value other than the two given labels
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use ndarray::array;
-    /// use rustyml::metrics::ConfusionMatrix;
-    ///
-    /// // A margin classifier's -1 / +1 convention
-    /// let y_true = array![1.0, -1.0, 1.0, -1.0];
-    /// let y_pred = array![1.0, 1.0, 1.0, -1.0];
-    /// let cm = ConfusionMatrix::new_with_labels(&y_true, &y_pred, -1.0, 1.0);
-    /// assert_eq!(cm.get_counts(), (2, 1, 1, 0));
-    /// ```
+    /// - Panics if `y_true` and `y_pred` have different lengths.
+    /// - Panics if the inputs are empty.
+    /// - Panics if the 2 label values are equal.
+    /// - Panics if either array holds a value other than the 2 given labels.
     pub fn new_with_labels<S1, S2>(
         y_true: &ArrayBase<S1, Ix1>,
         y_pred: &ArrayBase<S2, Ix1>,
@@ -182,13 +177,13 @@ impl ConfusionMatrix {
         Self { tp, fp, tn, fn_ }
     }
 
-    /// Returns the raw counts as `(tp, fp, tn, fn)`
+    /// Returns the raw counts as `(tp, fp, tn, fn)`.
     #[inline]
     pub fn get_counts(&self) -> (usize, usize, usize, usize) {
         (self.tp, self.fp, self.tn, self.fn_)
     }
 
-    /// Calculates accuracy: `(TP + TN) / (TP + TN + FP + FN)`
+    /// Calculates accuracy: `(TP + TN) / (TP + TN + FP + FN)`.
     ///
     /// # Returns
     ///
@@ -202,7 +197,7 @@ impl ConfusionMatrix {
         (self.tp + self.tn) as f64 / total as f64
     }
 
-    /// Calculates the error rate: `1 - accuracy`
+    /// Calculates the error rate: `1 - accuracy`.
     ///
     /// # Returns
     ///
@@ -212,7 +207,7 @@ impl ConfusionMatrix {
         1.0 - self.accuracy()
     }
 
-    /// Calculates precision: `TP / (TP + FP)`
+    /// Calculates precision: `TP / (TP + FP)`.
     ///
     /// # Returns
     ///
@@ -225,7 +220,7 @@ impl ConfusionMatrix {
         self.tp as f64 / (self.tp + self.fp) as f64
     }
 
-    /// Calculates recall (sensitivity): `TP / (TP + FN)`
+    /// Calculates recall (sensitivity): `TP / (TP + FN)`.
     ///
     /// # Returns
     ///
@@ -238,7 +233,7 @@ impl ConfusionMatrix {
         self.tp as f64 / (self.tp + self.fn_) as f64
     }
 
-    /// Calculates specificity: `TN / (TN + FP)`
+    /// Calculates specificity: `TN / (TN + FP)`.
     ///
     /// # Returns
     ///
@@ -252,7 +247,7 @@ impl ConfusionMatrix {
         self.tn as f64 / (self.tn + self.fp) as f64
     }
 
-    /// Calculates the F1 score: the harmonic mean of precision and recall
+    /// Calculates the F1 score: the harmonic mean of precision and recall.
     ///
     /// # Returns
     ///
@@ -269,11 +264,11 @@ impl ConfusionMatrix {
         2.0 * (precision * recall) / (precision + recall)
     }
 
-    /// Calculates the Matthews correlation coefficient (MCC)
+    /// Calculates the Matthews correlation coefficient (MCC).
     ///
-    /// MCC is a balanced measure usable even when the classes are very different sizes, ranging
+    /// MCC is a balanced measure usable even when the classes are very different sizes. It ranges
     /// from -1 (total disagreement) through 0 (random) to +1 (perfect). Returns 0.0 when any of
-    /// the four marginal sums is zero (the coefficient is undefined)
+    /// the 4 marginal sums is zero, since the coefficient is then undefined.
     ///
     /// # Returns
     ///
@@ -293,10 +288,10 @@ impl ConfusionMatrix {
         }
     }
 
-    /// Calculates balanced accuracy: the mean of recall and specificity
+    /// Calculates balanced accuracy: the mean of recall and specificity.
     ///
-    /// Unlike plain accuracy this is not inflated by a dominant negative class, so it is a better
-    /// summary on imbalanced data
+    /// Unlike plain accuracy, this is not inflated by a dominant negative class. It is a better
+    /// summary on imbalanced data.
     ///
     /// # Returns
     ///
@@ -306,11 +301,11 @@ impl ConfusionMatrix {
         (self.recall() + self.specificity()) / 2.0
     }
 
-    /// Renders the matrix and its derived metrics as a formatted, human-readable table
+    /// Renders the matrix and its derived metrics as a formatted, human-readable table.
     ///
     /// # Returns
     ///
-    /// - `String` - Text summary of the counts and metrics (metrics to four decimal places)
+    /// - `String` - Text summary of the counts and metrics (metrics to 4 decimal places)
     pub fn summary(&self) -> String {
         let sep = "+-----------------+--------------------+--------------------+";
         format!(
@@ -360,11 +355,11 @@ impl ConfusionMatrix {
     }
 }
 
-/// Calculates the accuracy of a classification model: the fraction of exactly-matching labels
+/// Calculates the accuracy of a classification model: the fraction of exactly matching labels.
 ///
 /// Labels are compared for equality within [`f64::EPSILON`], so this works for integer-valued
-/// class labels stored as `f64` in both binary and multi-class settings. The comparison is
-/// symmetric, so the argument order does not affect the result
+/// class labels stored as `f64`, in both binary and multi-class settings. The comparison is
+/// symmetric, so the argument order does not affect the result.
 ///
 /// # Parameters
 ///
@@ -374,11 +369,6 @@ impl ConfusionMatrix {
 /// # Returns
 ///
 /// - `f64` - Accuracy in `[0.0, 1.0]`
-///
-/// # Panics
-///
-/// - Panics if `y_true` and `y_pred` have different lengths
-/// - Panics if the inputs are empty
 ///
 /// # Examples
 ///
@@ -391,6 +381,11 @@ impl ConfusionMatrix {
 /// let acc = accuracy(&y_true, &y_pred);
 /// assert!((acc - 0.6666666666666667).abs() < 1e-6);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `y_true` and `y_pred` have different lengths.
+/// - Panics if the inputs are empty.
 pub fn accuracy<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> f64
 where
     S: Data<Elem = f64>,
@@ -406,9 +401,9 @@ where
     correct as f64 / y_true.len() as f64
 }
 
-/// Rejects `NaN` scores from the input array
+/// Rejects `NaN` scores from the input array.
 ///
-/// Panics if any score is `NaN`
+/// Panics if any score is `NaN`.
 #[inline]
 fn reject_nan_scores<S>(scores: &ArrayBase<S, Ix1>)
 where
@@ -419,10 +414,11 @@ where
     }
 }
 
-/// Calculates the Area Under the ROC Curve (ROC AUC) for binary classification
+/// Calculates the Area Under the ROC Curve (ROC AUC) for binary classification.
 ///
-/// Uses the Mann-Whitney U statistic, which equals the probability that a randomly chosen positive
-/// sample is scored above a randomly chosen negative one. Tied scores receive their average rank
+/// Uses the Mann-Whitney U statistic, which equals the probability that a randomly chosen
+/// positive sample scores above a randomly chosen negative one. Tied scores receive their
+/// average rank.
 ///
 /// # Parameters
 ///
@@ -432,13 +428,6 @@ where
 /// # Returns
 ///
 /// - `f64` - ROC AUC in `[0.0, 1.0]`
-///
-/// # Panics
-///
-/// - Panics if `labels` and `scores` have different lengths
-/// - Panics if the inputs are empty
-/// - Panics if `scores` contains `NaN` (it cannot be ranked meaningfully)
-/// - Panics if the labels do not contain both a positive and a negative sample
 ///
 /// # Examples
 ///
@@ -451,6 +440,13 @@ where
 /// let auc = roc_auc(&labels, &scores);
 /// println!("ROC AUC: {}", auc);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `labels` and `scores` have different lengths.
+/// - Panics if the inputs are empty.
+/// - Panics if `scores` contains `NaN`. It cannot be ranked meaningfully.
+/// - Panics if the labels do not contain both a positive and a negative sample.
 pub fn roc_auc<S1, S2>(labels: &ArrayBase<S1, Ix1>, scores: &ArrayBase<S2, Ix1>) -> f64
 where
     S1: Data<Elem = bool>,
@@ -505,12 +501,12 @@ where
     u / (pos_count as f64 * neg_count as f64)
 }
 
-/// Confusion matrix for multi-class classification
+/// Confusion matrix for multi-class classification.
 ///
-/// Built from two arrays of integer class labels, it holds the full `K x K` count matrix
-/// (`matrix[[i, j]]` = number of samples whose true class is the `i`-th label and predicted class
-/// is the `j`-th) and derives per-class and averaged precision, recall, and F1. The class axis is
-/// the sorted union of the labels seen in either input
+/// Built from 2 arrays of integer class labels, it holds the full `K x K` count matrix.
+/// `matrix[[i, j]]` counts the samples whose true class is the `i`-th label and predicted class
+/// is the `j`-th. The matrix derives per-class and averaged precision, recall, and F1. The class
+/// axis is the sorted union of the labels seen in either input.
 ///
 /// # Examples
 ///
@@ -529,14 +525,14 @@ where
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MulticlassConfusionMatrix {
-    /// Row = true class index, column = predicted class index
+    /// Row = true class index, column = predicted class index.
     matrix: Array2<usize>,
-    /// The sorted distinct labels; index `i` corresponds to `labels[i]`
+    /// The sorted distinct labels. Index `i` corresponds to `labels[i]`.
     labels: Vec<usize>,
 }
 
 impl MulticlassConfusionMatrix {
-    /// Builds a multi-class confusion matrix from integer ground-truth and predicted labels
+    /// Builds a multi-class confusion matrix from integer ground-truth and predicted labels.
     ///
     /// # Parameters
     ///
@@ -549,8 +545,8 @@ impl MulticlassConfusionMatrix {
     ///
     /// # Panics
     ///
-    /// - Panics if `y_true` and `y_pred` have different lengths
-    /// - Panics if the inputs are empty
+    /// - Panics if `y_true` and `y_pred` have different lengths.
+    /// - Panics if the inputs are empty.
     pub fn new<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> Self
     where
         S: Data<Elem = usize>,
@@ -572,31 +568,31 @@ impl MulticlassConfusionMatrix {
         Self { matrix, labels }
     }
 
-    /// Returns a view of the raw `K x K` count matrix (row = true class, column = predicted)
+    /// Returns a view of the raw `K x K` count matrix (row = true class, column = predicted).
     #[inline]
     pub fn matrix(&self) -> ArrayView2<'_, usize> {
         self.matrix.view()
     }
 
-    /// Returns the class labels in the order they index the matrix (sorted ascending)
+    /// Returns the class labels in the order they index the matrix (sorted ascending).
     #[inline]
     pub fn labels(&self) -> &[usize] {
         &self.labels
     }
 
-    /// Returns the number of distinct classes (the matrix dimension)
+    /// Returns the number of distinct classes (the matrix dimension).
     #[inline]
     pub fn n_classes(&self) -> usize {
         self.labels.len()
     }
 
-    /// Returns the support of each class: the number of ground-truth samples per class, in label
-    /// order
+    /// Returns the support of each class: the number of ground-truth samples per class, in
+    /// label order.
     pub fn support(&self) -> Vec<usize> {
         self.matrix.sum_axis(Axis(1)).to_vec()
     }
 
-    /// Calculates overall accuracy: correct predictions (the matrix trace) over all samples
+    /// Calculates overall accuracy: correct predictions (the matrix trace) over all samples.
     ///
     /// # Returns
     ///
@@ -610,7 +606,8 @@ impl MulticlassConfusionMatrix {
         correct as f64 / total as f64
     }
 
-    /// Per-class precision (`TP / (TP + FP)`), in label order; 0.0 for a class never predicted
+    /// Per-class precision (`TP / (TP + FP)`), in label order. Returns 0.0 for a class never
+    /// predicted.
     pub fn per_class_precision(&self) -> Vec<f64> {
         let predicted = self.matrix.sum_axis(Axis(0));
         (0..self.labels.len())
@@ -625,7 +622,8 @@ impl MulticlassConfusionMatrix {
             .collect()
     }
 
-    /// Per-class recall (`TP / (TP + FN)`), in label order; 0.0 for a class with no true samples
+    /// Per-class recall (`TP / (TP + FN)`), in label order. Returns 0.0 for a class with no true
+    /// samples.
     pub fn per_class_recall(&self) -> Vec<f64> {
         let actual = self.matrix.sum_axis(Axis(1));
         (0..self.labels.len())
@@ -640,7 +638,7 @@ impl MulticlassConfusionMatrix {
             .collect()
     }
 
-    /// Per-class F1 score (harmonic mean of precision and recall), in label order
+    /// Per-class F1 score (harmonic mean of precision and recall), in label order.
     pub fn per_class_f1(&self) -> Vec<f64> {
         self.per_class_precision()
             .iter()
@@ -655,23 +653,23 @@ impl MulticlassConfusionMatrix {
             .collect()
     }
 
-    /// Precision aggregated across classes by the given [`Average`] strategy
+    /// Precision aggregated across classes by the given [`Average`] strategy.
     pub fn precision(&self, average: Average) -> f64 {
         self.aggregate(&self.per_class_precision(), average)
     }
 
-    /// Recall aggregated across classes by the given [`Average`] strategy
+    /// Recall aggregated across classes by the given [`Average`] strategy.
     pub fn recall(&self, average: Average) -> f64 {
         self.aggregate(&self.per_class_recall(), average)
     }
 
-    /// F1 score aggregated across classes by the given [`Average`] strategy
+    /// F1 score aggregated across classes by the given [`Average`] strategy.
     pub fn f1(&self, average: Average) -> f64 {
         self.aggregate(&self.per_class_f1(), average)
     }
 
-    /// Combines per-class scores by `average`. For [`Average::Micro`] every per-class metric
-    /// collapses to accuracy on single-label data, so accuracy is returned directly
+    /// Combines per-class scores by `average`. For [`Average::Micro`], every per-class metric
+    /// collapses to accuracy on single-label data, so this returns accuracy directly.
     fn aggregate(&self, per_class: &[f64], average: Average) -> f64 {
         match average {
             Average::Micro => self.accuracy(),
@@ -698,17 +696,17 @@ impl MulticlassConfusionMatrix {
         }
     }
 
-    /// Renders the `K x K` count matrix followed by a per-class precision/recall/F1/support table
-    /// with accuracy and macro/weighted averages in a per-class report style
+    /// Renders the `K x K` count matrix, followed by a per-class precision, recall, F1, and
+    /// support table, with accuracy and macro and weighted averages.
     ///
-    /// Mirrors [`ConfusionMatrix::summary`]: a `Confusion Matrix:` grid first, then the metrics
+    /// Mirrors [`ConfusionMatrix::summary`]: a `Confusion Matrix:` grid first, then the metrics.
     ///
     /// # Returns
     ///
-    /// - `String` - Formatted multi-line summary (metrics to four decimal places)
+    /// - `String` - Formatted multi-line summary (metrics to 4 decimal places)
     pub fn summary(&self) -> String {
-        // Confusion matrix as a bordered grid (rows = true classes, columns = predicted), with a
-        // cell width sized to the widest label or count so it works for any number of classes
+        // Confusion matrix as a bordered grid (rows = true classes, columns = predicted). The
+        // cell width is sized to the widest label or count, so it works for any number of classes.
         let width = self
             .labels
             .iter()
@@ -799,13 +797,13 @@ impl MulticlassConfusionMatrix {
     }
 }
 
-/// Calculates the multi-class logarithmic loss (cross-entropy) of predicted probabilities
+/// Calculates the multi-class logarithmic loss (cross-entropy) of predicted probabilities.
 ///
-/// For each sample only the probability assigned to its true class contributes:
+/// For each sample, only the probability assigned to its true class contributes:
 /// `-mean(ln(p[i, y_true[i]]))`. Each row of `y_prob` is first renormalized to sum to 1, so rows
-/// that do not already sum to 1 are scored consistently; the selected
-/// probability is then clamped away from 0 and 1 to keep the logarithm finite. Each value of
-/// `y_true` indexes a column of `y_prob`
+/// that do not already sum to 1 are scored consistently. The selected probability is then
+/// clamped away from 0 and 1 to keep the logarithm finite. Each value of `y_true` indexes a
+/// column of `y_prob`.
 ///
 /// # Parameters
 ///
@@ -814,13 +812,7 @@ impl MulticlassConfusionMatrix {
 ///
 /// # Returns
 ///
-/// - `f64` - Mean cross-entropy (>= 0.0; lower is better)
-///
-/// # Panics
-///
-/// - Panics if `y_true`'s length differs from the number of rows in `y_prob`
-/// - Panics if the inputs are empty
-/// - Panics if any label is not a valid column index into `y_prob`
+/// - `f64` - Mean cross-entropy (>= 0.0, lower is better)
 ///
 /// # Examples
 ///
@@ -834,6 +826,12 @@ impl MulticlassConfusionMatrix {
 /// // -(ln(0.9) + ln(0.8)) / 2
 /// assert!((loss - 0.164252033).abs() < 1e-6);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `y_true`'s length differs from the number of rows in `y_prob`.
+/// - Panics if the inputs are empty.
+/// - Panics if any label is not a valid column index into `y_prob`.
 pub fn log_loss<S1, S2>(y_true: &ArrayBase<S1, Ix1>, y_prob: &ArrayBase<S2, Ix2>) -> f64
 where
     S1: Data<Elem = usize>,
@@ -864,11 +862,12 @@ where
     total / n as f64
 }
 
-/// Calculates Cohen's kappa: agreement between two labelings corrected for chance
+/// Calculates Cohen's kappa: agreement between 2 labelings, corrected for chance.
 ///
-/// `kappa = (p_o - p_e) / (1 - p_e)`, where `p_o` is the observed agreement (accuracy) and `p_e`
-/// the agreement expected from the marginal label frequencies. Scores range from -1 to 1; 1 is
-/// perfect agreement and 0 is chance-level. Returns 1.0 when chance agreement is already total
+/// `kappa = (p_o - p_e) / (1 - p_e)`. Here `p_o` is the observed agreement (accuracy) and `p_e`
+/// is the agreement expected from the marginal label frequencies. Scores range from -1 to 1.
+/// A score of 1 is perfect agreement and 0 is chance level. Returns 1.0 when chance agreement is
+/// already total.
 ///
 /// # Parameters
 ///
@@ -878,11 +877,6 @@ where
 /// # Returns
 ///
 /// - `f64` - Cohen's kappa in `[-1.0, 1.0]`
-///
-/// # Panics
-///
-/// - Panics if `y_true` and `y_pred` have different lengths
-/// - Panics if the inputs are empty
 ///
 /// # Examples
 ///
@@ -894,6 +888,11 @@ where
 /// let y_pred = array![0, 1, 0, 1];
 /// assert!((cohen_kappa(&y_true, &y_pred) - 1.0).abs() < 1e-12);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `y_true` and `y_pred` have different lengths.
+/// - Panics if the inputs are empty.
 pub fn cohen_kappa<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> f64
 where
     S: Data<Elem = usize>,
@@ -918,10 +917,10 @@ where
 }
 
 /// Calculates top-k accuracy: the fraction of samples whose true class is among the `k`
-/// highest-probability predicted classes
+/// highest-probability predicted classes.
 ///
-/// A class ties into the top-k set if fewer than `k` classes are assigned a strictly higher
-/// probability, so ties at the boundary count in the sample's favor
+/// A class ties into the top-k set if fewer than `k` classes get a strictly higher probability.
+/// Ties at the boundary count in the sample's favor.
 ///
 /// # Parameters
 ///
@@ -933,14 +932,6 @@ where
 ///
 /// - `f64` - Top-k accuracy in `[0.0, 1.0]`
 ///
-/// # Panics
-///
-/// - Panics if `y_true`'s length differs from the number of rows in `y_prob`
-/// - Panics if the inputs are empty
-/// - Panics if `k` is zero, or if any label is out of range for `y_prob`'s columns
-/// - Panics if `y_prob` contains `NaN`: a `NaN` true-class probability makes every `p > true_prob`
-///   comparison false, which would otherwise miscount the sample as a hit
-///
 /// # Examples
 ///
 /// ```rust
@@ -949,9 +940,17 @@ where
 ///
 /// let y_true = array![0, 1, 2];
 /// let y_prob = arr2(&[[0.7, 0.2, 0.1], [0.3, 0.3, 0.4], [0.1, 0.5, 0.4]]);
-/// // Every true class is within the two most probable, so top-2 accuracy is 1.0
+/// // Every true class is within the two most probable, so top-2 accuracy is 1.0.
 /// assert!((top_k_accuracy(&y_true, &y_prob, 2) - 1.0).abs() < 1e-12);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `y_true`'s length differs from the number of rows in `y_prob`.
+/// - Panics if the inputs are empty.
+/// - Panics if `k` is zero, or if any label is out of range for `y_prob`'s columns.
+/// - Panics if `y_prob` contains `NaN`. A `NaN` true-class probability would make every
+///   `p > true_prob` comparison false, which would otherwise miscount the sample as a hit.
 pub fn top_k_accuracy<S1, S2>(
     y_true: &ArrayBase<S1, Ix1>,
     y_prob: &ArrayBase<S2, Ix2>,
@@ -981,8 +980,8 @@ where
             );
         }
         let true_prob = y_prob[[i, label]];
-        // A NaN anywhere in the row breaks the `p > true_prob` ranking (every comparison with NaN
-        // is false), so reject it rather than silently miscount the sample
+        // A NaN anywhere in the row breaks the `p > true_prob` ranking, since every comparison
+        // with NaN is false. Reject it instead of silently miscounting the sample.
         let mut n_greater = 0;
         for &p in y_prob.row(i) {
             if p.is_nan() {
@@ -1001,10 +1000,10 @@ where
 
 /// Sorts samples by score descending and returns, at each distinct score, the cumulative
 /// `(threshold, cumulative_true_positives, cumulative_false_positives)`, plus the total positive
-/// and negative counts. Shared by the precision-recall / ROC curve builders
+/// and negative counts. Shared by the precision-recall and ROC curve builders.
 ///
-/// Panics on a length mismatch, empty input, or a `NaN` score (see [`reject_nan_scores`]), so all
-/// callers (`average_precision`, `roc_curve`, `precision_recall_curve`) inherit those guarantees
+/// Panics on a length mismatch, empty input, or a `NaN` score (see [`reject_nan_scores`]). All
+/// callers (`average_precision`, `roc_curve`, `precision_recall_curve`) inherit those guarantees.
 fn ranked_cumulative<S1, S2>(
     labels: &ArrayBase<S1, Ix1>,
     scores: &ArrayBase<S2, Ix1>,
@@ -1045,8 +1044,10 @@ where
     (points, total_pos, total_neg)
 }
 
-/// Calculates average precision: the area under the precision-recall curve, computed as the
-/// precision-weighted sum of recall increments `sum (R_n - R_{n-1}) * P_n`
+/// Calculates average precision: the area under the precision-recall curve.
+///
+/// Computed as the precision-weighted sum of recall increments,
+/// `sum (R_n - R_{n-1}) * P_n`.
 ///
 /// # Parameters
 ///
@@ -1056,13 +1057,6 @@ where
 /// # Returns
 ///
 /// - `f64` - Average precision in `[0.0, 1.0]`
-///
-/// # Panics
-///
-/// - Panics if `labels` and `scores` have different lengths
-/// - Panics if the inputs are empty
-/// - Panics if `scores` contains `NaN`
-/// - Panics if there are no positive labels
 ///
 /// # Examples
 ///
@@ -1075,6 +1069,13 @@ where
 /// // Ranked T,F,T,F: AP = 1.0*0.5 + (2/3)*0.5 = 0.8333...
 /// assert!((average_precision(&labels, &scores) - 0.833333333).abs() < 1e-6);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `labels` and `scores` have different lengths.
+/// - Panics if the inputs are empty.
+/// - Panics if `scores` contains `NaN`.
+/// - Panics if there are no positive labels.
 pub fn average_precision<S1, S2>(labels: &ArrayBase<S1, Ix1>, scores: &ArrayBase<S2, Ix1>) -> f64
 where
     S1: Data<Elem = bool>,
@@ -1096,16 +1097,16 @@ where
     ap
 }
 
-/// Computes the Receiver Operating Characteristic (ROC) curve
+/// Computes the Receiver Operating Characteristic (ROC) curve.
 ///
 /// Returns `(fpr, tpr, thresholds)`: the false-positive rate and true-positive rate at each
 /// distinct score threshold (in decreasing order), preceded by the `(0, 0)` origin. `thresholds`
-/// holds the score at each point; its leading entry is [`f64::INFINITY`], the only threshold that
-/// classifies nothing as positive, as in scikit-learn
+/// holds the score at each point. Its leading entry is [`f64::INFINITY`], the only threshold
+/// that classifies nothing as positive, as in scikit-learn.
 ///
-/// Unlike scikit-learn's default (`drop_intermediate = True`), the full sweep is always returned:
-/// collinear interior points are kept, so the point count can be larger than scikit-learn's while
-/// the curve itself, and [`roc_auc`], are identical
+/// Unlike scikit-learn's default (`drop_intermediate = True`), the full sweep is always
+/// returned: collinear interior points are kept. So the point count can be larger than
+/// scikit-learn's, while the curve itself, and [`roc_auc`], are identical.
 ///
 /// # Parameters
 ///
@@ -1115,13 +1116,6 @@ where
 /// # Returns
 ///
 /// - `(Array1<f64>, Array1<f64>, Array1<f64>)` - `(fpr, tpr, thresholds)`, all of equal length
-///
-/// # Panics
-///
-/// - Panics if `labels` and `scores` have different lengths
-/// - Panics if the inputs are empty
-/// - Panics if `scores` contains `NaN`
-/// - Panics if the labels do not contain both a positive and a negative sample
 ///
 /// # Examples
 ///
@@ -1137,6 +1131,13 @@ where
 /// assert_eq!(fpr[0], 0.0);
 /// assert_eq!(tpr[tpr.len() - 1], 1.0);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `labels` and `scores` have different lengths.
+/// - Panics if the inputs are empty.
+/// - Panics if `scores` contains `NaN`.
+/// - Panics if the labels do not contain both a positive and a negative sample.
 pub fn roc_curve<S1, S2>(
     labels: &ArrayBase<S1, Ix1>,
     scores: &ArrayBase<S2, Ix1>,
@@ -1154,9 +1155,9 @@ where
     let mut tpr = Vec::with_capacity(points.len() + 1);
     let mut thresholds = Vec::with_capacity(points.len() + 1);
 
-    // Origin: no sample classified positive. scikit-learn uses an infinite threshold here rather
-    // than a finite one just above the maximum, which also keeps the sentinel distinguishable from
-    // the top real threshold for large scores (`1e17 + 1.0 == 1e17`)
+    // Origin: no sample is classified positive. scikit-learn uses an infinite threshold here,
+    // rather than a finite one just above the maximum. This also keeps the sentinel distinct from
+    // the top real threshold for large scores (`1e17 + 1.0 == 1e17`).
     fpr.push(0.0);
     tpr.push(0.0);
     thresholds.push(f64::INFINITY);
@@ -1174,15 +1175,16 @@ where
     )
 }
 
-/// Computes the precision-recall curve
+/// Computes the precision-recall curve.
 ///
-/// Returns `(precision, recall, thresholds)` at each distinct score threshold in **increasing**
-/// order - so recall decreases along the arrays - with a final `(precision = 1, recall = 0)` point
+/// Returns `(precision, recall, thresholds)` at each distinct score threshold, in **increasing**
+/// order (so recall decreases along the arrays). A final `(precision = 1, recall = 0)` point is
 /// appended that has no threshold. Hence `precision` and `recall` are one element longer than
-/// `thresholds`. This is scikit-learn's `precision_recall_curve` layout element for element
+/// `thresholds`. This matches scikit-learn's `precision_recall_curve` layout, element for
+/// element.
 ///
-/// Note that the ordering is the opposite of [`roc_curve`], which runs from the highest threshold
-/// down; scikit-learn makes the same distinction between the two
+/// The ordering is the opposite of [`roc_curve`], which runs from the highest threshold down.
+/// scikit-learn makes the same distinction between the 2.
 ///
 /// # Parameters
 ///
@@ -1193,13 +1195,6 @@ where
 ///
 /// - `(Array1<f64>, Array1<f64>, Array1<f64>)` - `(precision, recall, thresholds)`, where
 ///   `precision.len() == recall.len() == thresholds.len() + 1`
-///
-/// # Panics
-///
-/// - Panics if `labels` and `scores` have different lengths
-/// - Panics if the inputs are empty
-/// - Panics if `scores` contains `NaN`
-/// - Panics if there are no positive labels
 ///
 /// # Examples
 ///
@@ -1215,6 +1210,13 @@ where
 /// assert_eq!(precision[precision.len() - 1], 1.0);
 /// assert_eq!(recall[recall.len() - 1], 0.0);
 /// ```
+///
+/// # Panics
+///
+/// - Panics if `labels` and `scores` have different lengths.
+/// - Panics if the inputs are empty.
+/// - Panics if `scores` contains `NaN`.
+/// - Panics if there are no positive labels.
 pub fn precision_recall_curve<S1, S2>(
     labels: &ArrayBase<S1, Ix1>,
     scores: &ArrayBase<S2, Ix1>,
@@ -1232,15 +1234,15 @@ where
     let mut recall = Vec::with_capacity(points.len() + 1);
     let mut thresholds = Vec::with_capacity(points.len());
 
-    // `points` is ranked by descending score; walking it backwards yields ascending thresholds and
-    // therefore descending recall, which is the order scikit-learn returns
+    // `points` is ranked by descending score. Walking it backwards yields ascending thresholds
+    // and therefore descending recall, the order scikit-learn returns.
     for &(score, tp, fp) in points.iter().rev() {
         precision.push(tp as f64 / (tp + fp) as f64);
         recall.push(tp as f64 / total_pos as f64);
         thresholds.push(score);
     }
-    // Closing point of the curve (recall 0, precision 1) has no associated threshold, and belongs
-    // at the low-recall end - which, after the reversal above, is the end of the arrays
+    // Closing point of the curve (recall 0, precision 1) has no associated threshold. It belongs
+    // at the low-recall end, which, after the reversal above, is the end of the arrays.
     precision.push(1.0);
     recall.push(0.0);
 
@@ -1251,14 +1253,15 @@ where
     )
 }
 
+/// Unit tests for internal edge cases not reachable through the public API.
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // MulticlassConfusionMatrix::aggregate empty-support guards: `new()` rejects empty input, so
-    // the internal state is built directly to reach the defensive branches in `aggregate`
+    // Tests the empty-support guards in `MulticlassConfusionMatrix::aggregate`. `new()` rejects
+    // empty input, so these build the internal state directly to reach the defensive branches.
 
-    /// Helper: a confusion matrix with no classes and a 0x0 count matrix
+    /// Helper: a confusion matrix with no classes and a 0 x 0 count matrix.
     fn empty_cm() -> MulticlassConfusionMatrix {
         MulticlassConfusionMatrix {
             matrix: Array2::<usize>::zeros((0, 0)),
@@ -1266,14 +1269,14 @@ mod tests {
         }
     }
 
-    /// Macro averaging over an empty per-class slice returns 0.0
+    /// Macro averaging over an empty per-class slice returns 0.0.
     #[test]
     fn test_aggregate_macro_empty_per_class_is_zero() {
         let cm = empty_cm();
         assert_eq!(cm.aggregate(&[], Average::Macro), 0.0);
     }
 
-    /// Weighted averaging with zero total support returns 0.0
+    /// Weighted averaging with zero total support returns 0.0.
     #[test]
     fn test_aggregate_weighted_zero_support_is_zero() {
         let cm = empty_cm();

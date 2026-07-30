@@ -1,6 +1,6 @@
 //! Linear regression with gradient-descent and closed-form solvers
 //!
-//! Provides the [`LinearRegression`] model supporting multivariate regression, an
+//! Provides the [`LinearRegression`] model, which supports multivariate regression, an
 //! optional intercept term, and L1/L2 regularization
 
 use crate::error::Error;
@@ -16,39 +16,41 @@ use crate::{Deserialize, Serialize};
 use gemmkit_ndarray::Parallelism;
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix1, Ix2};
 
-/// Optimization strategy used to fit [`LinearRegression`], carrying that strategy's own settings
+/// Optimization strategy for fitting [`LinearRegression`], carrying that strategy's own settings
 ///
-/// Each variant owns exactly the knobs it uses, so there is no way to hand a learning rate to the
-/// closed form or to leave one unset for the iterative path. Validate a variant by passing it to
+/// Each variant owns exactly the knobs it uses. The closed form takes no learning rate. The
+/// iterative path cannot leave one unset. Validate a variant by passing it to
 /// [`LinearRegression::with_solver`], which rejects an unusable configuration
 #[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize, Serialize)]
 pub enum LeastSquaresSolver {
     /// Closed-form normal-equation / ridge solution via SVD least squares
     ///
     /// The default, and the analogue of scikit-learn's `LinearRegression()`. Exact and
-    /// hyperparameter-free, but it supports only no regularization or L2 - L1 has no closed form
+    /// hyperparameter-free, but it supports only no regularization or L2 (L1 has no closed form)
     #[default]
     Normal,
     /// Iterative gradient descent, supporting L1, L2, or no regularization
     ///
-    /// The analogue of a scikit-learn iterative solver such as `Ridge(solver="sag")`. Needed for
-    /// L1, since [`Normal`](LeastSquaresSolver::Normal) cannot express it
+    /// The analogue of scikit-learn's `SGDRegressor`, which also fits by gradient steps under an
+    /// L1 or L2 penalty. Needed for L1, since [`Normal`](LeastSquaresSolver::Normal) cannot
+    /// express it
     GradientDescent {
-        /// Step size applied to each gradient update; must be positive and finite
+        /// Step size applied to each gradient update. Must be positive and finite
         learning_rate: f64,
-        /// Iteration cap; must be greater than 0
+        /// Iteration cap. Must be greater than 0
         max_iter: usize,
-        /// Cost-change threshold below which the fit is treated as converged; must be positive
-        /// and finite
+        /// Cost-change threshold below which the fit counts as converged. Must be positive and
+        /// finite
         tol: f64,
     },
 }
 
-/// Linear regression model implementation
+/// Linear regression model
 ///
-/// Trains a linear regression model using gradient descent. Supports multivariate regression, an
-/// optional intercept term. The iteration settings - learning rate, iteration cap, convergence
-/// tolerance - are carried by [`LeastSquaresSolver::GradientDescent`], the only strategy that uses them
+/// Uses the closed-form [`LeastSquaresSolver::Normal`] solver by default, or iterative
+/// [`LeastSquaresSolver::GradientDescent`] when selected. Supports multivariate regression and an
+/// optional intercept term. [`LeastSquaresSolver::GradientDescent`] carries its own learning
+/// rate, iteration cap, and convergence tolerance, since it is the only strategy that uses them
 ///
 /// # Examples
 ///
@@ -57,8 +59,9 @@ pub enum LeastSquaresSolver {
 /// use rustyml::machine_learning::linear_model::LeastSquaresSolver;
 /// use ndarray::{Array1, Array2};
 ///
-/// // Create a linear regression model. `LeastSquaresSolver::GradientDescent` carries the settings only it
-/// // uses; `LinearRegression::new(true)` alone would give the closed-form `LeastSquaresSolver::Normal`
+/// // Create a linear regression model.
+/// // `LeastSquaresSolver::GradientDescent` carries the settings only it uses.
+/// // `LinearRegression::new(true)` alone gives the closed-form `LeastSquaresSolver::Normal`
 /// let mut model = LinearRegression::new(true)
 ///     .with_solver(LeastSquaresSolver::GradientDescent { learning_rate: 0.01, max_iter: 1000, tol: 1e-6 })
 ///     .unwrap();
@@ -87,10 +90,10 @@ pub enum LeastSquaresSolver {
 /// // Use the loaded model for predictions
 /// let loaded_predictions = loaded_model.predict(&new_data);
 ///
-/// // Clone is implemented, so the model can be copied
+/// // LinearRegression derives Clone, so this copies the model
 /// let model_copy = model.clone();
 ///
-/// // Debug is implemented, so model details can be printed
+/// // LinearRegression derives Debug, so this prints the model details
 /// println!("{:?}", model);
 ///
 /// // Clean up the created file
@@ -115,23 +118,23 @@ pub struct LinearRegression {
 impl Default for LinearRegression {
     /// Creates a `LinearRegression` with default parameter values
     ///
+    /// Identical to [`LinearRegression::new(true)`](Self::new), so the 2 constructors always
+    /// agree on which algorithm they build
+    ///
     /// # Default Values
     ///
     /// - `fit_intercept` - `true` - include an intercept term in the linear model
     /// - `solver` - [`LeastSquaresSolver::Normal`] - the exact closed-form least-squares solution
     /// - `regularization_type` - `None` - no regularization applied by default
     ///
-    /// Identical to [`LinearRegression::new(true)`](Self::new), so the two constructors always
-    /// agree on which algorithm they build
-    ///
-    /// # scikit-learn parity
-    ///
-    /// The analogue of Python's `LinearRegression()`, which is exact OLS - hence
-    /// [`LeastSquaresSolver::Normal`]
-    ///
     /// # Returns
     ///
     /// - `LinearRegression` - a new instance with default parameters
+    ///
+    /// # scikit-learn Parity
+    ///
+    /// The analogue of Python's `LinearRegression()`, which is exact OLS, so the default here
+    /// uses [`LeastSquaresSolver::Normal`]
     fn default() -> Self {
         Self::new(true)
     }
@@ -140,7 +143,7 @@ impl Default for LinearRegression {
 impl LinearRegression {
     /// Creates a linear regression model
     ///
-    /// The solver and any regularization are chosen afterwards through
+    /// Choose the solver and any regularization afterward, through
     /// [`with_solver`](Self::with_solver) and [`with_regularization`](Self::with_regularization).
     /// Each solver carries its own settings, so there is nothing here to validate and no `Result`
     /// to unwrap
@@ -152,24 +155,6 @@ impl LinearRegression {
     /// # Returns
     ///
     /// - `Self` - a new instance using [`LeastSquaresSolver::Normal`] and no regularization
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use rustyml::machine_learning::linear_model::{LinearRegression, LeastSquaresSolver};
-    ///
-    /// // Exact OLS, the default
-    /// let ols = LinearRegression::new(true);
-    ///
-    /// // Gradient descent, which carries the settings only it uses
-    /// let gd = LinearRegression::new(true)
-    ///     .with_solver(LeastSquaresSolver::GradientDescent {
-    ///         learning_rate: 0.01,
-    ///         max_iter: 1000,
-    ///         tol: 1e-6,
-    ///     })
-    ///     .unwrap();
-    /// ```
     pub fn new(fit_intercept: bool) -> Self {
         LinearRegression {
             coefficients: None,
@@ -183,13 +168,13 @@ impl LinearRegression {
 
     /// Selects the optimization strategy (default: [`LeastSquaresSolver::Normal`])
     ///
-    /// The variant carries its own settings, so a [`LeastSquaresSolver::GradientDescent`] is configured in the
-    /// same expression that selects it, and [`LeastSquaresSolver::Normal`] has nothing to configure. Those
-    /// settings are validated here, which is why this returns `Result` while the other builders on
-    /// this type do not
+    /// Each variant carries its own settings. You configure a
+    /// [`LeastSquaresSolver::GradientDescent`] in the same expression that selects it.
+    /// [`LeastSquaresSolver::Normal`] has nothing to configure. This method validates those
+    /// settings, so it returns `Result` while the other builders on this type do not
     ///
-    /// [`LeastSquaresSolver::Normal`] supports only no regularization or L2; pairing it with L1 makes
-    /// [`fit`](Self::fit) return an error, since L1 has no closed form
+    /// [`LeastSquaresSolver::Normal`] supports only no regularization or L2. Pairing it with L1
+    /// makes [`fit`](Self::fit) return an error, since L1 has no closed form
     ///
     /// # Parameters
     ///
@@ -201,8 +186,8 @@ impl LinearRegression {
     ///
     /// # Errors
     ///
-    /// - [`Error::InvalidParameter`] - If a [`LeastSquaresSolver::GradientDescent`] carries a non-positive or
-    ///   non-finite `learning_rate` or `tol`, or a `max_iter` of 0
+    /// - [`Error::InvalidParameter`] - if a [`LeastSquaresSolver::GradientDescent`] carries a
+    ///   non-positive or non-finite `learning_rate` or `tol`, or a `max_iter` of 0
     pub fn with_solver(mut self, solver: LeastSquaresSolver) -> Result<Self, Error> {
         if let LeastSquaresSolver::GradientDescent {
             learning_rate,
@@ -222,11 +207,12 @@ impl LinearRegression {
     ///
     /// # Parameters
     ///
-    /// - `regularization` - the regularization variant and strength ([`RegularizationType::L1`] or [`RegularizationType::L2`])
+    /// - `regularization` - the regularization variant and strength
+    ///   ([`RegularizationType::L1`] or [`RegularizationType::L2`])
     ///
     /// # Returns
     ///
-    /// - `Ok(Self)` - the updated instance, for method chaining
+    /// - `Result<Self, Error>` - the updated instance, for method chaining
     ///
     /// # Errors
     ///
@@ -253,9 +239,10 @@ impl LinearRegression {
 
     /// Fits the linear regression model using the configured [`LeastSquaresSolver`]
     ///
-    /// With [`LeastSquaresSolver::GradientDescent`] (the default), iteratively updates the coefficients and
-    /// intercept to minimize the cost function, with early stopping once convergence is reached;
-    /// with [`LeastSquaresSolver::Normal`], delegates to the closed-form ridge solution instead
+    /// With [`LeastSquaresSolver::Normal`] (the default), delegates to the closed-form ridge
+    /// solution. With [`LeastSquaresSolver::GradientDescent`], iteratively updates the
+    /// coefficients and intercept to minimize the cost function, with early stopping once the
+    /// fit converges
     ///
     /// # Parameters
     ///
@@ -275,8 +262,8 @@ impl LinearRegression {
     ///
     /// The prediction and gradient matrix-vector products run in parallel above an internal size
     /// gate. The SSE and intercept-gradient sums use deterministic blocked folds above the sum
-    /// gate (see `crate::parallel_gates`), so re-running on the same machine reproduces the result
-    /// (not necessarily bit-for-bit)
+    /// gate (see `crate::parallel_gates`). Re-running on the same machine reproduces the result,
+    /// though not necessarily bit-for-bit
     pub fn fit<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -288,7 +275,8 @@ impl LinearRegression {
     {
         preliminary_check(x, Some(y.len()))?;
 
-        // Closed-form path; the iterative one below unpacks its own settings
+        // Falls back to the closed-form solver unless GradientDescent is selected. This unpacks
+        // GradientDescent's own settings for the loop below.
         let LeastSquaresSolver::GradientDescent {
             learning_rate,
             max_iter,
@@ -305,7 +293,7 @@ impl LinearRegression {
         let mut intercept = 0.0;
 
         let mut prev_cost = f64::INFINITY;
-        // Track consecutive convergences for stability
+        // Counts consecutive iterations below the tolerance
         let mut convergence_count = 0;
         const CONVERGENCE_THRESHOLD: usize = 3;
 
@@ -409,10 +397,10 @@ impl LinearRegression {
 
             // Add regularization terms to gradients
             //
-            // L1 is deliberately absent here: it is applied after the step by the proximal
-            // operator below. Folding `alpha * sign(w)` into the gradient only lets a weight
-            // approach zero asymptotically, so a sub-gradient "Lasso" never delivers the exact
-            // zeros that make L1 a feature selector
+            // L1 is absent here. The proximal operator below applies it after the gradient step.
+            // Folding `alpha * sign(w)` into the gradient only lets a weight approach zero
+            // asymptotically. A sub-gradient Lasso never reaches the exact zeros that make L1 a
+            // feature selector.
             match &self.regularization_type {
                 None | Some(RegularizationType::L1(_)) => {}
                 Some(RegularizationType::L2(alpha)) => {
@@ -427,10 +415,10 @@ impl LinearRegression {
                 intercept -= learning_rate * intercept_gradient;
             }
 
-            // Proximal step for L1 (ISTA): soft-thresholding by `learning_rate * alpha` is the
-            // exact minimizer of `0.5 * ||w - v||^2 + learning_rate * alpha * ||w||_1`, so a
-            // weight the data cannot justify lands on exactly 0.0 and stays there. The intercept
-            // is left alone, since it carries no penalty
+            // Proximal step for L1 (ISTA). Soft-thresholding by `learning_rate * alpha` is the
+            // exact minimizer of `0.5 * ||w - v||^2 + learning_rate * alpha * ||w||_1`. A weight
+            // the data cannot justify lands on exactly 0.0 and stays there. This step leaves the
+            // intercept alone, since it carries no penalty.
             if let Some(RegularizationType::L1(alpha)) = &self.regularization_type {
                 let shrink = learning_rate * alpha;
                 weights.mapv_inplace(|w| {
@@ -487,12 +475,13 @@ impl LinearRegression {
     /// Fits the model with the closed-form normal-equation (ridge) solution
     ///
     /// Minimizes the same objective as the gradient-descent path,
-    /// `(1/2n)||Xw + b - y||^2 + (alpha/2)||w||^2`, whose minimizer satisfies the ridge normal
-    /// equations with effective penalty `lambda = n * alpha`. When `fit_intercept` is set, the
-    /// features and target are mean-centered so the intercept is not penalized, and the
-    /// intercept is recovered as `mean(y) - mean(x) . w`. The system is solved via an SVD least
-    /// squares on the augmented design `[Xc; sqrt(lambda) I]`, which yields the minimum-norm
-    /// solution even when `X^T X` is singular (e.g. collinear or wide data)
+    /// `(1/2n)||Xw + b - y||^2 + (alpha/2)||w||^2`. Its minimizer satisfies the ridge normal
+    /// equations with effective penalty `lambda = n * alpha`. When `fit_intercept` is set, this
+    /// method centers the features and target on their means. This keeps the intercept
+    /// unpenalized. It then recovers the intercept as `mean(y)` minus the dot product of
+    /// `mean(x)` and `w`. It solves the system with an SVD least squares on the augmented design
+    /// `[Xc; sqrt(lambda) I]`. This gives the minimum-norm solution even when `X^T X` is
+    /// singular, for example with collinear or wide data
     fn fit_normal<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -504,7 +493,7 @@ impl LinearRegression {
     {
         let n_samples = x.nrows();
 
-        // The penalty matches the GD objective
+        // The penalty matches the gradient-descent objective
         let ridge_lambda = match &self.regularization_type {
             None => 0.0,
             Some(RegularizationType::L2(alpha)) => *alpha * n_samples as f64,
@@ -623,10 +612,10 @@ impl LinearRegression {
 
     /// Returns the coefficient of determination R^2 of the prediction on `(x, y)`
     ///
-    /// `R^2 = 1 - SS_res / SS_tot`, where `SS_res = sum((y_i - y_pred_i)^2)` is the residual
-    /// sum of squares and `SS_tot = sum((y_i - mean(y))^2)` is the total sum of squares. The
-    /// best possible score is `1.0`; a model that always predicts the mean of `y` scores `0.0`,
-    /// and an arbitrarily worse model scores negative
+    /// `R^2 = 1 - SS_res / SS_tot`. `SS_res = sum((y_i - y_pred_i)^2)` is the residual sum of
+    /// squares. `SS_tot = sum((y_i - mean(y))^2)` is the total sum of squares. The best possible
+    /// score is `1.0`. A model that always predicts the mean of `y` scores `0.0`. An arbitrarily
+    /// worse model scores negative
     ///
     /// # Parameters
     ///
@@ -685,10 +674,10 @@ impl LinearRegression {
 
 /// Solves the ridge least-squares problem `min ||x w - y||^2 + ridge_lambda ||w||^2`
 ///
-/// Stacks the design as `[x; sqrt(ridge_lambda) I]` with target `[y; 0]` and solves the
+/// Stacks the design as `[x; sqrt(ridge_lambda) I]` with target `[y; 0]`. It solves the
 /// resulting least-squares system with an SVD, which yields the minimum-norm solution even
-/// when `x` is rank-deficient (collinear or wide). `ridge_lambda == 0` reduces to ordinary
-/// least squares
+/// when `x` is rank-deficient, for example collinear or wide data. `ridge_lambda == 0` reduces
+/// to ordinary least squares
 fn solve_ridge_lstsq(
     x: &Array2<f64>,
     y: &Array1<f64>,

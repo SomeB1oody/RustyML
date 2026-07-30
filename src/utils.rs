@@ -1,23 +1,24 @@
 //! Utilities for preprocessing and dataset splitting
 //!
-//! Preprocessing covers normalization, standardization, and label encoding; dataset
-//! splitting covers train/test partitioning
+//! Preprocessing covers normalization, standardization, and label encoding. Dataset splitting
+//! covers train-test partitioning.
 //!
 //! # Preprocessing
-//! - **normalize**: scale samples to unit norm along a chosen axis (L1 / L2 / max order)
+//! - **normalize**: scale samples to unit norm along a chosen axis (L1, L2, or max order)
 //! - **standardize**: z-score standardization (zero mean, unit variance) for feature scaling
-//! - **scalers**: the stateful form of the above - fit on the training matrix, then reuse those
-//!   statistics for every later batch: `StandardScaler` (z-score), `MinMaxScaler` (bounded
-//!   range), `MaxAbsScaler` (magnitude, keeping zeros and signs), `RobustScaler` (median/IQR,
-//!   outlier-resistant), `Normalizer` (per-sample norm)
-//! - **label encoding**: convert between dense labels and one-hot / sparse categorical formats
+//! - **scalers**: the stateful form of the above. Fit on the training matrix, then reuse those
+//!   statistics for every later batch. The set is `StandardScaler` (z-score), `MinMaxScaler`
+//!   (bounded range), `MaxAbsScaler` (magnitude, keeping zeros and signs), `RobustScaler` (median
+//!   and IQR, resists outliers), and `Normalizer` (per-sample norm)
+//! - **label encoding**: convert between dense labels and one-hot or sparse categorical formats
 //!
 //! # Dataset splitting
-//! - **train_test_split**: split into train/test sets with a configurable ratio, optionally stratified
+//! - **train_test_split**: split into train and test sets with a configurable ratio, optionally
+//!   stratified
 //!
 //! # Key features
-//! - **Parallel processing**: rayon-based parallel computation
-//! - **Input validation**: descriptive errors on malformed input
+//! - **Parallel processing**: uses rayon for parallel computation above a size gate
+//! - **Input validation**: reports descriptive errors on malformed input
 //!
 //! # Examples
 //!
@@ -51,7 +52,7 @@ pub mod standardize;
 /// Split datasets into training and test sets
 pub mod train_test_split;
 
-/// The crate-wide estimator traits, re-exported here for convenience; their canonical
+/// The crate-wide estimator traits, re-exported here for convenience. Their canonical
 /// home is [`crate::traits`]
 pub use crate::traits::{Fit, FitTransform, Predict, Transform};
 pub use label_encoding::{to_categorical, to_categorical_with_mapping, to_sparse_categorical};

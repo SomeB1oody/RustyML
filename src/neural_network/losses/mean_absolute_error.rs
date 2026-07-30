@@ -1,11 +1,11 @@
-//! Mean Absolute Error (MAE) loss function and its gradient
+//! Mean Absolute Error (MAE) loss function and its gradient.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::losses::validate_same_shape;
 use crate::neural_network::traits::Loss;
 
-/// Mean Absolute Error loss function
+/// Mean Absolute Error loss function.
 ///
 /// # Examples
 ///
@@ -31,7 +31,7 @@ use crate::neural_network::traits::Loss;
 ///
 /// // Compute loss
 /// let loss = mae.compute_loss(&y_true, &y_pred).unwrap();
-/// println!("MAE Loss: {:.4}", loss); // Expected: ~0.175
+/// println!("MAE Loss: {:.4}", loss); // Expected: about 0.175
 ///
 /// // Compute gradients
 /// let gradients = mae.compute_grad(&y_true, &y_pred).unwrap();
@@ -41,11 +41,11 @@ use crate::neural_network::traits::Loss;
 pub struct MeanAbsoluteError;
 
 impl MeanAbsoluteError {
-    /// Creates a new `MeanAbsoluteError` instance
+    /// Creates a new `MeanAbsoluteError` instance.
     ///
     /// # Returns
     ///
-    /// - `MeanAbsoluteError` - A unit-like struct
+    /// - `MeanAbsoluteError` - a unit-like struct
     pub fn new() -> Self {
         Self {}
     }

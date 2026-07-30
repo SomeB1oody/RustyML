@@ -1,4 +1,5 @@
-//! 2D max pooling layer that selects the maximum value within each window across height and width
+//! 2D max pooling layer that selects the maximum value within each pooling window across
+//! height and width.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -18,11 +19,11 @@ use crate::neural_network::traits::Layer;
 
 /// 2D max pooling layer
 ///
-/// Selects the maximum value within each pooling window across height and width
+/// Selects the maximum value within each pooling window across height and width.
 /// Input tensor shape: `[batch_size, height, width, channels]`. Output tensor shape:
-/// `[batch_size, pooled_height, pooled_width, channels]` where
+/// `[batch_size, pooled_height, pooled_width, channels]`. With `Valid` padding,
 /// `pooled_height = (height - pool_size_h) / stride_h + 1` and
-/// `pooled_width = (width - pool_size_w) / stride_w + 1`
+/// `pooled_width = (width - pool_size_w) / stride_w + 1`.
 ///
 /// # Examples
 ///
@@ -37,7 +38,7 @@ use crate::neural_network::traits::Layer;
 /// // batch size 2, 6x6 pixels, 3 input channels
 /// let mut input_data = Array4::zeros((2, 6, 6, 3));
 ///
-/// // Set specific values so the max pooling result is predictable
+/// // Set values that make the max pooling result predictable
 /// for b in 0..2 {
 ///     for c in 0..3 {
 ///         for i in 0..6 {
@@ -72,22 +73,22 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is gated on the estimated element ops of the whole pass
-/// (`batch * out_positions * channels * window taps`) clearing
-/// [`tuning::pool`](crate::tuning::pool), not on any fixed shape
+/// The pass runs in parallel when its estimated element count
+/// (`batch * out_positions * channels * window taps`) clears the gate in
+/// [`tuning::pool`](crate::tuning::pool). The gate does not depend on any fixed shape.
 #[derive(Debug)]
 pub struct MaxPooling2D {
     /// Size of the pooling window as (height, width)
     pool_size: (usize, usize),
-    /// Step size of the pooling operation as (vertical stride, horizontal stride)
+    /// Step size of the pooling operation as (height, width)
     strides: (usize, usize),
     /// Shape of the input tensor declared at construction time
     input_shape: Vec<usize>,
     /// Padding mode applied around the input before pooling
     padding: PaddingType,
-    /// Shape of the most recent forward input, cached for backpropagation
+    /// Shape of the most recent forward input, cached for the backward pass
     forward_input_shape: Option<Vec<usize>>,
-    /// Cached flat per-output arg-max indices used for backpropagation
+    /// Cached flat per-output arg-max indices used for the backward pass
     argmax: Option<Vec<usize>>,
 }
 
@@ -99,19 +100,21 @@ impl MaxPooling2D {
     /// - `pool_size` - Size of the pooling window as (height, width)
     /// - `input_shape` - Input tensor shape `[batch_size, height, width, channels]`
     ///
-    /// # Notes
-    ///
-    /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
-    /// with [`MaxPooling2D::with_strides`] and [`MaxPooling2D::with_padding`]
-    ///
     /// # Returns
     ///
     /// - `Result<MaxPooling2D, Error>` - New layer instance on success
     ///
+    /// # Notes
+    ///
+    /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
+    /// with [`MaxPooling2D::with_strides`] and [`MaxPooling2D::with_padding`].
+    ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If `input_shape` is not 4D
-    /// - `Error::InvalidParameter` - If `pool_size` has a zero dimension
+    /// - `Error::DimensionMismatch` - If `input_shape` is not 4D
+    /// - `Error::InvalidInput` - If any `input_shape` dimension is zero
+    /// - `Error::InvalidParameter` - If `pool_size` has a zero dimension or exceeds the
+    ///   corresponding input dimension
     pub fn new(pool_size: (usize, usize), input_shape: Vec<usize>) -> Result<Self, Error> {
         validate_input_shape_dims(&input_shape, 4, "MaxPooling2D")?;
         validate_all_dims_positive(&input_shape)?;
@@ -131,7 +134,7 @@ impl MaxPooling2D {
     ///
     /// # Parameters
     ///
-    /// - `strides` - Strides of the pooling operation as (vertical stride, horizontal stride)
+    /// - `strides` - Strides of the pooling operation as (height, width)
     ///
     /// # Returns
     ///
@@ -146,8 +149,8 @@ impl MaxPooling2D {
     ///
     /// # Parameters
     ///
-    /// - `padding` - `Valid` (no padding) or `Same` (pad so the output covers the input; padded
-    ///   cells are excluded from each window)
+    /// - `padding` - `Valid` (no padding) or `Same` (pad so the output covers the input, with
+    ///   padded cells excluded from each window)
     ///
     /// # Returns
     ///
@@ -178,7 +181,7 @@ impl Layer for MaxPooling2D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
+    /// Runs the forward pass for inference. Writes no cache. See [`Layer::predict`].
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));

@@ -13,7 +13,8 @@ use std::borrow::Cow;
 /// deserializes them into owned arrays
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DepthwiseConv2DLayerWeight<'a> {
-    /// 4D depthwise convolution kernel with shape (kernel_height, kernel_width, channels, depth_multiplier)
+    /// 4D depthwise convolution kernel with shape (kernel_height, kernel_width, channels,
+    /// depth_multiplier)
     pub weight: Cow<'a, Array4<f32>>,
     /// 1D bias vector with shape (channels * depth_multiplier), one entry per output channel
     pub bias: Cow<'a, Array1<f32>>,

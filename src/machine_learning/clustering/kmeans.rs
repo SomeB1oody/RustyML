@@ -27,9 +27,9 @@ const DEFAULT_N_INIT: usize = 10;
 
 /// Derives a distinct, deterministic seed for one restart from the model's `random_state`
 ///
-/// SplitMix64's mixing step, so consecutive restarts get well-separated streams. Deriving them by
-/// hand rather than advancing one RNG keeps a restart's seeding independent of how much randomness
-/// the previous restarts happened to consume
+/// Uses SplitMix64's mixing step, so consecutive restarts get well-separated streams. Deriving
+/// each seed directly, instead of advancing one shared RNG, keeps a restart's seeding independent
+/// of how much randomness earlier restarts consumed
 #[inline]
 fn restart_seed(base: u64, restart: usize) -> u64 {
     let mut z = base.wrapping_add((restart as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
@@ -172,14 +172,15 @@ impl KMeans {
     ///
     /// - `Result<Self, Error>` - A new KMeans instance if parameters are valid
     ///
-    /// # Errors
-    ///
-    /// - `Error::InvalidParameter` - If `n_clusters` or `max_iterations` is 0, or `tolerance` is non-positive/non-finite
-    ///
     /// # Notes
     ///
     /// k-means++ initialization is non-deterministic by default. For reproducible runs, set a
     /// fixed seed after construction with [`with_random_state`](Self::with_random_state)
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If `n_clusters` or `max_iterations` is 0. Also returned if
+    ///   `tolerance` is not positive or not finite
     pub fn new(n_clusters: usize, max_iterations: usize, tolerance: f64) -> Result<Self, Error> {
         if n_clusters == 0 {
             return Err(Error::invalid_parameter(
@@ -207,16 +208,9 @@ impl KMeans {
     /// Sets how many times the fit restarts from a fresh k-means++ seeding (default: 10)
     ///
     /// Each restart runs the whole Lloyd iteration and the one with the lowest inertia wins, so a
-    /// single unlucky seeding cannot decide the result. Restarts are seeded deterministically from
-    /// [`with_random_state`](Self::with_random_state), so a seeded model stays reproducible
-    ///
-    /// # scikit-learn parity
-    ///
-    /// scikit-learn's `n_init='auto'` is `1` for `init='k-means++'`, on the grounds that its
-    /// *greedy* k-means++ (which draws `2 + ln(k)` candidates per center and keeps the best) is
-    /// already low-variance. RustyML's seeding is plain k-means++ - one D^2 draw per center - so
-    /// it needs the restarts that greedy seeding would otherwise replace. Pass `1` for literal
-    /// scikit-learn parity
+    /// single unlucky seeding cannot decide the result. The fit derives each restart's seed
+    /// deterministically from [`with_random_state`](Self::with_random_state), so a seeded model
+    /// stays reproducible
     ///
     /// # Parameters
     ///
@@ -225,6 +219,13 @@ impl KMeans {
     /// # Returns
     ///
     /// - `Result<Self, Error>` - the updated instance, for method chaining
+    ///
+    /// # scikit-learn parity
+    ///
+    /// scikit-learn's `n_init='auto'` is `1` for `init='k-means++'`. Its greedy k-means++ draws
+    /// `2 + ln(k)` candidates per center and keeps the best, so a single run already has low
+    /// variance. RustyML uses plain k-means++, one D^2 draw per center, which needs the restarts
+    /// that greedy seeding would otherwise replace. Pass `1` for literal scikit-learn parity
     ///
     /// # Errors
     ///
@@ -265,9 +266,9 @@ impl KMeans {
 
     /// Index of the closest centroid given a sample's projection row (`proj[j] = x . c_j`)
     ///
-    /// Ranks centroids by `||c_j||^2 - 2 x.c_j`, which orders identically to the squared
-    /// distance (the `||x||^2` term is constant per sample). The projections for all samples
-    /// come from one parallel GEMM, so per-sample work is a plain scan
+    /// Ranks centroids by `||c_j||^2 - 2 x.c_j`, which orders the same as the squared distance
+    /// (the `||x||^2` term is constant per sample). The projections for every sample come from
+    /// one GEMM call, so the per-sample work here is a plain scan
     fn argmin_centroid(proj_row: ArrayView1<f64>, centroid_sq_norms: &Array1<f64>) -> usize {
         let mut min_cluster = 0;
         let mut min_val = f64::MAX;
@@ -285,12 +286,13 @@ impl KMeans {
 
     /// Initializes cluster centroids using the k-means++ algorithm
     ///
-    /// K-means++ provides better initialization than random selection by choosing
-    /// initial centers that are spread out from each other, leading to better convergence
+    /// K-means++ improves on random selection by choosing centers that start spread apart, so
+    /// the later iteration converges better
     ///
     /// # Parameters
     ///
     /// - `data` - Training data as a 2D array
+    /// - `seed` - RNG seed for this run, overriding `random_state` when set
     fn init_centroids<S>(
         &mut self,
         data: &ArrayBase<S, Ix2>,
@@ -346,8 +348,8 @@ impl KMeans {
             }
             let distances = &min_dists;
 
-            // Deterministic blocked sum, on rayon above the sum gate; the roulette walk
-            // below stays serial (prefix scan)
+            // Deterministic blocked sum, run on rayon above the sum gate. The roulette walk
+            // below stays serial, since it is a prefix scan
             let total_dist: f64 = det_reduce(
                 distances,
                 distances.len() >= sum_f64_parallel_min_elems(),
@@ -401,11 +403,11 @@ impl KMeans {
     ///
     /// # Performance
     ///
-    /// The per-iteration assignment runs as one parallel GEMM; the arg-min scan
-    /// parallelizes above the calibrated scan-class gate, and the centroid accumulation
-    /// runs as a deterministic blocked fold above the sum gate (see
-    /// `crate::parallel_gates`), so the parallel path matches the serial result and
-    /// rerunning on the same machine gives the same result (not necessarily bit-for-bit)
+    /// The per-iteration assignment runs as one GEMM call. The arg-min scan runs in parallel
+    /// above the calibrated scan-class gate. The centroid accumulation runs as a deterministic
+    /// blocked fold above the sum gate (see `crate::parallel_gates`). The parallel path matches
+    /// the serial result, so rerunning on the same machine gives the same result, though not
+    /// necessarily bit-for-bit
     pub fn fit<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
@@ -417,10 +419,10 @@ impl KMeans {
             ));
         }
 
-        // Restart the whole fit `n_init` times and keep the lowest-inertia run. Plain k-means++
-        // is a single D^2 draw per center, so one seeding can land in a poor local optimum that
-        // Lloyd's iteration cannot escape; the best-of-n rule is what makes a fit reproducible in
-        // quality rather than only in seed
+        // Restarts the whole fit `n_init` times and keeps the lowest-inertia run. Plain k-means++
+        // draws only one D^2 sample per center. A single seeding can therefore land in a poor
+        // local optimum that Lloyd's iteration cannot escape. The best-of-n rule is what makes a
+        // fit reproducible in quality, not only in seed
         let mut best: Option<(Array2<f64>, Array1<isize>, f64, usize)> = None;
         for restart in 0..self.n_init {
             let seed = self.random_state.map(|base| restart_seed(base, restart));
@@ -539,9 +541,9 @@ impl KMeans {
 
             let results = results?;
 
-            // Fold every sample's row into its cluster's running sum, plus counts and
-            // inertia, as a deterministic blocked range fold, on rayon above the sum gate
-            // (work metric: samples x features)
+            // Folds every sample's row into its cluster's running sum. Also accumulates the
+            // per-cluster counts and the total inertia. Runs as a deterministic blocked range
+            // fold, on rayon above the sum gate (work metric: samples x features)
             let n_clusters = self.n_clusters;
             let accumulate_parallel =
                 n_samples.saturating_mul(n_features) >= sum_f64_parallel_min_elems();
@@ -576,8 +578,8 @@ impl KMeans {
             new_centroids.assign(&sums);
             counts.copy_from_slice(&new_counts);
 
-            // The label store is a per-index map (no accumulation order to preserve);
-            // chunking the parallel write like the fold keeps the pass cheap for small n
+            // The label store is a per-index map, with no accumulation order to preserve.
+            // Chunking the parallel write like the fold keeps the pass cheap for small n
             let label_slice = labels
                 .as_slice_mut()
                 .expect("labels are freshly allocated and contiguous");
@@ -669,8 +671,8 @@ impl KMeans {
             iter_count = i + 1;
 
             // Converged when the centroids move no more than the variance-scaled tolerance.
-            // Breaking here, *before* the swap below, leaves `self.centroids` holding exactly the
-            // centroids `labels` and `inertia` were computed against
+            // Breaking here, before the swap below, leaves `self.centroids` holding exactly the
+            // centroids against which the loop computed `labels` and `inertia`
             if center_shift <= tol_scaled {
                 self.inertia = Some(inertia);
                 converged = true;
@@ -696,10 +698,10 @@ impl KMeans {
             ));
         }
 
-        // On the max_iter exit path the last iteration installed fresh centroids *after* labelling,
-        // so `labels` and `inertia` still describe the previous ones and `predict(x) != get_labels()`.
-        // One more assignment pass against the final centroids fixes that; scikit-learn re-runs the
-        // same final E-step, and for the same reason
+        // On the max_iter exit path, the last iteration installs fresh centroids after labeling.
+        // So `labels` and `inertia` still describe the previous centroids, and `predict(x)` would
+        // not equal `get_labels()`. One more assignment pass against the final centroids fixes
+        // this, matching how scikit-learn re-runs the same final E-step for the same reason
         if converged {
             self.labels = Some(labels);
         } else {
@@ -708,7 +710,7 @@ impl KMeans {
             self.inertia = Some(final_inertia);
         }
 
-        // Set inertia if max_iter was reached without convergence
+        // Falls back to the last iteration's inertia when it is still unset
         if self.inertia.is_none() {
             self.inertia = prev_inertia;
         }
@@ -719,8 +721,8 @@ impl KMeans {
 
     /// Assigns every sample to its closest fitted centroid, returning the labels and the inertia
     ///
-    /// Used for the final pass after a fit that stopped at `max_iter`, so the recorded labels and
-    /// inertia describe the centroids the model actually ends up holding
+    /// Used for the final pass after a fit that stopped at `max_iter`. It makes the recorded
+    /// labels and inertia match the centroids the model holds at the end
     fn assign_to_centroids<S>(&self, data: &ArrayBase<S, Ix2>) -> (Array1<isize>, f64)
     where
         S: Data<Elem = f64>,

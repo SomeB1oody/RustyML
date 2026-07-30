@@ -1,4 +1,4 @@
-//! Global max pooling layer for 1D inputs, reducing the length dimension to a per-channel maximum
+//! Global max pooling layer for 1D inputs.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -13,7 +13,7 @@ use crate::neural_network::traits::Layer;
 /// Global max pooling layer for 1D inputs
 ///
 /// Selects the maximum value across the length dimension. Input tensor shape:
-/// `[batch_size, length, channels]`. Output tensor shape: `[batch_size, channels]`
+/// `[batch_size, length, channels]`. Output tensor shape: `[batch_size, channels]`.
 ///
 /// # Examples
 ///
@@ -50,14 +50,14 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is gated on the estimated element ops of the whole pass
-/// (`batch * positions * channels`) clearing [`tuning::pool`](crate::tuning::pool),
-/// not on any fixed shape
+/// The pass runs in parallel when its estimated element count (`batch * positions * channels`)
+/// clears the gate in [`tuning::pool`](crate::tuning::pool). The gate does not depend on any
+/// fixed shape.
 #[derive(Debug)]
 pub struct GlobalMaxPooling1D {
     /// Shape of the input tensor cached during the forward pass
     input_shape: Vec<usize>,
-    /// Cached flat per-channel arg-max indices for backpropagation
+    /// Cached flat per-channel arg-max indices used for the backward pass
     argmax: Option<Vec<usize>>,
 }
 
@@ -83,12 +83,11 @@ impl Default for GlobalMaxPooling1D {
 
 impl Layer for GlobalMaxPooling1D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         if input.ndim() != 3 {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }
 
-        // Store the input shape and arg-max positions for backpropagation
+        // Cache the input shape and arg-max positions for the backward pass
         self.input_shape = input.shape().to_vec();
 
         let (output, argmax) = global_pool_forward(input, PoolKind::Max);
@@ -96,9 +95,8 @@ impl Layer for GlobalMaxPooling1D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
+    /// Runs the forward pass for inference. Writes no cache. See [`Layer::predict`].
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         if input.ndim() != 3 {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }

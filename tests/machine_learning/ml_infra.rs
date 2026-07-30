@@ -1,10 +1,12 @@
-//! Integration tests for cross-cutting ML infrastructure: generic Fit/Predict trait
-//! forwarding across every estimator, a save/load round-trip, and predict-before-fit
-//! NotFitted errors
+//! Integration tests for cross-cutting ML infrastructure.
 //!
-//! Per-type kernel/distance math is unit-tested in `src/types.rs`, and the `Error` smart
-//! constructors in `src/error.rs`; this file no longer re-covers those, focusing only on
-//! the cross-cutting wiring that the per-estimator files cannot exercise in isolation
+//! Covers generic Fit/Predict trait forwarding across every estimator, a save/load
+//! round-trip, and predict-before-fit NotFitted errors.
+//!
+//! Per-type kernel and distance math has unit tests in `src/machine_learning/types.rs`.
+//! The `Error` smart constructors have unit tests in `src/error.rs`. This file does not
+//! repeat those. It covers only the cross-cutting wiring that the per-estimator files
+//! cannot exercise alone.
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
@@ -25,21 +27,10 @@ use rustyml::machine_learning::{Algorithm, DecisionTree};
 use rustyml::machine_learning::{KNN, WeightingStrategy};
 use rustyml::machine_learning::{LinearSVC, RegularizationType};
 
-// Fit / Predict traits used generically
+// Fit and Predict traits used generically
 
-/// Train a supervised estimator through the Fit trait, predict through the Predict trait,
-/// and return the number of predictions
-///
-/// # Parameters
-///
-/// - `model` - estimator to train and query
-/// - `x_train` - training features
-/// - `y_train` - training targets
-/// - `x_test` - inputs to predict
-///
-/// # Returns
-///
-/// - Number of predictions produced for `x_test`
+/// Trains a supervised estimator through the `Fit` trait, predicts through the `Predict`
+/// trait, and returns the number of predictions produced.
 fn train_and_predict_count<M>(
     model: &mut M,
     x_train: &Array2<f64>,
@@ -55,7 +46,7 @@ where
     preds.len()
 }
 
-/// Generic Fit/Predict helper on LinearRegression returns one prediction per test point
+/// Generic Fit/Predict helper on LinearRegression returns 1 prediction per test point
 #[test]
 fn generic_fit_predict_with_linear_regression() {
     let x_train = Array2::from_shape_vec((5, 1), vec![1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
@@ -73,7 +64,7 @@ fn generic_fit_predict_with_linear_regression() {
     assert_eq!(n, 3, "expected 3 predictions for 3 test points");
 }
 
-/// Fit/Predict traits on unsupervised KMeans return one label per input sample
+/// Fit/Predict traits on unsupervised KMeans return 1 label per input sample
 #[test]
 fn generic_fit_trait_with_kmeans_unsupervised() {
     let data = Array2::from_shape_vec(
@@ -127,12 +118,12 @@ fn trait_predictions_match_inherent_method_predictions() {
 
 // save_to_path + load_from_path round-trip
 
-/// Build 3 tight, well-separated blobs centred at (0,0), (100,0), (50,100) for the
-/// KMeans save/load round-trip
+/// Builds 3 tight, well-separated blobs centered at (0,0), (100,0), and (50,100) for the
+/// KMeans save/load round-trip.
 ///
 /// # Returns
 ///
-/// - 15x2 matrix of points, 5 per blob
+/// - `Array2<f64>` - 15x2 matrix of points, 5 per blob
 fn three_blob_data_for_round_trip() -> Array2<f64> {
     Array2::from_shape_vec(
         (15, 2),
@@ -212,12 +203,11 @@ fn isolation_forest_predict_before_fit_is_not_fitted() {
     );
 }
 
-// Fit / Predict trait forwarding for the remaining estimators: each test invokes the
-// traits explicitly to confirm dispatch for every distinct Predict::Output type
+// Fit and Predict trait forwarding for the remaining estimators. Each test confirms
+// dispatch for a distinct Predict::Output type.
 
-/// IsolationForest (unsupervised, Fit<&Array2<f64>>, Predict::Output = Array1<i32>):
-/// like every other estimator, the trait yields labels, not raw scores. Scores stay
-/// reachable through the inherent `score_samples`.
+/// IsolationForest via the generic traits yields labels (`Array1<i32>`), not raw scores.
+/// Scores stay reachable through the inherent `score_samples`.
 #[test]
 fn generic_fit_predict_isolation_forest_outputs_i32_labels() {
     let data = Array2::from_shape_vec(
@@ -236,7 +226,7 @@ fn generic_fit_predict_isolation_forest_outputs_i32_labels() {
         assert!(l == -1 || l == 1, "label[{i}] = {l} not in {{-1, +1}}");
     }
 
-    // Anomaly scores are -(2^(-E/c)) with E,c > 0, hence in [-1, 0)
+    // Anomaly scores follow -(2^(-E/c)) with E, c > 0, so they fall in [-1, 0).
     let scores = forest
         .score_samples(&data)
         .expect("score_samples should succeed");
@@ -245,7 +235,7 @@ fn generic_fit_predict_isolation_forest_outputs_i32_labels() {
     }
 }
 
-/// DBSCAN (unsupervised, Predict::Output = Array1<isize>): two dense blobs get distinct
+/// DBSCAN (unsupervised, Predict::Output = Array1<isize>): 2 dense blobs get distinct
 /// non-negative cluster ids
 #[test]
 fn generic_fit_predict_dbscan_outputs_isize_labels() {
@@ -260,19 +250,17 @@ fn generic_fit_predict_dbscan_outputs_isize_labels() {
 
     let mut db = DBSCAN::new(0.5, 2).unwrap();
     Fit::fit(&mut db, &data).expect("fit via Fit trait should succeed");
-    // predict assigns each passed-in point to a fitted cluster
     let labels: Array1<isize> =
         Predict::predict(&db, &data).expect("predict via Predict trait should succeed");
 
     assert_eq!(labels.len(), 6, "one label per sample");
-    // Both dense blobs are clusters, so no point is noise and ids are non-negative
+    // Both dense blobs are clusters, so no point is noise and ids are non-negative.
     for (i, &l) in labels.iter().enumerate() {
         assert!(
             l >= 0,
             "label[{i}] = {l} should be a non-negative cluster id"
         );
     }
-    // The two far-apart blobs must land in different clusters
     assert_ne!(labels[0], labels[3], "the two separated blobs must differ");
 }
 
@@ -295,13 +283,13 @@ fn generic_fit_predict_knn_outputs_generic_labels() {
         Predict::predict(&knn, &x_test).expect("predict via Predict trait should succeed");
 
     assert_eq!(preds.len(), 2, "one label per test point");
-    // (0.5,0) is nearest to anchor 0 (label 0); (9.5,0) is nearest to anchor 1 (label 1)
+    // (0.5, 0) is nearest to anchor 0, label 0. (9.5, 0) is nearest to anchor 1, label 1.
     assert_eq!(preds[0], 0, "point near anchor 0 must get label 0");
     assert_eq!(preds[1], 1, "point near anchor 1 must get label 1");
 }
 
-/// LDA (supervised, Predict::Output = Array1<i32>): two well-separated 1-D classes are
-/// each labelled correctly on the training set
+/// LDA (supervised, Predict::Output = Array1<i32>) labels 2 well-separated 1-D classes
+/// correctly on the training set.
 #[test]
 fn generic_fit_predict_lda_outputs_i32_labels() {
     let x_train = Array2::from_shape_vec((6, 1), vec![1.0, 2.0, 3.0, 7.0, 8.0, 9.0]).unwrap();
@@ -313,7 +301,7 @@ fn generic_fit_predict_lda_outputs_i32_labels() {
         Predict::predict(&lda, &x_train).expect("predict via Predict trait should succeed");
 
     assert_eq!(preds.len(), 6, "one label per sample");
-    // Classes are separated by a wide margin (3 vs 7), so training accuracy must be perfect
+    // A wide margin (3 vs 7) separates the classes, so training accuracy must be perfect
     for (i, (&p, &t)) in preds.iter().zip(y_train.iter()).enumerate() {
         assert_eq!(
             p, t,
@@ -335,15 +323,15 @@ fn generic_fit_predict_decision_tree_outputs_f64_labels() {
         Predict::predict(&tree, &x_train).expect("predict via Predict trait should succeed");
 
     assert_eq!(preds.len(), 6, "one label per sample");
-    // Separable by a single threshold on feature 0, so training error is zero
+    // A single threshold on feature 0 separates the classes, so training error is zero
     for (i, (&p, &t)) in preds.iter().zip(y_train.iter()).enumerate() {
         assert_abs_diff_eq!(p, t, epsilon = 1e-9);
         let _ = i;
     }
 }
 
-/// LinearSVC (supervised, Predict::Output = Array1<f64>): separable data is classified
-/// into the {0,1} label domain
+/// LinearSVC (supervised, Predict::Output = Array1<f64>) classifies separable data into the
+/// {0,1} label domain
 #[test]
 fn generic_fit_predict_linear_svc_outputs_f64_labels() {
     let x_train = Array2::from_shape_vec(
@@ -372,8 +360,8 @@ fn generic_fit_predict_linear_svc_outputs_f64_labels() {
     }
 }
 
-/// MeanShift (unsupervised, Predict::Output = Array1<usize>): two tight blobs each land in
-/// one cluster, and the blobs land in different clusters
+/// MeanShift (unsupervised, Predict::Output = Array1<isize>): 2 tight blobs each land in
+/// 1 cluster, and the 2 blobs land in different clusters.
 #[test]
 fn generic_fit_predict_mean_shift_outputs_usize_labels() {
     let data = Array2::from_shape_vec(
@@ -439,9 +427,8 @@ fn generic_fit_predict_svc_outputs_zero_one_labels() {
 
 // Storage-generic relaxation: `x` and `y` may use different storage types
 
-/// Every supervised estimator accepts an owned feature matrix paired with a borrowed
-/// label view (and vice versa). The signatures previously bound both to one `S`, so
-/// mixing owned and view storage was a compile error rather than a runtime one.
+/// Every supervised estimator accepts an owned feature matrix paired with a borrowed label
+/// view, and the reverse pairing of storage types also compiles.
 #[test]
 fn supervised_fit_accepts_mixed_storage_for_x_and_y() {
     let x = array![
@@ -489,7 +476,7 @@ fn supervised_fit_accepts_mixed_storage_for_x_and_y() {
         .expect("SVC: view x + owned y");
 }
 
-/// `LinearRegression::score` takes its targets independently of the feature matrix' storage
+/// `LinearRegression::score` takes its targets independently of the feature matrix's storage
 #[test]
 fn linear_regression_score_accepts_mixed_storage() {
     let x = array![[1.0], [2.0], [3.0], [4.0]];
@@ -504,8 +491,8 @@ fn linear_regression_score_accepts_mixed_storage() {
     assert!(r2.is_finite(), "R^2 should be finite, got {r2}");
 }
 
-/// `DecisionTree::predict` no longer requires `Send + Sync` on the storage type, so a
-/// non-Sync-friendly view works — `predict_proba` never had the bound to begin with
+/// `DecisionTree::predict` and `predict_proba` both accept any storage type that only
+/// implements `Data<Elem = f64>`, with no `Send + Sync` bound.
 #[test]
 fn decision_tree_predict_accepts_plain_data_storage() {
     fn predict_via_plain_bound<S>(tree: &DecisionTree, x: &ndarray::ArrayBase<S, ndarray::Ix2>)

@@ -29,7 +29,6 @@ fn simple_rnn_forward_1step_1unit_tanh() {
     let x = Array::from_elem((1, 1, 1), 0.5_f32).into_dyn();
     let out = rnn.forward(&x).unwrap();
 
-    // Output shape must be (batch=1, units=1)
     assert_eq!(out.shape(), &[1, 1]);
 
     let expected = Array::from_elem((1, 1), 0.46211716_f32).into_dyn();
@@ -133,7 +132,7 @@ fn simple_rnn_predict_equals_forward() {
 /// SimpleRNN constructor rejects a zero dimension, whichever argument carries it
 #[test]
 fn simple_rnn_new_rejects_zero_dimension() {
-    // (input_dim, units, which-arg-is-bad) — covers zero input_dim and zero units
+    // (input_dim, units, name of the bad argument), 1 row per zero-valued argument
     let cases = [(0, 3, "input_dim"), (2, 0, "units")];
     for (input_dim, units, bad_arg) in cases {
         let err = SimpleRNN::new(input_dim, units, Tanh::new()).unwrap_err();
@@ -183,11 +182,8 @@ fn simple_rnn_backward_before_forward_errors() {
     );
 }
 
-/// SimpleRNN backward with units == 1 and input_dim > 1 must not panic on the grad_x reshape
-///
-/// With units == 1 the flattened dz matrix has a row stride of 1, so ndarray's `dot` returns a
-/// column-major grad_x; the reshape back to [batch, timesteps, input_dim] has to tolerate that
-/// layout (regression test for a latent `IncompatibleLayout` panic)
+/// SimpleRNN backward with units == 1 and input_dim > 1 must not panic on the grad_x reshape.
+/// Regression test: `dot` can return a column-major grad_x here, and the reshape must tolerate it.
 #[test]
 fn simple_rnn_backward_units_one_multi_feature_reshapes() {
     let mut rnn = SimpleRNN::new(2, 1, Tanh::new()).unwrap();
@@ -202,7 +198,7 @@ fn simple_rnn_backward_units_one_multi_feature_reshapes() {
 #[test]
 fn simple_rnn_set_weights_wrong_kernel_shape_errors() {
     let mut rnn = SimpleRNN::new(2, 3, Tanh::new()).unwrap();
-    // kernel should be (2,3); (3,2) is passed
+    // kernel should be (2,3). (3,2) is passed instead.
     let bad_kernel = Array2::zeros((3, 2));
     let rk = Array2::zeros((3, 3));
     let bias = Array2::zeros((1, 3));
@@ -253,7 +249,7 @@ fn lstm_forward_1step_1unit_tanh() {
 /// Forget-gate bias of 1.0 yields a different final state than 0.0 across timesteps
 #[test]
 fn lstm_forget_bias_is_one_not_zero() {
-    // Two LSTMs: one with forget_bias=1.0 (default path), one with 0.0
+    // 2 LSTMs: one with forget_bias=1.0 (the default), one with 0.0
     let mut lstm_correct = LSTM::new(1, 1, Tanh::new()).unwrap();
     let mut lstm_zero_forget = LSTM::new(1, 1, Tanh::new()).unwrap();
 
@@ -296,8 +292,8 @@ fn lstm_forget_bias_is_one_not_zero() {
         )
         .unwrap();
 
-    // Two timesteps: at step 1, c_0 = 0 so f*c_prev = 0 and the forget bias has no effect;
-    // only from step 2 onward (c_prev != 0) does forget_bias=1.0 diverge from 0.0
+    // 2 timesteps: at step 1, c_0 = 0, so f*c_prev = 0 and the forget bias has no effect.
+    // Only from step 2 onward (c_prev != 0) does forget_bias=1.0 diverge from 0.0.
     let x = Array::from_elem((1, 2, 1), 0.5_f32).into_dyn();
     let h_correct = lstm_correct.forward(&x).unwrap()[[0, 0]];
     let h_zero = lstm_zero_forget.forward(&x).unwrap()[[0, 0]];
@@ -400,7 +396,7 @@ fn lstm_predict_equals_forward() {
 /// LSTM constructor rejects a zero dimension, whichever argument carries it
 #[test]
 fn lstm_new_rejects_zero_dimension() {
-    // (input_dim, units, which-arg-is-bad) — covers zero input_dim and zero units
+    // (input_dim, units, name of the bad argument), 1 row per zero-valued argument
     let cases = [(0, 3, "input_dim"), (2, 0, "units")];
     for (input_dim, units, bad_arg) in cases {
         let err = LSTM::new(input_dim, units, Tanh::new()).unwrap_err();
@@ -543,10 +539,8 @@ fn gru_forward_2step_hidden_state_blending() {
     assert_allclose(&out, &expected, 1e-5);
 }
 
-/// GRU update gate z~=0 hands the candidate straight through
-///
-/// Keras' convention: `z` weights the *previous* state, so an open update gate takes the
-/// candidate. The candidate kernel is zero here, so that candidate is tanh(0) = 0
+/// GRU update gate z~=0 hands the candidate straight through, since Keras' `z` weights the
+/// previous state. An open update gate takes the candidate, whose kernel here gives tanh(0).
 #[test]
 fn gru_update_gate_zero_takes_the_candidate() {
     let mut gru = GRU::new(1, 1, Tanh::new()).unwrap();
@@ -576,15 +570,13 @@ fn gru_update_gate_zero_takes_the_candidate() {
     assert_eq!(out.shape(), &[1, 1]);
     assert!(
         out[[0, 0]].abs() < 1e-4,
-        "expected h_t≈0 when z≈0, got: {}",
+        "expected h_t about 0 when z about 0, got: {}",
         out[[0, 0]]
     );
 }
 
-/// GRU update gate z~=1 keeps the previous hidden state, whatever the candidate says
-///
-/// The mirror of the test above, and the one that pins the *direction* of the blend: the
-/// candidate here is a clearly non-zero tanh(1), so a flipped `z` would show 0.76 not 0
+/// GRU update gate z~=1 keeps the previous hidden state, whatever the candidate says. The
+/// candidate here is a clearly non-zero tanh(1), so a flipped `z` would show 0.76, not 0
 #[test]
 fn gru_update_gate_one_keeps_previous_hidden() {
     let mut gru = GRU::new(1, 1, Tanh::new()).unwrap();
@@ -615,24 +607,18 @@ fn gru_update_gate_one_keeps_previous_hidden() {
     assert_eq!(out.shape(), &[1, 1]);
     assert!(
         out[[0, 0]].abs() < 1e-4,
-        "expected h_t≈0 when z≈1 (the previous state is kept), got: {}",
+        "expected h_t about 0 when z about 1 (the previous state is kept), got: {}",
         out[[0, 0]]
     );
 }
 
-/// The fused kernel's first column block is the UPDATE gate, second the reset gate
-///
-/// Every other GRU test here sets its weights through `set_gate_weights`, which takes the gates by
-/// name and packs them itself - so none of them can see the packed order at all. This one writes
-/// the fused tensors directly. A driving weight of -20 sits in column block 0; if that block is the
-/// update gate (Keras' `[z | r | h]`) then z is 0, the candidate passes through, and the output is
-/// tanh(1). If the blocks were ordered `[r | z | h]` instead, the -20 would be the reset gate and z
-/// would be sigmoid(0) = 0.5, giving roughly half that
+/// The fused kernel's column blocks are ordered [z | r | h] (Keras' update, reset, candidate).
+/// This test writes the fused tensors directly instead of through `set_gate_weights`.
 #[test]
 fn gru_fused_kernel_first_block_is_the_update_gate() {
     let mut gru = GRU::new(1, 1, Tanh::new()).unwrap();
 
-    // [z | r | h] over one unit: z driven to 0, r left at 0, candidate kernel 1
+    // [z | r | h] over 1 unit: z driven to 0, r left at 0, candidate kernel 1
     let kernel = Array2::from_shape_vec((1, 3), vec![-20.0_f32, 0.0, 1.0]).unwrap();
     let recurrent_kernel = Array2::zeros((1, 3));
     let bias = Array2::zeros((1, 3));
@@ -645,7 +631,7 @@ fn gru_fused_kernel_first_block_is_the_update_gate() {
     let expected: f32 = 1.0_f32.tanh();
     assert!(
         (out[[0, 0]] - expected).abs() < 1e-4,
-        "expected h_t≈tanh(1)={expected:.8}, got {} - the fused blocks are not [z | r | h]",
+        "expected h_t about tanh(1)={expected:.8}, got {} - the fused blocks are not [z | r | h]",
         out[[0, 0]]
     );
 }
@@ -701,7 +687,7 @@ fn gru_predict_equals_forward() {
 /// GRU constructor rejects a zero dimension, whichever argument carries it
 #[test]
 fn gru_new_rejects_zero_dimension() {
-    // (input_dim, units, which-arg-is-bad) — covers zero input_dim and zero units
+    // (input_dim, units, name of the bad argument), 1 row per zero-valued argument
     let cases = [(0, 3, "input_dim"), (2, 0, "units")];
     for (input_dim, units, bad_arg) in cases {
         let err = GRU::new(input_dim, units, Tanh::new()).unwrap_err();
@@ -864,7 +850,7 @@ fn gru_accepts_activation_enum_tanh() {
 
 // Determinism: same weights + same input => identical outputs
 
-/// SimpleRNN: two forward passes with the same weights and input are bit-identical
+/// SimpleRNN: 2 forward passes with the same weights and input are bit-identical
 #[test]
 fn simple_rnn_forward_is_deterministic() {
     let mut rnn = SimpleRNN::new(2, 2, Tanh::new()).unwrap();
@@ -884,7 +870,7 @@ fn simple_rnn_forward_is_deterministic() {
     assert_eq!(out1, out2, "forward passes must be bit-identical");
 }
 
-/// GRU: two forward passes with the same weights are bit-identical
+/// GRU: 2 forward passes with the same weights are bit-identical
 #[test]
 fn gru_forward_is_deterministic() {
     let mut gru = GRU::new(2, 2, Tanh::new()).unwrap();

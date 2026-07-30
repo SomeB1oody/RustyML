@@ -1,4 +1,4 @@
-//! Integration tests for the KNN (K-Nearest Neighbours) classifier: constructor
+//! Integration tests for the KNN (K-Nearest Neighbors) classifier: constructor
 //! validation, fit/predict error paths, distance metrics, weighting, parallel
 //! paths, and save/load round-trips
 
@@ -235,7 +235,7 @@ fn predict_empty_x_test_returns_empty_input() {
 
 // k=1 Euclidean correctness
 
-/// k=1 Euclidean Uniform picks the single nearest neighbour per query
+/// k=1 Euclidean Uniform picks the single nearest neighbor per query
 #[test]
 fn predict_k1_euclidean_correctness() {
     let mut knn = KNN::<i32>::new(1)
@@ -257,7 +257,7 @@ fn predict_k1_euclidean_correctness() {
 
 // k=1 Manhattan correctness
 
-/// k=1 Manhattan Uniform picks the single nearest neighbour per query
+/// k=1 Manhattan Uniform picks the single nearest neighbor per query
 #[test]
 fn predict_k1_manhattan_correctness() {
     let mut knn = KNN::<i32>::new(1)
@@ -371,11 +371,11 @@ fn predict_k3_majority_clean() {
     assert_eq!(predictions[1], 1, "Q1=(10.5,0) → 3 votes for class 1");
 }
 
-/// Above 16 features KNN falls back from the kd-tree to the brute-force search; predictions
-/// (and the sequential/parallel paths) must remain correct on that path
+/// Above 8 features, KNN falls back from the kd-tree to a brute-force search.
+/// Predictions on the sequential and parallel paths must stay correct on that path.
 #[test]
 fn predict_high_dimensional_falls_back_to_brute_force() {
-    let n_features = 18; // above the kd-tree dimensionality cutoff (16)
+    let n_features = 18; // above the kd-tree dimensionality cutoff (8)
     let mut x_train = Array2::<f64>::zeros((6, n_features));
     for i in 0..3 {
         for j in 0..n_features {
@@ -412,7 +412,7 @@ fn predict_high_dimensional_falls_back_to_brute_force() {
     );
 }
 
-/// k=3 Euclidean Uniform resolves a 2:1 split (2 of 3 neighbours decide the class)
+/// k=3 Euclidean Uniform resolves a 2:1 split (2 of 3 neighbors decide the class)
 #[test]
 fn predict_k3_majority_two_to_one_split() {
     let mut knn = KNN::<i32>::new(3)
@@ -420,7 +420,7 @@ fn predict_k3_majority_two_to_one_split() {
         .with_weighting_strategy(WeightingStrategy::Uniform)
         .with_metric(Metric::Euclidean)
         .unwrap();
-    // 4 training points - exactly k+1 to keep the problem minimal
+    // 4 training points (exactly k+1) keep the problem minimal
     let x_train = array![[0.0, 0.0], [1.0, 0.0], [5.0, 0.0], [6.0, 0.0]];
     let y_train = array![0, 0, 1, 1];
     knn.fit(&x_train, &y_train).unwrap();
@@ -442,7 +442,7 @@ fn predict_k3_majority_two_to_one_split() {
 
 // Distance weighting
 
-/// k=2 Distance weighting: the closer neighbour decides the class
+/// k=2 Distance weighting: the closer neighbor decides the class
 #[test]
 fn predict_distance_weighting_closer_wins() {
     let mut knn = KNN::<i32>::new(2)
@@ -483,13 +483,13 @@ fn predict_distance_zero_exact_match_returns_immediately() {
     let x_test = array![[3.0, 4.0]]; // exact match for P0
     let predictions = knn.predict(&x_test).unwrap();
 
-    // exact match wins regardless of the other neighbour
+    // exact match wins regardless of the other neighbor
     assert_eq!(predictions[0], 7, "exact-match query must return class 7");
 }
 
 // String labels
 
-/// KNN with T=String returns the nearest neighbour's string label
+/// KNN with T=String returns the nearest neighbor's string label
 #[test]
 fn predict_string_labels() {
     let mut knn = KNN::<String>::new(1)
@@ -565,9 +565,9 @@ fn predict_and_predict_parallel_agree_distance_weights() {
     );
 }
 
-// k>=100 parallel voting path
+// k=100: predict and predict_parallel agreement at a larger k
 
-/// k>=100 Uniform exercises the parallel voting branch; both entry points must agree
+/// Checks predict and predict_parallel agree at k=100 with Uniform weighting.
 #[test]
 fn predict_parallel_large_k_exercises_parallel_voting_branch() {
     const N: usize = 200; // 100 per class
@@ -607,7 +607,6 @@ fn predict_parallel_large_k_exercises_parallel_voting_branch() {
         "Q=(250,0): 100 class-1 neighbours → class 1"
     );
 
-    // parallel path must match
     let preds_par = knn.predict_parallel(&x_test).unwrap();
     assert_eq!(
         preds_seq, preds_par,
@@ -615,7 +614,7 @@ fn predict_parallel_large_k_exercises_parallel_voting_branch() {
     );
 }
 
-/// k>=100 with Distance weighting exercises the parallel weight-aggregation branch
+/// Checks predict and predict_parallel agree at k=100 with Distance weighting.
 #[test]
 fn predict_parallel_large_k_distance_weighting_exercises_parallel_weight_branch() {
     const N: usize = 200;
@@ -644,8 +643,8 @@ fn predict_parallel_large_k_distance_weighting_exercises_parallel_weight_branch(
     let preds_seq = knn.predict(&x_test).unwrap();
     let preds_par = knn.predict_parallel(&x_test).unwrap();
 
-    // class-0 points are all within distance <= 100, class-1 points start at distance >= 149.5,
-    // so class-0 aggregate weight far exceeds class-1 even with 100 neighbours
+    // class-0 points are all within distance <= 100. class-1 points start at distance >= 149.5,
+    // so class-0's aggregate weight far exceeds class-1's even with 100 neighbors.
     assert_eq!(
         preds_seq[0], 0,
         "distance-weighted: class-0 should win near x=50.5"
@@ -673,7 +672,7 @@ fn fit_predict_returns_training_labels() {
 
 // Minkowski p=3 numerical check (end-to-end)
 
-/// k=1 Minkowski(p=3) finds the correct nearest neighbour under the Lp-3 metric
+/// k=1 Minkowski(p=3) finds the correct nearest neighbor under the Lp-3 metric
 #[test]
 fn predict_minkowski_p3_correct_nearest_neighbour() {
     let mut knn = KNN::<i32>::new(1)
@@ -686,7 +685,7 @@ fn predict_minkowski_p3_correct_nearest_neighbour() {
     knn.fit(&x_train, &y_train).unwrap();
 
     // Q=(0,0): dist to P0=3, to P1=4 -> nearest P0 -> class 0
-    // Q=(0,3): dist to P0=(54)^(1/3)~=3.78, to P1=1 -> nearest P1 -> class 1
+    // Q=(0,3): dist to P0=(54)^(1/3), about 3.78, to P1=1 -> nearest P1 -> class 1
     let x_test = array![[0.0, 0.0], [0.0, 3.0]];
     let predictions = knn.predict(&x_test).unwrap();
 

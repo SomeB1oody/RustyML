@@ -1,38 +1,42 @@
 //! Dimension-generic convolution engine shared by `Conv1D`, `Conv2D`, and `Conv3D`
 //!
-//! A plain convolution is the same operation at every rank; only the number of spatial axes
-//! changes. One implementation, generic over the spatial rank `R = ndim - 2`, serves all 3
-//! layers. The layer wrappers keep their public API, weight storage, activation, and caches; they
-//! delegate just the numeric forward/backward to [`conv_forward`] and [`conv_backward`]
+//! A plain convolution is the same operation at every rank. Only the number of spatial axes
+//! changes. One implementation, driven by the spatial rank computed at runtime as `ndim - 2`,
+//! serves all 3 layers. The layer wrappers keep their public API, weight storage, activation, and
+//! caches. They delegate only the numeric forward and backward passes to [`conv_forward`] and
+//! [`conv_backward`]. `SeparableConv2D` also calls these same 2 functions for its pointwise (1x1)
+//! stage
 //!
 //! # Conventions
 //!
-//! - `Valid` output: `(in - k) / stride + 1`; `Same` output: `ceil(in / stride)`
-//! - `Same` padding splits the total evenly with the extra cell on the trailing edge
-//!   (`pad_before = pad_total / 2`)
-//! - Cross-correlation (no kernel flip); the bias is added last
+//! - `Valid` output: `(in - k) / stride + 1`
+//! - `Same` output: `ceil(in / stride)`
+//! - `Same` padding splits the total padding evenly, and the extra cell (if any) goes on the
+//!   trailing edge (`pad_before = pad_total / 2`)
+//! - The engine computes a cross-correlation, so it does not flip the kernel
+//! - The bias is added last, after the matrix product
 //!
 //! # Layout
 //!
-//! Tensors are channels-last, `[batch, spatial..., channels]`; weights are flat row-major
-//! `[k..., Cin, F]` (Keras' kernel shape). The channel axis being innermost is what makes the
-//! im2col a copy rather than a gather: one kernel tap at one output position is `Cin` *contiguous*
-//! floats, so the pass moves runs instead of scalars, and the flat weight matrix `[k*Cin, F]` needs
-//! no permutation to line up with it.
+//! Tensors are channels-last, `[batch, spatial..., channels]`. Weights are flat row-major
+//! `[k..., Cin, F]` (Keras' kernel shape). The channel axis is innermost. This turns im2col into
+//! a copy instead of a gather. One kernel tap at one output position is `Cin` contiguous floats,
+//! so the pass moves runs instead of scalars. The flat weight matrix `[k*Cin, F]` needs no
+//! permutation to align with it
 //!
 //! The forward pass parallelizes over `(batch item, output-position block)` tasks. Splitting the
-//! output positions lets a single large image use every core even at `batch == 1`, with each task
-//! building its own im2col block and running 1 serial GEMM straight into its disjoint output
-//! region - which under this layout is a contiguous slab of rows, so the product needs no scatter.
-//! That GEMM carries the per-filter bias as a fused `PerCol` epilogue, so a block costs 1 pass with
-//! no product temporary and no separate bias sweep (the fused result is bit-for-bit the plain
-//! product followed by the same scalar bias add).
+//! output positions lets a single large image use every core, even when `batch == 1`. Each task
+//! builds its own im2col block and runs 1 serial GEMM directly into its disjoint output region.
+//! Under this layout that region is a contiguous slab of rows, so the product needs no scatter.
+//! The GEMM applies the per-filter bias as a fused `PerCol` epilogue. Each block then costs 1
+//! pass, with no product temporary and no separate bias sweep. The fused result matches, bit for
+//! bit, the plain product followed by the same scalar bias add.
 //!
-//! The backward pass parallelizes over batch items (their weight/bias partials are reduced in
-//! batch order, so rerunning on the same machine gives the same result) and routes its two GEMMs
-//! through the crate's [`dot_par`](crate::math::matmul::dot_par): the per-item GEMMs stay
-//! parallel while the batch fan is too short to fill the pool, and switch to serial once the
-//! batch alone fills it (so the batch tasks do not each fork rayon inside a GEMM)
+//! The backward pass parallelizes over batch items. It reduces their weight and bias partials in
+//! batch order, so rerunning on the same machine gives the same result. Both GEMMs route through
+//! the crate's [`dot_par`](crate::math::matmul::dot_par). The per-item GEMMs stay parallel while
+//! the batch fan is too short to fill the thread pool. They switch to serial once the batch alone
+//! fills the pool, so a batch task does not fork rayon again inside its own GEMM
 
 use super::PaddingType;
 use crate::error::Error;
@@ -43,14 +47,14 @@ use ndarray::{Array2, Array3, ArrayD, ArrayView2, ArrayViewMut2, Axis, IxDyn};
 use rayon::prelude::*;
 
 tunable_gate! {
-    /// Minimum estimated GEMM FLOPs (`2 * batch * F * out_plane * Cin*k`) at or above which an engine
-    /// pass runs in parallel
+    /// Minimum estimated GEMM FLOPs (`2 * batch * F * out_plane * Cin * k`) at or above which an
+    /// engine pass runs in parallel
     ///
-    /// Counting FLOPs rather than output elements keeps the gate meaningful across kernel sizes and
-    /// channel counts (an output-element count would rate a `7x7x512` and a `3x3x3` convolution
-    /// identically). The measured crossover bracket at batch == 1 is 2.1M-8.3M FLOPs
+    /// Counting FLOPs rather than output elements keeps the gate meaningful across kernel sizes
+    /// and channel counts. An output-element count would rate a `7x7x512` and a `3x3x3`
+    /// convolution the same
     ///
-    /// Overridable via [`crate::tuning`]
+    /// Overridable through [`crate::tuning`]
     pub(crate) CONV_PARALLEL_MIN_FLOPS => conv_parallel_min_flops / set_conv_parallel_min_flops = 4_000_000
 }
 
@@ -82,7 +86,8 @@ fn spatial_strides(sp: &[usize], cin: usize) -> Vec<usize> {
     strides
 }
 
-/// Advances a multi-index `idx` (row-major, last axis fastest) within `dims`; `false` when it wraps
+/// Advances a multi-index `idx` (row-major, last axis fastest) within `dims`. Returns `false`
+/// when it wraps
 #[inline]
 fn increment_index(idx: &mut [usize], dims: &[usize]) -> bool {
     for k in (0..idx.len()).rev() {
@@ -148,8 +153,8 @@ fn conv_geometry(
 
 /// Builds a zero-padded copy of the flat `[items, sp..., cin]` data
 ///
-/// Only the spatial axes are padded. The `cin` channels of a position stay contiguous and travel
-/// together, so each step of the walk moves a run rather than a single float
+/// The copy pads only the spatial axes. The `cin` channels of a position stay contiguous and
+/// travel together, so each step of the walk moves a run rather than a single float
 fn build_padded(
     in_flat: &[f32],
     items: usize,
@@ -188,7 +193,7 @@ fn build_padded(
 /// Inverse of [`build_padded`]: gathers the unpadded `[items, sp..., cin]` region out of a padded
 /// buffer
 ///
-/// Used to crop the input-gradient back to the original spatial size after col2im
+/// Crops the input gradient back to its original spatial size after col2im
 fn crop_padded(
     padded: &[f32],
     items: usize,
@@ -226,11 +231,11 @@ fn crop_padded(
 
 /// Flat padded-item offsets for im2col/col2im, laid out `[k_plane, out_plane]`
 ///
-/// `offsets[kk * out_plane + o]` is the element index, within one padded `[spatial..., cin]` item,
-/// of the *first channel* that output position `o` reads for kernel tap `kk`; the remaining `cin - 1`
-/// channels follow contiguously. `padded_strides` carries the `cin` scaling (see
-/// [`spatial_strides`]), so the table is independent of batch and is computed once and reused for
-/// every im2col copy and every col2im accumulate
+/// `offsets[kk * out_plane + o]` is the element index, within one padded `[spatial..., cin]`
+/// item, of the first channel that output position `o` reads for kernel tap `kk`. The remaining
+/// `cin - 1` channels follow it contiguously. `padded_strides` carries the `cin` scaling (see
+/// [`spatial_strides`]), so the table does not depend on batch. The engine computes it once and
+/// reuses it for every im2col copy and every col2im accumulate
 fn im2col_offsets(
     out_sp: &[usize],
     k_dims: &[usize],
@@ -270,7 +275,7 @@ fn im2col_offsets(
 struct ColContext<'a> {
     /// Flat zero-padded input `[batch, padded_spatial..., Cin]`
     padded: &'a [f32],
-    /// Input channels; also the length of one contiguous copy run
+    /// Input channels, which is also the length of one contiguous copy run
     cin: usize,
     /// Elements per padded batch item (`padded_plane * cin`)
     padded_item: usize,
@@ -284,21 +289,21 @@ struct ColContext<'a> {
 
 /// im2col for one batch item, restricted to the output positions `[c0, c1)`
 ///
-/// Builds a `[c1-c0, k_plane*Cin]` row-major matrix - one row per output position - whose columns
-/// align with the flat weight matrix `[k_plane*Cin, F]`. Within a row the kernel taps run slowest
-/// and the channels fastest, which is exactly the order the padded buffer already holds them in,
-/// so each tap is one `copy_from_slice` of `Cin` floats. Pass the full `[0, out_plane)` range for
-/// the whole item; a sub-range is one forward task's row block
+/// Builds a `[c1-c0, k_plane*Cin]` row-major matrix, one row per output position, whose columns
+/// align with the flat weight matrix `[k_plane*Cin, F]`. Within a row the kernel taps run
+/// slowest and the channels fastest. This is exactly the order the padded buffer already holds
+/// them in, so each tap is 1 `copy_from_slice` of `Cin` floats. Pass the full `[0, out_plane)`
+/// range for the whole item. A sub-range builds one forward task's row block
 fn build_col_range(ctx: &ColContext, b: usize, c0: usize, c1: usize) -> Vec<f32> {
     let rows = c1 - c0;
     let k_total = ctx.k_plane * ctx.cin;
     let mut col = vec![0.0f32; rows * k_total];
     let b_base = b * ctx.padded_item;
-    // Tap-outer/position-inner: at a fixed tap, consecutive output positions read consecutive
-    // (for unit stride, adjacent) runs, so the source side is a single streaming read. The
-    // transposed nest would make the *write* sequential instead, at the cost of `k_plane`
-    // simultaneously live read streams - and `col` is small enough to stay cache-resident either
-    // way, so the read side is the one worth keeping linear
+    // The loop nests tap outer, position inner. At a fixed tap, consecutive output positions
+    // read consecutive runs (adjacent runs at unit stride), so the source side stays a single
+    // streaming read. The transposed nest would make the write sequential instead, at the cost
+    // of `k_plane` live read streams at once. `col` stays cache-resident either way, so the read
+    // side is the one worth keeping linear
     for kk in 0..ctx.k_plane {
         let off = kk * ctx.out_plane;
         let kbase = kk * ctx.cin;
@@ -311,7 +316,8 @@ fn build_col_range(ctx: &ColContext, b: usize, c0: usize, c1: usize) -> Vec<f32>
     col
 }
 
-/// Forward convolution; `weight_shape` is `[k..., Cin, F]`, `bias` is `[F]`, `strides` has length `R`
+/// Runs the forward convolution. `weight_shape` is `[k..., Cin, F]`, `bias` is `[F]`, and
+/// `strides` has one entry per spatial axis
 pub(super) fn conv_forward(
     input: &Tensor,
     weights: &[f32],
@@ -323,8 +329,8 @@ pub(super) fn conv_forward(
     conv_forward_impl(input, weights, weight_shape, bias, strides, padding, None)
 }
 
-/// `conv_forward` with an optional override of the parallel/serial gate decision, so a bench can
-/// time both paths on either side of the gate
+/// `conv_forward` with an optional override of the parallel-or-serial gate decision, so a bench
+/// can measure both paths on either side of the gate
 ///
 /// Reachable outside the crate only through `bench_internals`
 pub fn conv_forward_impl(
@@ -388,13 +394,13 @@ pub fn conv_forward_impl(
         let col = build_col_range(&ctx, b, c0, c0 + rows);
         let col_mat = ArrayView2::from_shape((rows, k_total), &col)
             .expect("col block length matches [positions, k*Cin]");
-        // `C <- col_mat @ w_mat + bias` in 1 fused pass. `beta == 0` overwrites the block without
-        // reading it, and `blk` is written in place, so the product needs no temporary and no
-        // separate bias sweep. The per-filter bias is 1 value per column of the `[positions, F]`
-        // product, i.e. `Bias::PerCol`, and the epilogue applies it after the accumulation - the
-        // same "bias added last" order as the elementwise pass it replaces, bit for bit. `blk` is
-        // a contiguous row block of `out3`, so the product lands in its final place with no
-        // scatter and no copy
+        // `C <- col_mat @ w_mat + bias`, in 1 fused pass. `beta == 0` overwrites the block
+        // without reading it. `blk` is written in place, so the product needs no temporary and
+        // no separate bias sweep. The per-filter bias is 1 value per column of the
+        // `[positions, F]` product, so it is a `Bias::PerCol` epilogue applied after the
+        // accumulation. That gives the same "bias added last" order as the elementwise pass it
+        // replaces, bit for bit. `blk` is a contiguous row block of `out3`, so the product lands
+        // in its final place with no scatter and no copy
         gemmkit_ndarray::gemm_fused(
             1.0,
             &col_mat,
@@ -403,8 +409,8 @@ pub fn conv_forward_impl(
             &mut blk,
             Some(Bias::PerCol(bias)),
             None,
-            // Serial: `fill_block` already runs as 1 leaf task of the batch x position-chunk
-            // par_iters above the gate, and as a plain loop body below it
+            // Serial because `fill_block` already runs as 1 leaf task of the batch-by-position-
+            // chunk par_iters above the gate, and as a plain loop body below it
             Parallelism::Serial,
         );
     };
@@ -448,8 +454,8 @@ pub fn conv_forward_impl(
         .expect("conv output length matches shape"))
 }
 
-/// Backward convolution; `input` is the original (unpadded) forward input, `grad_output` is the
-/// gradient w.r.t. the convolution output (i.e. after the activation backward)
+/// Runs the backward convolution. `input` is the original, unpadded forward input.
+/// `grad_output` is the gradient of the convolution output, taken after the activation backward
 pub(super) fn conv_backward(
     grad_output: &Tensor,
     input: &Tensor,
@@ -511,7 +517,8 @@ pub(super) fn conv_backward(
         offsets: &offsets,
     };
     // `gemm_par` is `Serial` when the batch fan alone fills the pool, so a per-batch task does
-    // not fork rayon again inside its GEMM; `Rayon(0)` otherwise, letting the backend decide
+    // not fork rayon again inside its GEMM. Otherwise it is `Rayon(0)`, and the backend decides
+    // how to parallelize
     let process_b = |b: usize, gemm_par: Parallelism| -> (Array2<f32>, Vec<f32>, Vec<f32>) {
         let col = build_col_range(&ctx, b, 0, out_plane);
         let col_mat = ArrayView2::from_shape((out_plane, k_total), &col)
@@ -520,16 +527,16 @@ pub(super) fn conv_backward(
         let g_mat = ArrayView2::from_shape((out_plane, filters), g_slice)
             .expect("grad slice matches [out_plane, F]");
 
-        // Weight gradient [k*Cin, F] - already the layer's weight layout, so no permute - and
-        // input-gradient rows [out_plane, k*Cin]
+        // Weight gradient `[k*Cin, F]` (already the layer's weight layout, so no permute
+        // needed), and input-gradient rows `[out_plane, k*Cin]`
         let wg = dot_par(&col_mat.t(), &g_mat, gemm_par);
         let dcol = dot_par(&g_mat, &w_mat.t(), gemm_par);
-        let bias_p: Vec<f32> = g_mat.sum_axis(Axis(0)).to_vec(); // [F]
+        let bias_p: Vec<f32> = g_mat.sum_axis(Axis(0)).to_vec(); // `[F]`
 
         let dcol = dcol.as_slice().expect("matmul result is standard layout");
         let mut pad_grad = vec![0.0f32; padded_item];
         // Same tap-outer nest as `build_col_range`, for the same reason: a fixed tap walks the
-        // padded buffer linearly, so the read-modify-write side stays one stream
+        // padded buffer linearly, so the read-modify-write side stays 1 stream
         for kk in 0..k_plane {
             let off = kk * out_plane;
             let kbase = kk * cin;
@@ -549,15 +556,16 @@ pub(super) fn conv_backward(
         (wg, bias_p, input_grad_b)
     };
 
-    // Two GEMMs per item (weight grad + input grad), ~4*F*out_plane*k_total FLOPs apiece
+    // Each item runs 2 GEMMs (weight grad and input grad), about 4 * F * out_plane * k_total
+    // FLOPs apiece
     let gemm_flops = 4usize
         .saturating_mul(batch)
         .saturating_mul(filters)
         .saturating_mul(out_plane)
         .saturating_mul(k_total);
     let parallel = gemm_flops >= conv_parallel_min_flops();
-    // Parallelize over the batch above the gate. Only force the per-item GEMMs serial once the
-    // batch axis alone already fills the pool (`batch >= threads`)
+    // The pass parallelizes over the batch above the gate. It forces the per-item GEMMs serial
+    // only once the batch axis alone fills the pool (`batch >= threads`)
     let gemm_par = if parallel && batch >= rayon::current_num_threads() {
         Parallelism::Serial
     } else {
@@ -565,7 +573,8 @@ pub(super) fn conv_backward(
     };
     let per_b = map_indexed(batch, parallel, |b| process_b(b, gemm_par));
 
-    // Reduce the per-batch partials in batch order (weight/bias sum across the batch axis)
+    // Reduces the per-batch partials in batch order, summing weight and bias across the batch
+    // axis
     let mut weight_grad_arr = Array2::<f32>::zeros((k_total, filters));
     let mut bias_grad = vec![0.0f32; filters];
     let mut in_grad_flat = Vec::with_capacity(batch * in_item);
@@ -613,7 +622,7 @@ mod tests {
         assert_eq!(got, vec![12, 4, 1]);
     }
 
-    /// A 1-D shape has one stride, equal to the channel count
+    /// A 1-D shape has 1 stride, equal to the channel count
     #[test]
     fn test_spatial_strides_1d() {
         let got = spatial_strides(&[5], 3);
@@ -678,7 +687,7 @@ mod tests {
         assert!(!increment_index(&mut idx, &dims));
     }
 
-    // conv_geometry - Valid padding
+    // conv_geometry: Valid padding
 
     /// Valid 1-D geometry shrinks the output and adds no padding
     #[test]
@@ -701,7 +710,7 @@ mod tests {
         );
     }
 
-    // conv_geometry - Same padding, 1-D
+    // conv_geometry: Same padding, 1-D
 
     /// Same 1-D geometry rounds the output up and pads to preserve coverage
     #[test]
@@ -713,7 +722,7 @@ mod tests {
         assert_eq!(padded_sp, vec![9]);
     }
 
-    // conv_geometry - Same padding, 2-D
+    // conv_geometry: Same padding, 2-D
 
     /// Same 2-D geometry applies the per-axis padding rule independently on each axis
     #[test]
@@ -750,7 +759,7 @@ mod tests {
         }
     }
 
-    /// Two batch items each pad into a disjoint 16-element slice
+    /// 2 batch items each pad into a disjoint 16-element slice
     #[test]
     fn test_build_padded_two_items() {
         let in_flat = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
@@ -771,7 +780,7 @@ mod tests {
         assert_eq!(got[16 + 10], 8.0);
     }
 
-    /// The channels of a position stay adjacent through the pad: a 2x2x2 input lands as four
+    /// The channels of a position stay adjacent through the pad. A 2x2x2 input lands as 4
     /// 2-float runs at the strides `spatial_strides` reports, and nothing interleaves them
     #[test]
     fn test_build_padded_keeps_channels_contiguous() {
@@ -847,13 +856,13 @@ mod tests {
 
     // im2col_offsets
 
-    /// 1-D, kernel 3, stride 1 over a length-5 (already padded) plane at 1 channel: tap `kk` at
-    /// output `o` reads index `o + kk`, laid out as `[k_plane, out_plane]`
+    /// 1-D, kernel 3, stride 1, over an already-padded length-5 plane at 1 channel. Tap `kk` at
+    /// output `o` reads index `o + kk`. The table is laid out as `[k_plane, out_plane]`
     #[test]
     fn test_im2col_offsets_1d() {
-        // out_sp = (5 - 3)/1 + 1 = 3; padded plane length 5, stride 1
+        // out_sp = (5 - 3)/1 + 1 = 3. The padded plane length is 5, at stride 1
         let offsets = im2col_offsets(&[3], &[3], &[1], &spatial_strides(&[5], 1));
-        // rows = kk (0..3), cols = o (0..3); offset = o*1 + kk*1
+        // rows = kk (0..3), cols = o (0..3). offset = o*1 + kk*1
         assert_eq!(
             offsets,
             vec![
@@ -876,18 +885,18 @@ mod tests {
         );
     }
 
-    // conv_forward - hand-derived values
+    // conv_forward: hand-derived values
     //
-    // The helper tests above pin the geometry; these pin the whole pass against numbers worked out
-    // from the cross-correlation definition by hand. That distinction matters here: a gradient
-    // check compares a layer against a finite difference of *itself*, so it agrees with a
-    // consistently transposed forward pass. Only an independently derived expected value catches
-    // an axis that moved.
+    // The helper tests above check the geometry math. These tests check the whole pass against
+    // numbers worked out by hand from the cross-correlation definition. That distinction matters
+    // here. A gradient check compares a layer against a finite difference of itself. It still
+    // agrees even when the forward pass has a consistent axis-transposition error. Only an
+    // independently derived expected value catches a moved axis.
 
     /// 2-D, 1 batch item, 3x3 input at 2 channels, a 2x2 all-ones kernel and 1 filter
     ///
-    /// The channel-0 plane is 1..9 and the channel-1 plane is 10..90, so each output is the sum of
-    /// a 2x2 window over both planes plus the bias
+    /// The channel-0 plane is 1..9 and the channel-1 plane is 10..90. Each output is the sum of
+    /// a 2x2 window over both planes, plus the bias
     #[test]
     fn test_conv_forward_2d_two_channels_hand_derived() {
         // [1, 3, 3, 2] channels-last: position (h, w) holds [plane0, plane1]
@@ -916,17 +925,17 @@ mod tests {
         .unwrap();
 
         assert_eq!(out.shape(), &[1, 2, 2, 1]);
-        // (1+2+4+5) + (10+20+40+50) + 0.5 = 132.5, and so on across the four windows
+        // (1+2+4+5) + (10+20+40+50) + 0.5 = 132.5, and so on across the 4 windows
         let got = out.iter().copied().collect::<Vec<f32>>();
         assert_eq!(got, vec![132.5, 176.5, 264.5, 308.5]);
     }
 
-    /// The filter axis is the fastest-varying output axis: a second filter holding twice the first
-    /// kernel's weights must land interleaved with it, not in a separate plane
+    /// The filter axis is the fastest-varying output axis. A second filter holding twice the
+    /// first kernel's weights must land interleaved with it, not in a separate plane
     #[test]
     fn test_conv_forward_2d_filter_axis_is_innermost() {
         let input = ArrayD::from_shape_vec(IxDyn(&[1, 2, 2, 1]), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
-        // [kh=2, kw=2, Cin=1, F=2]; filter 0 is all ones, filter 1 is all twos
+        // [kh=2, kw=2, Cin=1, F=2]. Filter 0 is all ones, filter 1 is all twos
         let weights = vec![1.0f32, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0];
         let bias = [0.0f32, 0.0];
 
@@ -940,7 +949,7 @@ mod tests {
         )
         .unwrap();
 
-        // One output position, two filters: sum = 10, so [10, 20] adjacent in memory
+        // 1 output position, 2 filters: sum = 10, so [10, 20] adjacent in memory
         assert_eq!(out.shape(), &[1, 1, 1, 2]);
         assert_eq!(out.iter().copied().collect::<Vec<f32>>(), vec![10.0, 20.0]);
     }

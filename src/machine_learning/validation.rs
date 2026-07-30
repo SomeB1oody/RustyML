@@ -25,7 +25,7 @@ use ndarray::{ArrayBase, Data, Dimension, Ix2};
 ///
 /// # Returns
 ///
-/// - `Ok(())` if all validation checks pass, otherwise an `Error`
+/// - `Result<(), Error>` - `Ok(())` when every check passes, otherwise the failing `Error`
 ///
 /// # Errors
 ///
@@ -65,8 +65,8 @@ where
 
 /// Validates that the learning rate parameter is positive and finite
 ///
-/// The learning rate controls the step size in gradient descent optimization,
-/// so it must be a positive, finite value to ensure proper convergence behavior
+/// The learning rate controls the step size in gradient descent optimization. It must be
+/// positive and finite so training converges correctly
 ///
 /// # Parameters
 ///
@@ -74,7 +74,7 @@ where
 ///
 /// # Returns
 ///
-/// - `Ok(())` if the learning rate is valid, otherwise an `Error`
+/// - `Result<(), Error>` - `Ok(())` when the learning rate is valid, otherwise the failing `Error`
 ///
 /// # Errors
 ///
@@ -90,7 +90,7 @@ pub(super) fn validate_learning_rate(learning_rate: f64) -> Result<(), Error> {
     Ok(())
 }
 
-/// Validates that the maximum iterations parameter is greater than zero
+/// Validates that the maximum iterations parameter is greater than 0
 ///
 /// The maximum iterations parameter determines the upper bound on the number
 /// of training iterations. It must be at least 1 to allow the algorithm to run
@@ -101,7 +101,7 @@ pub(super) fn validate_learning_rate(learning_rate: f64) -> Result<(), Error> {
 ///
 /// # Returns
 ///
-/// - `Ok(())` if the maximum iterations value is valid, otherwise an `Error`
+/// - `Result<(), Error>` - `Ok(())` when the value is valid, otherwise the failing `Error`
 ///
 /// # Errors
 ///
@@ -119,9 +119,9 @@ pub(super) fn validate_max_iterations(max_iterations: usize) -> Result<(), Error
 
 /// Validates that the tolerance parameter is positive and finite
 ///
-/// The tolerance parameter defines the convergence criterion for iterative algorithms:
-/// training stops when the change in loss between iterations falls below this threshold,
-/// so it must be a positive, finite value to ensure meaningful convergence detection
+/// The tolerance parameter defines the convergence criterion for iterative algorithms.
+/// Training stops when the change in loss between iterations falls below this threshold.
+/// The value must be positive and finite for meaningful convergence detection
 ///
 /// # Parameters
 ///
@@ -129,7 +129,7 @@ pub(super) fn validate_max_iterations(max_iterations: usize) -> Result<(), Error
 ///
 /// # Returns
 ///
-/// - `Ok(())` if the tolerance is valid, otherwise an `Error`
+/// - `Result<(), Error>` - `Ok(())` when the tolerance is valid, otherwise the failing `Error`
 ///
 /// # Errors
 ///
@@ -158,7 +158,7 @@ pub(super) fn validate_tolerance(tolerance: f64) -> Result<(), Error> {
 ///
 /// # Returns
 ///
-/// - `Ok(())` if the regularization configuration is valid, otherwise an `Error`
+/// - `Result<(), Error>` - `Ok(())` when the configuration is valid, otherwise the failing `Error`
 ///
 /// # Errors
 ///
@@ -194,7 +194,7 @@ pub(super) fn validate_regularization_type(
 ///
 /// # Returns
 ///
-/// - `Ok(())` if the model is fitted, otherwise [`Error::NotFitted`]
+/// - `RustymlResult<()>` - `Ok(())` when the model is fitted, otherwise [`Error::NotFitted`]
 ///
 /// # Errors
 ///
@@ -213,7 +213,7 @@ pub(super) fn check_is_fitted(
 
 /// Validates a feature matrix passed to a `predict`-style method
 ///
-/// Performs the three checks every estimator needs before predicting, with a
+/// Performs the 3 checks every estimator needs before predicting, with a
 /// single consistent error message for each failure mode:
 /// - the matrix is not empty
 /// - the feature count matches the training data
@@ -226,7 +226,7 @@ pub(super) fn check_is_fitted(
 ///
 /// # Returns
 ///
-/// - `Ok(())` if all checks pass, otherwise an `Error`
+/// - `Result<(), Error>` - `Ok(())` when every check passes, otherwise the failing `Error`
 ///
 /// # Errors
 ///

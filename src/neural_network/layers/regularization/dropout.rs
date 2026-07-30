@@ -1,11 +1,14 @@
 //! Dropout-family regularization layers and the shared helpers that build them
 //!
-//! Re-exports the plain [`Dropout`](crate::neural_network::layers::regularization::dropout::Dropout)
-//! layer alongside its spatial variants
+//! Re-exports the plain
+//! [`Dropout`](crate::neural_network::layers::regularization::dropout::Dropout) layer and its
+//! spatial variants
 //! [`SpatialDropout1D`](crate::neural_network::layers::regularization::dropout::SpatialDropout1D),
 //! [`SpatialDropout2D`](crate::neural_network::layers::regularization::dropout::SpatialDropout2D),
-//! and [`SpatialDropout3D`](crate::neural_network::layers::regularization::dropout::SpatialDropout3D),
-//! grouping each in its own submodule (`dropout`, `spatial_dropout_1d`/`2d`/`3d`)
+//! and
+//! [`SpatialDropout3D`](crate::neural_network::layers::regularization::dropout::SpatialDropout3D).
+//! Each layer has its own submodule: `dropout`, `spatial_dropout_1d`, `spatial_dropout_2d`, and
+//! `spatial_dropout_3d`.
 //!
 //! Defines the infrastructure these layers share:
 //!
@@ -16,9 +19,9 @@
 //!   input shape
 //! - `apply_spatial_dropout_threshold` - thresholds a random mask into a binary keep/drop mask,
 //!   parallel or sequential by element count
-//! - `spatial_dropout_scale` and `spatial_dropout_backward` - apply the per-channel inverted-dropout
-//!   scale to a `[batch, *spatial, channels]` tensor from a small `[batch, channels]` mask without
-//!   materializing a full-size mask
+//! - `spatial_dropout_scale` and `spatial_dropout_backward` - apply the per-channel
+//!   inverted-dropout scale to a `[batch, *spatial, channels]` tensor from a small
+//!   `[batch, channels]` mask without building a full-size mask
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -98,14 +101,14 @@ fn dropout_output_shape(input_shape: &[usize]) -> String {
 
 /// Thresholds a random mask into a binary mask, in parallel or sequentially
 ///
-/// Used by all spatial dropout layers to convert a random mask into a binary mask based
+/// All spatial dropout layers use this to convert a random mask into a binary mask based
 /// on the dropout rate. Larger masks use parallel computation
 ///
 /// # Parameters
 ///
 /// - `mask_2d` - The random mask to convert to binary (modified in place)
 /// - `rate` - The dropout rate threshold
-/// - `parallel_threshold` - Element count at or above which parallel computation is used
+/// - `parallel_threshold` - Element count at or above which the pass runs in parallel
 fn apply_spatial_dropout_threshold(mask_2d: &mut Tensor, rate: f32, parallel_threshold: usize) {
     let total_elements = mask_2d.len();
 
@@ -117,27 +120,21 @@ fn apply_spatial_dropout_threshold(mask_2d: &mut Tensor, rate: f32, parallel_thr
 }
 
 /// Applies the per-channel inverted-dropout scale to a `[batch, *spatial, channels]` tensor
-/// without materializing the full mask
+/// without building the full mask
 ///
-/// `channel_mask` holds one binary keep/drop value per `(batch, channel)` in row-major order
-/// (flat index `b * channels + c`). Under the channels-last layout that is exactly one factor per
-/// element of a position's channel vector, so every position of a batch item is scaled by the same
-/// `channels`-long vector. Used for both the forward output (`t = input`) and the backward
-/// input-gradient (`t = grad_output`), since both are the same elementwise scale
+/// `channel_mask` holds 1 binary keep/drop value per `(batch, channel)` in row-major order
+/// (flat index `b * channels + c`). Under the channels-last layout, every position in a batch
+/// item gets the same `channels`-long scale vector. Callers use this for both the forward output
+/// (`t = input`) and the backward input gradient (`t = grad_output`), since both apply the same
+/// elementwise scale.
 ///
-/// The scale is applied through a small repeated *tile* rather than one channel vector at a time.
-/// Multiplying position by position would run a loop of `channels` elements per iteration, and at
-/// the small channel counts a 1-D or early-conv spatial dropout sees that is far too short to
-/// amortize anything. Repeating the factors up to about a kilobyte turns the pass into long flat
-/// multiplies at every channel count, with one body and no special case
+/// Each output element depends only on its own input element and its channel's scalar. The
+/// `parallel` flag therefore never changes the result, only whether the pass runs in parallel
+/// above `parallel_threshold`.
 ///
-/// Each output element depends only on its own input element and its channel's scalar (no
-/// reduction), so the `parallel` flag never changes the result. The per-channel value is broadcast
-/// by the tile, so no input-sized mask is ever built or stored
-///
-/// Gives the same result as the explicit `t * broadcast(mask) * scale`: the mask is binary, so
+/// Gives the same result as the explicit `t * broadcast(mask) * scale`. The mask is binary, so
 /// `(x * 1) * scale == x * (1 * scale)` and `(x * 0) * scale == x * (0 * scale)` both hold
-/// exactly
+/// exactly.
 fn spatial_dropout_scale(
     t: &Tensor,
     channel_mask: &[f32],
@@ -151,24 +148,24 @@ fn spatial_dropout_scale(
     let positions = (item / channels).max(1);
     let scale = 1.0 / (1.0 - rate);
 
-    // Contiguous data maps positions onto fixed slices; standardize a non-contiguous view
+    // Standardize the layout first, so positions map onto fixed contiguous slices.
     let t_std = t.as_standard_layout();
     let src = t_std.as_slice().unwrap();
 
     let mut out = Tensor::zeros(t.raw_dim());
     let dst = out.as_slice_mut().unwrap();
 
-    // Repetitions of the channel vector per tile. Snapping down to a divisor of `positions` keeps
-    // every tile-sized block inside one batch item, so the whole tensor can be walked in a single
-    // parallel pass instead of one rayon launch per item
+    // Repetitions of the channel vector per tile. This snaps down to a divisor of `positions`, so
+    // each tile-sized block stays inside 1 batch item. A single parallel pass can then walk the
+    // whole tensor instead of 1 rayon launch per item.
     let mut reps = (1024 / channels).clamp(1, positions);
     while reps > 1 && !positions.is_multiple_of(reps) {
         reps -= 1;
     }
     let tile_len = reps * channels;
 
-    // One tile per batch item, laid out `[batch, tile_len]`; a few hundred KB at most, and it turns
-    // the pass below into a flat multiply that never looks up a channel index
+    // 1 tile per batch item, laid out `[batch, tile_len]`. This turns the pass below into a
+    // flat multiply that never looks up a channel index.
     let mut tiles = Vec::with_capacity(batch * tile_len);
     for b in 0..batch {
         let mask = &channel_mask[b * channels..(b + 1) * channels];
@@ -203,9 +200,9 @@ fn spatial_dropout_scale(
 /// Applies the stored per-channel mask to the gradient with [`spatial_dropout_scale`], without
 /// rebuilding a full-size mask
 ///
-/// Mirrors the early-return structure of [`dropout_backward`] (inference / `rate == 0`
-/// pass-through, `rate == 1` zeros, missing-mask error), but the stored `mask` is the small
-/// `[batch, channels]` per-channel mask rather than a full-shape one
+/// Mirrors the early-return structure of [`dropout_backward`]: pass-through at inference or
+/// `rate == 0`, zeros at `rate == 1`, and a missing-mask error otherwise. The stored `mask` here
+/// is the small `[batch, channels]` per-channel mask, not a full-shape one.
 fn spatial_dropout_backward(
     grad_output: &Tensor,
     mask: &Option<Tensor>,
@@ -236,8 +233,8 @@ fn spatial_dropout_backward(
 }
 
 /// Dropout layer for neural networks
-// `Dropout` lives in a `dropout` submodule beside the spatial-dropout modules; the repeated
-// name is the intended file layout
+// `Dropout` lives in a `dropout` submodule beside the spatial-dropout modules. The repeated
+// name is the intended file layout.
 #[allow(clippy::module_inception)]
 pub mod dropout;
 /// Spatial Dropout layer for 1D data
@@ -259,10 +256,10 @@ mod tests {
 
     /// The mask lines up with the trailing channel axis
     ///
-    /// Four channels with the mask `[1, 0, 1, 0]` over an all-ones input: every position must come
-    /// back as `[2, 0, 2, 0]` at `rate = 0.5`. A channel axis read anywhere but last would drop
-    /// whole positions instead of whole channels, and a mask off by one would shift the pattern -
-    /// both show up immediately against a hand-written expectation
+    /// 4 channels with mask `[1, 0, 1, 0]` over an all-ones input must return `[2, 0, 2, 0]` at
+    /// every position, at `rate = 0.5`. A channel axis read anywhere but last would drop whole
+    /// positions instead of whole channels. A 1-element shift in the mask would also change the
+    /// pattern. Both failures show up against a hand-written expectation.
     #[test]
     fn spatial_dropout_scale_drops_whole_channels() {
         // [batch = 1, positions = 3, channels = 4]
@@ -293,10 +290,11 @@ mod tests {
         );
     }
 
-    /// Each output element of the per-channel scale depends only on its own input element and
-    /// its channel's scalar (no reduction), so forcing serial vs parallel must produce the same
-    /// result: the gate is a pure performance knob. Covers channel counts above and below the
-    /// tile width, and position counts that do not divide the tile
+    /// Each output element of the per-channel scale depends only on its own input element and its
+    /// channel's scalar. There is no reduction, so the serial and parallel paths must produce the
+    /// same result. The `parallel_threshold` gate only controls performance. This test covers
+    /// channel counts above and below the tile width, and position counts that do not divide the
+    /// tile evenly.
     #[test]
     fn spatial_dropout_scale_parallel_flag_invariant() {
         for &(batch, positions, channels) in &[
@@ -318,7 +316,7 @@ mod tests {
                 .collect();
             let rate = 0.25f32;
 
-            // total >= gate forces parallel; usize::MAX forces serial
+            // A threshold of 0 forces the parallel path. `usize::MAX` forces the serial path.
             let serial = spatial_dropout_scale(&t, &channel_mask, rate, usize::MAX);
             let parallel = spatial_dropout_scale(&t, &channel_mask, rate, 0);
             assert_eq!(
@@ -327,7 +325,7 @@ mod tests {
                 "parallel flag changed the bits at [{batch}, {positions}, {channels}]"
             );
 
-            // And the same result as the explicit `t * broadcast(mask) * scale` it replaces
+            // Matches the explicit `t * broadcast(mask) * scale` 2-step form it replaces
             let scale = 1.0 / (1.0 - rate);
             let item = positions * channels;
             let mut expected = vec![0.0f32; total];

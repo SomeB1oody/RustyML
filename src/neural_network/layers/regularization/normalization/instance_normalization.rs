@@ -22,9 +22,9 @@ use std::borrow::Cow;
 /// Normalizes each sample and channel independently, which is useful for
 /// style transfer and generative models
 ///
-/// Instance normalization is group normalization with one group per channel, so it shares the
-/// shared `group_norm_forward_core` / `group_norm_backward_core` with `num_groups` set to
-/// the channel count
+/// Instance normalization is group normalization with 1 group per channel, so it shares
+/// `group_norm_forward_core` / `group_norm_backward_core` with `num_groups` set to the channel
+/// count
 ///
 /// # Examples
 ///
@@ -34,7 +34,6 @@ use std::borrow::Cow;
 /// use ndarray::Array3;
 ///
 /// // Create an InstanceNormalization layer for input shape [batch, spatial, channels]
-/// // with channels at axis 1 (default)
 /// let mut in_layer = InstanceNormalization::new(vec![4, 32, 3], 1e-5).unwrap();
 ///
 /// // Create input tensor
@@ -133,7 +132,7 @@ impl Layer for InstanceNormalization {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;
-        // One group per channel makes group normalization equal to instance normalization
+        // 1 group per channel makes group normalization equal to instance normalization
         let num_channels = input.shape()[input.ndim() - 1];
 
         let (output, x_normalized, inv_std) =
@@ -145,11 +144,11 @@ impl Layer for InstanceNormalization {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches), see [`Layer::predict`]
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     ///
     /// # Errors
     ///
-    /// Returns an error if the input shape, dimensionality, or channel axis is invalid
+    /// Returns an error if the input shape or dimensionality is invalid
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;
@@ -167,8 +166,7 @@ impl Layer for InstanceNormalization {
             return Ok(grad_output.clone());
         }
 
-        // Channels-first layout matches the cached forward intermediates; the input-gradient is
-        // permuted back at the end
+        // The channel axis is last, matching the cached forward intermediates
         let num_channels = grad_output.shape()[grad_output.ndim() - 1];
 
         let x_normalized = self

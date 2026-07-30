@@ -1,9 +1,10 @@
 //! Magnitude scaling that preserves zeros and signs
 //!
 //! Provides [`MaxAbsScaler`], which divides each feature by the largest absolute value seen at
-//! fit time. It neither centers nor shifts, so a zero stays a zero and every sign is preserved
-//! - the property that makes it the scaler of choice for data where zero means "absent"
-//! (count vectors, one-hot blocks, TF-IDF matrices) and centering would destroy that meaning
+//! fit time. It neither centers nor shifts, so a zero stays a zero and every sign survives.
+//! This is the property that makes it the scaler of choice for data where zero means "absent".
+//! Examples include count vectors, one-hot blocks, and TF-IDF matrices, where centering would
+//! destroy that meaning
 
 use super::{
     column_min_max, fitted, for_each_row, handle_zero_scale, validate_matrix,
@@ -16,13 +17,13 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
 /// Scales each feature by its maximum absolute value, learned from the training data
 ///
 /// Rows are samples and columns are features. [`fit`](Self::fit) records each feature's
-/// `max(|x|)`; [`transform`](Self::transform) divides by it, so every training value lands in
-/// `[-1, 1]` and the feature's sign structure is untouched. An all-zero feature has no
-/// magnitude to divide by; its divisor is forced to `1.0` and the column stays zero rather than
-/// becoming `NaN`. This mirrors scikit-learn's `MaxAbsScaler`
+/// `max(|x|)`. [`transform`](Self::transform) divides by it, so every training value lands in
+/// `[-1, 1]` and the feature's sign structure stays untouched. An all-zero feature has no
+/// magnitude to divide by. The scaler forces its divisor to `1.0` instead, so the column stays
+/// zero rather than becoming `NaN`. This mirrors scikit-learn's `MaxAbsScaler`
 ///
-/// Prefer it over [`MinMaxScaler`](super::MinMaxScaler) when zero has to keep meaning "absent":
-/// min-max shifts every feature, which turns structural zeros into an arbitrary nonzero value
+/// Prefer it over [`MinMaxScaler`](super::MinMaxScaler) when zero has to keep meaning "absent".
+/// Min-max shifts every feature, which turns structural zeros into an arbitrary nonzero value
 ///
 /// # Examples
 ///
@@ -35,7 +36,7 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
 /// let mut scaler = MaxAbsScaler::new();
 /// let z = scaler.fit_transform(&x_train).unwrap();
 ///
-/// // Divisors are 2 and 4; zeros stay zero and signs survive
+/// // Divisors are 2 and 4. Zeros stay zero and signs survive
 /// assert_eq!(scaler.get_max_abs().unwrap(), &array![2.0, 4.0]);
 /// assert_eq!(z, array![[0.5, -1.0], [0.0, 0.5], [-1.0, 0.0]]);
 /// ```
@@ -76,8 +77,8 @@ impl MaxAbsScaler {
 
     /// Fits the scaler, recording each feature's maximum absolute value
     ///
-    /// Any magnitudes from a previous fit are discarded. Call this on the training matrix only -
-    /// fitting on the full dataset before splitting leaks test-set information into the
+    /// This discards any magnitudes from a previous fit. Call this on the training matrix only.
+    /// Fitting on the full dataset before splitting leaks test-set information into the
     /// transform
     ///
     /// # Parameters
@@ -95,9 +96,9 @@ impl MaxAbsScaler {
     ///
     /// # Performance
     ///
-    /// One min/max pass per feature (the magnitude is the wider end of the two),
-    /// parallelized across features above the calibrated scan gate (see
-    /// `crate::parallel_gates`), so the result never depends on the thread count
+    /// One min/max pass per feature, where the magnitude is the wider end of the 2. The pass runs
+    /// in parallel across features above the scan gate (see `crate::parallel_gates`). The result
+    /// never depends on the thread count
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
@@ -112,10 +113,10 @@ impl MaxAbsScaler {
 
     /// Folds another batch of samples into the recorded magnitudes
     ///
-    /// Keeps the larger of the stored and the batch magnitude per feature, so a scaler can be
-    /// fitted over data that never exists in memory at once. On an unfitted scaler this behaves
-    /// exactly like [`fit`](Self::fit), and the result after `n` batches is identical to a
-    /// single `fit` over their concatenation
+    /// Keeps the larger of the stored magnitude and the batch magnitude, per feature. A scaler can
+    /// therefore be fitted over data that never exists in memory at once. On an unfitted scaler
+    /// this behaves exactly like [`fit`](Self::fit). The result after `n` batches is identical to
+    /// a single `fit` over their concatenation
     ///
     /// # Parameters
     ///
@@ -128,7 +129,8 @@ impl MaxAbsScaler {
     /// # Errors
     ///
     /// - [`Error::EmptyInput`] - If `x` has no rows or no columns
-    /// - [`Error::DimensionMismatch`] - If `x` has a different feature count than the previous batches
+    /// - [`Error::DimensionMismatch`] - If `x` has a different feature count than the previous
+    ///   batches
     /// - [`Error::NonFinite`] - If `x` contains NaN or infinite values
     pub fn partial_fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
@@ -164,7 +166,7 @@ impl MaxAbsScaler {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, Error>` - A new scaled matrix; `x` is not modified
+    /// - `Result<Array2<f64>, Error>` - A new scaled matrix. `x` is not modified
     ///
     /// # Errors
     ///
@@ -196,7 +198,7 @@ impl MaxAbsScaler {
 
     /// Fits the scaler on `x` and returns the scaled `x`
     ///
-    /// Equivalent to [`fit`](Self::fit) followed by [`transform`](Self::transform); this is the
+    /// Equivalent to [`fit`](Self::fit) followed by [`transform`](Self::transform). This is the
     /// call for the training matrix, after which [`transform`](Self::transform) handles every
     /// other batch
     ///
@@ -206,7 +208,7 @@ impl MaxAbsScaler {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, Error>` - A new scaled matrix; `x` is not modified
+    /// - `Result<Array2<f64>, Error>` - A new scaled matrix. `x` is not modified
     ///
     /// # Errors
     ///
@@ -223,7 +225,7 @@ impl MaxAbsScaler {
     /// Multiplies scaled data back into the original units
     ///
     /// Applies `x * max_abs`, the exact inverse of [`transform`](Self::transform). An all-zero
-    /// feature is the only degenerate case, and it round-trips too - zero maps to zero either
+    /// feature is the only degenerate case, and it round-trips too. Zero maps to zero either
     /// way
     ///
     /// # Parameters
@@ -232,7 +234,7 @@ impl MaxAbsScaler {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, Error>` - A new matrix in the original units; `x` is not modified
+    /// - `Result<Array2<f64>, Error>` - A new matrix in the original units. `x` is not modified
     ///
     /// # Errors
     ///
@@ -287,7 +289,7 @@ mod tests {
     use super::*;
     use ndarray::array;
 
-    /// Every feature is divided by its own magnitude, leaving zeros and signs intact
+    /// The scaler divides every feature by its own magnitude, leaving zeros and signs intact
     #[test]
     fn divides_by_column_magnitude() {
         let x = array![[1.0, -4.0], [0.0, 2.0], [-2.0, 0.0]];

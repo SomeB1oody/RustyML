@@ -1,8 +1,9 @@
 //! Linear Support Vector Classifier
 //!
 //! Provides [`LinearSVC`], a hinge-loss classifier trained with stochastic gradient
-//! descent and L1 or L2 regularization, along with the [`RegularizationType`](crate::machine_learning::RegularizationType) enum
-//! that selects the penalty
+//! descent and L1 or L2 regularization, along with the
+//! [`RegularizationType`](crate::machine_learning::RegularizationType) enum that
+//! selects the penalty
 
 use crate::error::Error;
 pub use crate::machine_learning::RegularizationType;
@@ -18,8 +19,9 @@ use ndarray_rand::rand::seq::SliceRandom;
 
 /// Loss function minimized by [`LinearSVC`]
 ///
-/// `Hinge` is `max(0, 1 - y * f(x))`; `SquaredHinge` is its square, `max(0, 1 - y * f(x))^2`,
-/// which penalizes margin violations quadratically and is differentiable everywhere
+/// `Hinge` is `max(0, 1 - y * f(x))`. `SquaredHinge` is its square,
+/// `max(0, 1 - y * f(x))^2`. It penalizes margin violations quadratically and
+/// is differentiable everywhere
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Loss {
     /// Standard hinge loss `max(0, 1 - y * f(x))`
@@ -30,8 +32,8 @@ pub enum Loss {
 
 /// Linear Support Vector Classifier (LinearSVC)
 ///
-/// A linear classifier trained with the hinge loss function
-/// and L1 or L2 regularization to prevent overfitting
+/// A linear classifier trained by stochastic gradient descent on the hinge or
+/// squared-hinge loss, with L1 or L2 regularization to reduce overfitting
 ///
 /// # Examples
 ///
@@ -89,9 +91,10 @@ pub struct LinearSVC {
     tol: f64,
     /// Loss function (hinge or squared hinge)
     loss: Loss,
-    /// Optional seed for the per-epoch minibatch shuffling, enabling reproducible training
+    /// Optional seed for the per-epoch minibatch shuffling. A fixed seed makes training
+    /// reproducible
     random_state: Option<u64>,
-    /// Number of iterations that were actually performed during training
+    /// Number of iterations the optimizer actually performed during training
     n_iter: Option<usize>,
 }
 
@@ -100,14 +103,14 @@ impl Default for LinearSVC {
     ///
     /// # Default Values
     ///
-    /// - `max_iter`: 1000
-    /// - `learning_rate`: 0.001
-    /// - `learning_rate_decay`: 0.0 (constant rate)
-    /// - `penalty`: RegularizationType::L2(1.0) - L2 regularization with strength 1.0
-    /// - `fit_intercept`: true
-    /// - `tol`: 1e-4
-    /// - `loss`: Loss::Hinge
-    /// - `random_state`: None (non-deterministic minibatch shuffling)
+    /// - `max_iter` - 1000
+    /// - `learning_rate` - 0.001
+    /// - `learning_rate_decay` - 0.0 (constant rate)
+    /// - `penalty` - `RegularizationType::L2(1.0)`, L2 regularization with strength 1.0
+    /// - `fit_intercept` - true
+    /// - `tol` - 1e-4
+    /// - `loss` - `Loss::Hinge`
+    /// - `random_state` - None (non-deterministic minibatch shuffling)
     ///
     /// # Returns
     ///
@@ -142,7 +145,14 @@ impl LinearSVC {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A Result containing the new LinearSVC instance if validation passes
+    /// - `Result<Self, Error>` - The new LinearSVC instance if validation passes
+    ///
+    /// # Notes
+    ///
+    /// The per-epoch minibatch shuffling is non-deterministic by default. For reproducible
+    /// runs, set a fixed seed after construction with the builder method below:
+    ///
+    /// - [`with_random_state`](Self::with_random_state) - fixed seed for minibatch shuffling
     ///
     /// # Errors
     ///
@@ -151,13 +161,6 @@ impl LinearSVC {
     /// - `learning_rate` is not positive or not finite
     /// - `penalty` regularization parameter is negative or not finite
     /// - `tol` is not positive or not finite
-    ///
-    /// # Notes
-    ///
-    /// The per-epoch minibatch shuffling is non-deterministic by default. For reproducible
-    /// runs, set a fixed seed after construction with the builder method below:
-    ///
-    /// - [`with_random_state`](Self::with_random_state) - fixed seed for minibatch shuffling
     pub fn new(
         max_iter: usize,
         learning_rate: f64,
@@ -213,12 +216,12 @@ impl LinearSVC {
         self
     }
 
-    /// Sets an inverse-scaling learning-rate decay (default: `0.0`, i.e. a constant rate)
+    /// Sets an inverse-scaling learning-rate decay (default: `0.0`, a constant rate)
     ///
     /// The effective learning rate at epoch `t` (0-indexed) is
-    /// `learning_rate / (1 + learning_rate_decay * t)`. A positive decay shrinks the step
-    /// size over time, which lets stochastic gradient descent settle closer to the optimum
-    /// instead of hovering at a fixed-step distance from it
+    /// `learning_rate / (1 + learning_rate_decay * t)`. A positive decay shrinks the
+    /// step size over time. This lets stochastic gradient descent settle near the
+    /// optimum instead of staying a fixed step away
     ///
     /// # Parameters
     ///
@@ -242,8 +245,8 @@ impl LinearSVC {
         Ok(self)
     }
 
-    /// Sets a fixed RNG seed for the per-epoch minibatch shuffling, making training
-    /// reproducible (default: `None`, non-deterministic)
+    /// Sets a fixed RNG seed for the per-epoch minibatch shuffling. A fixed seed makes
+    /// training reproducible (default: `None`, non-deterministic)
     ///
     /// # Parameters
     ///
@@ -267,7 +270,8 @@ impl LinearSVC {
         Ok(())
     }
 
-    /// Calculates the optimal batch size based on dataset size
+    /// Picks a batch size for the dataset, clamped between `MIN_BATCH_SIZE` and
+    /// `MAX_BATCH_SIZE`
     fn calculate_batch_size(n_samples: usize) -> usize {
         const MIN_BATCH_SIZE: usize = 32;
         const MAX_BATCH_SIZE: usize = 512;
@@ -290,13 +294,13 @@ impl LinearSVC {
 
     /// Trains the model on the provided data
     ///
-    /// Uses stochastic gradient descent to optimize the hinge loss function,
-    /// continuing until either the maximum iterations are reached or convergence
-    /// is detected based on tolerance
+    /// Uses stochastic gradient descent to optimize the configured loss function
+    /// (hinge or squared hinge). Training continues until it reaches the maximum
+    /// iterations or the weights converge within tolerance
     ///
     /// # Parameters
     ///
-    /// - `x` - Input features as a 2D array where each row is a sample and each column is a feature
+    /// - `x` - Input feature matrix, 1 row per sample and 1 column per feature
     /// - `y` - Target values as a 1D array (should contain only 0.0 and 1.0 values)
     ///
     /// # Returns
@@ -305,14 +309,16 @@ impl LinearSVC {
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If input data is invalid or feature dimension mismatches
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If input data is invalid or feature
+    ///   dimension mismatches
     /// - `Error::InvalidInput` - If any label is not 0.0 or 1.0 (LinearSVC is a binary classifier)
-    /// - `Error::NonFinite` - If numerical issues occur during training (e.g., weights become NaN)
+    /// - `Error::NonFinite` - If numerical issues occur during training, for example if weights
+    ///   become NaN
     ///
     /// # Performance
     ///
-    /// The full-batch cost GEMV runs parallel above its FLOPs gate; the per-batch
-    /// gradient accumulation is sequential so the f64 result is reproducible
+    /// The per-batch gradient accumulation stays serial, so the f64 result is
+    /// reproducible
     pub fn fit<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -381,7 +387,6 @@ impl LinearSVC {
                 }
             };
 
-            // Regularization term
             let regularization_term = match penalty {
                 RegularizationType::L2(lambda) => {
                     lambda * weights.iter().map(|&w| w * w).sum::<f64>() / 2.0
@@ -433,9 +438,9 @@ impl LinearSVC {
                     }
                 };
 
-                // Serial accumulation: one minibatch is far below the parallel sum gate,
-                // and the accumulator is an n_features vector, so blocked merging would
-                // allocate more than it saves
+                // The accumulation stays serial because a minibatch is far below the
+                // parallel sum gate. The accumulator is an n_features vector, so blocked
+                // merging would allocate more than it saves
                 let (weight_grad_sum, bias_grad_sum) = {
                     let mut acc = (Array1::<f64>::zeros(n_features), 0.0);
                     for &idx in batch_indices {
@@ -530,21 +535,21 @@ impl LinearSVC {
     ///
     /// # Parameters
     ///
-    /// - `x` - Input features as a 2D array where each row is a sample and each column is a feature
+    /// - `x` - Input feature matrix, 1 row per sample and 1 column per feature
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, Error>` - Array of predicted class labels (0.0 or 1.0) for each sample
+    /// - `Result<Array1<f64>, Error>` - Predicted class labels (0.0 or 1.0) per sample
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model hasn't been trained yet
+    /// - `Error::NotFitted` - If the model has not been trained yet
     /// - `Error::DimensionMismatch` - If input data is invalid or feature dimension mismatches
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
-        // Fitting checks and input validation are handled by `decision_function`
+        // `decision_function` checks that the model is fitted and validates the input
         let decision = self.decision_function(x)?;
         Ok(decision.mapv(|v| if v > 0.0 { 1.0 } else { 0.0 }))
     }
@@ -556,7 +561,7 @@ impl LinearSVC {
     ///
     /// # Parameters
     ///
-    /// - `x` - Input features as a 2D array where each row is a sample and each column is a feature
+    /// - `x` - Input feature matrix, 1 row per sample and 1 column per feature
     ///
     /// # Returns
     ///
@@ -564,7 +569,7 @@ impl LinearSVC {
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model hasn't been trained yet
+    /// - `Error::NotFitted` - If the model has not been trained yet
     /// - `Error::DimensionMismatch` - If input data is invalid or feature dimension mismatches
     /// - `Error::NonFinite` - If the computation produced NaN or infinite values
     pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
@@ -591,11 +596,11 @@ impl LinearSVC {
 
     /// Fits the model to the training data and then predicts labels for the same data
     ///
-    /// A convenience method that sequentially executes `fit` and then `predict`
+    /// A convenience method that runs `fit` followed by `predict`
     ///
     /// # Parameters
     ///
-    /// - `x` - Input features as a 2D array where each row is a sample and each column is a feature
+    /// - `x` - Input feature matrix, 1 row per sample and 1 column per feature
     /// - `y` - Target values as a 1D array (should contain only 0.0 and 1.0 values)
     ///
     /// # Returns

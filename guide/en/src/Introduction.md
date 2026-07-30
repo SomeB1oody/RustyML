@@ -1,12 +1,12 @@
 # Introduction
 
-RustyML is a machine learning and deep learning library written entirely in Rust — nothing to link against, no Python interpreter in the loop, no FFI boundary to marshal arrays across. This guide is the hands-on companion to that library: a book that takes you from a fresh `cargo new` to training neural networks, tuning the parallel/serial thresholds inside the hot kernels, and reasoning about exactly what lands on disk when you serialize a model. It tracks RustyML **0.13**; every complete example here is compiled against that version with the `full` and `show_progress` features enabled, so what you read is what the compiler accepts.
+RustyML is a machine learning and deep learning library written entirely in Rust. It needs no external library to link against, no Python interpreter, and no FFI boundary to move arrays across. This guide is the hands-on companion to the library. It takes you from a fresh `cargo new` to training neural networks. It also covers tuning the parallel and serial thresholds inside the hot kernels, and shows what lands on disk when you serialize a model. This guide tracks RustyML **0.13**. Every complete example compiles against that version with the `full` and `show_progress` features on, so what you read is what the compiler accepts.
 
 ## What this guide is
 
-The [API reference on docs.rs](https://docs.rs/rustyml) is the source of truth for every signature, every trait bound, every enum variant. This guide does not duplicate it — it explains the decisions the signatures leave unsaid. docs.rs tells you the arguments to `Adam::new`; this guide tells you which optimizer to reach for, why a per-call `random_state` overrides the global seed rather than the other way around, and what happens to a saved network when you load it into a model whose layer shapes no longer match. It is written the way an experienced colleague would walk you through a codebase they know well: concrete, opinionated where opinions are earned, and honest about the edges where a given estimator will bite you.
+The [API reference on docs.rs](https://docs.rs/rustyml) is the source of truth for every signature, every trait bound, and every enum variant. This guide does not duplicate that reference. It explains the decisions a signature does not state. docs.rs lists the arguments to `Adam::new`. This guide explains which optimizer to choose. It explains why a per-call `random_state` overrides the global seed instead of the reverse. It also explains what happens when you load a saved network into a model whose layer shapes no longer match. The guide stays concrete, states an opinion where the evidence supports one, and names the pitfalls in specific estimators.
 
-Here is the shape of nearly everything in the classical-ML half of the crate — construct, `fit`, `predict`, the same `(&x, &y)`-then-`&x` rhythm you know from scikit-learn:
+The classical-ML half of the crate follows one shape almost everywhere: construct, `fit`, `predict`. That is the same `(&x, &y)`-then-`&x` rhythm scikit-learn uses.
 
 ```rust
 use rustyml::prelude::machine_learning::*;
@@ -17,7 +17,7 @@ fn main() {
     let x = array![[1.0], [2.0], [3.0], [4.0]];
     let y = array![3.0, 6.0, 9.0, 12.0];
 
-    // new(fit_intercept); the default solver is the exact closed form
+    // new(fit_intercept). The default solver is the exact closed form
     let mut model = LinearRegression::new(true);
     model.fit(&x, &y).unwrap();
 
@@ -26,17 +26,17 @@ fn main() {
 }
 ```
 
-That fluency — models sharing the `Fit` / `Predict` traits, metrics that always take `(y_true, y_pred)` in that order, a single `set_global_seed` that makes the whole crate deterministic — is what the rest of the book unpacks, one module at a time.
+The rest of this guide unpacks that pattern, one module at a time. Models share the `Fit` and `Predict` traits. Metrics always take `(y_true, y_pred)` in that order. A single `set_global_seed` call makes the whole crate deterministic.
 
 ## Who it is for
 
-Two readers, coming from opposite directions, will both feel at home here. The first is a **Rust developer** who wants machine learning without leaving the ecosystem: no `pip`, no linked BLAS, no unsafe FFI to audit, just a `cargo add` and a crate that plays by Rust's rules on ownership, `Send`/`Sync`, and error handling. The second is an **ML practitioner arriving from Python**, fluent in scikit-learn and Keras, who wants the same mental models — `fit`/`predict`, a Keras-style `Sequential` you `.add(...)` layers to and `.compile(...)`, confusion matrices and silhouette scores that mean what they mean in sklearn — but expressed as compiled, statically typed, parallel-by-default Rust. Where RustyML deliberately diverges from those tools, the guide says so and says why.
+This guide serves 2 kinds of readers. The first is a **Rust developer** who wants machine learning without leaving the Rust ecosystem. That reader needs no `pip`, no linked BLAS, and no unsafe FFI to audit. A `cargo add` command adds a crate that follows Rust's rules on ownership, `Send`/`Sync`, and error handling. The second is an **ML practitioner coming from Python**, fluent in scikit-learn and Keras. That reader wants the same mental model in Rust. RustyML gives it: `fit`/`predict` methods and a Keras-style `Sequential` model built with `.add(...)` and `.compile(...)`. Its confusion matrices and silhouette scores mean what they mean in scikit-learn. RustyML expresses these ideas as compiled, statically typed, parallel-by-default Rust. Where RustyML departs from scikit-learn or Keras, this guide states the difference and the reason for it.
 
-You do not need prior Rust experience with numerical code, but you should be comfortable reading Rust and running `cargo`. Data flows through [`ndarray`](https://docs.rs/ndarray) arrays throughout, so [Working with ndarray](./Chapter-01/1.3._Working_with_ndarray.md) gives that library the short, focused treatment it deserves before you meet it everywhere else.
+You do not need prior experience with Rust numerical code. You should be comfortable reading Rust and running `cargo`. Data flows through [`ndarray`](https://docs.rs/ndarray) arrays throughout the crate, so [Working with ndarray](./Chapter-01/1.3._Working_with_ndarray.md) covers that library before you meet it in every later chapter.
 
 ## How the book is organized
 
-The crate splits into five feature-gated modules — `machine_learning`, `neural_network`, `utils`, `metrics`, and `math` — plus a domain-split `prelude`. The chapters follow that structure, front-loaded with the one chapter you should read start to finish.
+The crate splits into 5 feature-gated modules: `machine_learning`, `neural_network`, `utils`, `metrics`, and `math`. It also has a domain-split `prelude`. The chapters follow that structure. Read the first chapter start to finish, then use the rest as reference material.
 
 | Chapter | Covers | Maps to |
 |---|---|---|
@@ -48,14 +48,14 @@ The crate splits into five feature-gated modules — `machine_learning`, `neural
 | [6. Math Utilities](./Chapter-06/6.0._Math_Utilities.md) | Distance metrics, matrix multiplication, deterministic parallel reductions | `math` |
 | [7. Advanced Topics](./Chapter-07/7.0._Advanced_Topics.md) | Reproducibility and seeds, model persistence internals, performance tuning, minimal builds | cross-cutting |
 
-Chapters 2 and 3 are the two large algorithm families and carry most of the crate's surface area. Chapters 4 through 6 are the supporting cast — the preprocessing you run before a model, the metrics you run after, and the numerical primitives both are built on. Chapter 7 is where the guide earns the word *advanced*: how `random_state` resolves against the global seed, what the postcard-serialized bytes of a saved model actually contain, how the runtime-tunable parallelism gates work, and how to compile a build that pulls in only `metrics` or only `math`.
+Chapters 2 and 3 cover the two large algorithm families and most of the crate's surface area. Chapters 4 through 6 support those families. Preprocessing runs before a model, metrics run after it, and both rest on the same numerical primitives. Chapter 7 covers cross-cutting advanced topics. It explains how `random_state` resolves against the global seed, what the postcard-serialized bytes of a saved model contain, and how the runtime-tunable parallelism gates work. It also shows how to compile a build that pulls in only `metrics` or only `math`.
 
 ## How to read it
 
-Read [Getting Started](./Chapter-01/1.0._Getting_Started.md) in order, once, front to back. It is the only chapter that assumes you have read what came before it: it installs the crate, sets up ndarray, and builds a complete model so that every later chapter can lean on that shared footing instead of re-deriving it. Everything after Chapter 1 is reference-style and deliberately order-independent — jump straight to [Support Vector Machines](./Chapter-02/2.5._Support_Vector_Machines.md), [Optimizers](./Chapter-03/3.4._Optimizers.md), or [Clustering Metrics](./Chapter-05/5.3._Clustering_Metrics.md) as your problem demands, and follow the inline cross-links when one page depends on a concept another page owns. If you already have RustyML compiling and a model training, you have finished Chapter 1's job; treat the rest as a manual you open at the page you need.
+Read [Getting Started](./Chapter-01/1.0._Getting_Started.md) once, in order, from start to end. It is the only chapter that assumes you read the chapters before it. It installs the crate, sets up ndarray, and builds a complete model, so every later chapter can build on that shared base. Every chapter after Chapter 1 is reference material, and you can read those chapters in any order. Jump straight to [Support Vector Machines](./Chapter-02/2.5._Support_Vector_Machines.md), [Optimizers](./Chapter-03/3.4._Optimizers.md), or [Clustering Metrics](./Chapter-05/5.3._Clustering_Metrics.md) as your problem demands. Follow the inline cross-links when one page depends on a concept from another page. If RustyML already compiles for you and a model already trains, Chapter 1 has done its job. Treat the rest of the guide as a manual: open the page you need.
 
 ## Versions, feedback, and conventions
 
-This edition tracks the current crate version, **0.13**. RustyML is pre-1.0 and under active development: the API is stabilizing but breaking changes can still land in minor releases, so if a signature in the guide has drifted from what your compiler sees, trust [docs.rs for your exact version](https://docs.rs/rustyml) and let us know. Bug reports, feature requests, and corrections to this guide all belong in the same place — the [GitHub repository](https://github.com/SomeB1oody/RustyML), where issues and pull requests are welcome.
+This edition tracks the current crate version, **0.13**. RustyML is pre-1.0 and under active development. The API is stabilizing, but breaking changes can still land in minor releases. If a signature in this guide differs from what the compiler accepts, trust [docs.rs for the exact version](https://docs.rs/rustyml) in use. Send bug reports, feature requests, and corrections to this guide to the [GitHub repository](https://github.com/SomeB1oody/RustyML). Issues and pull requests are welcome there.
 
-Two conventions worth internalizing before you go further. First, complete examples in this book are self-contained programs with a `main`, tiny inline datasets, and few iterations, so you can paste one into a `full`-feature project and run it as-is; fragments and signatures are marked as such. Second, outside the leaf `metrics` and `math` modules, every fallible call returns `RustymlResult<T>` — an alias for `Result<T, rustyml::error::Error>` over a structured, matchable error enum — and the examples reach for `.unwrap()` only to stay short. [Error Handling](./Chapter-01/1.6._Error_Handling.md) shows what you would write instead in real code.
+This guide follows 2 conventions. First, a complete example is a self-contained program with a `main` function, a tiny inline dataset, and few iterations. Paste a complete example into a `full`-feature project and run it as written. A fragment or a signature is marked as such. Second, outside the leaf `metrics` and `math` modules, every fallible call returns `RustymlResult<T>`, an alias for `Result<T, rustyml::error::Error>` over a structured, matchable error enum. The examples reach for `.unwrap()` only to stay short. [Error Handling](./Chapter-01/1.6._Error_Handling.md) shows what to write instead in real code.

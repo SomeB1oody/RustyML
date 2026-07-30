@@ -22,8 +22,8 @@ fn make_separable() -> (Array2<f64>, Array1<f64>) {
     (x, y)
 }
 
-/// Fit a default (L2) LinearSVC on the separable dataset with enough iterations
-/// that convergence is expected, returning the trained model
+/// Fit an L2-regularized LinearSVC on the separable dataset with enough
+/// iterations for convergence, returning the trained model
 fn fit_separable_model() -> LinearSVC {
     let (x, y) = make_separable();
     let mut model = LinearSVC::new(5000, 0.01, RegularizationType::L2(0.1), true, 1e-5).unwrap();
@@ -285,8 +285,8 @@ fn sign_consistency_on_training_data() {
 
 #[test]
 fn sign_consistency_on_new_points() {
-    // [+10, 0] should score > 0 (class 1), [-10, 0] should score < 0 (class 0);
-    // assert the invariant rather than a hardcoded class, since the sign axis may flip
+    // [+10, 0] should score above 0 (class 1) and [-10, 0] below 0 (class 0).
+    // The test checks the sign invariant, not a hardcoded class, since the axis may flip
     let model = fit_separable_model();
     let x_new = Array2::from_shape_vec((2, 2), vec![10.0, 0.0, -10.0, 0.0]).unwrap();
     let preds = model.predict(&x_new).unwrap();
@@ -393,7 +393,7 @@ fn weights_have_correct_dimensionality() {
 /// When fit_intercept=false the bias is never updated and stays 0.0
 #[test]
 fn fit_intercept_false_bias_stays_zero() {
-    // Data centred at origin lets the zero-bias model solve the problem
+    // Data centered at origin lets the zero-bias model solve the problem
     let (x, y) = make_separable();
     let mut model = LinearSVC::new(5000, 0.01, RegularizationType::L2(0.1), false, 1e-5).unwrap();
     model.fit(&x, &y).unwrap();
@@ -404,7 +404,7 @@ fn fit_intercept_false_bias_stays_zero() {
     );
 }
 
-/// When fit_intercept=false, decision_function(x) = x . weights exactly (bias is 0.0)
+/// When fit_intercept=false, decision_function(x) equals x.dot(weights) exactly (bias is 0.0)
 #[test]
 fn fit_intercept_false_decision_function_equals_dot_product() {
     let (x, y) = make_separable();
@@ -427,7 +427,7 @@ fn fit_intercept_false_decision_function_equals_dot_product() {
     }
 }
 
-// L1 vs L2 penalty produce different weight vectors
+// L1 vs L2 penalties produce different weight vectors
 
 /// L1 and L2 penalties with the same lambda on the same data yield different
 /// weight vectors
@@ -529,9 +529,9 @@ fn save_load_preserves_hyperparameters() {
     let _ = std::fs::remove_file(path);
 }
 
-// correctness invariant: class-1 must be on positive side
+// correctness invariant: class 1 must be on positive side
 
-/// On separable data, all class-1 samples score positive and all class-0 samples
+/// On separable data, all class 1 samples score positive and all class 0 samples
 /// score negative
 #[test]
 fn class_one_samples_score_positive_class_zero_samples_score_negative() {
@@ -541,8 +541,8 @@ fn class_one_samples_score_positive_class_zero_samples_score_negative() {
 
     let scores = model.decision_function(&x).unwrap();
 
-    // First 4 samples are class 0, last 4 are class 1; the large margin means all
-    // land on their respective sides of the hyperplane
+    // First 4 samples are class 0, last 4 are class 1. The large margin puts
+    // every sample on its correct side of the hyperplane
     let mut all_correct = true;
     for i in 0..4 {
         if scores[i] >= 0.0 {
@@ -593,7 +593,7 @@ fn make_many() -> (Array2<f64>, Array1<f64>) {
     (x, y)
 }
 
-/// Two models trained with the same seed produce bit-identical weights and bias
+/// 2 models trained with the same seed produce bit-identical weights and bias
 #[test]
 fn same_random_state_is_reproducible() {
     let (x, y) = make_many();
@@ -667,7 +667,7 @@ fn fit_huge_learning_rate_on_large_finite_data_returns_non_finite() {
 // decision_function applies a non-zero fitted bias (fit_intercept=true)
 
 /// Origin-shifted separable data forces a non-zero trained bias, so
-/// decision_function(x)[i] must equal x.row(i).weights + bias from the getters
+/// decision_function(x)[i] must equal x.row(i).dot(weights) + bias from the getters
 #[test]
 fn decision_function_applies_nonzero_fitted_bias() {
     let x = Array2::from_shape_vec(
@@ -726,7 +726,7 @@ fn make_separable_n(n: usize) -> (Array2<f64>, Array1<f64>) {
     (x, y)
 }
 
-/// Mean squared-hinge loss + (λ/2)||w||² for y ∈ {-1,+1}
+/// Mean squared-hinge loss + (lambda/2)||w||^2 for y in {-1,+1}
 fn squared_hinge_objective(
     x: &Array2<f64>,
     y_pm1: &Array1<f64>,
@@ -744,8 +744,8 @@ fn squared_hinge_objective(
     loss / n + 0.5 * lambda * w.dot(w)
 }
 
-/// Reference full-batch GD that minimizes (1/n)Σ max(0,1-y·m)² + (λ/2)||w||², using the
-/// independently-derived squared-hinge gradient d/dw = -2·max(0,1-y·m)·y·x
+/// Reference full-batch GD that minimizes (1/n) sum max(0,1-y*m)^2 + (lambda/2)||w||^2,
+/// using the independently-derived squared-hinge gradient d/dw = -2*max(0,1-y*m)*y*x
 fn reference_squared_hinge_svm(
     x: &Array2<f64>,
     y_pm1: &Array1<f64>,
@@ -777,7 +777,7 @@ fn reference_squared_hinge_svm(
     (w, b)
 }
 
-/// Default loss is Hinge; with_loss sets SquaredHinge
+/// Default loss is Hinge. with_loss sets SquaredHinge
 #[test]
 fn loss_default_is_hinge_and_builder_sets_squared() {
     assert_eq!(LinearSVC::default().get_loss(), Loss::Hinge);
@@ -817,9 +817,8 @@ fn squared_hinge_differs_from_hinge() {
     assert_ne!(w_hinge, w_sq, "the two losses must yield different weights");
 }
 
-/// Ground truth: with SquaredHinge, LinearSVC minimizes the squared-hinge objective,
-/// reaching essentially the same value as an independent reference solver. A wrong
-/// gradient would converge elsewhere and miss the reference optimum.
+/// LinearSVC with SquaredHinge reaches essentially the same objective value as an
+/// independent reference solver. A wrong gradient would miss this optimum
 #[test]
 fn squared_hinge_minimizes_its_objective() {
     let (x, y01) = make_separable_n(120);

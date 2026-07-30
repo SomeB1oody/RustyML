@@ -2,10 +2,10 @@
 //!
 //! Provides [`RobustScaler`], which centers on the median and divides by the interquartile
 //! range instead of using the mean and standard deviation. Both statistics are order-based, so
-//! a handful of extreme values moves them barely at all - where a single outlier can drag
-//! [`StandardScaler`](super::StandardScaler)'s mean and inflate its standard deviation, or
-//! stretch [`MinMaxScaler`](super::MinMaxScaler)'s denominator until every other sample is
-//! squeezed into a sliver of the range
+//! a handful of extreme values moves them barely at all. A single outlier can drag
+//! [`StandardScaler`](super::StandardScaler)'s mean and inflate its standard deviation. An
+//! outlier can also stretch [`MinMaxScaler`](super::MinMaxScaler)'s denominator until every
+//! other sample is squeezed into a sliver of the range
 
 use super::{
     column_quantiles, fitted, for_each_row, handle_zero_scale, validate_matrix,
@@ -18,26 +18,26 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
 /// Scales features by their median and interquartile range
 ///
 /// Rows are samples and columns are features. [`fit`](Self::fit) records each feature's median
-/// and the spread between the two quantiles of `quantile_range` (the interquartile range by
-/// default); [`transform`](Self::transform) applies `(x - center) / scale` with those stored
+/// and the spread between the 2 quantiles of `quantile_range` (the interquartile range by
+/// default). [`transform`](Self::transform) applies `(x - center) / scale` with those stored
 /// values. A feature whose quantile spread is degenerate gets a divisor of `1.0`, so it centers
-/// to zeros rather than producing `NaN`
+/// to zeros instead of producing `NaN`
 ///
-/// This is scikit-learn's `RobustScaler`, and it is the answer when the data has outliers you
-/// do not want to remove: the median ignores how far away the extremes are, and the IQR
-/// measures the bulk of the distribution rather than its tails. The trade-off is that the
-/// output has no fixed range and no unit variance - only a comparable middle
+/// This is scikit-learn's `RobustScaler`. Use it when the data has outliers you do not want to
+/// remove. The median ignores how far the extremes sit, and the IQR measures the bulk of the
+/// distribution rather than its tails. The trade-off is that the output has no fixed range and
+/// no unit variance, only a comparable middle
 ///
 /// # Differences from the rest of the family
 ///
-/// - **No `partial_fit`.** Quantiles cannot be merged across batches the way moments and
-///   extrema can, so the whole training matrix has to be in hand (scikit-learn has no
-///   `partial_fit` here either)
-/// - **No `unit_variance` option.** scikit-learn can additionally rescale so that normally
-///   distributed features come out with unit variance; that needs the inverse normal CDF, which
-///   this crate does not provide
+/// - **No `partial_fit`.** Quantiles cannot merge across batches the way moments and extrema
+///   can. The whole training matrix must be in hand (scikit-learn has no `partial_fit` here
+///   either)
+/// - **No `unit_variance` option.** scikit-learn can also rescale so that normally distributed
+///   features come out with unit variance. That needs the inverse normal CDF, which this crate
+///   does not provide
 /// - As with [`StandardScaler`](super::StandardScaler), `center_` and `scale_` are computed and
-///   kept even when `with_centering` / `with_scaling` are `false`; the flags decide only what
+///   kept even when `with_centering` / `with_scaling` are `false`. The flags decide only what
 ///   [`transform`](Self::transform) applies
 ///
 /// # Examples
@@ -55,11 +55,11 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
 /// let mut scaler = RobustScaler::new();
 /// let z = scaler.fit_transform(&x).unwrap();
 ///
-/// // Both columns get the SAME center and scale: the outlier never enters either statistic
+/// // Both columns get the same center and scale: the outlier never enters either statistic
 /// assert_eq!(scaler.get_center().unwrap(), &array![5.0, 5.0]);
 /// assert_eq!(scaler.get_scale().unwrap(), &array![4.0, 4.0]);
 ///
-/// // So the bulk of the data lands on a sane scale, and the outlier stays visible as one
+/// // So the bulk of the data lands on a reasonable scale, and the outlier stays visible as one
 /// assert!(z.rows().into_iter().take(8).all(|row| row.iter().all(|v| v.abs() <= 1.0)));
 /// assert!(z[[8, 1]] > 200.0);
 /// ```
@@ -77,7 +77,7 @@ pub struct RobustScaler {
     scale: Option<Array1<f64>>,
     /// Number of samples the statistics were computed over
     ///
-    /// A RustyML addition for symmetry with the rest of the family; scikit-learn's
+    /// A RustyML addition for symmetry with the rest of the family. scikit-learn's
     /// `RobustScaler` has no such attribute
     n_samples_seen: usize,
 }
@@ -95,12 +95,13 @@ impl RobustScaler {
     ///
     /// # Returns
     ///
-    /// - `Self` - A new scaler with `quantile_range = (25.0, 75.0)`, centering and scaling on
+    /// - `Self` - A new scaler with `quantile_range = (25.0, 75.0)` and both centering and
+    ///   scaling enabled
     ///
     /// # Notes
     ///
     /// Either step can be switched off with [`with_centering`](Self::with_centering) and
-    /// [`with_scaling`](Self::with_scaling); the quantiles themselves move with
+    /// [`with_scaling`](Self::with_scaling). The quantiles themselves move with
     /// [`with_quantile_range`](Self::with_quantile_range)
     pub fn new() -> Self {
         Self {
@@ -145,7 +146,7 @@ impl RobustScaler {
     /// Sets the quantile percentages whose spread becomes the divisor (default: `(25.0, 75.0)`)
     ///
     /// A wider range (say `(10.0, 90.0)`) uses more of the distribution and reacts more to the
-    /// tails; a narrower one is more resistant but rests on fewer samples
+    /// tails. A narrower one is more resistant but rests on fewer samples
     ///
     /// # Parameters
     ///
@@ -156,16 +157,16 @@ impl RobustScaler {
     ///
     /// - `Result<Self, Error>` - the updated instance, for method chaining
     ///
+    /// # Notes
+    ///
+    /// Unlike [`MinMaxScaler::with_feature_range`](super::MinMaxScaler::with_feature_range),
+    /// this **discards any fitted statistics**. The stored quantiles were read at the old
+    /// positions and cannot move without the training data. Refit after changing it
+    ///
     /// # Errors
     ///
     /// - [`Error::InvalidParameter`] - If the bounds are not finite, out of `[0, 100]`, or
     ///   `low >= high`
-    ///
-    /// # Notes
-    ///
-    /// Unlike [`MinMaxScaler::with_feature_range`](super::MinMaxScaler::with_feature_range),
-    /// this **discards any fitted statistics**: the stored quantiles were read at the old
-    /// positions and cannot be moved without the training data. Refit after changing it
     pub fn with_quantile_range(mut self, low: f64, high: f64) -> Result<Self, Error> {
         if !low.is_finite() || !high.is_finite() || low < 0.0 || high > 100.0 || low >= high {
             return Err(Error::invalid_parameter(
@@ -205,8 +206,8 @@ impl RobustScaler {
 
     /// Fits the scaler, recording each feature's median and quantile spread
     ///
-    /// Any statistics from a previous fit are discarded. Call this on the training matrix only -
-    /// fitting on the full dataset before splitting leaks test-set information into the
+    /// Any statistics from a previous fit are discarded. Call this on the training matrix only.
+    /// Fitting on the full dataset before splitting leaks test-set information into the
     /// transform
     ///
     /// # Parameters
@@ -224,10 +225,8 @@ impl RobustScaler {
     ///
     /// # Performance
     ///
-    /// One sort per feature serves all three quantiles, parallelized across features above the
-    /// calibrated scan gate (see `crate::parallel_gates`), so the statistics never depend on
-    /// the thread count. This is the one scaler that copies a column at a time (a borrowed lane
-    /// cannot be sorted in place), so it costs `threads * n_samples` of scratch memory
+    /// Sorts each feature once for all 3 quantiles, in parallel across features above the
+    /// scan gate in `crate::parallel_gates`. The result does not depend on the thread count
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
@@ -259,7 +258,7 @@ impl RobustScaler {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, Error>` - A new scaled matrix; `x` is not modified
+    /// - `Result<Array2<f64>, Error>` - A new scaled matrix (`x` is not modified)
     ///
     /// # Errors
     ///
@@ -307,9 +306,9 @@ impl RobustScaler {
 
     /// Fits the scaler on `x` and returns the scaled `x`
     ///
-    /// Equivalent to [`fit`](Self::fit) followed by [`transform`](Self::transform); this is the
-    /// call for the training matrix, after which [`transform`](Self::transform) handles every
-    /// other batch
+    /// Equivalent to [`fit`](Self::fit) followed by [`transform`](Self::transform). Call this
+    /// once on the training matrix, then use [`transform`](Self::transform) for every other
+    /// batch
     ///
     /// # Parameters
     ///
@@ -317,7 +316,7 @@ impl RobustScaler {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, Error>` - A new scaled matrix; `x` is not modified
+    /// - `Result<Array2<f64>, Error>` - A new scaled matrix (`x` is not modified)
     ///
     /// # Errors
     ///
@@ -342,7 +341,7 @@ impl RobustScaler {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, Error>` - A new matrix in the original units; `x` is not modified
+    /// - `Result<Array2<f64>, Error>` - A new matrix in the original units (`x` is not modified)
     ///
     /// # Errors
     ///
@@ -394,6 +393,7 @@ impl RobustScaler {
     }
 }
 
+/// Unit tests for [`RobustScaler`]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,9 +429,9 @@ mod tests {
 
     /// Replacing an extreme value leaves the robust statistics untouched, unlike the moments
     ///
-    /// Note that this needs enough samples for the quantile positions to sit away from the
-    /// tail: with only four rows, the 75th percentile interpolates straight into the outlier,
-    /// which is the rule working as specified rather than a failure of robustness
+    /// This needs enough samples for the quantile positions to sit away from the tail. With
+    /// too few rows, the 75th percentile interpolates straight into the outlier by design,
+    /// not a failure of robustness
     #[test]
     fn resists_an_outlier() {
         let clean = array![

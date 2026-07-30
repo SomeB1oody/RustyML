@@ -6,7 +6,7 @@ use crate::error::Error;
 ///
 /// # Errors
 ///
-/// Returns [`Error::DimensionMismatch`] if the shape length doesn't match expected_dims
+/// Returns [`Error::DimensionMismatch`] if the shape length does not match expected_dims
 pub(super) fn validate_input_shape_dims(
     input_shape: &[usize],
     expected_dims: usize,
@@ -154,6 +154,7 @@ pub(super) fn validate_strides_3d(strides: (usize, usize, usize)) -> Result<(), 
     Ok(())
 }
 
+/// Unit tests for the validation helpers
 #[cfg(test)]
 mod tests {
     use super::*;

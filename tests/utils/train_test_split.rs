@@ -69,7 +69,7 @@ fn test_none_test_size_defaults_to_0_3() {
     assert_eq!(x_test.nrows(), x_test_explicit.nrows());
 }
 
-// Determinism: seed behaviour
+// Determinism: seed behavior
 
 /// Same random_state yields byte-identical splits
 #[test]
@@ -113,7 +113,7 @@ fn test_different_seeds_different_splits() {
 
 // Row-value determinism: verify actual values, not just counts
 
-/// Every output row traces back to exactly one input row, with no cross-partition duplicates
+/// Every output row traces back to exactly 1 input row, with no cross-partition duplicates
 #[test]
 fn test_output_rows_are_subsets_of_input() {
     // Rows: [0,1], [10,11], [20,21], [30,31], [40,41]
@@ -345,10 +345,7 @@ fn test_error_dimension_mismatch() {
     );
 }
 
-/// Out-of-range test_size values all yield InvalidParameter.
-///
-/// Covers the exclusive lower boundary (0.0), the exclusive upper boundary (1.0),
-/// a negative value (-0.1), and a value above 1.0 (1.5).
+/// Out-of-range test_size values (0.0, 1.0, -0.1, 1.5) all yield InvalidParameter
 #[test]
 fn test_error_test_size_out_of_range() {
     for test_size in [0.0_f64, 1.0, -0.1, 1.5] {
@@ -379,7 +376,7 @@ fn test_error_single_sample() {
 
 // Stratified split
 
-/// Every class keeps at least one sample on each side, even when classes are imbalanced
+/// Every class keeps at least 1 sample on each side, even when classes are imbalanced
 #[test]
 fn test_stratified_keeps_every_class_on_both_sides() {
     // 8 of class 0 and 2 of class 1: a plain split could drop class 1 from the train set

@@ -2,11 +2,11 @@
 //!
 //! Provides the [`IsolationForest`] estimator and its underlying [`IsolationTree`]
 //! node type. They isolate outliers via random feature splits and score samples by
-//! their average path length across the forest
+//! their average path length across the forest.
 //!
 //! The inlier/outlier decision threshold is [`Contamination`], resolved against the
-//! *training* scores at fit time, so [`IsolationForest::predict`] is a fitted rule:
-//! it gives the same answer for a sample whether it is scored alone or in a batch
+//! *training* scores at fit time. [`IsolationForest::predict`] is therefore a fitted rule: it
+//! gives the same answer whether the caller scores a sample alone or in a batch.
 
 use crate::error::Error;
 use crate::machine_learning::validation::{
@@ -18,18 +18,19 @@ use ndarray::{Array1, ArrayBase, Axis, Data, Ix2};
 use ndarray_rand::rand::Rng;
 use ndarray_rand::rand::rngs::StdRng;
 
-/// Euler–Mascheroni constant, used in the harmonic-number approximation of [`average_path_length_factor`]
+/// Euler-Mascheroni constant, used in the harmonic-number approximation of
+/// [`average_path_length_factor`]
 const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
 
 /// The inlier/outlier decision threshold for [`IsolationForest`]
 ///
 /// Resolved into a concrete score cutoff at fit time from the *training* scores (see
-/// [`IsolationForest::get_offset`]), so the resulting rule does not depend on how the
-/// samples you later predict on happen to be batched
+/// [`IsolationForest::get_offset`]). The resulting rule does not depend on how you later
+/// batch the samples you predict on
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum Contamination {
-    /// `'auto'`: the `-0.5` cutoff from the original Isolation Forest paper — a sample is an
-    /// outlier when it isolates faster than the forest's expected path length
+    /// `'auto'`: the `-0.5` cutoff from the original Isolation Forest paper. A sample is an
+    /// outlier when it isolates faster than the forest's expected path length.
     Auto,
     /// The expected proportion of outliers in the training data, in `(0.0, 0.5]`
     ///
@@ -38,9 +39,11 @@ pub enum Contamination {
     Fraction(f64),
 }
 
-/// Average path-length normalization factor `c(n)` for isolation trees: the expected path length
-/// of an unsuccessful search in a binary search tree of `n` points, used to normalize raw path
-/// lengths into anomaly scores. Returns 0.0 for `n <= 1` and 1.0 for `n == 2`
+/// Average path-length normalization factor `c(n)` for isolation trees
+///
+/// Equals the expected path length of an unsuccessful search in a binary search tree of `n`
+/// points. Normalizes raw path lengths into anomaly scores. Returns 0.0 for `n <= 1` and 1.0
+/// for `n == 2`.
 #[inline]
 fn average_path_length_factor(n: usize) -> f64 {
     if n <= 1 {
@@ -62,19 +65,15 @@ fn average_path_length_factor(n: usize) -> f64 {
 }
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
-/// Default minimum number of trees required to enable parallel tree construction
-///
-/// A synthetic ~0.7 us-per-tree build crosses over at 16-32 tasks, roughly 22 us of total
-/// work, about one rayon fork/join. A real iTree build (subsample gather, allocations) costs
-/// well over 2.2 us per tree, so at this gate the parallel path's total work clears the fork
-/// cost with margin
+/// Minimum number of trees needed before the forest builds trees in parallel
 const DEFAULT_PARALLEL_THRESHOLD_TREES: usize = 10;
 
-/// Average isolation-tree path length for the prediction work estimate, `c(256) ~= 10`
-/// (`2 * H(psi - 1) - 2(psi - 1)/psi` at the default subsample size 256)
+/// Average isolation-tree path length, used to estimate per-sample work for the parallel gate
+///
+/// `c(256)` is about 10, the value at the default subsample size of 256
 const ISOLATION_TREE_AVG_PATH: usize = 10;
 
-/// Score cutoff for [`Contamination::Auto`]: the threshold from Liu et al., where a raw
+/// Score cutoff for [`Contamination::Auto`]: the threshold from Liu et al. A raw
 /// normalized score above `0.5` means the sample isolates faster than the forest average.
 /// Negated to match the sign convention of [`IsolationForest::score_samples`], and identical
 /// to scikit-learn's `offset_` under `contamination='auto'`
@@ -82,22 +81,21 @@ const AUTO_CONTAMINATION_OFFSET: f64 = -0.5;
 
 /// A node in an isolation tree
 ///
-/// Unlike a decision-tree node, an isolation tree only needs to record where it
-/// split and how many samples ended up unresolved at a leaf, so it uses this
-/// minimal structure rather than reusing the classification-oriented decision
-/// tree node
+/// An isolation tree only needs to record where it split and how many samples ended up
+/// unresolved at a leaf. It uses this minimal structure instead of the classification-oriented
+/// decision tree node.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum IsolationTree {
-    /// A terminal node reached by samples that could not be split further
+    /// A terminal node that holds samples the tree could not split further
     Leaf {
         /// Number of samples that reached this leaf, used by the average-path-length correction
         size: usize,
     },
-    /// A split node directing samples to one of the two children
+    /// A split node that directs samples to one of the 2 children
     Internal {
         /// Index of the feature this node splits on
         feature: usize,
-        /// Split value; samples with a feature value below this go left
+        /// Split value. Samples with a feature value below this go left.
         threshold: f64,
         /// Subtree for samples below the threshold
         left: Box<IsolationTree>,
@@ -108,10 +106,10 @@ pub enum IsolationTree {
 
 /// Isolation Forest for anomaly detection
 ///
-/// An unsupervised algorithm that detects anomalies by isolating outliers in the
-/// data. Each tree randomly selects a feature, then randomly selects a split value between
-/// the minimum and maximum values of that feature. Anomalies are isolated more easily and so
-/// have shorter average path lengths in the trees
+/// An unsupervised algorithm that detects anomalies by isolating outliers in the data. Each
+/// tree randomly selects a feature, then randomly selects a split value between the minimum
+/// and maximum values of that feature. Trees isolate anomalies more easily, so anomalies get
+/// shorter average path lengths.
 ///
 /// # Examples
 ///
@@ -123,13 +121,13 @@ pub enum IsolationTree {
 /// let data = array![[1.0, 2.0], [2.0, 3.0], [10.0, 15.0]];
 /// model.fit(&data).unwrap();
 ///
-/// // Anomaly scores in [-1, 0), *lower* meaning more anomalous, as in scikit-learn
+/// // Anomaly scores in [-1, 0). Lower means more anomalous, as in scikit-learn.
 /// let scores = model.score_samples(&data).unwrap();
 ///
-/// // The same scores shifted by the fitted offset, so negative marks an outlier
+/// // Same scores, shifted by the fitted offset. Negative marks an outlier.
 /// let decision = model.decision_function(&data).unwrap();
 ///
-/// // Hard labels: -1 for outliers, +1 for inliers - exactly the sign of `decision_function`
+/// // Hard labels: -1 for outliers, +1 for inliers. This matches the sign of `decision_function`.
 /// let labels = model.predict(&data).unwrap();
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -152,8 +150,8 @@ pub struct IsolationForest {
     sample_size: usize,
     /// Rule for choosing the inlier/outlier cutoff, resolved into `offset` at fit time
     contamination: Contamination,
-    /// Score cutoff separating inliers from outliers, `None` before training. A sample
-    /// scoring at or above this is labelled `-1` by [`IsolationForest::predict`]
+    /// Score cutoff separating inliers from outliers, `None` before training.
+    /// [`IsolationForest::predict`] labels a sample `-1` when it scores at or above this value.
     offset: Option<f64>,
 }
 
@@ -198,12 +196,14 @@ impl IsolationForest {
     ///
     /// # Notes
     ///
-    /// By default the tree depth is derived as `ceil(log2(max_samples))` and the forest is
-    /// seeded non-deterministically. Override either with the builder methods below:
+    /// By default, `new` derives the tree depth as `ceil(log2(max_samples))` and seeds the
+    /// forest non-deterministically. Override either with the builder methods below:
     ///
-    /// - [`with_max_depth`](Self::with_max_depth) - maximum depth of each tree (returns `Result`; the depth is validated)
+    /// - [`with_max_depth`](Self::with_max_depth) - maximum depth of each tree (returns
+    ///   `Result` because it validates the depth)
     /// - [`with_random_state`](Self::with_random_state) - fixed RNG seed for reproducible forests
-    /// - [`with_contamination`](Self::with_contamination) - inlier/outlier cutoff rule (default [`Contamination::Auto`])
+    /// - [`with_contamination`](Self::with_contamination) - inlier/outlier cutoff rule (default
+    ///   [`Contamination::Auto`])
     ///
     /// # Errors
     ///
@@ -223,7 +223,6 @@ impl IsolationForest {
             ));
         }
 
-        // ceil(log2(max_samples))
         let computed_max_depth = (max_samples as f64).log2().ceil() as usize;
 
         Ok(Self {
@@ -243,11 +242,11 @@ impl IsolationForest {
     ///
     /// # Parameters
     ///
-    /// - `max_depth` - Maximum depth of each tree; must be greater than 0
+    /// - `max_depth` - Maximum depth of each tree. Must be greater than 0
     ///
     /// # Returns
     ///
-    /// - `Ok(Self)` - the updated instance, for method chaining
+    /// - `Result<Self, Error>` - the updated instance, for method chaining
     ///
     /// # Errors
     ///
@@ -263,7 +262,8 @@ impl IsolationForest {
         Ok(self)
     }
 
-    /// Sets a fixed RNG seed, making forest construction reproducible (default: `None`, non-deterministic)
+    /// Sets a fixed RNG seed, so forest construction is reproducible (default: `None`,
+    /// non-deterministic)
     ///
     /// # Parameters
     ///
@@ -280,8 +280,8 @@ impl IsolationForest {
     /// Sets the inlier/outlier cutoff rule used by [`predict`](Self::predict)
     /// (default: [`Contamination::Auto`])
     ///
-    /// The rule is resolved into a concrete score cutoff at fit time, so changing it
-    /// after fitting requires re-fitting.
+    /// `fit` resolves this rule into a concrete score cutoff, so changing it after fitting
+    /// requires a new call to `fit`.
     ///
     /// # Parameters
     ///
@@ -289,7 +289,7 @@ impl IsolationForest {
     ///
     /// # Returns
     ///
-    /// - `Ok(Self)` - the updated instance, for method chaining
+    /// - `Result<Self, Error>` - the updated instance, for method chaining
     ///
     /// # Errors
     ///
@@ -336,7 +336,6 @@ impl IsolationForest {
     /// Returns `Error` if:
     /// - Input data is empty
     /// - Input contains NaN or infinite values
-    /// - Tree building fails
     ///
     /// # Performance
     ///
@@ -391,8 +390,8 @@ impl IsolationForest {
 
         self.trees = Some(trees?);
 
-        // Resolve the decision threshold against the TRAINING scores, so `predict` is a
-        // fitted rule rather than a per-batch quantile of whatever it is handed
+        // Resolve the decision threshold against the training scores, so `predict` is a
+        // fitted rule, not a per-batch quantile of whatever the caller hands it.
         self.offset = Some(match self.contamination {
             Contamination::Auto => AUTO_CONTAMINATION_OFFSET,
             Contamination::Fraction(c) => {
@@ -440,7 +439,7 @@ impl IsolationForest {
     where
         S: Data<Elem = f64>,
     {
-        // Stop when max depth is reached or the node has at most one sample
+        // Stop when the recursion reaches max depth or the node has at most 1 sample
         if current_depth >= self.max_depth || indices.len() <= 1 {
             return Ok(IsolationTree::Leaf {
                 size: indices.len(),
@@ -490,7 +489,8 @@ impl IsolationForest {
         })
     }
 
-    /// Computes the path length of a sample through an isolation tree with average adjustment for unresolved samples
+    /// Computes the path length of a sample through an isolation tree, with the average-path
+    /// correction for samples unresolved at a leaf
     fn path_length(&self, sample: &[f64], node: &IsolationTree, current_depth: usize) -> f64 {
         match node {
             IsolationTree::Leaf { size } => {
@@ -514,9 +514,9 @@ impl IsolationForest {
 
     /// Computes the anomaly score for a single sample
     ///
-    /// The single-sample form of [`score_samples`](Self::score_samples), taking a slice instead of
-    /// a matrix so a streaming caller does not have to build a one-row array. The score lies in
-    /// `[-1, 0)` and *lower* means more anomalous, exactly as the batch form does
+    /// The single-sample form of [`score_samples`](Self::score_samples). It takes a slice
+    /// instead of a matrix, so a streaming caller does not have to build a 1-row array. The
+    /// score lies in `[-1, 0)`, and *lower* means more anomalous, exactly as in the batch form.
     ///
     /// # Parameters
     ///
@@ -548,14 +548,14 @@ impl IsolationForest {
         Ok(self.normalized_score(sample, trees, c_n))
     }
 
-    /// Computes the normalized anomaly score for one sample, given a precomputed
+    /// Computes the normalized anomaly score for a single sample, using a precomputed
     /// normalization constant `c_n = c(sample_size)`
     ///
-    /// Taking `c_n` as a parameter lets batch prediction compute it once instead of
-    /// recomputing it for every sample
+    /// `c_n` is a parameter so batch prediction can compute it once and reuse it, instead of
+    /// recomputing it for every sample.
     fn normalized_score(&self, sample: &[f64], trees: &[IsolationTree], c_n: f64) -> f64 {
-        // Average path length across all trees; one term per tree stays below any parallel
-        // reduction gate, and the per-sample batch loop parallelizes one level up
+        // Average path length across all trees. Each tree contributes 1 term, which stays
+        // below any parallel reduction gate. The per-sample batch loop parallelizes one level up.
         let avg_path_length: f64 = trees
             .iter()
             .map(|tree| self.path_length(sample, tree, 0))
@@ -567,19 +567,18 @@ impl IsolationForest {
             return -1.0;
         }
 
-        // Liu et al.'s score is s(x, n) = 2^(-E(h(x)) / c(n)), rising towards 1 as the sample gets
-        // more anomalous. scikit-learn returns its negation so that *lower* means more anomalous,
-        // which is what puts `decision_function` on the usual "negative is the rejected class"
-        // footing; negating here keeps every score in this type on that one orientation
+        // Liu et al.'s score is s(x, n) = 2^(-E(h(x)) / c(n)), which rises toward 1 for more
+        // anomalous samples. This function returns the negated score, matching scikit-learn's
+        // convention where *lower* means more anomalous and negative marks the rejected class.
         -(2.0_f64.powf(-avg_path_length / c_n))
     }
 
     /// Computes the anomaly score for each sample
     ///
-    /// Scores lie in `[-1, 0)` and *lower* means more anomalous - `-(2^(-E[h(x)] / c(n)))`, which
-    /// is scikit-learn's `score_samples` exactly. For the same values shifted by the fitted cutoff
-    /// use [`decision_function`](Self::decision_function), and for a hard inlier/outlier label use
-    /// [`predict`](Self::predict)
+    /// Scores lie in `[-1, 0)`, and *lower* means more anomalous. The formula is
+    /// `-(2^(-E[h(x)] / c(n)))`, exactly scikit-learn's `score_samples`. For the same values
+    /// shifted by the fitted cutoff, use [`decision_function`](Self::decision_function). For a
+    /// hard inlier/outlier label, use [`predict`](Self::predict).
     ///
     /// # Parameters
     ///
@@ -599,7 +598,7 @@ impl IsolationForest {
     ///
     /// # Performance
     ///
-    /// Parallelizes when the traversal work (samples x trees x average path length) clears
+    /// Parallelizes when the traversal work (samples * trees * average path length) clears
     /// the calibrated tree-traversal gate (see `crate::parallel_gates`)
     pub fn score_samples<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
@@ -636,9 +635,10 @@ impl IsolationForest {
 
     /// Shifts each sample's score by the fitted cutoff, so that negative means outlier
     ///
-    /// `score_samples(x) - offset`, matching scikit-learn's `decision_function`. Because the
-    /// [`offset`](Self::get_offset) is model state rather than a quantile of `x`, a given sample
-    /// gets the same decision value whether it is scored alone or inside a larger batch
+    /// `score_samples(x) - offset`, matching scikit-learn's `decision_function`. The
+    /// [`offset`](Self::get_offset) is model state rather than a quantile of `x`. A given
+    /// sample gets the same decision value whether the caller scores it alone or inside a
+    /// larger batch.
     ///
     /// # Parameters
     ///
@@ -646,17 +646,18 @@ impl IsolationForest {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, Error>` - Per-sample decision values; negative marks an outlier
+    /// - `Result<Array1<f64>, Error>` - Per-sample decision values. Negative marks an outlier
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` / `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::NonFinite` -
-    ///   propagated from [`score_samples`](Self::score_samples)
+    /// - `Error::NotFitted` / `Error::EmptyInput` / `Error::DimensionMismatch` /
+    ///   `Error::NonFinite` - propagated from [`score_samples`](Self::score_samples)
     pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
-        // `score_samples` validates the fitted state, so `offset` is Some by the time we read it
+        // `score_samples` validates the fitted state, so `offset` is Some by the time this
+        // function reads it.
         let scores = self.score_samples(x)?;
         let offset = self
             .offset
@@ -681,8 +682,8 @@ impl IsolationForest {
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` / `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::NonFinite` -
-    ///   propagated from [`decision_function`](Self::decision_function)
+    /// - `Error::NotFitted` / `Error::EmptyInput` / `Error::DimensionMismatch` /
+    ///   `Error::NonFinite` - propagated from [`decision_function`](Self::decision_function)
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
     where
         S: Data<Elem = f64>,
@@ -694,7 +695,7 @@ impl IsolationForest {
 
     /// Trains the model on the dataset and immediately labels it
     ///
-    /// This is a convenience method that combines `fit` and `predict` in one call
+    /// This is a convenience method that combines `fit` and `predict` in a single call
     ///
     /// # Parameters
     ///
@@ -719,6 +720,7 @@ impl IsolationForest {
     model_save_and_load_methods!(IsolationForest);
 }
 
+/// Unit tests for `average_path_length_factor`
 #[cfg(test)]
 mod tests {
     use super::*;

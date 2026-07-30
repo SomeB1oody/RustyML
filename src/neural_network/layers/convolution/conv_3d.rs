@@ -20,13 +20,13 @@ use std::borrow::Cow;
 /// A 3D convolutional layer for neural networks
 ///
 /// Applies a 3D convolution to volumetric data such as medical images, 3D models, or video
-/// sequences. Input shape is \[batch_size, depth, height, width, channels\] and output shape is
-/// \[batch_size, output_depth, output_height, output_width, filters\], where output dimensions
-/// depend on input size, kernel size, strides, and padding
+/// sequences. Input shape is \[batch_size, depth, height, width, channels\]. Output shape is
+/// \[batch_size, output_depth, output_height, output_width, filters\]. Output dimensions depend
+/// on input size, kernel size, strides, and padding
 ///
 /// The dimension-generic convolution math lives in
-/// [`convolution_engine`](crate::neural_network::layers::convolution); this layer holds the
-/// weights, activation, and caches, and delegates the forward/backward numerics to it
+/// [`convolution_engine`](crate::neural_network::layers::convolution). This layer holds the
+/// weights, activation, and caches, and delegates the forward/backward numerics to it.
 ///
 /// # Examples
 ///
@@ -66,7 +66,7 @@ use std::borrow::Cow;
 /// let prediction = model.predict(&x).unwrap();
 /// println!("3D Convolution layer prediction results: {:?}", prediction);
 ///
-/// // Output shape should be [2, 3, 6, 6, 6]
+/// // Output shape should be [2, 6, 6, 6, 3]
 /// assert_eq!(prediction.shape(), &[2, 6, 6, 6, 3]);
 /// ```
 #[derive(Debug)]
@@ -79,7 +79,8 @@ pub struct Conv3D {
     strides: (usize, usize, usize),
     /// Type of padding to apply (`Valid` or `Same`)
     padding: PaddingType,
-    /// 5D filter weights with shape \[kernel_depth, kernel_height, kernel_width, channels, filters\]
+    /// 5D filter weights with shape
+    /// \[kernel_depth, kernel_height, kernel_width, channels, filters\]
     weights: Array5<f32>,
     /// 1D bias values with shape \[filters\]
     bias: Array1<f32>,
@@ -106,23 +107,24 @@ impl Conv3D {
     /// - `kernel_size` - Size of the convolution kernel as (depth, height, width)
     /// - `input_shape` - Expected input shape as \[batch_size, depth, height, width, channels\]
     /// - `strides` - Stride values as (depth_stride, height_stride, width_stride)
-    /// - `activation` - Activation applied to the convolution output (e.g. ReLU, Sigmoid, Tanh, Softmax)
-    ///
-    /// # Notes
-    ///
-    /// Padding defaults to [`PaddingType::Valid`]; choose [`PaddingType::Same`] with
-    /// [`Conv3D::with_padding`]. Weights are seeded from the global seed or entropy by default; for
-    /// reproducible initialization, set a seed with [`Conv3D::with_random_state`]
+    /// - `activation` - Activation applied to the convolution output
     ///
     /// # Returns
     ///
     /// - `Result<Self, Error>` - A new `Conv3D` layer instance or an error
     ///
+    /// # Notes
+    ///
+    /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
+    /// [`Conv3D::with_padding`]. By default, the layer seeds weights from the global seed or
+    /// entropy. For reproducible initialization, set a seed with [`Conv3D::with_random_state`].
+    ///
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `filters` is 0
     /// - `Error::InvalidParameter` - If any kernel dimension or stride is 0
-    /// - `Error::InvalidInput` - If `input_shape` is not 5D or has 0 dimensions
+    /// - `Error::InvalidInput` - If `input_shape` is not 5D or has a dimension equal to 0
+    /// - `Error::InvalidInput` - If input spatial dimensions are smaller than kernel size
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize, usize),
@@ -169,11 +171,13 @@ impl Conv3D {
         self
     }
 
-    /// Sets the seed used to initialize the filter weights and re-initializes them deterministically
+    /// Sets the seed used to initialize the filter weights and re-initializes them
+    /// deterministically
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`])
-    /// This re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
-    /// assigning custom weights or training. The bias stays zero-initialized
+    /// By default, the layer seeds weights from the global seed or entropy (see
+    /// [`crate::random`]). This method re-runs Xavier/Glorot uniform initialization with
+    /// `random_state`. Call it before assigning custom weights or training. The bias stays
+    /// zero-initialized
     ///
     /// # Parameters
     ///
@@ -242,12 +246,14 @@ impl Conv3D {
     ///
     /// # Parameters
     ///
-    /// - `weights` - 5D array of filter weights with shape \[kernel_depth, kernel_height, kernel_width, channels, filters\]
+    /// - `weights` - 5D array of filter weights with shape \[kernel_depth, kernel_height,
+    ///   kernel_width, channels, filters\]
     /// - `bias` - 1D array of bias values with shape \[filters\]
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork` - If `weights` or `bias` does not match the layer's expected shape
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` does not match the
+    ///   layer's expected shape
     pub fn set_weights(&mut self, weights: Array5<f32>, bias: Array1<f32>) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
@@ -280,7 +286,7 @@ impl Layer for Conv3D {
         Ok(activated)
     }
 
-    /// Inference forward (eval mode, writes no caches); see [`Layer::predict`]
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         if input.ndim() != 5 {
             return Err(Error::invalid_input("input tensor is not 5D"));

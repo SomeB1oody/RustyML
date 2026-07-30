@@ -1,10 +1,10 @@
-//! Parallel/serial gate calibration for the neural-network kernels
+//! Parallel/serial gate calibration for the crate's kernels
 //!
 //! Every `*_MIN_FLOPS` / `*_MIN_OPS` / `*_PARALLEL_THRESHOLD` constant in the crate decides when
 //! a pass is worth spreading across rayon. This bench times the forced-serial and
-//! forced-parallel implementations of each kernel class across a size ladder, prints the
-//! tables, and rewrites `benches/calibrations/RESULTS.md` with the measurements and the observed crossovers,
-//! so the constants can be set from data instead of estimates
+//! forced-parallel implementations of each kernel class across a size ladder. It prints the
+//! tables and rewrites `benches/calibrations/RESULTS.md` with the measurements, so the
+//! constants can be set from data instead of estimates.
 //!
 //! Run with:
 //!
@@ -12,20 +12,20 @@
 //! cargo bench --bench parallel_gates
 //! ```
 //!
-//! Calibration is machine-specific; the generated report records the CPU and thread count
+//! Calibration is machine-specific. The generated report records the CPU and the thread count.
 //!
-//! The calibrations are grouped by kernel family:
-//!
-//! - [`harness`]: the timing loop, the `Row`/`Section` table model, and the random-data generators
-//! - [`nn_kernels`]: conv/pooling engines and the f32 elementwise classes
-//! - [`ml_kernels`]: f64 elementwise classes and the deterministic blocked reductions
-//! - [`trees`]: tree traversal/sort-scan/build and the kd-tree dimension crossover
-//! - [`normalization`]: BatchNorm and LayerNorm statistics folds
+//! The calibrations are grouped by kernel family. See the doc comment above each `mod`
+//! declaration below for what it covers.
 
+/// The timing loop, the `Row`/`Section` table model, and the random-data generators.
 mod harness;
+/// f64 elementwise classes and the deterministic blocked reductions.
 mod ml_kernels;
+/// Conv and pooling engines plus the f32 elementwise classes.
 mod nn_kernels;
+/// BatchNorm and LayerNorm statistics folds.
 mod normalization;
+/// Tree traversal, sort-scan, tree build, and the kd-tree dimension crossover.
 mod trees;
 
 use std::fmt::Write as _;
@@ -53,12 +53,12 @@ fn today() -> String {
 }
 
 fn main() {
-    // `cargo bench -- <filter>` passes harness args; this custom harness ignores them
+    // `cargo bench -- <filter>` passes harness args. This custom harness ignores them.
     let threads = rayon::current_num_threads();
     println!("calibrating parallel gates (rayon threads: {threads}) ...");
 
-    // Note: the GEMM/GEMV FLOP-and-block gate calibrations were removed when the matmul backend
-    // moved to the `gemmkit` backend, which decides serial-vs-parallel by problem size itself.
+    // The matmul backend (`gemmkit`) decides serial-vs-parallel by problem size on its own, so
+    // this harness has no GEMM or GEMV gate to calibrate.
     let mut sections = vec![
         nn_kernels::calibrate_conv_forward(),
         nn_kernels::calibrate_pooling(),

@@ -6,17 +6,14 @@ use ndarray::{ArrayBase, Data, Dimension};
 use ndarray_rand::rand::SeedableRng;
 use ndarray_rand::rand::rngs::StdRng;
 
-/// A deterministically seeded RNG, for reproducible tests
-///
-/// Always seed test RNGs - never use the thread RNG - so failures are reproducible
+/// Creates a deterministically seeded RNG, so a failing test reproduces with the same seed
 pub fn seeded_rng(seed: u64) -> StdRng {
     StdRng::seed_from_u64(seed)
 }
 
-/// Asserts two arrays are element-wise equal within `eps` (absolute difference)
+/// Asserts 2 arrays are element-wise equal within `eps` (absolute difference)
 ///
-/// Use this for array comparisons. For single scalars, use approx's
-/// `assert_abs_diff_eq!` / `assert_relative_eq!` macros directly
+/// For a single scalar, use approx's `assert_abs_diff_eq!` or `assert_relative_eq!` directly
 pub fn assert_allclose<A, S1, S2, D>(actual: &ArrayBase<S1, D>, expected: &ArrayBase<S2, D>, eps: A)
 where
     A: approx::AbsDiffEq<Epsilon = A> + Copy + std::fmt::Debug,

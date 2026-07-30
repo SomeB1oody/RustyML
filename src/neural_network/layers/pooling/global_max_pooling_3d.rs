@@ -1,4 +1,4 @@
-//! Global max pooling layer for 3D inputs, reducing each channel to its maximum value
+//! Global max pooling layer for 3D inputs.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -12,9 +12,9 @@ use crate::neural_network::traits::Layer;
 
 /// Global max pooling layer for 3D inputs
 ///
-/// Selects the maximum value across the depth, height, and width dimensions. Input
-/// tensor shape: `[batch_size, depth, height, width, channels]`. Output tensor shape:
-/// `[batch_size, channels]`
+/// Selects the maximum value across the depth, height, and width dimensions.
+/// Input tensor shape: `[batch_size, depth, height, width, channels]`. Output tensor shape:
+/// `[batch_size, channels]`.
 ///
 /// # Examples
 ///
@@ -51,14 +51,14 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is gated on the estimated element ops of the whole pass
-/// (`batch * positions * channels`) clearing [`tuning::pool`](crate::tuning::pool),
-/// not on any fixed shape
+/// The pass runs in parallel when its estimated element count (`batch * positions * channels`)
+/// clears the gate in [`tuning::pool`](crate::tuning::pool). The gate does not depend on any
+/// fixed shape.
 #[derive(Debug)]
 pub struct GlobalMaxPooling3D {
     /// Shape of the input tensor cached during the forward pass
     input_shape: Vec<usize>,
-    /// Cached flat per-channel arg-max indices for backpropagation
+    /// Cached flat per-channel arg-max indices used for the backward pass
     argmax: Option<Vec<usize>>,
 }
 
@@ -88,7 +88,7 @@ impl Layer for GlobalMaxPooling3D {
             return Err(Error::invalid_input("input tensor is not 5D"));
         }
 
-        // Cache the input shape and arg-max positions for backpropagation
+        // Cache the input shape and arg-max positions for the backward pass
         self.input_shape = input.shape().to_vec();
 
         let (output, argmax) = global_pool_forward(input, PoolKind::Max);
@@ -96,7 +96,7 @@ impl Layer for GlobalMaxPooling3D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
+    /// Runs the forward pass for inference. Writes no cache. See [`Layer::predict`].
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         if input.ndim() != 5 {
             return Err(Error::invalid_input("input tensor is not 5D"));

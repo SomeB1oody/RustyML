@@ -21,14 +21,15 @@ use std::borrow::Cow;
 ///
 /// Processes a 3D input tensor with shape (batch_size, timesteps, input_dim) and returns
 /// the last hidden state with shape (batch_size, units). Uses reset, update, and candidate
-/// gates to control information flow and mitigate vanishing gradients
+/// gates to control information flow and reduce vanishing gradients.
 ///
-/// All 3 gates are stored fused: the kernels are packed side by side into single matrices
-/// with column blocks in the order `[update | reset | candidate]` (`[z | r | h]`), Keras' layout, so the input
-/// projection and the gradient reductions each run as one GEMM instead of three. Per timestep
-/// the reset and update recurrent projections fuse into one GEMM; only the candidate's recurrent
-/// projection stays separate because its input `r_t .* h_{t-1}` depends on the freshly computed
-/// reset gate
+/// All 3 gates are stored fused. The kernels are packed side by side into single matrices.
+/// Column blocks follow the order `[update | reset | candidate]` (`[z | r | h]`), matching
+/// Keras. This lets the input projection run as 1 GEMM instead of 3.
+///
+/// Per timestep, the reset and update recurrent projections fuse into 1 GEMM. Only the
+/// candidate's recurrent projection stays separate, because its input `r_t .* h_{t-1}`
+/// depends on the freshly computed reset gate.
 ///
 /// # Examples
 ///
@@ -68,8 +69,8 @@ pub struct GRU {
 
     /// Cached input tensor for backward propagation
     input_cache: Option<Array3<f32>>,
-    /// Per-timestep forward values recorded by `forward` for the backward pass (`None` until the
-    /// first training forward; `predict` never sets it)
+    /// Per-timestep forward values recorded by `forward` for the backward pass. This is `None`
+    /// until the first training forward. `predict` never sets it.
     caches: Option<GruCaches>,
 
     /// Activation applied to the candidate hidden state each timestep (Keras-style)
@@ -99,16 +100,17 @@ impl GRU {
     ///
     /// - `input_dim` - Dimensionality of input features (number of features per timestep)
     /// - `units` - Number of GRU units/neurons in the layer (determines output dimensionality)
-    /// - `activation` - Activation layer from the activation module (ReLU, Sigmoid, Tanh, Softmax)
-    ///
-    /// # Notes
-    ///
-    /// Weights are seeded from the global seed or entropy by default. For reproducible
-    /// initialization, set a seed with [`GRU::with_random_state`]
+    /// - `activation` - Activation from the activation module (Linear, ReLU, Sigmoid, Tanh,
+    ///   Softmax)
     ///
     /// # Returns
     ///
     /// - `Result<Self, Error>` - A new GRU layer instance
+    ///
+    /// # Notes
+    ///
+    /// Weights are seeded from the global seed or entropy by default. For reproducible
+    /// initialization, set a seed with [`GRU::with_random_state`].
     ///
     /// # Errors
     ///
@@ -130,11 +132,11 @@ impl GRU {
         })
     }
 
-    /// Sets the seed used to initialize the gate weights and re-initializes them deterministically
+    /// Sets the seed used to initialize the gate weights and re-initializes them deterministically.
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`])
-    /// This re-runs the gate initialization with `random_state`, so call it before assigning custom
-    /// weights or training
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
+    /// This re-runs the gate initialization with `random_state`. Call it before assigning custom
+    /// weights or training.
     ///
     /// # Parameters
     ///
@@ -150,9 +152,9 @@ impl GRU {
         self
     }
 
-    /// Initializes the fused `[z | r | h]` gate blocks from the given seed
+    /// Initializes the fused `[z | r | h]` gate blocks from the given seed.
     ///
-    /// One RNG is threaded through all 3 gate blocks; all biases start at 0.0
+    /// 1 RNG is threaded through all 3 gate blocks. All biases start at 0.0.
     fn init_gates(
         input_dim: usize,
         units: usize,
@@ -168,7 +170,8 @@ impl GRU {
     ///
     /// - `kernel` - Fused input kernel with shape (input_dim, 3 * units), gate column blocks in
     ///   the order `[z | r | h]` (update, reset, candidate), matching Keras
-    /// - `recurrent_kernel` - Fused recurrent kernel with shape (units, 3 * units), same block order
+    /// - `recurrent_kernel` - Fused recurrent kernel with shape (units, 3 * units), same block
+    ///   order
     /// - `bias` - Fused bias with shape (1, 3 * units), same block order
     ///
     /// # Errors
@@ -202,10 +205,6 @@ impl GRU {
     ///
     /// # Parameters
     ///
-    /// The arguments stay in reset-update-candidate order even though the fused kernel packs
-    /// update first: every one of them is an `Array2<f32>`, so reordering them to match the packing
-    /// would compile at every existing call site and silently swap two gates
-    ///
     /// - `reset_kernel` - Input kernel for the reset gate with shape (input_dim, units)
     /// - `reset_recurrent_kernel` - Recurrent kernel for the reset gate with shape (units, units)
     /// - `reset_bias` - Bias for the reset gate with shape (1, units)
@@ -213,8 +212,15 @@ impl GRU {
     /// - `update_recurrent_kernel` - Recurrent kernel for the update gate with shape (units, units)
     /// - `update_bias` - Bias for the update gate with shape (1, units)
     /// - `candidate_kernel` - Input kernel for the candidate gate with shape (input_dim, units)
-    /// - `candidate_recurrent_kernel` - Recurrent kernel for the candidate gate with shape (units, units)
+    /// - `candidate_recurrent_kernel` - Recurrent kernel for the candidate gate with shape
+    ///   (units, units)
     /// - `candidate_bias` - Bias for the candidate gate with shape (1, units)
+    ///
+    /// # Notes
+    ///
+    /// The arguments stay in reset, update, candidate order, even though the fused kernel packs
+    /// update first. Each argument is an `Array2<f32>`, so reordering them to match the packing
+    /// would compile at every call site and silently swap 2 gates.
     ///
     /// # Errors
     ///
@@ -293,27 +299,18 @@ impl GRU {
         self.set_weights(kernel, recurrent_kernel, bias)
     }
 
-    /// Runs the recurrence and returns the last hidden state - the shared numeric body of
-    /// [`Layer::forward`] and [`Layer::predict`]
+    /// Runs the recurrence and returns the last hidden state. This is the shared numeric body of
+    /// [`Layer::forward`] and [`Layer::predict`].
     ///
-    /// When `caches` is `Some`, every per-timestep value the backward pass needs (hidden states,
-    /// the reset/update gate activations, the candidate, and `r_t .* h_{t-1}`) is recorded;
-    /// `predict` passes `None` and skips both the recording and the clones
+    /// When `caches` is `Some`, the pass records every per-timestep value the backward pass
+    /// needs. This includes the hidden states, the reset and update gate activations, the
+    /// candidate, and `r_t .* h_{t-1}`. `predict` passes `None` and skips the recording.
     ///
-    /// Each of the two recurrent products per timestep is a single GEMM call: its buffer starts as
-    /// the matching column block of the pre-projected `x_t @ kernel` slice, the product
-    /// accumulates into it (`beta = 1`), and the epilogue adds that block's bias slice -
-    /// removing the four allocating broadcast adds. The gate activations stay separate
-    /// vectorized sweeps: a per-element closure epilogue (`gemm_map`) would drop the exp-based
-    /// sigmoid/tanh maps to one indirect scalar call per element, which measures far slower than
-    /// the sweeps it saves. The fused bias add is bitwise-identical to the plain product followed
-    /// by the same broadcast adds, so the cached per-gate arrays the BPTT pass consumes are
-    /// unchanged
+    /// Each timestep computes the reset and update gates with 1 fused GEMM, then the candidate
+    /// with a second GEMM whose input is `r_t .* h_{t-1}`.
     ///
-    /// Both calls pass gemmkit's auto parallelism: `batch * units * 2*units` and
-    /// `batch * units * units` of work, which at small layer sizes sit below the backend's work
-    /// gate and stay on the calling thread, so the tight loop pays no parallel dispatch; wider
-    /// layers cross the gate and the backend spreads them itself
+    /// The GEMM calls use gemmkit's automatic parallelism, so gemmkit picks serial or parallel
+    /// execution based on its own work-size gate.
     fn run(
         &self,
         x3: &ArrayView3<f32>,
@@ -322,7 +319,7 @@ impl GRU {
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         let u = self.units;
         let act = self.activation;
-        // Bias blocks `[r | z]` and `[h]`, each folded into its own product's epilogue
+        // Bias blocks `[z | r]` and `[h]`, each folded into its own product's epilogue
         let (bias_rz, bias_h) = self
             .gates
             .bias
@@ -341,7 +338,7 @@ impl GRU {
         for t in 0..timesteps {
             let xw_t = xw.index_axis(Axis(1), t); // [batch, 3*units]
 
-            // Reset and update share h_prev, so their recurrent projections fuse into one GEMM
+            // Reset and update share h_prev, so their recurrent projections fuse into 1 GEMM
             let mut rz = xw_t.slice(s![.., 0..2 * u]).to_owned();
             gemmkit_ndarray::gemm_fused(
                 1.0,
@@ -475,7 +472,7 @@ impl Layer for GRU {
                 .into_dimensionality::<ndarray::Ix2>()
                 .unwrap();
 
-            // Gradient through r_h = r_t .* h_{t-1} (one recurrent matmul shared by both terms)
+            // Gradient through r_h = r_t .* h_{t-1} (1 recurrent matmul shared by both terms)
             let grad_rh = dot(
                 &grad_h_candidate_raw,
                 &self.gates.recurrent_kernel.slice(s![.., 2 * u..]).t(),
@@ -492,7 +489,7 @@ impl Layer for GRU {
             dz_rz_t.slice_mut(s![.., 0..u]).assign(&grad_z_raw);
             dz_rz_t.slice_mut(s![.., u..2 * u]).assign(&grad_r_raw);
 
-            // Gradient w.r.t. the previous hidden state
+            // Gradient with respect to the previous hidden state
             grad_h = dot(
                 &dz_rz_t,
                 &self.gates.recurrent_kernel.slice(s![.., 0..2 * u]).t(),
@@ -526,7 +523,7 @@ impl Layer for GRU {
             .to_shape((batch * timesteps, 3 * u))
             .expect("contiguous DZ reshape");
 
-        // Input-kernel gradient for all 3 gates in one GEMM
+        // Input-kernel gradient for all 3 gates in 1 GEMM
         let grad_kernel = dot(&x_flat.t(), &dz_flat);
         let grad_bias = dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0));
 
@@ -550,7 +547,7 @@ impl Layer for GRU {
             Parallelism::Rayon(0),
         );
 
-        // Input gradient for all 3 gates in one GEMM
+        // Input gradient for all 3 gates in 1 GEMM
         let grad_x3 = crate::neural_network::layers::recurrent::gate::reshape_2d_to_3d(
             dot(&dz_flat, &self.gates.kernel.t()),
             (batch, timesteps, feat),

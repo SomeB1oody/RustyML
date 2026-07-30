@@ -1,7 +1,8 @@
-//! Fused gate parameters and shared helpers for GRU/LSTM recurrent cells
+//! Fused gate parameters and shared helpers for the GRU and LSTM recurrent cells
 //!
-//! Defines the `FusedGates` weight/gradient container plus the batched input-projection and
-//! cache helpers reused across recurrent layers
+//! Defines the `FusedGates` weight and gradient container. Provides the batched input-projection
+//! and reshape helpers shared by all 3 recurrent layers. Also provides a cache-extraction helper
+//! used by the GRU and LSTM cells.
 
 use crate::error::Error;
 use crate::neural_network::layers::recurrent::orthogonal_init;
@@ -14,15 +15,14 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// Fused gate parameters and gradients for recurrent cells
 ///
 /// Packs every gate's weights side by side into single matrices. Column blocks follow a fixed,
-/// layer-defined gate order (LSTM: `[i | f | g | o]`, GRU: `[z | r | h]`), so the batched input
-/// projection and the per-timestep recurrent projection each run as one large GEMM instead of one
-/// GEMM per gate:
+/// layer-defined gate order: LSTM uses `[i | f | g | o]` and GRU uses `[z | r | h]`. This lets
+/// the batched input projection run as 1 large GEMM for every gate, instead of 1 GEMM per gate.
 ///
-/// - `kernel`: `[input_dim, n_gates * units]`
-/// - `recurrent_kernel`: `[units, n_gates * units]`
-/// - `bias`: `[1, n_gates * units]`
+/// The per-timestep recurrent projection benefits the same way when a layer's gates do not
+/// depend on each other. GRU's candidate gate depends on the reset gate's output, so GRU still
+/// needs 2 recurrent GEMMs per timestep instead of 1.
 ///
-/// Optimizer state is held by the optimizer, not the gates (see [`FusedGates::parameters`])
+/// The optimizer holds its own state, not the gates. See [`FusedGates::parameters`].
 #[derive(Debug)]
 pub struct FusedGates {
     /// Fused input kernel with shape (input_dim, n_gates * units)
@@ -42,19 +42,19 @@ pub struct FusedGates {
 impl FusedGates {
     /// Creates fused gates with randomly initialized weights
     ///
-    /// Initialization keeps the per-gate semantics of separate gates exactly: the input kernel is
-    /// Xavier/Glorot uniform with the **per-gate** fan (`input_dim + units`, not
-    /// `input_dim + n_gates * units`), each gate's recurrent block is an independent Gram-Schmidt
+    /// Initialization keeps the per-gate semantics of separate gates. The input kernel uses
+    /// Xavier/Glorot uniform with the **per-gate** fan, `input_dim + units`, not
+    /// `input_dim + n_gates * units`. Each gate's recurrent block is an independent Gram-Schmidt
     /// orthogonal `[units, units]` matrix, and each gate's bias block is a per-gate constant
     ///
     /// # Parameters
     ///
     /// - `input_dim` - Dimensionality of the input features
     /// - `units` - Number of units (neurons) per gate
-    /// - `bias_init` - Initial bias value per gate, in gate-block order; its length determines the
-    ///   number of gates (e.g. `&[0.0, 1.0, 0.0, 0.0]` for an LSTM with forget bias 1.0)
-    /// - `rng` - RNG threaded in by the owning layer so the whole layer shares one reproducible
-    ///   stream. See [`crate::random`]
+    /// - `bias_init` - Initial bias value per gate, in gate-block order. Its length sets the
+    ///   number of gates (e.g. `&[0.0, 1.0, 0.0, 0.0]` for an LSTM with a forget bias of 1.0)
+    /// - `rng` - Shared RNG from the owning layer, so the whole layer draws from a single
+    ///   reproducible stream. See [`crate::random`]
     ///
     /// # Returns
     ///
@@ -83,7 +83,7 @@ impl FusedGates {
             rng,
         );
 
-        // One orthogonal [units, units] block per gate
+        // A single orthogonal [units, units] block per gate
         let mut recurrent_kernel = Array2::<f32>::zeros((units, width));
         for g in 0..n_gates {
             recurrent_kernel
@@ -109,7 +109,10 @@ impl FusedGates {
     /// Exposes the 3 fused trainable tensors (kernel, recurrent kernel, bias) and their gradients
     /// as flat [`ParamGrad`] slices for the optimizer to update
     ///
-    /// Returns an empty vector if gradients have not been computed yet
+    /// # Returns
+    ///
+    /// - `Vec<ParamGrad<'_>>` - The 3 tensors with their gradients, or an empty vector if
+    ///   gradients have not been computed yet
     pub fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
         let Self {
             kernel,
@@ -169,13 +172,22 @@ impl FusedGates {
     }
 }
 
-/// Batched fused input projection: `x3 [batch, timesteps, input_dim] @ kernel` for every timestep
-/// and every gate in a single GEMM, returning `[batch, timesteps, n_gates * units]`
+/// Batched fused input projection: `x3 @ kernel` for every timestep and every gate in a single
+/// GEMM
 ///
-/// The input projection does not depend on the recurrence, so collapsing the (batch, timesteps)
-/// axes and all gate columns into one matmul replaces `timesteps * n_gates` small gemms with one
-/// large one (better cache/SIMD use). Only the `h_prev @ recurrent_kernel` term has to stay
-/// sequential
+/// The input projection does not depend on the recurrence. Collapsing the (batch, timesteps) axes
+/// and all gate columns into 1 matmul replaces `timesteps * n_gates` small GEMMs with 1 large
+/// GEMM. This improves cache and SIMD use. Only the `h_prev @ recurrent_kernel` term must stay
+/// sequential.
+///
+/// # Parameters
+///
+/// - `kernel` - Fused input kernel with shape `[input_dim, n_gates * units]`
+/// - `x3` - Input tensor with shape `[batch, timesteps, input_dim]`
+///
+/// # Returns
+///
+/// - `Array3<f32>` - The projected input with shape `[batch, timesteps, n_gates * units]`
 pub fn project_input(kernel: &Array2<f32>, x3: &ArrayView3<f32>) -> Array3<f32> {
     let (batch, timesteps, input_dim) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
     let width = kernel.shape()[1];
@@ -185,12 +197,22 @@ pub fn project_input(kernel: &Array2<f32>, x3: &ArrayView3<f32>) -> Array3<f32> 
     reshape_2d_to_3d(gemmkit_ndarray::dot(&x2, kernel), (batch, timesteps, width))
 }
 
-/// Reshapes a GEMM result `[d0*d1, d2]` to `[d0, d1, d2]`, tolerating a column-major input
+/// Reshapes a GEMM result `[d0*d1, d2]` to `[d0, d1, d2]`, and tolerates a column-major input
 ///
-/// `ndarray`'s `dot` returns a column-major result when both operands have a row stride of 1,
-/// which arrays with a length-1 axis can exhibit despite passing `is_standard_layout` (e.g. a
-/// `[1, w]` kernel built by `concatenate`). A direct `into_shape_with_order` would panic with
-/// `IncompatibleLayout` on such a result, so normalize the layout first when needed
+/// `ndarray`'s `dot` returns a column-major result when both operands have a row stride of 1.
+/// Arrays with a length-1 axis can have this stride even when `is_standard_layout` returns true,
+/// for example a `[1, w]` kernel built by `concatenate`. A direct `into_shape_with_order` call
+/// would then panic with `IncompatibleLayout`, so this function normalizes the layout first when
+/// needed.
+///
+/// # Parameters
+///
+/// - `m` - GEMM result with shape `[d0*d1, d2]`, in either row-major or column-major layout
+/// - `dims` - Target shape `(d0, d1, d2)`
+///
+/// # Returns
+///
+/// - `Array3<f32>` - `m` reshaped to `dims`
 pub fn reshape_2d_to_3d(m: Array2<f32>, dims: (usize, usize, usize)) -> Array3<f32> {
     let m = if m.is_standard_layout() {
         m
@@ -201,9 +223,9 @@ pub fn reshape_2d_to_3d(m: Array2<f32>, dims: (usize, usize, usize)) -> Array3<f
         .expect("row-major [d0*d1, d2] reshapes to [d0, d1, d2]")
 }
 
-/// Extracts the cached value, erroring if it is absent
+/// Extracts the cached value, or returns an error if it is absent
 ///
-/// Used during the backward pass to ensure the forward pass has been run
+/// The backward pass calls this to confirm the forward pass ran first
 ///
 /// # Parameters
 ///
@@ -233,7 +255,7 @@ mod tests {
 
     // FusedGates::new
 
-    /// Fused shapes follow [input_dim, n*units] / [units, n*units] / [1, n*units]
+    /// Fused shapes are `[input_dim, w]`, `[units, w]`, and `[1, w]`, where `w = n_gates * units`
     #[test]
     fn fused_gates_new_shapes() {
         let mut rng = crate::random::make_rng(Some(42));
@@ -243,7 +265,7 @@ mod tests {
         assert_eq!(gates.bias.shape(), &[1, 12]);
     }
 
-    /// Each gate's bias block is filled with its per-gate constant
+    /// `FusedGates::new` fills each gate's bias block with its per-gate constant
     #[test]
     fn fused_gates_new_bias_blocks() {
         let mut rng = crate::random::make_rng(Some(42));
@@ -282,7 +304,7 @@ mod tests {
         }
     }
 
-    /// Zero dimensions are rejected
+    /// `FusedGates::new` rejects a dimension of 0
     #[test]
     fn fused_gates_new_rejects_zero_dims() {
         let mut rng = crate::random::make_rng(Some(1));

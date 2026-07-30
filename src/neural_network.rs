@@ -1,13 +1,13 @@
 //! Neural network primitives: layers, loss functions, optimizers, the sequential
 //! model, and the traits that tie them together
 //!
-//! A framework for constructing, training, and deploying feed-forward neural networks. Layers,
-//! optimizers, and losses live in the [`layers`](crate::neural_network::layers),
+//! A framework for constructing, training, and deploying feed-forward neural networks.
+//! Layers, optimizers, and losses live in the [`layers`](crate::neural_network::layers),
 //! [`optimizers`](crate::neural_network::optimizers), and [`losses`](crate::neural_network::losses)
-//! submodules; [`Sequential`](crate::neural_network::sequential::Sequential) stacks layers into a
+//! submodules. [`Sequential`](crate::neural_network::sequential::Sequential) stacks layers into a
 //! trainable model, and the shared interfaces live in [`traits`](crate::neural_network::traits).
-//! Every tensor flowing through the framework is a [`Tensor`](crate::neural_network::Tensor) (`f32`
-//! n-dimensional array)
+//! Every tensor in the framework is a [`Tensor`](crate::neural_network::Tensor), an `f32`
+//! n-dimensional array
 //!
 //! # Core components
 //!
@@ -15,15 +15,15 @@
 //! - **Dense**: fully connected layer with a configurable activation
 //! - **Activation**: standalone activation layers (ReLU, Sigmoid, Tanh, Softmax, Linear, ...)
 //! - **Convolution**: 1D/2D/3D convolution, plus depthwise and separable variants
-//! - **Pooling**: max / average pooling and their global variants for 1D, 2D, and 3D
+//! - **Pooling**: max and average pooling and their global variants for 1D, 2D, and 3D
 //! - **Recurrent**: SimpleRNN, LSTM, and GRU sequence layers
-//! - **Regularization**: dropout (incl. spatial), noise injection, and normalization layers
+//! - **Regularization**: dropout (including spatial), noise injection, and normalization layers
 //!
 //! ## Optimizers
 //! - **SGD**: stochastic gradient descent with momentum
 //! - **Adam**: adaptive moment estimation (coupled L2 weight decay)
 //! - **AdamW**: Adam with decoupled weight decay
-//! - **RMSProp**: root-mean-square propagation
+//! - **RMSprop**: root-mean-square propagation
 //! - **AdaGrad**: adaptive gradient
 //!
 //! ## Loss functions
@@ -32,10 +32,10 @@
 //! - **CategoricalCrossEntropy** / **SparseCategoricalCrossEntropy**: multi-class classification
 //!
 //! ## Model
-//! - [`Sequential`](crate::neural_network::sequential::Sequential): a linear stack of layers with an
-//!   integrated training loop, prediction, and weight save/load. `fit` / `fit_with_batches` hand
-//!   back a [`History`](crate::neural_network::sequential::History) of one loss per epoch, the
-//!   single step they are built from is public as `train_batch`, and `evaluate` scores a model
+//! - [`Sequential`](crate::neural_network::sequential::Sequential): a linear stack of layers with
+//!   an integrated training loop, prediction, and weight save and load. `fit` and
+//!   `fit_with_batches` return a [`History`](crate::neural_network::sequential::History) with 1
+//!   loss value per epoch. Both build on the public `train_batch` step. `evaluate` scores a model
 //!   without training it
 //!
 //! # Examples

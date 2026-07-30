@@ -1,8 +1,8 @@
 //! Data normalization along configurable axes and norm orders
 //!
-//! Provides [`normalize()`] to scale arrays so the chosen norm equals 1 along each
-//! row, column, or globally, with [`NormalizationAxis`] and [`NormalizationOrder`]
-//! selecting the axis and norm (L1, L2, Max, or Lp)
+//! Provides [`normalize()`], which scales an array so the chosen norm equals 1 along each
+//! row, column, or the whole array. [`NormalizationAxis`] selects the axis, and
+//! [`NormalizationOrder`] selects the norm (L1, L2, Max, or Lp)
 
 use crate::error::Error;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, scan_f64_parallel_min_elems};
@@ -10,24 +10,24 @@ use crate::{Deserialize, Serialize};
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
-/// Norm magnitude below which a lane is treated as (near-)zero and left unscaled
+/// Norm magnitude below which a lane is treated as near-zero and left unscaled
 const NORM_CONSTANT_THRESHOLD: f64 = 10.0 * f64::EPSILON;
 
 /// Axis along which normalization is applied
 ///
-/// For arrays with 3 or more dimensions, `Row` and `Column` operate on the last two
-/// axes: `Row` normalizes along axis N-1 (last axis) and `Column` along axis N-2
-/// (second-to-last). The last axis holds features
+/// For arrays with 3 or more dimensions, `Row` and `Column` operate on the last 2 axes.
+/// `Row` normalizes along axis N-1 (the last axis), and `Column` along axis N-2 (the
+/// second-to-last). The last axis holds features
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NormalizationAxis {
     /// Normalize each row independently
     ///
-    /// For 2D arrays, normalizes each row (samples); for N-D arrays (N>2), normalizes
+    /// For 2D arrays, normalizes each row (samples). For N-D arrays (N>2), normalizes
     /// along the last axis (features). For shape (batch, height, width), along width
     Row,
     /// Normalize each column independently
     ///
-    /// For 2D arrays, normalizes each column (features); for N-D arrays (N>2), normalizes
+    /// For 2D arrays, normalizes each column (features). For N-D arrays (N>2), normalizes
     /// along the second-to-last axis. For shape (batch, height, width), along height
     Column,
     /// Normalize the entire array as a single vector
@@ -53,8 +53,8 @@ pub enum NormalizationOrder {
 /// Normalize data along the specified axis using the given norm order
 ///
 /// Divides each element by the norm computed along the chosen axis, so the norm of the
-/// data along that axis equals 1. A lane whose norm is below `10 * f64::EPSILON` (a (near-)zero
-/// lane) is left unchanged, since such a norm is treated as 1.0
+/// data along that axis equals 1. A lane whose norm is below `10 * f64::EPSILON` is a
+/// near-zero lane and is left unchanged, since its norm counts as 1.0
 ///
 /// # Parameters
 ///
@@ -66,19 +66,6 @@ pub enum NormalizationOrder {
 ///
 /// - `Result<Array<f64, D>, Error>` - Normalized array with the same dimensions as the input
 ///
-/// # Errors
-///
-/// - [`Error::EmptyInput`] if the input array is empty
-/// - [`Error::NonFinite`] if the input contains non-finite values (NaN/Inf)
-/// - [`Error::InvalidParameter`] if the Lp norm parameter `p` is not positive and finite
-/// - [`Error::NonFinite`] if the normalization computation produces non-finite values
-///
-/// # Performance
-///
-/// Row/column normalization runs across lanes in parallel once the per-lane scan work
-/// clears the scan-class gate; global normalization divides in parallel above the
-/// cheap-map gate (see `crate::parallel_gates`)
-///
 /// # Examples
 ///
 /// ```rust
@@ -89,6 +76,19 @@ pub enum NormalizationOrder {
 /// let result = normalize(&data, NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
 /// // Each row has L2 norm = 1
 /// ```
+///
+/// # Errors
+///
+/// - [`Error::EmptyInput`] if the input array is empty
+/// - [`Error::NonFinite`] if the input contains non-finite values (NaN/Inf)
+/// - [`Error::InvalidParameter`] if the Lp norm parameter `p` is not positive and finite
+/// - [`Error::NonFinite`] if the normalization computation produces non-finite values
+///
+/// # Performance
+///
+/// Row/column normalization runs in parallel across lanes once the per-lane scan work
+/// clears the scan gate. Global normalization divides in parallel above the cheap-map
+/// gate (see `crate::parallel_gates`)
 pub fn normalize<S, D>(
     data: &ArrayBase<S, D>,
     axis: NormalizationAxis,
@@ -120,9 +120,9 @@ where
 
 /// Divides a single lane by its norm in place
 ///
-/// A lane is scaled unless its norm is below
-/// [`NORM_CONSTANT_THRESHOLD`] (`10 * f64::EPSILON`), in which case the norm is treated as `1.0`
-/// and the lane is left untouched (a (near-)zero lane has no meaningful direction to rescale)
+/// A lane is scaled unless its norm is below [`NORM_CONSTANT_THRESHOLD`] (`10 * f64::EPSILON`).
+/// Below that threshold, the norm counts as `1.0` and the lane is left untouched, since a
+/// near-zero lane has no meaningful direction to rescale
 fn normalize_lane(lane: &mut ArrayViewMut1<f64>, norm: f64) {
     if norm >= NORM_CONSTANT_THRESHOLD {
         lane.mapv_inplace(|x| x / norm);
@@ -148,11 +148,11 @@ where
     Ok(())
 }
 
-/// Normalizes each lane along the axis `axis_from_end` positions from the end
-/// (`1` = last axis, rows; `2` = second-to-last, columns)
+/// Normalizes each lane along the axis `axis_from_end` positions from the end.
+/// `1` means the last axis (rows), `2` means the second-to-last axis (columns)
 ///
-/// Parallelizes across lanes once there are enough of them; each lane is then
-/// processed sequentially, so the two levels never nest
+/// Parallelizes across lanes once there are enough of them. Each lane is then
+/// processed sequentially, so the 2 levels never nest
 ///
 /// # Errors
 ///
@@ -175,7 +175,8 @@ where
             operation_name
         )));
     }
-    // ndim >= 2 guaranteed above, so ndim - axis_from_end cannot underflow for axis_from_end in {1, 2}
+    // ndim >= 2 guaranteed above, so ndim - axis_from_end cannot underflow for
+    // axis_from_end in {1, 2}
     let axis = Axis(ndim - axis_from_end);
 
     let mut lanes: Vec<ArrayViewMut1<f64>> = data.lanes_mut(axis).into_iter().collect();

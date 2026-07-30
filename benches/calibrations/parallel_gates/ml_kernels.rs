@@ -1,6 +1,8 @@
-//! Classical-ML / utils gates: the f64 elementwise classes (centering, kernel transforms,
-//! arg-min row scans, reference parallel sums) and the deterministic blocked reductions
-//! (block size, exp-heavy log-loss, k-means assign-accumulate, f32->f64 grad-norm square-sum)
+//! Classical-ML and utils gates.
+//!
+//! It covers the f64 elementwise classes: centering, kernel transforms, arg-min row scans, and
+//! reference parallel sums. It also covers the deterministic blocked reductions: block size,
+//! exp-heavy log-loss, k-means assign-accumulate, and f32-to-f64 grad-norm square-sum.
 
 use crate::harness::{
     Row, Section, random_matrix_f64, random_vector_f32, random_vector_f64, time_per_call_ns,
@@ -114,9 +116,9 @@ pub fn calibrate_elementwise_f64() -> Vec<Section> {
         rows,
     });
 
-    // Parallel f64 sum (reference only: rayon's reduction grouping is scheduling-dependent, so
-    // a parallel float sum is not bitwise reproducible - these sites get serialized unless the
-    // win is overwhelming and a deterministic blocked reduction is used instead)
+    // Parallel f64 sum, reference only. Rayon's reduction grouping is scheduling-dependent, so
+    // a parallel float sum is not bitwise reproducible. These sites run serial unless the win is
+    // overwhelming enough to use a deterministic blocked reduction instead.
     let mut rows = Vec::new();
     for &len in &sizes {
         let buf = random_vector_f64(len, 33);
@@ -178,10 +180,10 @@ pub fn calibrate_det_reduce_block() -> Section {
 
 // exp-heavy reduction: EXP_REDUCE_MIN_ELEMS (math::logistic_loss)
 
-/// Per-element work is the numerically stable log-loss term (`exp` + `ln` + a few flops), an
-/// order of magnitude heavier than the cheap sum-of-squares class, so its crossover sits well
-/// below SUM_F64_PARALLEL_MIN_ELEMS. The parallel side is the deterministic blocked range fold
-/// the production path uses
+/// Per-element work is the numerically stable log-loss term (`exp` + `ln` + a few flops). That
+/// is an order of magnitude heavier than the cheap sum-of-squares class, so its crossover sits
+/// well below SUM_F64_PARALLEL_MIN_ELEMS. The parallel side is the deterministic blocked range
+/// fold the production path uses
 pub fn calibrate_exp_reduction() -> Section {
     let max_n = 1_048_576usize;
     let logits = random_vector_f64(max_n, 81).mapv(|v| v * 4.0);
@@ -235,10 +237,10 @@ pub fn calibrate_exp_reduction() -> Section {
 // k-means assign-accumulate: SUM gate on samples x features
 
 /// The per-iteration k-means pass that folds every sample's row into its cluster's centroid sum
-/// (plus counts and inertia). Serial is the production scatter loop; parallel is the
+/// (plus counts and inertia). Serial is the production scatter loop. Parallel is the
 /// deterministic blocked range fold with an (Array2 sums, counts, inertia) accumulator per
-/// block. Work metric is samples x features - the d=8 rungs land in the same bracket as the
-/// d=32 rungs, which is what justifies gating on the product
+/// block. The work metric is samples x features. The d=8 rungs land in the same bracket as the
+/// d=32 rungs, which is what justifies gating on the product.
 pub fn calibrate_kmeans_accumulate() -> Section {
     let mut rows = Vec::new();
     for &(n, d, k) in &[
@@ -312,8 +314,8 @@ pub fn calibrate_kmeans_accumulate() -> Section {
 
 // f32 -> f64 widening square-sum: SQ_SUM_F32_PARALLEL_MIN_ELEMS (global_grad_norm)
 
-/// The clip-by-global-norm reduction: f32 gradients squared and accumulated in f64. Serial
-/// baseline is the production flat chain; the parallel side is the generic deterministic
+/// The clip-by-global-norm reduction: f32 gradients squared and accumulated in f64. The serial
+/// baseline is the production flat chain. The parallel side is the generic deterministic
 /// blocked fold over f32 blocks with f64 partials
 pub fn calibrate_f32_sq_sum() -> Section {
     let data = random_vector_f32(4_194_304, 101);
@@ -361,8 +363,8 @@ pub fn calibrate_f32_sq_sum() -> Section {
     }
 }
 
-/// DET_REDUCE_BLOCK validation on f32 elements (the constant counts elements, so an f32 block
-/// is half the bytes of the calibrated f64 one - this confirms 16K still sits on the plateau)
+/// DET_REDUCE_BLOCK validation on f32 elements. The constant counts elements, so an f32 block
+/// is half the bytes of the calibrated f64 one. This confirms 16K still sits on the plateau.
 pub fn calibrate_det_reduce_block_f32() -> Section {
     let data = random_vector_f32(4_194_304, 102);
     let slice = data.as_slice().unwrap();

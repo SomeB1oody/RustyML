@@ -1,12 +1,14 @@
 //! Weight containers for neural network layers
 //!
-//! Defines the [`LayerWeight`](LayerWeight<'a>) enum and the per-layer weight structs it wraps. Each struct holds
-//! its arrays as [`Cow`], so one type serves both directions. [`Layer::get_weights`] borrows
-//! the live layer arrays (no clone) for inspection or saving, while loading deserializes into
-//! owned arrays. The enum derives `Serialize`/`Deserialize`, so it is the on-disk weight format
+//! Defines the [`LayerWeight`] enum and the per-layer weight structs it wraps. Each struct
+//! holds its arrays as [`Cow`], so one type serves both directions. [`Layer::get_weights`]
+//! borrows the live layer arrays (no clone) for inspection or saving, while loading
+//! deserializes into owned arrays. The enum derives `Serialize`/`Deserialize`, so it is the
+//! on-disk weight format
 //!
 //! [`Cow`]: std::borrow::Cow
 //! [`Layer::get_weights`]: crate::neural_network::traits::Layer::get_weights
+//! [`LayerWeight`]: crate::neural_network::layers::layer_weight::LayerWeight
 
 use crate::{Deserialize, Serialize};
 
@@ -56,14 +58,14 @@ pub use simple_rnn_weight::*;
 /// Each variant corresponds to a specific layer type and holds the matching weight struct. The
 /// `'a` lifetime lets a variant borrow the live layer arrays when inspecting or saving (via
 /// [`Cow`](std::borrow::Cow)). Loading deserializes into owned arrays, so the type is used as
-/// `LayerWeight<'static>` on the load path. The enum uses serde's default (externally tagged)
+/// `LayerWeight<'static>` on the load path. The enum uses serde's default, externally tagged
 /// representation, which the non-self-describing postcard binary format requires
 ///
-/// The variants differ in size - `BatchNormalization` carries 4 arrays where a convolution carries
-/// 2 - so every value is padded to the largest. That is deliberate: exactly one of these exists per
-/// layer, built at save or load time and never in a hot path or a large collection, so the few
-/// hundred bytes of padding cost nothing. Boxing the wide variant to even them out would add an
-/// allocation to a type whose entire purpose is to borrow the live arrays without copying
+/// The variants differ in size (`BatchNormalization` carries 4 arrays, a convolution carries
+/// 2), so every value is padded to the largest one. This is deliberate. Exactly 1 value of
+/// this type exists per layer, built at save or load time, never in a hot path. Boxing the
+/// wide variant would add an allocation to a type whose only purpose is to borrow the live
+/// arrays without copying
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LayerWeight<'a> {

@@ -1,14 +1,15 @@
-//! Integration tests for the optimizer objects (SGD, Adam, RMSprop, AdaGrad)
+//! Integration tests for the optimizer objects: SGD, Adam, AdamW, RMSprop, and AdaGrad.
 //!
 //! Coverage:
-//! - Constructor validation: learning_rate/epsilon <= 0, NaN, Inf; Adam/RMSprop betas outside
-//!   [0, 1), with boundary values 0.0 (valid) and 1.0 (invalid) checked explicitly
+//! - Constructor validation: learning_rate or epsilon at or below 0, NaN, or Inf. Adam and
+//!   RMSprop betas outside [0, 1), with boundary values 0.0 (valid) and 1.0 (invalid) checked
+//!   explicitly.
 //! - End-to-end convergence: each optimizer drives a single Dense layer's MSE loss strictly
-//!   down over N epochs on a fixed, seeded regression problem
+//!   down over a fixed number of epochs on a fixed, seeded regression problem.
 //! - Multi-layer convergence: a 2-Dense-layer net with Adam verifies per-layer state buffers
-//!   are allocated correctly (both layers updated, loss falls)
+//!   are allocated correctly (both layers updated, loss falls).
 //!
-//! Gradient correctness lives in gradient_check.rs; per-element kernel math in kernels.rs
+//! Gradient correctness lives in `gradient_check.rs`.
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, ArrayD};
@@ -31,7 +32,7 @@ use rustyml::neural_network::traits::{Layer, Optimizer};
 
 /// Fixed, deterministic (x, y) pair for a tiny 1-input -> 1-output regression
 ///
-/// Target y = 2*x over 4 samples; with identity weights (w=1, b=0) the initial MSE is 1.875
+/// Target y = 2*x over 4 samples. With identity weights (w=1, b=0), the initial MSE is 1.875
 fn regression_data() -> (Tensor, Tensor) {
     let x = Array::from_shape_vec((4, 1), vec![0.5_f32, 1.0, 1.5, 2.0])
         .unwrap()
@@ -63,7 +64,7 @@ fn eval_mse(model: &Sequential, x: &Tensor, y: &Tensor) -> f32 {
     sq.sum() / sq.len() as f32
 }
 
-// SGD - constructor validation
+// SGD: constructor validation
 
 #[test]
 fn sgd_rejects_invalid_learning_rate() {
@@ -86,7 +87,7 @@ fn sgd_accepts_valid_learning_rate() {
     assert!(SGD::new(f32::MIN_POSITIVE, 0.0, false, 0.0).is_ok());
 }
 
-// Adam - constructor validation
+// Adam: constructor validation
 
 #[test]
 fn adam_rejects_invalid_learning_rate() {
@@ -101,8 +102,8 @@ fn adam_rejects_invalid_learning_rate() {
     }
 }
 
-/// beta1 must lie in [0, 1): 0.0 (inclusive lower) is accepted; 1.0 (exclusive upper),
-/// out-of-range, and NaN are rejected
+/// beta1 must lie in [0, 1): 0.0 (inclusive lower) is accepted. 1.0 (exclusive upper),
+/// out-of-range values, and NaN are rejected
 #[test]
 fn adam_beta1_bounds() {
     assert!(
@@ -120,7 +121,7 @@ fn adam_beta1_bounds() {
     }
 }
 
-/// beta2 must lie in [0, 1): 0.0 (inclusive lower) is accepted; 1.0 (exclusive upper)
+/// beta2 must lie in [0, 1): 0.0 (inclusive lower) is accepted. 1.0 (exclusive upper)
 /// and NaN are rejected
 #[test]
 fn adam_beta2_bounds() {
@@ -159,7 +160,7 @@ fn adam_accepts_valid_hyperparameters() {
     assert!(Adam::new(0.01, 0.5, 0.9, 1e-6, 0.0).is_ok());
 }
 
-// RMSprop - constructor validation
+// RMSprop: constructor validation
 
 #[test]
 fn rmsprop_rejects_invalid_learning_rate() {
@@ -174,8 +175,8 @@ fn rmsprop_rejects_invalid_learning_rate() {
     }
 }
 
-/// rho must lie in [0, 1): 0.0 (inclusive lower) is accepted; 1.0 (exclusive upper),
-/// out-of-range, and NaN are rejected
+/// rho must lie in [0, 1): 0.0 (inclusive lower) is accepted. 1.0 (exclusive upper),
+/// out-of-range values, and NaN are rejected
 #[test]
 fn rmsprop_rho_bounds() {
     assert!(
@@ -212,7 +213,7 @@ fn rmsprop_accepts_valid_hyperparameters() {
     assert!(RMSprop::new(0.01, 0.95, 1e-5, 0.0).is_ok());
 }
 
-// AdaGrad - constructor validation
+// AdaGrad: constructor validation
 
 #[test]
 fn adagrad_rejects_invalid_learning_rate() {
@@ -271,8 +272,9 @@ fn sgd_single_layer_loss_decreases_over_20_epochs() {
     let initial_mse = 1.875_f32;
 
     let mut model = Sequential::new();
-    // lr=0.1: plain SGD needs lr < 2/lambda_max(Hessian) ~= 2/5.5 ~= 0.36 here to
-    // converge (0.5 overshoots and diverges); 0.1 reduces the loss steadily
+    // Plain SGD needs lr < 2 / lambda_max(Hessian) to converge here, about 2 / 5.5, or about
+    // 0.36. A rate of 0.5 overshoots and diverges. This test uses 0.1, which reduces the loss
+    // steadily.
     model.add(identity_dense()).compile(
         SGD::new(0.1, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
@@ -364,8 +366,8 @@ fn adagrad_single_layer_loss_decreases_over_20_epochs() {
 
 // Multi-layer convergence with Adam (verifies per-layer state-buffer allocation)
 
-/// Adam on Dense(1->4) -> Dense(4->1) allocates moment buffers for both layers and
-/// drives loss down (after 20 epochs < initial; after 40 not above after 20)
+/// Adam on Dense(1->4) -> Dense(4->1) allocates moment buffers for both layers. Loss falls:
+/// below the initial value after 20 epochs, and not above the 20-epoch value after 40
 #[test]
 fn adam_two_layer_loss_decreases_and_buffers_allocated_correctly() {
     let (x, y) = regression_data();
@@ -508,9 +510,9 @@ fn adagrad_two_layer_loss_decreases() {
     );
 }
 
-// Numerical value: SGD one-step weight update on known weights
+// Numerical value: SGD 1-step weight update on known weights
 
-/// One SGD step (lr=0.01) on w=1, b=0 with x=2, y=6 yields y_hat=2.40 after refit
+/// 1 SGD step (lr=0.01) on w=1, b=0 with x=2, y=6 yields y_hat=2.40 after refit
 #[test]
 fn sgd_one_step_weight_update_matches_hand_calculation() {
     let x = Array::from_shape_vec((1, 1), vec![2.0_f32])
@@ -539,7 +541,7 @@ fn sgd_one_step_weight_update_matches_hand_calculation() {
 
     model.fit(&x, &y, 1).unwrap();
 
-    // after one SGD step: w_new=1.16, b_new=0.08, so y_hat = 2.0*1.16 + 0.08 = 2.40
+    // after 1 SGD step: w_new=1.16, b_new=0.08, so y_hat = 2.0*1.16 + 0.08 = 2.40
     let pred_after = model.predict(&x).unwrap();
     let val_after = *pred_after.iter().next().unwrap();
     assert_abs_diff_eq!(val_after, 2.40_f32, epsilon = 1e-4);
@@ -555,10 +557,8 @@ fn dense_wb(model: &Sequential) -> (f32, f32) {
     }
 }
 
-/// One clipped SGD step on the same w=1, b=0, x=2, y=6 problem as the hand-calc test above
-/// Unclipped gradients are grad_w=-16, grad_b=-8, so the global norm is sqrt(16^2+8^2)=sqrt(320);
-/// with max_norm=8 every gradient is scaled by 8/sqrt(320), shrinking the +0.16/+0.08 updates by
-/// that single factor (direction preserved, unlike per-element clamping)
+/// 1 clipped SGD step on the same w=1, b=0, x=2, y=6 problem as the hand-calc test above.
+/// Clipping scales every gradient by max_norm / global_norm, preserving direction
 #[test]
 fn clip_by_global_norm_scales_sgd_step() {
     let x = Array::from_shape_vec((1, 1), vec![2.0_f32])
@@ -585,12 +585,14 @@ fn clip_by_global_norm_scales_sgd_step() {
 
     model.fit(&x, &y, 1).unwrap();
 
-    // scale = max_norm / global_norm = 8 / sqrt(320); unclipped deltas were +0.16 (w) and +0.08 (b)
+    // grad_w=-16, grad_b=-8, so global_norm = sqrt(16^2 + 8^2), which is sqrt(320).
+    // scale = max_norm / global_norm = 8 / sqrt(320).
+    // Unclipped deltas were +0.16 (w) and +0.08 (b).
     let scale = max_norm / 320.0_f32.sqrt();
     let (w_new, b_new) = dense_wb(&model);
     assert_abs_diff_eq!(w_new, 1.0 + 0.16 * scale, epsilon = 1e-5);
     assert_abs_diff_eq!(b_new, 0.0 + 0.08 * scale, epsilon = 1e-5);
-    // Both parameters were scaled by the *same* factor, i.e. direction is preserved
+    // Clipping scales both parameters by the same factor, so direction is preserved
     assert_abs_diff_eq!((w_new - 1.0) / (b_new), 0.16 / 0.08, epsilon = 1e-4);
 }
 
@@ -626,8 +628,8 @@ fn clip_by_global_norm_above_norm_is_noop() {
     assert_abs_diff_eq!(b_new, 0.08_f32, epsilon = 1e-5);
 }
 
-/// `with_global_clipnorm` rejects non-positive or non-finite thresholds and accepts a valid positive one;
-/// constructing without it leaves clipping disabled
+/// `with_global_clipnorm` rejects non-positive or non-finite thresholds, and accepts a valid
+/// positive one. Constructing without it leaves clipping disabled
 #[test]
 fn new_rejects_invalid_global_clipnorm() {
     for bad in [0.0_f32, -1.0, f32::NAN, f32::INFINITY] {
@@ -650,9 +652,9 @@ fn new_rejects_invalid_global_clipnorm() {
     assert!(SGD::new(0.01, 0.0, false, 0.0).is_ok());
 }
 
-// SGD momentum / weight decay / LR scheduling (integration)
+// SGD: momentum, weight decay, and LR scheduling (integration)
 
-/// `set_learning_rate` retunes the step: doubling lr before one SGD step doubles the weight delta
+/// `set_learning_rate` retunes the step: doubling lr before 1 SGD step doubles the weight delta.
 /// Reuses the w=1, b=0, x=2, y=6 problem (grad_w=-16, grad_b=-8)
 #[test]
 fn set_learning_rate_scales_the_step() {
@@ -683,7 +685,7 @@ fn set_learning_rate_scales_the_step() {
     assert_abs_diff_eq!(b_new, 0.02 * 8.0, epsilon = 1e-5); // 0.16
 }
 
-/// Decoupled weight decay shrinks the parameter by (1 - lr*wd) before the gradient step
+/// Decoupled weight decay shrinks the parameter by (1 - lr*wd) before the gradient step.
 /// With w=1, wd=0.5, lr=0.01: w := 1*(1 - 0.005) - 0.01*(-16) = 0.995 + 0.16 = 1.155
 #[test]
 fn sgd_decoupled_weight_decay_shrinks_param() {
@@ -713,14 +715,14 @@ fn sgd_decoupled_weight_decay_shrinks_param() {
     assert_abs_diff_eq!(b_new, 0.08, epsilon = 1e-5); // b=0, decay no-op
 }
 
-// Weight decay applies to weights only, not biases or normalization gamma/beta
-// These run two layers through an identical forward+backward and differ only in `weight_decay`,
-// so any divergence is attributable solely to decay (the gradient values cancel out of the
-// comparison: weight_decay shrinks `value` by `(1 - lr*wd)` before the same gradient step)
+// Weight decay applies to weights only, not to biases or to normalization gamma and beta.
+// These run 2 layers through an identical forward and backward pass and differ only in
+// `weight_decay`, so decay explains any divergence. The gradient values cancel out of the
+// comparison: weight_decay shrinks `value` by `(1 - lr*wd)` before the same gradient step.
 
-/// Runs a Dense(2->2, Linear) with fixed weights/bias through one forward + backward (fixed
-/// nonzero upstream gradient) and one SGD step at the given `weight_decay`, returning the
-/// resulting (weights, bias). Both decay settings see identical gradients
+/// Runs a Dense(2->2, Linear) with fixed weights and bias through 1 forward and backward pass
+/// and 1 SGD step at the given `weight_decay`. The upstream gradient is fixed and nonzero.
+/// Returns the resulting (weights, bias). Both decay settings see identical gradients.
 fn dense_after_one_sgd_step(
     w0: &Array2<f32>,
     b0: &Array2<f32>,
@@ -747,8 +749,7 @@ fn dense_after_one_sgd_step(
     }
 }
 
-/// Decoupled weight decay shrinks Dense weights but leaves the bias untouched:
-/// `weight_decay = w_plain - lr*wd*w0` (exact, independent of the gradient), while the bias is
+/// Decoupled weight decay shrinks Dense weights by exactly `lr*wd*w0`, but leaves the bias
 /// byte-identical with and without decay
 #[test]
 fn weight_decay_decays_dense_weights_but_skips_bias() {
@@ -780,9 +781,9 @@ fn weight_decay_decays_dense_weights_but_skips_bias() {
     );
 }
 
-/// Runs a BatchNormalization layer (gamma=1, beta=0) through one training forward + backward
-/// (fixed nonzero upstream gradient) and one SGD step at the given `weight_decay`, returning the
-/// resulting (gamma, beta)
+/// Runs a BatchNormalization layer (gamma=1, beta=0) through 1 training forward and backward
+/// pass and 1 SGD step at the given `weight_decay`. The upstream gradient is fixed and nonzero.
+/// Returns the resulting (gamma, beta).
 fn batchnorm_gamma_beta_after_one_sgd_step(weight_decay: f32) -> (ArrayD<f32>, ArrayD<f32>) {
     let mut bn = BatchNormalization::new(vec![2, 3], 0.9, 1e-5).unwrap();
     bn.set_training_if_mode_dependent(true);
@@ -804,7 +805,7 @@ fn batchnorm_gamma_beta_after_one_sgd_step(weight_decay: f32) -> (ArrayD<f32>, A
     }
 }
 
-/// Normalization scale/shift (gamma/beta) are excluded from weight decay: a non-zero
+/// Normalization scale and shift (gamma and beta) are excluded from weight decay: a non-zero
 /// `weight_decay` produces a byte-identical update to no decay at all
 #[test]
 fn weight_decay_skips_batchnorm_gamma_and_beta() {
@@ -818,8 +819,8 @@ fn weight_decay_skips_batchnorm_gamma_and_beta() {
     for (p, d) in b_plain.iter().zip(b_decay.iter()) {
         assert_abs_diff_eq!(*p, *d, epsilon = 1e-6);
     }
-    // Guard against a vacuous pass: gamma must have actually been updated by the gradient step
-    // (so the "identical" check above is comparing moved values, not two untouched 1.0 arrays)
+    // Guard against a vacuous pass. The gradient step must actually update gamma.
+    // The "identical" check above then compares moved values, not 2 untouched 1.0 arrays.
     assert!(
         g_plain.iter().any(|&v| (v - 1.0).abs() > 1e-5),
         "gamma should have a non-trivial gradient update"
@@ -828,9 +829,9 @@ fn weight_decay_skips_batchnorm_gamma_and_beta() {
 
 // Adam (classic coupled L2 weight decay) vs AdamW (decoupled weight decay)
 
-/// Runs a Dense(2->2, Linear) with fixed weights/bias through one forward + backward (fixed
-/// nonzero upstream gradient) and one step of the given optimizer, returning the resulting
-/// (weights, bias). Generic over the optimizer so Adam and AdamW share the harness
+/// Runs a Dense(2->2, Linear) with fixed weights and bias through 1 forward and backward pass
+/// and 1 step of the given optimizer. The upstream gradient is fixed and nonzero. Returns the
+/// resulting (weights, bias). Generic over the optimizer, so Adam and AdamW share the harness.
 fn dense_weights_after_one_step<O: Optimizer>(
     mut opt: O,
     w0: &Array2<f32>,
@@ -874,9 +875,8 @@ fn adam_equals_adamw_without_weight_decay() {
     }
 }
 
-/// With a non-zero weight_decay the two schemes diverge on the weights (coupled L2 flows through
-/// the moments and the adaptive denominator; decoupled does not), while the bias - excluded from
-/// weight decay either way - updates identically
+/// Coupled L2 (Adam) flows through the moments and the adaptive denominator. Decoupled decay
+/// (AdamW) does not, so the 2 schemes diverge on the weights when weight_decay is non-zero
 #[test]
 fn adam_l2_and_adamw_decoupled_differ_with_weight_decay() {
     let w0 = Array::from_shape_vec((2, 2), vec![1.0_f32, -2.0, 3.0, -4.0]).unwrap();
@@ -888,7 +888,7 @@ fn adam_l2_and_adamw_decoupled_differ_with_weight_decay() {
     let (w_adamw, b_adamw) =
         dense_weights_after_one_step(AdamW::new(0.1, 0.9, 0.999, 1e-8, wd).unwrap(), &w0, &b0);
 
-    // Weights differ between the two decay schemes
+    // Weights differ between the 2 decay schemes
     assert!(
         w_adam
             .iter()
@@ -923,7 +923,7 @@ fn adamw_single_layer_loss_decreases_over_20_epochs() {
     );
 }
 
-/// AdamW routes through the same validators as Adam: rejects out-of-range betas / negative
+/// AdamW routes through the same validators as Adam: rejects out-of-range betas or negative
 /// weight_decay, accepts valid hyperparameters
 #[test]
 fn adamw_validates_hyperparameters() {
@@ -962,7 +962,7 @@ fn sgd_momentum_loss_decreases() {
     );
 }
 
-/// Negative momentum / weight_decay are rejected
+/// Negative momentum or weight_decay values are rejected
 #[test]
 fn new_rejects_negative_momentum_and_weight_decay() {
     assert!(matches!(
@@ -981,9 +981,8 @@ fn new_rejects_negative_momentum_and_weight_decay() {
 
 // learning rate: readable as well as writable
 
-/// Every optimizer reports the rate it was built with and the rate it was last set to. This is
-/// the read half a schedule needs: without it, `lr *= 0.5` has to be computed against a copy the
-/// caller keeps, which silently goes stale the moment anything else retunes the optimizer
+/// Every optimizer round-trips learning_rate(): it reports the value it was built with, and the
+/// value it was last set to. This lets a schedule read the current rate instead of a stale copy
 #[test]
 fn every_optimizer_reports_its_current_learning_rate() {
     fn round_trip(mut opt: impl Optimizer, configured: f32) {

@@ -1,6 +1,8 @@
-//! Normalization-layer statistics gates: the BatchNorm column-stats folds (channel-chunked
-//! negative result and the viable row-block fold), the rank>=3 native-layout plane fold, and the
-//! trailing-axis LayerNorm fused row pass
+//! Normalization-layer statistics gates.
+//!
+//! It covers the BatchNorm column-stats folds: a channel-chunked negative result, and the
+//! viable row-block fold. It also covers the rank >= 3 plane fold for the reserved
+//! `BN_PLANE_STATS_PARALLEL_MIN_ELEMS` gate, and the trailing-axis LayerNorm fused row pass.
 
 use crate::harness::{Row, Section, random_matrix, time_per_call_ns};
 use ndarray::{Array1, Array2, Axis};
@@ -9,12 +11,12 @@ use std::hint::black_box;
 
 // BatchNorm column statistics: channel-chunked parallel vs serial mean_axis
 
-/// One cache line of `f32` per channel chunk, mirroring the production helper
+/// 1 cache line of `f32` per channel chunk, used only by this bench's negative-result variant
 const BENCH_CHANNEL_CHUNK: usize = 16;
 
 /// Channel-chunked parallel column sums of a standard-layout [M, C] f32 matrix. Each channel
-/// accumulates in row order (bitwise identical to ndarray's serial `sum_axis(Axis(0))`);
-/// parallelism only splits the channel axis, so the task count is C / 16
+/// accumulates in row order (bitwise identical to ndarray's serial `sum_axis(Axis(0))`).
+/// Parallelism only splits the channel axis, so the task count is C / 16
 fn bench_par_col_sum(x: &Array2<f32>) -> Array1<f32> {
     let c = x.ncols();
     let slice = x.as_slice().unwrap();
@@ -36,13 +38,13 @@ fn bench_par_col_sum(x: &Array2<f32>) -> Array1<f32> {
 }
 
 /// The BatchNorm statistics reduction: per-channel sums over batch x spatial rows. The win is
-/// capped by the channel-chunk task count (C / 16), so narrow-C rungs document where the
-/// parallel path merely ties
+/// capped by the channel-chunk task count (C / 16). Narrow-C rungs document where the parallel
+/// path merely ties.
 ///
-/// **Negative result, kept as the record of why production uses row blocks instead:** the
-/// channel split preserves the serial per-channel accumulation order (bitwise identical to
-/// `mean_axis`) but loses 2-3x - the serial row-streaming fold is already bandwidth-efficient
-/// and SIMD-wide, and column-chunk tasks break exactly that
+/// This is a negative result, kept as the record of why production uses row blocks instead.
+/// The channel split preserves the serial per-channel accumulation order (bitwise identical to
+/// `mean_axis`), but it loses to the serial fold. That row-streaming fold is already
+/// bandwidth-efficient and SIMD-wide, and column-chunk tasks break exactly that.
 pub fn calibrate_bn_col_stats() -> Section {
     let mut rows = Vec::new();
     for &(m, c) in &[
@@ -77,9 +79,9 @@ pub fn calibrate_bn_col_stats() -> Section {
     }
 }
 
-/// Row-block deterministic fold for the same per-channel sums: each block streams whole rows
+/// Row-block deterministic fold for the same per-channel sums. Each block streams whole rows
 /// (the same bandwidth-friendly, SIMD-across-channels pattern as the serial fold) into a local
-/// [C] accumulator; block partials merge in block order. Rows per block scale as
+/// [C] accumulator. Block partials merge in block order. Rows per block scale as
 /// DET_REDUCE_BLOCK / C, so the grouping depends only on the input shape, never on scheduling
 fn bench_par_col_sum_rowblock(x: &Array2<f32>) -> Array1<f32> {
     let (m, c) = x.dim();
@@ -144,12 +146,13 @@ pub fn calibrate_bn_col_stats_rowblock() -> Section {
     }
 }
 
-// BatchNorm plane statistics (rank >= 3 native layout): BN_PLANE_STATS_PARALLEL_MIN_ELEMS
+// BatchNorm plane statistics on a [B, C, P] layout: BN_PLANE_STATS_PARALLEL_MIN_ELEMS (reserved,
+// not wired into the production forward or backward pass)
 
-/// Mirrors the production plane fold: per-channel sums over the native `[B, C, P]` layout,
-/// each channel's logical sequence (its planes in batch order) folded in 16K-element blocks
-/// whose contiguous segments accumulate in eight SIMD-friendly lanes; block partials merge in
-/// block order. The `parallel` flag only moves the (channel, block) tasks onto rayon
+/// A candidate plane fold: per-channel sums over a `[B, C, P]` layout. Each channel's logical
+/// sequence (its planes in batch order) folds in 16K-element blocks. Contiguous segments
+/// accumulate in 8 SIMD-friendly lanes, and block partials merge in block order. The
+/// `parallel` flag only moves the (channel, block) tasks onto rayon
 fn bench_plane_sum(x: &[f32], c: usize, p: usize, parallel: bool) -> Array1<f32> {
     const BLOCK: usize = 16_384;
     let len_per_chan = x.len() / c;
@@ -196,9 +199,11 @@ fn bench_plane_sum(x: &[f32], c: usize, p: usize, parallel: bool) -> Array1<f32>
     )
 }
 
-/// The rank >= 3 BatchNorm statistics reduction on the native layout: forced serial vs forced
-/// parallel of the same plane fold (the flag never changes the bits, so the gate is a pure
-/// performance knob). Spans conv-scale shapes plus narrow-channel and wide-channel extremes
+/// The rank >= 3 BatchNorm statistics reduction on a `[B, C, P]` layout. Forced serial vs
+/// forced parallel of the same plane fold (the flag never changes the bits, so the gate is a
+/// pure performance knob). This gate is reserved. BatchNorm's forward and backward passes use
+/// `BN_COL_STATS_PARALLEL_MIN_ELEMS` for every rank >= 2 input instead. Spans conv-scale shapes
+/// plus narrow-channel and wide-channel extremes
 pub fn calibrate_bn_plane_stats() -> Section {
     let mut rows = Vec::new();
     for &(b, c, p) in &[
@@ -237,9 +242,9 @@ pub fn calibrate_bn_plane_stats() -> Section {
 
 // LayerNorm fused row pass (trailing axis): LN_ROW_PARALLEL_MIN_ELEMS
 
-/// Mirrors the production LayerNorm row pass: per row of a `[R, N]` slice, eight-lane mean
-/// and variance folds plus the fused center/normalize/scale-shift sweep writing three
-/// buffers. Rows are independent, so the flag is scheduling-only
+/// Mirrors the production LayerNorm row pass. Per row of a `[R, N]` slice, it runs 8-lane mean
+/// and variance folds, plus the fused center/normalize/scale-shift sweep that writes 3 buffers.
+/// Rows are independent, so the flag is scheduling-only
 fn bench_ln_row_pass(
     x: &[f32],
     n: usize,
@@ -307,8 +312,8 @@ fn bench_ln_row_pass(
 }
 
 /// The trailing-axis LayerNorm forward pass: forced serial vs forced parallel of the same
-/// fused row sweep (per-row bits are scheduling-invariant, so the gate is a pure performance
-/// knob). Spans transformer-scale shapes plus wide-row and narrow-row extremes
+/// fused row sweep. Per-row bits are scheduling-invariant, so the gate is a pure performance
+/// knob. Spans transformer-scale shapes plus wide-row and narrow-row extremes
 pub fn calibrate_ln_row_pass() -> Section {
     let mut rows = Vec::new();
     for &(r, n) in &[

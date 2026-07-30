@@ -143,7 +143,7 @@ fn to_sparse_categorical_tie_breaks_to_first_index() {
 /// A non-finite sentinel (NaN, +Inf, -Inf) in the matrix produces NonFinite
 #[test]
 fn to_sparse_categorical_non_finite_is_non_finite() {
-    // Each row embeds one non-finite sentinel into an otherwise valid matrix
+    // Each row embeds 1 non-finite sentinel into an otherwise valid matrix
     let cases = [
         ("NaN", arr2(&[[0.1f64, f64::NAN, 0.5], [0.2, 0.3, 0.5]])),
         ("+Inf", arr2(&[[0.0f64, f64::INFINITY, 0.0]])),
@@ -348,5 +348,5 @@ fn to_categorical_with_mapping_empty_slice_is_zero_by_zero() {
         "empty mapping input must give shape (0, 0)"
     );
     assert_eq!(matrix.len(), 0);
-    assert!(mapping.is_empty(), "no labels → empty mapping");
+    assert!(mapping.is_empty(), "no labels -> empty mapping");
 }

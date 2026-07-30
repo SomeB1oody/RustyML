@@ -1,10 +1,10 @@
-//! Integration tests for GaussianNoise (additive, output = input + N(0, stddev))
-//! and GaussianDropout (multiplicative, output = input * N(1, stddev) with
-//! stddev = sqrt(rate / (1 - rate))) layers
+//! Integration tests for the GaussianNoise and GaussianDropout layers.
 //!
-//! Statistical assertions use large (10 000-element) all-ones tensors so the
-//! sample mean and sample std converge tightly to their population parameters,
-//! with a +/-0.05 tolerance around the expected values
+//! GaussianNoise adds N(0, stddev) to the input. GaussianDropout multiplies the input by
+//! N(1, stddev), where stddev = sqrt(rate / (1 - rate)).
+//!
+//! Statistical assertions use large (10,000-element) all-ones tensors, so the sample mean
+//! and sample std converge tightly to the population parameters, within a +/-0.05 tolerance.
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
@@ -32,9 +32,8 @@ fn tensor_std(t: &Tensor) -> f64 {
 
 // GaussianNoise: constructor validation
 
-/// An invalid stddev (negative, or non-finite NaN/+Inf) is rejected at construction with a
-/// graceful error rather than panicking now or later inside `Normal::new(..).unwrap()` in the
-/// forward pass. Each row is one originally-separate validation case.
+/// An invalid stddev (negative, or non-finite NaN or +Inf) is rejected at construction
+/// instead of panicking later inside `Normal::new`.
 #[test]
 fn gaussian_noise_invalid_stddev_returns_err() {
     for bad in [-0.1f32, f32::NAN, f32::INFINITY] {
@@ -142,7 +141,7 @@ fn gaussian_noise_training_preserves_mean() {
 
     assert!(
         (mean - input_val as f64).abs() < 0.05,
-        "GaussianNoise training mean: expected ≈{:.4}, got {:.6}",
+        "GaussianNoise training mean: expected about {:.4}, got {:.6}",
         input_val,
         mean
     );
@@ -168,7 +167,7 @@ fn gaussian_noise_training_noise_std_matches_stddev() {
 
         assert!(
             (std_val - stddev as f64).abs() < 0.05,
-            "GaussianNoise stddev={}: expected std≈{:.4}, got {:.6}",
+            "GaussianNoise stddev={}: expected std about {:.4}, got {:.6}",
             stddev,
             stddev,
             std_val
@@ -197,7 +196,7 @@ fn gaussian_noise_training_can_produce_negative_values() {
     );
 }
 
-/// Two consecutive training-mode forward() calls do not produce identical outputs
+/// 2 consecutive training-mode forward() calls do not produce identical outputs
 #[test]
 fn gaussian_noise_training_consecutive_calls_differ() {
     const N: usize = 10_000;
@@ -257,7 +256,7 @@ fn gaussian_noise_predict_shape_mismatch_returns_err() {
 #[test]
 fn gaussian_noise_empty_input_shape_accepts_any_tensor() {
     let mut layer = GaussianNoise::new(0.1, vec![]).unwrap();
-    // Supply tensors of completely different shapes - both should succeed
+    // Supply tensors of completely different shapes. Both must succeed.
     let a: Tensor = Array::from_shape_vec((5,), vec![1.0f32; 5])
         .unwrap()
         .into_dyn();
@@ -289,8 +288,8 @@ fn gaussian_noise_empty_input_shape_output_shape_unknown() {
 
 // GaussianDropout: constructor validation
 
-/// An out-of-range rate is rejected: the valid interval is [0, 1), so rate = 1.0 (excluded
-/// upper bound), rate > 1.0, and negative rate all fail. Each row is one originally-separate case.
+/// An out-of-range rate is rejected: the valid interval is [0, 1). rate = 1.0 (the excluded
+/// upper bound), rate > 1.0, and a negative rate all fail.
 #[test]
 fn gaussian_dropout_invalid_rate_returns_err() {
     for bad in [1.0f32, 1.5, -0.1] {
@@ -398,7 +397,7 @@ fn gaussian_dropout_training_preserves_mean() {
 
     assert!(
         (mean - input_val as f64).abs() < 0.05,
-        "GaussianDropout training mean: expected ≈{:.4}, got {:.6}",
+        "GaussianDropout training mean: expected about {:.4}, got {:.6}",
         input_val,
         mean
     );
@@ -409,7 +408,7 @@ fn gaussian_dropout_training_preserves_mean() {
 #[test]
 fn gaussian_dropout_training_noise_std_matches_formula() {
     const N: usize = 10_000;
-    // Two distinct rates pin the formula: rate=0.5 => stddev = 1.0,
+    // 2 distinct rates pin the formula: rate=0.5 => stddev = 1.0,
     // rate=0.25 => stddev = sqrt(1/3) ~= 0.5774
     let cases: &[(f32, f64)] = &[
         (0.5, 1.0),
@@ -430,7 +429,7 @@ fn gaussian_dropout_training_noise_std_matches_formula() {
 
         assert!(
             (std_val - expected_std).abs() < 0.05,
-            "GaussianDropout rate={}: expected std≈{:.4}, got {:.6}",
+            "GaussianDropout rate={}: expected std about {:.4}, got {:.6}",
             rate,
             expected_std,
             std_val
@@ -438,7 +437,7 @@ fn gaussian_dropout_training_noise_std_matches_formula() {
     }
 }
 
-/// Two consecutive training-mode forward() calls do not produce identical outputs
+/// 2 consecutive training-mode forward() calls do not produce identical outputs
 #[test]
 fn gaussian_dropout_training_consecutive_calls_differ() {
     const N: usize = 10_000;
@@ -509,8 +508,8 @@ fn gaussian_dropout_empty_input_shape_accepts_any_tensor() {
     assert!(layer.predict(&b).is_ok());
 }
 
-/// In training mode, backward multiplies by the cached forward noise, so without a prior forward()
-/// there is no noise to reuse and it errors, matching Dense/Dropout's forward-pass-not-run contract
+/// In training mode, backward multiplies by the cached forward noise. Without a prior forward()
+/// call, there is no noise to reuse, so it errors, matching Dense's and Dropout's contract.
 #[test]
 fn gaussian_dropout_backward_without_forward_errors() {
     let grad: Tensor = Array::from_shape_vec((2, 3), vec![1.0f32; 6])
@@ -529,8 +528,8 @@ fn gaussian_dropout_backward_without_forward_errors() {
     );
 }
 
-/// backward reuses the exact multiplicative noise from forward: with input = ones, output == noise,
-/// so backward(g) must equal g * output elementwise (y = x * noise => dx = g * noise)
+/// backward reuses the exact multiplicative noise from forward (y = x * noise, so dx = g * noise).
+/// With input = ones, output equals noise, so backward(g) must equal g * output.
 #[test]
 fn gaussian_dropout_backward_multiplies_by_forward_noise() {
     let input: Tensor = Array::from_shape_vec((2, 3), vec![1.0f32; 6])
@@ -555,9 +554,8 @@ fn gaussian_dropout_backward_multiplies_by_forward_noise() {
     }
 }
 
-/// backward borrows (does not consume) the cached noise, so calling it twice after a single
-/// forward returns the same gradient both times, matching the idempotent backward of the other
-/// dropout layers
+/// backward borrows, not consumes, the cached noise, so calling it twice after a single forward
+/// call gives the same gradient both times.
 #[test]
 fn gaussian_dropout_backward_is_idempotent() {
     let input: Tensor = Array::from_shape_vec((2, 3), vec![1.0f32; 6])
@@ -665,8 +663,8 @@ fn gaussian_dropout_mode_switching_routes_correctly() {
     crate::common::assert_allclose(&eval_out2, &input, 1e-6f32);
 }
 
-/// GaussianNoise::backward is a pure gradient pass-through: since y = x + noise and the
-/// noise does not depend on x, d(y)/dx = 1, so the upstream gradient returns unchanged
+/// GaussianNoise::backward is a pure gradient pass-through, since the noise does not depend on x.
+/// d(y)/dx = 1, so the upstream gradient returns unchanged.
 #[test]
 fn gaussian_noise_backward_passes_gradient_through_unchanged() {
     let mut layer = GaussianNoise::new(1.0, vec![2, 3]).unwrap();

@@ -2,11 +2,11 @@
 //!
 //! Tracks the wall-clock effect of the GEMM/parallelism work (and guards against regressions)
 //! at the level a user sees: whole `fit`/`predict`/`transform` calls. Detailed reports and
-//! saved baselines live under `target/criterion/`; compare across changes with
+//! saved baselines live under `target/criterion/`. Compare across changes with
 //! `cargo bench --bench ml_end_to_end -- --save-baseline <name>` and `-- --baseline <name>`
 //!
-//! The micro-level serial/parallel crossovers behind the gate constants are calibrated
-//! separately by `cargo bench --bench parallel_gates` (see benches/RESULTS.md)
+//! `cargo bench --bench parallel_gates` calibrates the micro-level serial/parallel crossovers
+//! behind the gate constants separately (see `benches/calibrations/RESULTS.md`)
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndarray::{Array1, Array2};
@@ -42,10 +42,10 @@ fn bench_kmeans_fit(c: &mut Criterion) {
     });
 }
 
-/// KMeans fit at high cluster count (k = 256, 128 features, 4k samples): a small sample count
-/// keeps the assignment GEMM modest so the per-iteration centroid-averaging step - which fires one
-/// rayon job per centroid - is a visible fraction. Stresses the nested per-centroid parallelism in
-/// the cluster-mean update
+/// KMeans fit at high cluster count: k = 256, 128 features, 4k samples. A small sample count
+/// keeps the assignment GEMM modest. The per-iteration centroid-averaging step (which fires 1
+/// rayon job per centroid) is then a visible fraction. Stresses the nested per-centroid
+/// parallelism in the cluster-mean update
 fn bench_kmeans_fit_high_k(c: &mut Criterion) {
     let x = random_matrix(4_096, 128, 11);
     let mut group = c.benchmark_group("kmeans_high_k");
@@ -60,23 +60,24 @@ fn bench_kmeans_fit_high_k(c: &mut Criterion) {
     group.finish();
 }
 
-/// LDA fit across two parallelism regimes. The fit parallelizes the per-class scatter statistics
-/// over the *classes*, but the current parallel decision keys off the total data size; each class
-/// task runs a `[d, n_class] x [n_class, d]` scatter GEMM that can itself fork. The two configs
-/// separate the regimes:
-/// - few classes + high-dim: only a 3-wide class fan (far below the core count), so the class axis
-///   alone cannot fill the pool while each per-class GEMM is large - probes idle cores + the
+/// LDA fit across 2 parallelism regimes. The fit parallelizes the per-class scatter statistics
+/// over the *classes*, but the current parallel decision keys off the total data size. Each
+/// class task runs a `[d, n_class] x [n_class, d]` scatter GEMM that can itself fork. The 2
+/// configs separate the regimes:
+/// - few classes, high-dim: a 3-wide class fan, far below the core count. The class axis alone
+///   cannot fill the pool while each per-class GEMM is large. Probes idle cores plus the
 ///   parallel branch's whole-matrix clone
-/// - many classes + moderate dim: a 64-wide class fan (above the core count) where each per-class
-///   GEMM still clears the GEMM parallel gate - probes the "class axis fills the pool while the
-///   inner GEMM also forks" nesting case
+/// - many classes, moderate dim: a 64-wide class fan (above the core count) where each
+///   per-class GEMM still clears the GEMM parallel gate. Probes the case where the class axis
+///   fills the pool while the inner GEMM also forks
 fn bench_lda_fit(c: &mut Criterion) {
     let mut group = c.benchmark_group("lda_fit");
     group.sample_size(20);
 
-    // (label, n_classes, n_features, samples_per_class, n_components). Dimensions are kept modest
-    // (d <= 128) so the per-class scatter GEMMs - the parallel section - dominate over the O(d^3)
-    // eigendecomposition, which would otherwise mask the parallelism signal.
+    // (label, n_classes, n_features, samples_per_class, n_components). Dimensions are kept
+    // modest (d <= 128), so the per-class scatter GEMMs (the parallel section) dominate over
+    // the O(d^3) eigendecomposition. Otherwise, that eigendecomposition would mask the
+    // parallelism signal.
     let configs: &[(&str, usize, usize, usize, usize)] = &[
         ("lda_fit_few_classes_4c_128f_64000n", 4, 128, 16_000, 3),
         ("lda_fit_many_classes_64c_96f_25600n", 64, 96, 400, 16),
@@ -119,7 +120,7 @@ fn bench_knn_predict(c: &mut Criterion) {
     });
 }
 
-/// SVC fit with the RBF kernel: one batched kernel-matrix GEMM + SMO on 1500 x 16
+/// SVC fit with the RBF kernel: 1 batched kernel-matrix GEMM + SMO on 1500 x 16
 fn bench_svc_fit(c: &mut Criterion) {
     let x = random_matrix(1500, 16, 4);
     let y: Array1<f64> = Array1::from_iter(
@@ -150,9 +151,9 @@ fn bench_svc_fit(c: &mut Criterion) {
 }
 
 /// SVC predict on a fitted RBF model: batched kernel matrix + the decision-value GEMV
-/// (`[n_query, n_sv] x [n_sv]`). The model is fit once outside the timing loop so the measured
-/// work is the prediction path - the kernel evaluation plus the batched matvec that A1 reroutes
-/// from ndarray `.dot()` to the gemmkit backend
+/// (`[n_query, n_sv] x [n_sv]`). The model is fit once outside the timing loop, so the measured
+/// work is the prediction path. That path is the kernel evaluation plus the batched matvec,
+/// which runs through the gemmkit backend instead of ndarray's `.dot()`
 fn bench_svc_predict(c: &mut Criterion) {
     let x = random_matrix(1500, 16, 4);
     let y: Array1<f64> = Array1::from_iter(
@@ -183,10 +184,11 @@ fn bench_svc_predict(c: &mut Criterion) {
     group.finish();
 }
 
-/// MeanShift fit: one task per seed (all samples are seeds by default), each running RBF-weighted
-/// updates whose per-iteration cost is two matvecs over the full sample matrix. With seeds far
-/// above the core count the seed axis fills the pool, so A3 forces those inner matvecs serial via
-/// the gemmkit backend - this bench tracks that nested-matvec path end to end
+/// MeanShift fit: 1 task per seed, since all samples are seeds by default. Each seed task runs
+/// flat-kernel-weighted updates whose per-iteration cost is 2 matvecs over the full sample
+/// matrix. With seeds far above the core count, the seed axis fills the pool. The fit then
+/// forces those inner matvecs serial through the gemmkit backend. This bench tracks that
+/// nested-matvec path end to end
 fn bench_mean_shift_fit(c: &mut Criterion) {
     let x = random_matrix(1500, 16, 12);
     let mut group = c.benchmark_group("mean_shift");
@@ -219,11 +221,12 @@ fn bench_logistic_fit(c: &mut Criterion) {
     });
 }
 
-/// generate_polynomial_features: the expansion forks one rayon job per output monomial column.
-/// The small config (degree 3 over 12 features = hundreds of monomials, few samples) is dominated
-/// by that repeated per-monomial fork-join overhead - B1 gates the maps to run serial below the
-/// cheap-map threshold. The large degree-1 config keeps the first-order copy on the parallel path
-/// (its `n_samples * n_features` work clears the gate) to guard that path against a regression
+/// generate_polynomial_features: the expansion forks 1 rayon job per output monomial column.
+/// The small config (degree 3 over 12 features, hundreds of monomials, few samples) is
+/// dominated by that repeated per-monomial fork-join overhead. Below the cheap-map threshold,
+/// the maps run serial. The large degree-1 config keeps the first-order copy on the parallel
+/// path. Its `n_samples * n_features` work clears the gate, so this guards that path against a
+/// regression
 fn bench_poly_features(c: &mut Criterion) {
     let mut group = c.benchmark_group("poly_features");
     group.sample_size(20);

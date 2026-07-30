@@ -1,4 +1,4 @@
-//! 2D depthwise convolution layer that applies one filter per input channel
+//! 2D depthwise convolution layer that gives each input channel its own kernel or kernels
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -22,16 +22,16 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rayon::prelude::*;
 use std::borrow::Cow;
 
-/// A 2D depthwise convolutional layer for neural networks
+/// A 2D depthwise convolutional layer
 ///
-/// Applies its own kernel to each input channel, reducing parameter count and computation while
-/// preserving spatial feature extraction. Input shape is \[batch_size, height, width, channels\]
-/// and output shape is \[batch_size, out_height, out_width, channels * depth_multiplier\]; no
-/// kernel ever mixes channels
+/// Applies its own kernel to each input channel. This lowers the parameter count and the
+/// computation compared to a standard convolution. It still extracts spatial features per
+/// channel. Input shape is \[batch_size, height, width, channels\] and output shape is
+/// \[batch_size, out_height, out_width, channels * depth_multiplier\]. No kernel mixes channels
 ///
 /// `depth_multiplier` (default 1, set with [`DepthwiseConv2D::with_depth_multiplier`]) is how many
 /// kernels each input channel gets. The output channel for input channel `c` and multiplier index
-/// `m` is `c * depth_multiplier + m`, matching Keras
+/// `m` is `c * depth_multiplier + m`, which matches Keras
 ///
 /// # Examples
 ///
@@ -42,10 +42,9 @@ use std::borrow::Cow;
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array4;
 ///
-/// // Create Sequential model
 /// let mut model = Sequential::new();
 ///
-/// // Create DepthwiseConv2D layer with ReLU activation (weights are initialized in `new`)
+/// // DepthwiseConv2D with ReLU (new initializes the weights)
 /// let depthwise_layer = DepthwiseConv2D::new(
 ///     (2, 2),                  // kernel_size
 ///     vec![1, 4, 4, 3],        // input shape [batch_size, height, width, channels]
@@ -53,12 +52,11 @@ use std::borrow::Cow;
 ///     Activation::ReLU,        // activation
 /// ).unwrap();
 ///
-/// // Add layer and compile model
 /// model
 ///     .add(depthwise_layer)
 ///     .compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Create test input data: [batch_size, height, width, channels]
+/// // Input data shape: [batch_size, height, width, channels]
 /// let batch_size = 1;
 /// let input_channels = 3;
 /// let height = 4;
@@ -66,7 +64,7 @@ use std::borrow::Cow;
 ///
 /// let mut input_data = Array4::zeros((batch_size, height, width, input_channels));
 ///
-/// // Set different values for each channel
+/// // Give each channel distinct values
 /// for c in 0..input_channels {
 ///     for h in 0..height {
 ///         for w in 0..width {
@@ -77,18 +75,15 @@ use std::borrow::Cow;
 ///
 /// let input = input_data.into_dyn();
 ///
-/// // Display model structure
 /// model.summary();
 ///
-/// // Forward propagation
 /// let output = model.predict(&input).unwrap();
 ///
-/// // Verify output shape
-/// // Input: [1, 4, 4, 3], kernel (2,2), stride (1,1), valid padding
-/// // Output should be: [1, 3, 3, 3]
+/// // Input [1, 4, 4, 3] with kernel (2, 2), stride (1, 1), and Valid padding gives output
+/// // [1, 3, 3, 3]
 /// assert_eq!(output.shape(), &[1, 3, 3, 3]);
 ///
-/// // Since ReLU activation is used, all output values should be non-negative
+/// // ReLU makes every output value non-negative
 /// for value in output.iter() {
 ///     assert!(*value >= 0.0);
 /// }
@@ -97,7 +92,7 @@ use std::borrow::Cow;
 pub struct DepthwiseConv2D {
     /// Number of input channels, read from the declared input shape
     channels: usize,
-    /// Kernels per input channel; the output carries `channels * depth_multiplier` of them
+    /// Kernels per input channel. The output carries `channels * depth_multiplier` of them
     depth_multiplier: usize,
     /// Size of the convolution kernel as (height, width)
     kernel_size: (usize, usize),
@@ -133,24 +128,26 @@ impl DepthwiseConv2D {
     /// - `strides` - Stride of the convolution as (height_stride, width_stride)
     /// - `activation` - Activation function applied to the output (ReLU, Sigmoid, Tanh, Softmax)
     ///
-    /// # Notes
-    ///
-    /// There is no `filters` argument: a depthwise convolution derives its output channel count
-    /// from the input, as `channels * depth_multiplier`. `depth_multiplier` defaults to 1; set it
-    /// with [`DepthwiseConv2D::with_depth_multiplier`]. Padding defaults to
-    /// [`PaddingType::Valid`]; choose [`PaddingType::Same`] with
-    /// [`DepthwiseConv2D::with_padding`]. Weights are seeded from the global seed or entropy by
-    /// default; for reproducible initialization, set a seed with
-    /// [`DepthwiseConv2D::with_random_state`]
-    ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A new `DepthwiseConv2D` instance with Xavier-initialized weights or an error
+    /// - `Result<Self, Error>` - A new `DepthwiseConv2D` instance with Xavier-initialized
+    ///   weights, or an error
+    ///
+    /// # Notes
+    ///
+    /// There is no `filters` argument. A depthwise convolution derives its output channel count
+    /// from the input, as `channels * depth_multiplier`. `depth_multiplier` defaults to 1. Set it
+    /// with [`DepthwiseConv2D::with_depth_multiplier`]. Padding defaults to
+    /// [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
+    /// [`DepthwiseConv2D::with_padding`]. The layer seeds weights from the global seed or entropy
+    /// by default. For reproducible initialization, set a seed with
+    /// [`DepthwiseConv2D::with_random_state`]
     ///
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If any kernel dimension or stride is 0
-    /// - `Error::InvalidInput` - If `input_shape` is not 4D, has 0 channels, or is smaller than the kernel
+    /// - `Error::InvalidInput` - If `input_shape` is not 4D, has 0 channels, or is smaller
+    ///   than the kernel
     pub fn new(
         kernel_size: (usize, usize),
         input_shape: Vec<usize>,
@@ -198,10 +195,10 @@ impl DepthwiseConv2D {
 
     /// Sets how many kernels each input channel gets (defaults to 1)
     ///
-    /// The layer then produces `channels * depth_multiplier` output channels, with input channel
-    /// `c`'s multiplier `m` landing at output channel `c * depth_multiplier + m`. Re-runs weight
-    /// initialization at the new shape and re-zeros the bias, so call it before assigning custom
-    /// weights or training
+    /// The layer then produces `channels * depth_multiplier` output channels. Input channel `c`'s
+    /// multiplier `m` lands at output channel `c * depth_multiplier + m`. This re-runs weight
+    /// initialization at the new shape and re-zeros the bias. Call it before you assign custom
+    /// weights or start training
     ///
     /// # Parameters
     ///
@@ -223,11 +220,11 @@ impl DepthwiseConv2D {
         Ok(self)
     }
 
-    /// Sets the seed used to initialize the depthwise weights and re-initializes them deterministically
+    /// Sets the seed for the depthwise weights and re-initializes them deterministically
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]). This
-    /// re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before assigning
-    /// custom weights or training. The bias stays zero-initialized
+    /// By default, the layer seeds weights from the global seed or entropy (see
+    /// [`crate::random`]). This re-runs Xavier/Glorot uniform initialization with `random_state`.
+    /// Call it before you assign custom weights or start training. The bias stays zero-initialized
     ///
     /// # Parameters
     ///
@@ -254,11 +251,12 @@ impl DepthwiseConv2D {
         random_state: Option<u64>,
     ) -> Array4<f32> {
         let (kernel_height, kernel_width) = kernel_size;
-        // Keras' `compute_fans` reads the kernel tensor's last two axes and knows nothing about
-        // the layer's semantics: with shape [kh, kw, channels, depth_multiplier] the receptive
-        // field is `kh * kw`, so `fan_in = channels * kh * kw` and `fan_out = dm * kh * kw`. A
-        // depthwise unit really does see only 1 input channel, but counting the fans that way
-        // gives a bound ~sqrt(channels) too wide and puts this layer at odds with `Conv2D`
+        // Keras' `compute_fans` reads only the kernel tensor's last 2 axes. For shape
+        // [kh, kw, channels, depth_multiplier] this gives `fan_in = channels * kh * kw` and
+        // `fan_out = depth_multiplier * kh * kw`. A depthwise unit sees only 1 input channel.
+        // This fan_in is therefore `channels` times the true receptive field. The resulting
+        // bound is narrower by about sqrt(channels) than a per-channel count would give. This
+        // matches `Conv2D` and Keras rather than a depthwise-specific formula
         let fan_in = channels * kernel_height * kernel_width;
         let fan_out = depth_multiplier * kernel_height * kernel_width;
         let weight_bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
@@ -294,12 +292,14 @@ impl DepthwiseConv2D {
     ///
     /// # Parameters
     ///
-    /// - `weights` - 4D weight tensor with shape \[kernel_height, kernel_width, channels, depth_multiplier\]
+    /// - `weights` - 4D weight tensor with shape
+    ///   \[kernel_height, kernel_width, channels, depth_multiplier\]
     /// - `bias` - 1D bias vector with shape \[channels * depth_multiplier\]
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` does not match the existing shape
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` does not match
+    ///   the existing shape
     pub fn set_weights(&mut self, weights: Array4<f32>, bias: Array1<f32>) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
@@ -308,12 +308,6 @@ impl DepthwiseConv2D {
         Ok(())
     }
 
-    /// Runs the depthwise convolution and activation for `input`, returning the activated output
-    ///
-    /// Shared numeric body of [`Layer::forward`] and [`Layer::predict`]; writes no caches. `forward`
-    /// wraps this and records the input/output caches, `predict` returns its result directly. Each
-    /// `(batch item, channel)` is convolved independently into a disjoint output plane, so the
-    /// FLOPs-gated parallel and sequential paths produce the same result
     /// The layer's geometry for a given input, as the shared kernel wants it
     fn geometry(&self, input_shape: &[usize]) -> DepthwiseGeometry {
         let (height, width) = (input_shape[1], input_shape[2]);
@@ -333,6 +327,9 @@ impl DepthwiseConv2D {
     }
 
     /// Depthwise convolution over a channels-last tensor, followed by the activation
+    ///
+    /// Shared numeric body of [`Layer::forward`] and [`Layer::predict`]. `forward` wraps this and
+    /// records the input/output caches. `predict` returns the result directly
     fn convolve(&self, input: &Tensor) -> Result<Tensor, Error> {
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));
@@ -359,8 +356,8 @@ impl DepthwiseConv2D {
         let row_len = g.output.1 * out_channels;
         let out_flat = output.as_slice_mut().expect("output is contiguous");
 
-        // One task per (batch item, output row). Output rows are disjoint, so this is race-free
-        // without any halo or merge, and it keeps every core busy even at batch == 1
+        // 1 task per (batch item, output row). Output rows are disjoint, so this needs no halo
+        // and no merge. It keeps every core busy even at batch == 1
         if flops >= naive_conv_parallel_min_flops() {
             out_flat
                 .par_chunks_mut(row_len)
@@ -429,8 +426,8 @@ impl Layer for DepthwiseConv2D {
             (0..batch_size).map(run).collect()
         };
 
-        // Sum the weight and bias partials in batch order, so rerunning on the same machine gives
-        // the same result whichever branch above ran
+        // Sum the weight and bias partials in batch order, so the result does not depend on
+        // which branch above ran
         let mut weight_grads = vec![0.0f32; self.weights.len()];
         let mut bias_grads = vec![0.0f32; out_channels];
         let mut input_grads = Vec::with_capacity(batch_size * g.input.0 * g.input.1 * g.channels);
@@ -516,17 +513,19 @@ impl Layer for DepthwiseConv2D {
     }
 }
 
+/// Unit tests for `DepthwiseConv2D`
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::neural_network::layers::activation::linear::Linear;
     use ndarray::ArrayD;
 
-    /// Channels never mix, and the values match a hand-worked cross-correlation
+    /// Channels never mix. The values match a hand-worked cross-correlation
     ///
-    /// Channel 0 carries 1..9 against an all-ones kernel; channel 1 carries all ones against an
-    /// all-twos kernel. Channel 1's output is therefore the same constant at every position while
-    /// channel 0's varies - which only holds if the two kernels stayed on their own channels
+    /// Channel 0 carries 1..9 against an all-ones kernel. Channel 1 carries all ones against an
+    /// all-twos kernel. Channel 1's output is therefore the same constant at every position,
+    /// while channel 0's output varies. This only holds if the 2 kernels stay on their own
+    /// channels
     #[test]
     fn depthwise_forward_keeps_channels_separate_hand_derived() {
         let mut layer =
@@ -550,7 +549,7 @@ mod tests {
 
         let out = layer.predict(&input).unwrap();
         assert_eq!(out.shape(), &[1, 2, 2, 2]);
-        // Channel 0: the four 2x2 window sums. Channel 1: 2 * 4 ones at every position
+        // Channel 0: the 4 window sums from the 2x2 kernel. Channel 1: 2 * 4 ones at every position
         assert_eq!(
             out.iter().copied().collect::<Vec<f32>>(),
             vec![12.0, 8.0, 16.0, 8.0, 24.0, 8.0, 28.0, 8.0]
@@ -558,7 +557,7 @@ mod tests {
     }
 
     /// With `depth_multiplier`, input channel `c`'s multiplier `m` lands at output channel
-    /// `c * depth_multiplier + m` - the Keras ordering
+    /// `c * depth_multiplier + m`, the Keras ordering
     #[test]
     fn depthwise_depth_multiplier_output_channel_order() {
         let mut layer = DepthwiseConv2D::new((1, 1), vec![1, 1, 1, 2], (1, 1), Linear::new())
@@ -571,7 +570,7 @@ mod tests {
         let weights = Array4::from_shape_vec((1, 1, 2, 2), vec![1.0, 10.0, 100.0, 1000.0]).unwrap();
         layer.set_weights(weights, Array1::zeros(4)).unwrap();
 
-        // One position holding [2, 3]
+        // 1 position holding [2, 3]
         let input = ArrayD::from_shape_vec(ndarray::IxDyn(&[1, 1, 1, 2]), vec![2.0, 3.0]).unwrap();
 
         let out = layer.predict(&input).unwrap();

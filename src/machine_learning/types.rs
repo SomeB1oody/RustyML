@@ -1,12 +1,12 @@
 //! Configuration enums shared across the machine-learning estimators
 //!
-//! - [`RegularizationType`] is used by the linear models and the linear SVM
-//! - [`Gamma`] and [`KernelType`] are used by both
-//!   [`SVC`](crate::machine_learning::svm::svc::SVC) and
-//!   [`KernelPCA`](crate::machine_learning::decomposition::kernel_pca::KernelPCA)
+//! - The linear models and the linear SVM use [`RegularizationType`]
+//! - [`SVC`](crate::machine_learning::svm::svc::SVC) and
+//!   [`KernelPCA`](crate::machine_learning::decomposition::kernel_pca::KernelPCA) both use
+//!   [`Gamma`] and [`KernelType`]
 //!
 //! Each kernel carries its own evaluation logic (`compute` / `compute_matrix`) as inherent
-//! methods, so consumers share a single implementation instead of re-matching the enum in
+//! methods. Consumers share this single implementation instead of re-matching the enum in
 //! every model
 
 use crate::math::squared_euclidean_distance_row;
@@ -32,24 +32,25 @@ use ndarray::{Array2, ArrayBase, ArrayView1, Axis, Data, Ix2, Zip};
 ///
 /// That is exactly scikit-learn's `SGDRegressor` / `SGDClassifier` objective
 /// `E(w) = (1/n) * sum(L) + alpha * R(w)`, so `alpha` transfers **1:1** from either of those.
-/// The intercept is never penalized, as in scikit-learn
+/// This penalty never applies to the intercept, as in scikit-learn
 ///
 /// # Converting an `alpha` from scikit-learn's closed-form estimators
 ///
-/// Those use their own conventions, which differ from each other; convert as follows, where `a`
+/// Those use their own conventions, which differ from each other. Convert as follows, where `a`
 /// is the scikit-learn value and `n` the number of training samples:
 ///
 /// | scikit-learn | RustyML |
 /// |---|---|
-/// | `Lasso(alpha=a)` | `L1(a)` - identical objective, both scale the data term by `1 / 2n` |
-/// | `Ridge(alpha=a)` | `L2(a / n)` - scikit-learn's `Ridge` does *not* divide its data term by `n` |
-/// | `SGDRegressor(alpha=a)` / `SGDClassifier(alpha=a)` | `L1(a)` or `L2(a)` - no conversion |
-/// | `LogisticRegression(C=c)` | `L1(1 / (c * n))` or `L2(1 / (c * n))`, i.e. `c = 1 / (n * alpha)` |
+/// | `Lasso(alpha=a)` | `L1(a)` (identical objective, both scale the data term by `1 / 2n`) |
+/// | `Ridge(alpha=a)` | `L2(a / n)` (`Ridge` does not divide the data term by `n`) |
+/// | `SGDRegressor(alpha=a)` / `SGDClassifier(alpha=a)` | `L1(a)` or `L2(a)` (no conversion) |
+/// | `LogisticRegression(C=c)` | `L1(1 / (c * n))` or `L2(1 / (c * n))` (`c = 1 / (n * alpha)`) |
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum RegularizationType {
     /// L1 regularization (Lasso): adds the sum of absolute parameter values times the
-    /// coefficient. Produces sparse solutions - [`LinearRegression`](crate::machine_learning::LinearRegression)
-    /// and [`LogisticRegression`](crate::machine_learning::LogisticRegression) apply it through a
+    /// coefficient. Produces sparse solutions.
+    /// [`LinearRegression`](crate::machine_learning::LinearRegression) and
+    /// [`LogisticRegression`](crate::machine_learning::LogisticRegression) apply it through a
     /// proximal (soft-thresholding) step, so unsupported coefficients reach exactly `0.0`
     L1(f64),
     /// L2 regularization (Ridge): adds half the sum of squared parameter values times the
@@ -60,9 +61,9 @@ pub enum RegularizationType {
 /// Kernel coefficient `gamma`, either an explicit value or a data-dependent rule
 ///
 /// The data-dependent rules are: `Scale` is `1 / (n_features * X.var())` and
-/// `Auto` is `1 / n_features`. They are resolved to a concrete value at fit time (when the
-/// training data is known) via [`Gamma::resolve`]; kernel evaluation always operates on a
-/// resolved [`Gamma::Value`]
+/// `Auto` is `1 / n_features`. [`Gamma::resolve`] resolves them to a concrete value at fit
+/// time, when the training data is known. Kernel evaluation always operates on a resolved
+/// [`Gamma::Value`]
 #[derive(Debug, Copy, Clone, PartialEq, Deserialize, Serialize)]
 pub enum Gamma {
     /// `'scale'`: `1 / (n_features * X.var())`
@@ -80,6 +81,10 @@ impl Gamma {
     ///
     /// - `n_features` - Number of features (columns) in the training data
     /// - `x_variance` - Population variance of all entries of the training matrix (used by `Scale`)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<f64, Error>` - The resolved gamma coefficient
     ///
     /// # Errors
     ///
@@ -152,7 +157,7 @@ pub enum KernelType {
         /// Independent term
         coef0: f64,
     },
-    /// Radial Basis Function kernel: `K(x, y) = exp(-gamma*|x-y|^2)`
+    /// Radial Basis Function kernel: `K(x, y) = exp(-gamma*||x-y||^2)`
     RBF {
         /// Kernel coefficient (explicit, or `Scale`/`Auto`)
         gamma: Gamma,
@@ -172,13 +177,17 @@ impl KernelType {
     /// Returns a copy of this kernel with any `Scale`/`Auto` gamma resolved to a concrete value
     ///
     /// Estimators call this once at fit time (when the training data is known) and store the
-    /// resolved kernel, so that both the training Gram matrix and later predictions use the same
+    /// resolved kernel. Both the training Gram matrix and later predictions then use the same
     /// fixed coefficient. Kernels without a gamma (`Linear`, `Cosine`) are returned unchanged
     ///
     /// # Parameters
     ///
     /// - `n_features` - Number of features in the training data
     /// - `x_variance` - Population variance of all training-matrix entries (used by `Gamma::Scale`)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<KernelType, Error>` - The kernel with its gamma resolved
     ///
     /// # Errors
     ///
@@ -211,9 +220,9 @@ impl KernelType {
 }
 
 impl KernelType {
-    /// Computes the kernel function value between two vectors
+    /// Computes the kernel function value between 2 vectors
     ///
-    /// Single source of truth for kernel dispatch, shared by SVC and Kernel PCA
+    /// SVC and Kernel PCA both call this as the single source of truth for kernel dispatch,
     /// instead of each re-implementing the `match` over variants
     ///
     /// # Parameters
@@ -250,13 +259,13 @@ impl KernelType {
         }
     }
 
-    /// Computes the full kernel matrix `K[i, j] = K(x_i, y_j)` between two sample
-    /// sets in one shot, routing the dominant cost through a single parallel GEMM
+    /// Computes the full kernel matrix `K[i, j] = K(x_i, y_j)` between 2 sample
+    /// sets in one shot. It routes the dominant cost through a single parallel GEMM
     ///
     /// Batched counterpart of [`compute`](Self::compute). Every kernel reduces to the
     /// cross-Gram matrix `G = X*Y^T` (one rayon-parallel, cache-blocked matrix
-    /// multiply on the gemmkit backend) plus a cheap elementwise transform over the
-    /// `[n, m]` result:
+    /// multiply on the gemmkit backend). A cheap elementwise transform over the
+    /// `[n, m]` result then gives each kernel:
     ///
     /// - `Linear`  - `K = G`
     /// - `Poly`    - `K = (gamma*G + coef0)^degree`
@@ -265,11 +274,11 @@ impl KernelType {
     /// - `Cosine`  - `K = G / (||x_i||*||y_j||)`
     ///
     /// SVC's Gram matrix and Kernel PCA's (cross-)kernel matrix both call this instead
-    /// of looping [`compute`](Self::compute) over every pair, turning an `n*m` swarm of
-    /// scalar dot products into one GEMM
+    /// of looping [`compute`](Self::compute) over every pair. This turns an `n*m` swarm
+    /// of scalar dot products into one GEMM
     ///
     /// The result is numerically equivalent to filling each entry with
-    /// [`compute`](Self::compute) up to floating-point rounding; the `RBF` distance is
+    /// [`compute`](Self::compute) up to floating-point rounding. The `RBF` distance is
     /// clamped at zero to absorb the tiny negatives that the `||x||^2 + ||y||^2 - 2x*y`
     /// identity can produce by cancellation
     ///
@@ -320,7 +329,7 @@ impl KernelType {
             }
             KernelType::RBF { gamma } => {
                 let gamma = gamma.value();
-                // ||x-y||^2 = ||x||^2 + ||y||^2 - 2x*y; clamp cancellation negatives before exp
+                // ||x-y||^2 = ||x||^2 + ||y||^2 - 2x*y. Clamp cancellation negatives before exp
                 let x_norm_sq = x.map_axis(Axis(1), |row| row.dot(&row));
                 let y_norm_sq = y.map_axis(Axis(1), |row| row.dot(&row));
                 let transform_row = |mut k_row: ndarray::ArrayViewMut1<f64>, &x_sq: &f64| {
@@ -454,7 +463,7 @@ mod tests {
         assert_abs_diff_eq!(k.compute(x.view(), x.view()), 1.0, epsilon = 1e-6);
     }
 
-    // diff=[1,-1], ||diff||^2=2, exp(-1*2)=exp(-2)~=0.135335283
+    // diff=[1,-1], ||diff||^2=2, exp(-1*2)=exp(-2), about 0.135335283
     #[test]
     fn kernel_rbf_orthogonal_unit_vectors() {
         let k = KernelType::RBF {
@@ -462,12 +471,12 @@ mod tests {
         };
         let x1 = array![1.0_f64, 0.0];
         let x2 = array![0.0_f64, 1.0];
-        let expected = (-2.0_f64).exp(); // ~= 0.13533528323661
+        let expected = (-2.0_f64).exp(); // about 0.13533528323661
         assert_abs_diff_eq!(k.compute(x1.view(), x2.view()), expected, epsilon = 1e-6);
     }
 
     // Polynomial kernel: K(x,y) = (gamma*x*y + coef0)^degree
-    // degree=2, gamma=1, coef0=0; [1,0]*[0,1]=0 -> (0)^2 = 0
+    // degree=2, gamma=1, coef0=0. [1,0]*[0,1]=0 -> (0)^2 = 0
     #[test]
     fn kernel_poly_degree2_orthogonal() {
         let k = KernelType::Poly {
@@ -480,7 +489,7 @@ mod tests {
         assert_abs_diff_eq!(k.compute(x1.view(), x2.view()), 0.0, epsilon = 1e-6);
     }
 
-    // degree=3, gamma=2, coef0=1; [1,1]*[1,1]=2 -> (2*2+1)^3=5^3=125
+    // degree=3, gamma=2, coef0=1. [1,1]*[1,1]=2 -> (2*2+1)^3=5^3=125
     #[test]
     fn kernel_poly_degree3_general() {
         let k = KernelType::Poly {
@@ -494,7 +503,7 @@ mod tests {
     }
 
     // Sigmoid kernel: K(x,y) = tanh(gamma*x*y + coef0)
-    // gamma=1, coef0=0; [1,0]*[1,0]=1 -> tanh(1)~=0.76159415595577
+    // gamma=1, coef0=0. [1,0]*[1,0]=1 -> tanh(1), about 0.76159415595577
     #[test]
     fn kernel_sigmoid_unit_vector() {
         let k = KernelType::Sigmoid {
@@ -502,7 +511,7 @@ mod tests {
             coef0: 0.0,
         };
         let x = array![1.0_f64, 0.0];
-        let expected = 1.0_f64.tanh(); // ~= 0.76159415595577
+        let expected = 1.0_f64.tanh(); // about 0.76159415595577
         assert_abs_diff_eq!(k.compute(x.view(), x.view()), expected, epsilon = 1e-6);
     }
 
@@ -535,9 +544,9 @@ mod tests {
 
     // KernelType::compute_matrix (batched)
 
-    // The batched GEMM path must agree, entry for entry, with looping `compute`
-    // over every pair, for every kernel variant, including the asymmetric
-    // cross-matrix case `x != y`
+    // The batched GEMM path must agree with looping `compute` over every pair, entry for
+    // entry, for every kernel variant. This includes the asymmetric cross-matrix case
+    // `x != y`
     #[test]
     fn compute_matrix_matches_pairwise() {
         use ndarray::Array2;

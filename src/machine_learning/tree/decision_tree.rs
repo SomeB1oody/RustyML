@@ -1,7 +1,7 @@
 //! Decision tree models for classification and regression
 //!
 //! Provides the [`DecisionTree`] estimator backed by the ID3, C4.5, and CART
-//! algorithms, along with its node types ([`Node`], [`NodeType`]), the
+//! algorithms. Also provides its node types ([`Node`], [`NodeType`]), the
 //! [`Algorithm`] selector, and the [`DecisionTreeParams`] hyperparameters
 
 use crate::error::Error;
@@ -22,22 +22,27 @@ use indicatif::ProgressBar;
 /// Assumed average root-to-leaf walk length for the prediction parallel gate
 ///
 /// The fitted tree does not record its depth, so the traversal-work estimate
-/// (`samples x walk length`) uses this fixed stand-in. A grown CART tree on real data
-/// typically walks 10-30 nodes per sample
+/// (samples x walk length) uses this fixed value instead
 const DECISION_TREE_ASSUMED_DEPTH: usize = 16;
 
 /// The best split found for a node while growing the tree
 enum Split {
     /// Binary numeric split: samples with `feature <= threshold` go left, the rest right
     Numeric {
+        /// Index of the feature used for the split
         feature: usize,
+        /// The threshold value that separates left and right samples
         threshold: f64,
+        /// Row indices routed to the left child
         left: Vec<usize>,
+        /// Row indices routed to the right child
         right: Vec<usize>,
     },
-    /// Multi-way categorical split: one partition (and child branch) per distinct value
+    /// Multi-way categorical split: 1 partition (and child branch) per distinct value
     Categorical {
+        /// Index of the categorical feature used for the split
         feature: usize,
+        /// The row indices for each distinct category, keyed by its canonical string value
         partitions: Vec<(String, Vec<usize>)>,
     },
 }
@@ -71,7 +76,8 @@ fn split_information(counts: &[f64], total: f64) -> f64 {
 pub enum Algorithm {
     /// Iterative Dichotomiser 3: information gain (entropy) splitting, classification only
     ID3,
-    /// Successor to ID3: information gain ratio to handle varied attribute value ranges, classification only
+    /// Successor to ID3: information gain ratio to handle varied attribute value ranges,
+    /// classification only
     C45,
     /// Classification and Regression Trees: Gini impurity for classification, MSE for regression
     CART,
@@ -80,22 +86,22 @@ pub enum Algorithm {
 impl Algorithm {
     /// Whether this algorithm can be used for regression tasks
     ///
-    /// Only CART supports regression; ID3 and C4.5 are classification-only
+    /// Only CART supports regression. ID3 and C4.5 are classification-only
     fn supports_regression(&self) -> bool {
         matches!(self, Algorithm::CART)
     }
 
-    /// Whether this algorithm splits categorical features multi-way (one branch per value)
+    /// Whether this algorithm splits categorical features multi-way (1 branch per value)
     ///
-    /// ID3 and C4.5 do; CART is always binary
+    /// ID3 and C4.5 use multi-way splits. CART is always binary
     fn allows_multiway_categorical(&self) -> bool {
         matches!(self, Algorithm::ID3 | Algorithm::C45)
     }
 
     /// Impurity measure for a classification subset under this algorithm
     ///
-    /// CART uses Gini impurity; ID3 and C4.5 use entropy. Regression always uses MSE,
-    /// which is independent of the algorithm and handled by the caller
+    /// CART uses Gini impurity. ID3 and C4.5 use entropy. The caller computes regression
+    /// impurity (MSE) separately, regardless of algorithm
     fn classification_impurity(&self, y: &ArrayView1<f64>) -> f64 {
         if y.is_empty() {
             return 0.0;
@@ -142,9 +148,9 @@ impl Algorithm {
     /// Classification impurity computed directly from per-class counts, where `n_side` is the
     /// number of samples on this side of a split
     ///
-    /// Equivalent to [`classification_impurity`] (Gini for CART, entropy for ID3/C4.5) but
-    /// driven by running counts, letting the numeric split search update impurity
-    /// incrementally instead of re-scanning the label subset for every candidate threshold
+    /// Equivalent to [`classification_impurity`] (Gini for CART, entropy for ID3/C4.5), but
+    /// driven by running counts. The numeric split search uses this to update impurity
+    /// incrementally, instead of re-scanning the label subset for each candidate threshold
     fn impurity_from_counts(&self, counts: &[f64], n_side: f64) -> f64 {
         match self {
             Algorithm::CART => {
@@ -176,9 +182,9 @@ impl Algorithm {
     /// counts of its partitions
     ///
     /// C4.5 normalizes the gain by split information (gain ratio) to curb the bias toward
-    /// features with many distinct values; ID3 and CART use the raw impurity decrease. It
-    /// returns `None` when C4.5's split information is degenerate (~= 0), leaving the
-    /// caller to skip the split
+    /// features with many distinct values. ID3 and CART use the raw impurity decrease. It
+    /// returns `None` when C4.5's split information is degenerate (about 0). The caller
+    /// then skips the split
     fn selection_score(&self, impurity_decrease: f64, counts: &[f64], total: f64) -> Option<f64> {
         match self {
             Algorithm::C45 => {
@@ -195,13 +201,13 @@ impl Algorithm {
 /// These parameters help prevent overfitting and shape the tree structure during training
 #[derive(Debug, Copy, Clone, PartialEq, Deserialize, Serialize)]
 pub struct DecisionTreeParams {
-    /// Maximum depth of the tree. If `None`, nodes are expanded until all leaves are pure or
-    /// contain fewer than `min_samples_split` samples
+    /// Maximum depth of the tree. If `None`, the tree grows until all leaves are pure or
+    /// hold fewer than `min_samples_split` samples
     pub max_depth: Option<usize>,
     /// Minimum number of samples required to split an internal node. Must be at least 2
     pub min_samples_split: usize,
-    /// Minimum number of samples required at a leaf node. Splits that produce leaves with
-    /// fewer samples are rejected
+    /// Minimum number of samples required at a leaf node. The tree rejects splits that
+    /// produce leaves with fewer samples
     pub min_samples_leaf: usize,
     /// Minimum impurity decrease required for a split
     pub min_impurity_decrease: f64,
@@ -241,7 +247,7 @@ pub enum NodeType {
         feature_index: usize,
         /// Threshold for binary splits (samples with feature value <= threshold go left)
         threshold: f64,
-        /// For categorical splits, the list of category-value keys (one per branch)
+        /// For categorical splits, the list of category-value keys (1 per branch)
         categories: Option<Vec<String>>,
     },
     /// A terminal node that produces a prediction
@@ -262,8 +268,9 @@ pub enum NodeType {
 pub struct Node {
     /// The type of this node (Internal or Leaf), containing node-specific data
     pub node_type: NodeType,
-    /// For binary splits, the left child (feature value <= threshold); for categorical splits,
-    /// the fallback child used for category values unseen during training
+    /// For binary splits, this is the left child (feature value <= threshold). For
+    /// categorical splits, it is the fallback child used for category values unseen
+    /// during training
     pub left: Option<Box<Node>>,
     /// For binary splits, the right child (samples with feature value > threshold)
     pub right: Option<Box<Node>>,
@@ -276,7 +283,8 @@ impl Node {
     ///
     /// # Parameters
     ///
-    /// - `value` - The predicted value (class label for classification, continuous value for regression)
+    /// - `value` - The predicted value (class label for classification, continuous value
+    ///   for regression)
     /// - `class` - For classification, the majority class index
     /// - `probabilities` - For classification, the probability distribution over all classes
     ///
@@ -301,7 +309,8 @@ impl Node {
     /// # Parameters
     ///
     /// - `feature_index` - Index of the feature used for splitting
-    /// - `threshold` - Threshold value (samples with feature value <= threshold go to the left child)
+    /// - `threshold` - Threshold value (samples with feature value <= threshold go to the
+    ///   left child)
     ///
     /// # Returns
     ///
@@ -345,10 +354,11 @@ impl Node {
 
 /// Decision tree for classification and regression tasks
 ///
-/// Implements the ID3, C4.5, and CART algorithms with parallel optimization using rayon,
-/// and supports classification (with probability estimates) and regression. The tree is
-/// built recursively by selecting the best split at each node based on impurity measures
-/// (Gini, entropy, or MSE) and various stopping criteria
+/// Implements the ID3, C4.5, and CART algorithms, and parallelizes the split search with
+/// rayon. It supports classification (with probability estimates) and regression.
+///
+/// The tree grows recursively. At each node, it picks the best split by impurity measure
+/// (Gini, entropy, or MSE), subject to several stopping criteria
 ///
 /// # Examples
 ///
@@ -382,7 +392,7 @@ impl Node {
 /// let probabilities = tree.predict_proba(&x_test).unwrap();
 ///
 /// // Categorical features: mark which columns hold discrete category codes
-/// // ID3 and C4.5 then split them multi-way (one branch per distinct value),
+/// // ID3 and C4.5 then split them multi-way (1 branch per distinct value),
 /// // which can separate classes a single binary threshold cannot
 /// let x_cat = array![[0.0], [0.0], [1.0], [1.0], [2.0], [2.0]];
 /// let y_cat = array![0.0, 0.0, 1.0, 1.0, 0.0, 0.0]; // value 1 -> class 1, values 0/2 -> class 0
@@ -400,7 +410,7 @@ pub struct DecisionTree {
     root: Option<Box<Node>>,
     /// Number of features in the training data
     n_features: usize,
-    /// For classification, the number of distinct classes; `None` for regression
+    /// For classification, the number of distinct classes. `None` for regression
     n_classes: Option<usize>,
     /// Hyperparameters controlling tree growth and complexity
     params: DecisionTreeParams,
@@ -420,26 +430,32 @@ impl DecisionTree {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A new untrained `DecisionTree` instance, or an `Error` if validation fails
-    ///
-    /// # Errors
-    ///
-    /// - `Error::InvalidInput` - If the algorithm is incompatible with the task type (only CART supports regression)
+    /// - `Result<Self, Error>` - A new untrained `DecisionTree` instance, or an `Error` if
+    ///   validation fails
     ///
     /// # Notes
     ///
     /// Growth and pruning hyperparameters use sensible defaults (no depth limit,
     /// `min_samples_split = 2`, `min_samples_leaf = 1`, `min_impurity_decrease = 0`, no fixed
-    /// seed). Tune them with the builder methods below; the bounded ones return `Result`:
+    /// seed). Tune them with the builder methods below. The bounded ones return `Result`:
     ///
     /// - [`with_max_depth`](Self::with_max_depth) - maximum tree depth (default: unlimited)
-    /// - [`with_min_samples_split`](Self::with_min_samples_split) - minimum samples to split a node (returns `Result`; must be >= 2)
-    /// - [`with_min_samples_leaf`](Self::with_min_samples_leaf) - minimum samples at a leaf (returns `Result`; must be >= 1)
-    /// - [`with_min_impurity_decrease`](Self::with_min_impurity_decrease) - minimum impurity decrease for a split (returns `Result`; must be >= 0)
-    /// - [`with_random_state`](Self::with_random_state) - fixed seed for tie-breaking between equal splits
+    /// - [`with_min_samples_split`](Self::with_min_samples_split) - minimum samples to split
+    ///   a node (returns `Result`, must be >= 2)
+    /// - [`with_min_samples_leaf`](Self::with_min_samples_leaf) - minimum samples at a leaf
+    ///   (returns `Result`, must be >= 1)
+    /// - [`with_min_impurity_decrease`](Self::with_min_impurity_decrease) - minimum impurity
+    ///   decrease for a split (returns `Result`, must be >= 0)
+    /// - [`with_random_state`](Self::with_random_state) - fixed seed for tie-breaking
+    ///   between equal splits
     ///
-    /// `min_samples_leaf` must not exceed `min_samples_split`; because the two are set
-    /// independently, that cross-field constraint is checked at [`fit`](Self::fit) time
+    /// `min_samples_leaf` must not exceed `min_samples_split`. Both are set independently,
+    /// so [`fit`](Self::fit) checks this constraint when training starts
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the algorithm is incompatible with the task type (only
+    ///   CART supports regression)
     pub fn new(algorithm: Algorithm, is_classifier: bool) -> Result<Self, Error> {
         // Validate algorithm compatibility with task type
         if !is_classifier && !algorithm.supports_regression() {
@@ -463,7 +479,7 @@ impl DecisionTree {
     ///
     /// # Parameters
     ///
-    /// - `max_depth` - maximum depth; nodes are not expanded beyond it
+    /// - `max_depth` - maximum depth. Nodes are not expanded beyond it
     ///
     /// # Returns
     ///
@@ -526,7 +542,7 @@ impl DecisionTree {
     }
 
     /// Sets a fixed seed for breaking ties between equally-scoring splits
-    /// (default: `None`, non-deterministic tie-breaking)
+    /// (default: `None`, deterministic tie-breaking that always picks the last tied candidate)
     ///
     /// # Returns
     ///
@@ -555,7 +571,7 @@ impl DecisionTree {
 
     /// Designates which feature columns are categorical
     ///
-    /// The ID3 and C4.5 algorithms split categorical features multi-way (one branch per
+    /// The ID3 and C4.5 algorithms split categorical features multi-way (1 branch per
     /// distinct value), while CART always uses binary splits and ignores this
     /// designation. Set this before calling [`fit`](Self::fit)
     ///
@@ -597,7 +613,12 @@ impl DecisionTree {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If the input data is invalid or does not meet minimum requirements
+    /// - `Error::EmptyInput` - If `x` has no rows, or `y` is empty
+    /// - `Error::NonFinite` - If `x` contains NaN or infinite values
+    /// - `Error::DimensionMismatch` - If `y.len()` does not equal `x.nrows()`
+    /// - `Error::InvalidParameter` - If `min_samples_leaf` is greater than `min_samples_split`
+    /// - `Error::InvalidInput` - If the sample count is below `min_samples_split`, `x` has no
+    ///   features, or a classification label is not a non-negative integer
     /// - `Error::Computation` - If class information cannot be determined
     ///
     /// # Performance
@@ -615,7 +636,7 @@ impl DecisionTree {
     {
         preliminary_check(x, Some(y.len()))?;
 
-        // Cross-field constraint: the two are set independently through the builder
+        // Cross-field constraint: both are set independently through the builder
         if self.params.min_samples_leaf > self.params.min_samples_split {
             return Err(Error::invalid_parameter(
                 "min_samples_leaf",
@@ -635,7 +656,7 @@ impl DecisionTree {
             )));
         }
 
-        // At least one feature is required
+        // At least 1 feature is required
         if x.ncols() == 0 {
             return Err(Error::invalid_input(
                 "Input data must have at least one feature",
@@ -679,7 +700,8 @@ impl DecisionTree {
             pb
         };
 
-        // RNG is `Some` only when a local `random_state` or the global seed is set; otherwise tie-breaking stays deterministic
+        // RNG is `Some` only when a local `random_state` or the global seed is set.
+        // Otherwise, tie-breaking stays deterministic
         let mut rng = crate::random::make_rng_opt(self.params.random_state);
         let indices: Vec<usize> = (0..x.nrows()).collect();
         self.root = Some(Box::new(self.build_tree(
@@ -728,7 +750,6 @@ impl DecisionTree {
             return Ok(self.create_leaf(y, indices));
         }
 
-        // Find the best split
         let split_result = self.find_best_split(x, y, indices, rng)?;
 
         let Some((split, impurity_decrease)) = split_result else {
@@ -819,12 +840,12 @@ impl DecisionTree {
 
     /// Finds the best split for the given samples across all features
     ///
-    /// Numeric features are evaluated as binary threshold splits. Features marked as
-    /// categorical are evaluated as multi-way splits for ID3 and C4.5 (CART is always
-    /// binary). Selection uses information gain (ID3/CART) or gain ratio (C4.5); the
-    /// returned `impurity_decrease` drives the `min_impurity_decrease` stopping rule. The
-    /// search parallelizes when the sort work clears the calibrated sort-scan gate (see
-    /// `crate::parallel_gates`)
+    /// The search evaluates numeric features as binary threshold splits. It evaluates
+    /// features marked categorical as multi-way splits for ID3 and C4.5 (CART is always
+    /// binary). Selection uses the raw impurity decrease for ID3 and CART, or the gain
+    /// ratio for C4.5. The returned `impurity_decrease` drives the `min_impurity_decrease`
+    /// stopping rule. The search parallelizes when the sort work clears the calibrated
+    /// sort-scan gate (see `crate::parallel_gates`)
     fn find_best_split<S1, S2>(
         &self,
         x: &ArrayBase<S1, Ix2>,
@@ -839,7 +860,7 @@ impl DecisionTree {
         // Calculate parent impurity once
         let parent_impurity = self.calculate_impurity(y, indices);
 
-        // ID3 and C4.5 support multi-way categorical splits; CART is always binary
+        // ID3 and C4.5 support multi-way categorical splits. CART is always binary
         let allow_categorical = self.algorithm.allows_multiway_categorical();
 
         // For each feature, returns (selection_score, split, impurity_decrease)
@@ -852,7 +873,7 @@ impl DecisionTree {
         };
 
         // Collect every feature's best candidate, then pick the winner (sort-scan class
-        // gate: one copy + sort + scan task per feature over the node's samples)
+        // gate: 1 copy + sort + scan task per feature over the node's samples)
         let sort_work = indices.len().saturating_mul(self.n_features);
         let candidates: Vec<(f64, Split, f64)> = if sort_work >= sort_scan_min_elems() {
             (0..self.n_features)
@@ -869,9 +890,10 @@ impl DecisionTree {
 
     /// Picks the highest-scoring split candidate, resolving exact-score ties
     ///
-    /// With `rng == None` the last tied candidate wins, which makes the parallel path
-    /// deterministic. With `rng == Some`, a uniformly random tied candidate is chosen -
-    /// seeded tie-breaking active only when a local `random_state` or the global seed is set
+    /// With `rng == None`, the last tied candidate wins, which makes the parallel path
+    /// deterministic. With `rng == Some`, the function picks a uniformly random tied
+    /// candidate. Seeded tie-breaking is active only when a local `random_state` or the
+    /// global seed is set
     fn select_best_split(
         mut candidates: Vec<(f64, Split, f64)>,
         rng: &mut Option<StdRng>,
@@ -882,7 +904,8 @@ impl DecisionTree {
             .map(|(score, _, _)| *score)
             .filter(|score| !score.is_nan())
             .max_by(|a, b| a.partial_cmp(b).unwrap())?;
-        // Indices of all candidates tied at the maximum score; NaN scores never equal `max_score` so they are excluded
+        // Indices of every candidate tied at the maximum score.
+        // NaN scores never equal `max_score`, so this list excludes them
         let tied: Vec<usize> = candidates
             .iter()
             .enumerate()
@@ -924,9 +947,10 @@ impl DecisionTree {
             indices.iter().map(|&i| (x[[i, feature_idx]], i)).collect();
         order.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Start below any real score so the best candidate is found regardless of magnitude
+        // Start below any real score so the search always finds the best candidate
         let mut best_score = f64::NEG_INFINITY;
-        // (split position, threshold, impurity_decrease); left = order[..pos], right = order[pos..]
+        // best holds (split position, threshold, impurity_decrease)
+        // left = order[..pos], right = order[pos..]
         let mut best: Option<(usize, f64, f64)> = None;
 
         // Enforce the leaf-size constraint while searching, not just on the final pick
@@ -973,7 +997,7 @@ impl DecisionTree {
                 left_counts[cls] += 1.0;
                 right_counts[cls] -= 1.0;
 
-                // A split is only valid between two distinct feature values
+                // A split is only valid between 2 distinct feature values
                 if order[pos - 1].0 == order[pos].0 {
                     continue;
                 }
@@ -1028,7 +1052,7 @@ impl DecisionTree {
         })
     }
 
-    /// Evaluates a multi-way categorical split for a single feature (one branch per value)
+    /// Evaluates a multi-way categorical split for a single feature (1 branch per value)
     ///
     /// Returns `(selection_score, split, impurity_decrease)`, or `None` when the feature
     /// has fewer than 2 distinct values or the split does not reduce impurity
@@ -1106,9 +1130,9 @@ impl DecisionTree {
 
     /// Calculates mean squared error for regression samples
     ///
-    /// MSE impurity is the population variance of the node's targets. Tree inputs are validated
-    /// finite by `preliminary_check`, so this is a plain two-pass mean/squared-deviation with no
-    /// NaN handling or intermediate allocation
+    /// MSE impurity is the population variance of the node's targets. `preliminary_check`
+    /// validates that inputs are finite. This function uses a plain 2-pass mean/squared-deviation
+    /// calculation, with no NaN handling or extra allocation
     fn calculate_mse<S>(&self, y: &ArrayBase<S, Ix1>, indices: &[usize]) -> f64
     where
         S: Data<Elem = f64>,
@@ -1217,7 +1241,8 @@ impl DecisionTree {
                 categories,
             } => {
                 if categories.is_some() {
-                    // Route by category value, falling back to the default leaf for values unseen during training
+                    // Route by category value.
+                    // Fall back to the default leaf for values unseen during training
                     let key = category_key(x[*feature_index]);
                     if let Some(child) = node.children.as_ref().and_then(|c| c.get(&key)) {
                         return self.traverse_tree(child, x);
@@ -1267,6 +1292,7 @@ impl DecisionTree {
     /// - `Error::NotFitted` - If the model has not been trained yet
     /// - `Error::EmptyInput` - If input data is empty
     /// - `Error::DimensionMismatch` - If feature dimensions mismatch
+    /// - `Error::NonFinite` - If input data contains NaN or infinite values
     ///
     /// # Performance
     ///
@@ -1279,7 +1305,7 @@ impl DecisionTree {
         check_is_fitted(self.root.is_some(), "DecisionTree")?;
         validate_predict_input(x, self.n_features)?;
 
-        // Tree-traversal gate: one root-to-leaf walk per sample
+        // Tree-traversal gate: 1 root-to-leaf walk per sample
         let visit_work = x.nrows().saturating_mul(DECISION_TREE_ASSUMED_DEPTH);
         let predictions: Result<Vec<f64>, Error> = if visit_work >= tree_traversal_min_visits() {
             x.axis_iter(Axis(0))
@@ -1314,7 +1340,7 @@ impl DecisionTree {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If training or prediction inputs are invalid
+    /// Propagates any error from [`fit`](Self::fit) or [`predict`](Self::predict)
     pub fn fit_predict<S1, S2>(
         &mut self,
         x_train: &ArrayBase<S1, Ix2>,
@@ -1336,12 +1362,16 @@ impl DecisionTree {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, Error>` - A 2D array of class probabilities where each row sums to 1.0
+    /// - `Result<Array2<f64>, Error>` - A 2D array of class probabilities where each row
+    ///   sums to 1.0
     ///
     /// # Errors
     ///
-    /// - `Error::Tree` - If called on a regression tree
+    /// - `Error::Tree` - If called on a regression tree, or if the tree structure is broken
     /// - `Error::NotFitted` - If the model has not been trained yet
+    /// - `Error::EmptyInput` - If input data is empty
+    /// - `Error::DimensionMismatch` - If feature dimensions mismatch
+    /// - `Error::NonFinite` - If input data contains NaN or infinite values
     ///
     /// # Performance
     ///
@@ -1403,7 +1433,7 @@ impl DecisionTree {
     ///
     /// # Errors
     ///
-    /// - `Error::Tree` - If called on a regression tree
+    /// - `Error::Tree` - If called on a regression tree, or if the tree structure is broken
     /// - `Error::DimensionMismatch` - If the feature dimension mismatches
     /// - `Error::NotFitted` - If the model has not been trained yet
     pub fn predict_proba_one(&self, x: &[f64]) -> Result<Vec<f64>, Error> {
@@ -1436,7 +1466,8 @@ impl DecisionTree {
                 categories,
             } => {
                 if categories.is_some() {
-                    // Route by category value, falling back to the default leaf for values unseen during training
+                    // Route by category value.
+                    // Fall back to the default leaf for values unseen during training
                     let key = category_key(x[*feature_index]);
                     if let Some(child) = node.children.as_ref().and_then(|c| c.get(&key)) {
                         return self.get_probabilities(child, x);
@@ -1547,7 +1578,8 @@ impl DecisionTree {
                         feature_index
                     ));
 
-                    // One branch per category value (sorted by key for stable output), plus a default branch for unseen values
+                    // One branch per category value (sorted by key for stable output), plus a
+                    // default branch for unseen values
                     let mut branches: Vec<(String, &Node)> = node
                         .children
                         .as_ref()
@@ -1591,6 +1623,7 @@ impl DecisionTree {
 }
 
 #[cfg(test)]
+/// Unit tests for the split search, impurity criteria, and tree traversal error paths
 mod tests {
     use super::*;
 
@@ -1637,7 +1670,7 @@ mod tests {
         let mut rng: Option<StdRng> = None;
         assert!(DecisionTree::select_best_split(candidates, &mut rng).is_none());
     }
-    /// category_key collapses sub-1e-6 noise to one key but keeps distinct values distinct
+    /// category_key collapses sub-1e-6 noise to 1 key but keeps distinct values distinct
     #[test]
     fn category_key_collapses_subkey_noise_but_separates_distinct_values() {
         // Sub-1e-6 noise rounds to the same canonical key
@@ -1657,7 +1690,8 @@ mod tests {
         assert!(split_information(&[4.0], 4.0).abs() < 1e-12);
     }
 
-    /// selection_score returns None for C4.5 on a degenerate split, the gain ratio otherwise, and the raw decrease for ID3/CART
+    /// selection_score returns None for C4.5 on a degenerate split, the gain ratio otherwise,
+    /// and the raw decrease for ID3/CART
     #[test]
     fn selection_score_c45_none_on_degenerate_split_info() {
         // Degenerate single-branch partition => split_info ~= 0 => None for C4.5
@@ -1704,13 +1738,14 @@ mod tests {
         );
     }
 
-    /// traverse_tree returns CorruptStructure for a categorical node with no matching child and no fallback
+    /// traverse_tree returns CorruptStructure for a categorical node with no matching child
+    /// and no fallback
     #[test]
     fn traverse_tree_categorical_no_match_no_fallback_is_corrupt_structure() {
         let tree = DecisionTree::new(Algorithm::CART, true).unwrap();
         // Categorical internal node: children map present but empty, and left (fallback) is None
         let node = Node::new_categorical(0, vec!["0".to_string()]);
-        // No category key can match an empty map; with no fallback this is corrupt
+        // No category key can match an empty map. Without a fallback, this state is corrupt
         let err = tree.traverse_tree(&node, &[0.0]).unwrap_err();
         assert!(
             matches!(err, Error::Tree(TreeError::CorruptStructure(_))),
@@ -1731,7 +1766,8 @@ mod tests {
         );
     }
 
-    /// get_probabilities returns CorruptStructure for a categorical node with no matching child and no fallback
+    /// get_probabilities returns CorruptStructure for a categorical node with no matching
+    /// child and no fallback
     #[test]
     fn get_probabilities_categorical_no_match_no_fallback_is_corrupt_structure() {
         let tree = DecisionTree::new(Algorithm::CART, true).unwrap();

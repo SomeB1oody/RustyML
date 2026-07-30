@@ -1,6 +1,8 @@
-//! Neural-network forward-kernel gates: the conv engine FLOP gate, the pooling-engine op gate,
-//! and the f32 elementwise classes (cheap maps, exp maps, per-element rng, fused optimizer
-//! updates) that the activation/dropout/optimizer thresholds govern
+//! Neural-network forward-kernel gates.
+//!
+//! It covers the conv engine FLOP gate and the pooling-engine op gate. It also covers the f32
+//! elementwise classes (cheap maps, exp maps, per-element rng, fused optimizer updates) that
+//! the activation, dropout, and optimizer thresholds govern.
 
 use crate::harness::{Row, Section, time_per_call_ns};
 use ndarray::{Array1, IxDyn};
@@ -77,7 +79,7 @@ pub fn calibrate_pooling() -> Section {
             Some(force),
         ));
     };
-    // Few large images at 3 channels - the narrow-vector case a channels-last pass serves worst
+    // Few large images at 3 channels (the narrow-vector case a channels-last pass serves worst)
     for &img in &[32usize, 64, 128, 256, 512, 1024] {
         let input = Tensor::from_elem(IxDyn(&[1, img, img, 3]), 1.0f32);
         let work = 3 * (img / 2) * (img / 2) * 4; // channels * out_positions * window taps
@@ -103,11 +105,11 @@ pub fn calibrate_pooling() -> Section {
             parallel_ns: p,
         });
     }
-    // Conv-scale channel counts. The two ladders above pin the channel count to 1 or 3, which is
-    // the regime a channels-last layout serves worst: there the channel axis is the vectorization
-    // width, so a length-1 or length-3 pixel vector is its degenerate case. Fitting the gate to
-    // those rows alone would calibrate it entirely on the extreme; these cover the channel counts
-    // a real network spends its time in
+    // Conv-scale channel counts. The 2 ladders above pin the channel count to 1 or 3. That is
+    // the regime a channels-last layout serves worst, because the channel axis is the
+    // vectorization width. A length-1 or length-3 pixel vector is its degenerate case. Those
+    // rows alone would calibrate the gate entirely on the extreme. These rows instead cover the
+    // channel counts a real network spends its time in
     for &(batch, c, img) in &[
         (1usize, 32usize, 28usize),
         (1, 32, 56),
@@ -198,8 +200,8 @@ pub fn calibrate_elementwise() -> Vec<Section> {
         rows,
     });
 
-    // Per-element RNG (dropout-like): Bernoulli draw per element; the parallel path mirrors the
-    // per-chunk-rng pattern a parallel dropout needs
+    // Per-element RNG (dropout-like): a Bernoulli draw per element. The parallel path mirrors
+    // the per-chunk-rng pattern a parallel dropout needs
     let mut rows = Vec::new();
     for &len in &sizes {
         let mut rng = StdRng::seed_from_u64(7);
@@ -287,11 +289,11 @@ pub fn calibrate_elementwise() -> Vec<Section> {
 // spatial-dropout per-channel scale: SPATIAL_DROPOUT_SCALE_PARALLEL_MIN_ELEMS
 
 /// The spatial-dropout fused scale: multiply each `(batch, channel)` segment of a
-/// `[batch, channels, *spatial]` tensor by its channel's inverted-dropout factor, in one pass
-/// writing a fresh output (matching the production allocate-per-call). Forced serial vs forced
-/// parallel of the same per-segment scale; each element is independent, so the flag never
-/// changes the bits and the gate is a pure performance knob. The ladder varies the segment
-/// count (`B * C`) and segment length (`spatial`) across the crossover
+/// `[batch, *spatial, channels]` tensor by its channel's inverted-dropout factor. It writes a
+/// fresh output in 1 pass, matching the production allocate-per-call. The bench forces serial
+/// against forced parallel of the same per-segment scale. Each element is independent, so the
+/// flag never changes the bits, and the gate is a pure performance knob. The ladder varies the
+/// segment count (`B * C`) and the segment length (`spatial`) across the crossover.
 pub fn calibrate_spatial_dropout_scale() -> Section {
     let mut rows = Vec::new();
     for &(n_seg, seg) in &[

@@ -8,7 +8,7 @@ use ndarray::Array2;
 use rustyml::error::Error;
 use rustyml::machine_learning::manifold::t_sne::{Init, TSNE, TSNEMethod};
 
-// Small valid dataset (6 points, 2 features); perplexity=2.0 < 6 passes the n_samples guard
+// Small valid dataset (6 points, 2 features). perplexity=2.0 < 6 passes the n_samples guard
 fn small_data() -> Array2<f64> {
     ndarray::array![
         [0.0, 0.0],
@@ -20,7 +20,7 @@ fn small_data() -> Array2<f64> {
     ]
 }
 
-// Constructor validation - perplexity
+// Constructor validation: perplexity
 
 /// Non-positive (0.0, negative) and non-finite (NaN, +inf) perplexity values are all
 /// rejected as InvalidParameter
@@ -35,7 +35,7 @@ fn new_perplexity_invalid_returns_invalid_parameter() {
     }
 }
 
-// Constructor validation - learning_rate
+// Constructor validation: learning_rate
 
 /// Non-positive (0.0, negative) and non-finite (NaN, +inf) learning_rate values are all
 /// rejected as InvalidParameter
@@ -50,12 +50,12 @@ fn new_learning_rate_invalid_returns_invalid_parameter() {
     }
 }
 
-// Constructor validation - n_components and n_iter
+// Constructor validation: n_components and n_iter
 
 /// n_components = 0 and n_iter = 0 are each rejected as InvalidParameter
 #[test]
 fn new_zero_integer_param_returns_invalid_parameter() {
-    // (n_components, n_iter): one argument is the zero offender per row
+    // (n_components, n_iter): 1 argument is the zero offender per row
     for (n_components, n_iter) in [(0, 250), (2, 0)] {
         let err = TSNE::new(n_components, 5.0, 200.0, n_iter).unwrap_err();
         assert!(
@@ -72,7 +72,7 @@ fn new_valid_params_returns_ok() {
     assert!(result.is_ok(), "expected Ok, got {result:?}");
 }
 
-// fit_transform - output shape
+// fit_transform: output shape
 
 /// fit_transform on an (n, d) matrix returns an (n, n_components) matrix
 #[test]
@@ -112,7 +112,7 @@ fn fit_transform_output_shape_n_components_one() {
     );
 }
 
-// fit_transform - all finite
+// fit_transform: all finite
 
 /// Every element in the embedding is finite (no NaN or +/-inf)
 #[test]
@@ -133,9 +133,9 @@ fn fit_transform_all_elements_finite() {
     }
 }
 
-// fit_transform - determinism (same seed gives bit-identical result)
+// fit_transform: determinism (same seed gives bit-identical result)
 
-/// Two calls with the same random_state produce a bit-for-bit identical embedding
+/// 2 calls with the same random_state produce a bit-for-bit identical embedding
 #[test]
 fn fit_transform_deterministic_same_seed_gives_identical_results() {
     let x = small_data();
@@ -157,10 +157,8 @@ fn fit_transform_deterministic_same_seed_gives_identical_results() {
     crate::common::assert_allclose(&emb1, &emb2, 0.0_f64);
 }
 
-/// Different seeds produce different embeddings under random initialization
-///
-/// The seed only feeds the random initialization path; PCA initialization is deterministic
-/// and would ignore the seed, so this test pins [`Init::Random`]
+/// Different seeds produce different embeddings, since the seed feeds only the random
+/// initialization path (PCA initialization ignores it, so this test pins [`Init::Random`])
 #[test]
 fn fit_transform_different_seeds_produce_different_results() {
     let x = small_data();
@@ -178,7 +176,7 @@ fn fit_transform_different_seeds_produce_different_results() {
         .unwrap();
     let emb1 = tsne1.fit_transform(&x).unwrap();
     let emb2 = tsne2.fit_transform(&x).unwrap();
-    // At least one element must differ because the random initializations differ
+    // At least 1 element must differ because the random initializations differ
     let any_differs = emb1.iter().zip(emb2.iter()).any(|(a, b)| a != b);
     assert!(
         any_differs,
@@ -208,9 +206,9 @@ fn fit_transform_pca_init_is_seed_independent() {
     crate::common::assert_allclose(&emb1, &emb2, 0.0_f64);
 }
 
-// fit_transform - centered output
+// fit_transform: centered output
 
-/// Each column of the final embedding has mean ~= 0 (tolerance 1e-10)
+/// Each column of the final embedding has mean ~0 (tolerance 1e-10)
 #[test]
 fn fit_transform_column_means_are_zero() {
     let tsne = TSNE::new(2, 2.0, 200.0, 300)
@@ -228,7 +226,7 @@ fn fit_transform_column_means_are_zero() {
     assert_abs_diff_eq!(mean1, 0.0, epsilon = 1e-10);
 }
 
-/// n_components=1: the single output column also has mean ~= 0
+/// n_components=1: the single output column also has mean ~0
 #[test]
 fn fit_transform_column_mean_zero_n_components_one() {
     let tsne = TSNE::new(1, 2.0, 200.0, 300)
@@ -244,13 +242,13 @@ fn fit_transform_column_mean_zero_n_components_one() {
     assert_abs_diff_eq!(mean0, 0.0, epsilon = 1e-10);
 }
 
-// fit_transform - neighborhood preservation
+// fit_transform: neighborhood preservation
 
-/// Two well-separated high-D clusters remain separated in the 2-D embedding
+/// 2 well-separated high-D clusters remain separated in the 2-D embedding
 #[test]
 fn fit_transform_well_separated_clusters_remain_separated() {
     use std::f64::consts::PI;
-    // 10 points evenly spaced on the unit circle; cluster B shifts every x by +200
+    // 10 points sit evenly spaced on the unit circle. Cluster B shifts every x by +200
     let n_per_cluster = 10_usize;
     let shift = 200.0_f64;
     let mut rows: Vec<[f64; 2]> = Vec::with_capacity(2 * n_per_cluster);
@@ -265,8 +263,8 @@ fn fit_transform_well_separated_clusters_remain_separated() {
     let flat: Vec<f64> = rows.iter().flat_map(|r| r.iter().copied()).collect();
     let x = Array2::from_shape_vec((2 * n_per_cluster, 2), flat).unwrap();
 
-    // On a set this tiny (20 points) the default lr=200 over-expands the absolute
-    // scale; lr=100 keeps the step sized to the data
+    // On a set this tiny (20 points), the default lr=200 over-expands the absolute scale.
+    // lr=100 keeps the step sized to the data
     let tsne = TSNE::new(2, 5.0, 100.0, 1000)
         .unwrap()
         .with_random_state(42)
@@ -275,14 +273,14 @@ fn fit_transform_well_separated_clusters_remain_separated() {
         .unwrap();
     let emb = tsne.fit_transform(&x).unwrap();
 
-    // Euclidean distance between two 2-D embedding points
+    // Euclidean distance between 2 points in the 2-D embedding
     let dist2d = |i: usize, j: usize| -> f64 {
         let dy0 = emb[[i, 0]] - emb[[j, 0]];
         let dy1 = emb[[i, 1]] - emb[[j, 1]];
         (dy0 * dy0 + dy1 * dy1).sqrt()
     };
 
-    // Centroids of the two clusters in the embedding
+    // Centroids of the 2 clusters in the embedding
     let cen_a: [f64; 2] = [
         (0..n_per_cluster).map(|i| emb[[i, 0]]).sum::<f64>() / n_per_cluster as f64,
         (0..n_per_cluster).map(|i| emb[[i, 1]]).sum::<f64>() / n_per_cluster as f64,
@@ -316,7 +314,7 @@ fn fit_transform_well_separated_clusters_remain_separated() {
         }
     }
 
-    // The two cluster centroids must be at least 5x the max intra-cluster spread apart:
+    // The 2 cluster centroids must be at least 5x the max intra-cluster spread apart:
     // a conservative check given the 100:1 high-D separation ratio and 1000 iterations
     assert!(
         inter_centroid > 5.0 * max_intra,
@@ -326,7 +324,7 @@ fn fit_transform_well_separated_clusters_remain_separated() {
     );
 }
 
-// Error paths - fit_transform
+// Error paths: fit_transform
 
 /// perplexity == n_samples (5.0) and perplexity > n_samples (10.0) are both rejected as
 /// InvalidParameter (the dataset has 5 samples)
@@ -419,7 +417,7 @@ fn fit_transform_infinity_input_returns_non_finite() {
 
 // Getter roundtrips
 
-/// Getters return exactly the values passed to new()
+/// Getters return exactly the values set by the constructor and builder methods
 #[test]
 fn getters_return_construction_values() {
     let tsne = TSNE::new(3, 15.0, 100.0, 500)
@@ -578,7 +576,7 @@ fn fit_transform_barnes_hut_deterministic_same_seed() {
     crate::common::assert_allclose(&emb1, &emb2, 0.0_f64);
 }
 
-/// Barnes-Hut keeps two well-separated high-D clusters apart in the embedding
+/// Barnes-Hut keeps 2 well-separated high-D clusters apart in the embedding
 #[test]
 fn fit_transform_barnes_hut_well_separated_clusters_remain_separated() {
     use std::f64::consts::PI;

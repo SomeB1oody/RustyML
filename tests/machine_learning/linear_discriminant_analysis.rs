@@ -12,8 +12,8 @@ use crate::common::assert_allclose;
 
 // Local helpers
 
-/// Three well-separated classes in 2D (3 samples per class), centred near
-/// (1,1), (5,5) and (9,1); ~4 units apart so every solver reaches 100% accuracy
+/// 3 well-separated classes in 2D (3 samples per class), centered near (1,1), (5,5), and
+/// (9,1). The clusters sit far enough apart that every solver reaches 100% accuracy
 fn make_three_class_2d() -> (Array2<f64>, Array1<i32>) {
     let x = array![
         [1.0, 1.0],
@@ -30,7 +30,7 @@ fn make_three_class_2d() -> (Array2<f64>, Array1<i32>) {
     (x, y)
 }
 
-/// Holdout test set: one sample clearly within each of the three clusters
+/// Holdout test set: 1 sample clearly within each of the 3 clusters
 fn make_three_class_holdout() -> (Array2<f64>, Array1<i32>) {
     let x = array![
         [1.1, 1.0], // -> class 0
@@ -77,7 +77,7 @@ fn test_new_default_values() {
 #[test]
 fn test_default_impl() {
     let lda = LDA::default();
-    // The default is now `None` (auto): the component count is resolved at fit time to
+    // The default component count is `None` (auto), resolved at fit time to
     // min(n_classes - 1, n_features)
     assert_eq!(lda.get_n_components(), None);
     assert_eq!(lda.get_solver(), DiscriminantSolver::SVD);
@@ -319,7 +319,7 @@ fn test_transform_wrong_feature_count_errors() {
 
 #[test]
 fn test_fit_predict_train_100pct_svd() {
-    // Clusters 4 units apart, so perfect classification is guaranteed
+    // The 3 clusters sit far apart, so perfect classification is guaranteed
     let (x, y) = make_three_class_2d();
     let mut lda = LDA::new(2).unwrap().with_solver(DiscriminantSolver::SVD);
     lda.fit(&x, &y).unwrap();
@@ -367,7 +367,7 @@ fn test_predict_labels_are_i32_domain() {
 
 #[test]
 fn test_classes_sorted_after_fit() {
-    // classes_vec is sorted_unstable before storing; confirm the getter reflects this
+    // classes_vec sorts with sort_unstable before storage, and the getter must reflect that order
     let (x, y) = make_three_class_2d();
     let mut lda = LDA::new(2).unwrap();
     lda.fit(&x, &y).unwrap();
@@ -376,7 +376,7 @@ fn test_classes_sorted_after_fit() {
     assert_eq!(classes.as_slice().unwrap(), &[0, 1, 2]);
 }
 
-// 6. Correctness: all three solvers
+// 6. Correctness: all 3 solvers
 
 #[test]
 fn test_all_solvers_classify_correctly() {
@@ -442,7 +442,7 @@ fn test_transform_n_components_1() {
 
 #[test]
 fn test_transform_single_sample() {
-    // Single-sample inputs always take the sequential path (< 500)
+    // A single-sample input always takes the sequential path
     let (x_train, y_train) = make_three_class_2d();
     let mut lda = LDA::new(2).unwrap();
     lda.fit(&x_train, &y_train).unwrap();
@@ -474,8 +474,7 @@ fn test_two_class_1d_classification_correctness() {
 
 #[test]
 fn test_two_class_1d_projected_class_separation() {
-    // After projecting onto 1 component the class means must separate: with a unit
-    // vector w, |8w - 2w| = 6|w| = 6.0
+    // The class means must separate after projecting onto 1 component
     let (x, y) = make_two_class_1d();
     let mut lda = LDA::new(1).unwrap().with_solver(DiscriminantSolver::SVD);
     lda.fit(&x, &y).unwrap();
@@ -489,7 +488,8 @@ fn test_two_class_1d_projected_class_separation() {
     let mean0: f64 = proj_class0.iter().sum::<f64>() / 3.0;
     let mean1: f64 = proj_class1.iter().sum::<f64>() / 3.0;
 
-    // |projected mean diff| = |8 - 2| * |w| should be close to 6.0
+    // The pooled within-class variance in the raw data is 1, so the projection scale is
+    // about 1, and the mean gap stays close to |8 - 2| = 6.0
     assert_abs_diff_eq!((mean1 - mean0).abs(), 6.0, epsilon = 0.05);
 
     // Within each class the projections stay monotone (strictly increasing or
@@ -597,7 +597,7 @@ fn test_shrinkage_manual_zero_matches_no_shrinkage() {
 
 #[test]
 fn test_shrinkage_manual_boundary_one_produces_finite_output() {
-    // Manual(1.0): shrinks the covariance entirely to a scaled identity; fit and
+    // Manual(1.0) shrinks the covariance entirely to a scaled identity. Fit and
     // transform should still succeed on well-separated data
     let (x, y) = make_three_class_2d();
     let mut lda = LDA::new(2)
@@ -614,8 +614,9 @@ fn test_shrinkage_manual_boundary_one_produces_finite_output() {
 // 11. Projection columns are whitened, not unit-norm
 //
 // scikit-learn's `scalings_` scales each discriminant axis so the projected data has unit
-// within-class covariance. The axes are therefore NOT unit vectors, and their norms carry the
-// data's units - which is why `DiscriminantSolver::project` uses a relative degenerate-axis tolerance
+// within-class covariance. The axes are therefore not unit vectors, and their norms carry the
+// data's units. This is why `DiscriminantSolver::project` uses a relative degenerate-axis
+// tolerance
 
 /// Pooled within-class variance of a single projected component, over `n - n_classes`
 fn projected_within_class_variance(z: &Array2<f64>, y: &Array1<i32>, column: usize) -> f64 {
@@ -713,7 +714,7 @@ fn test_priors_equal_for_balanced_classes() {
 
 #[test]
 fn test_class_means_correct_2class_1d() {
-    // Class 0: [1,2,3] -> mean = 2.0; Class 1: [7,8,9] -> mean = 8.0
+    // Class 0: [1,2,3] -> mean 2.0. Class 1: [7,8,9] -> mean 8.0
     let (x, y) = make_two_class_1d();
     let mut lda = LDA::new(1).unwrap();
     lda.fit(&x, &y).unwrap();
@@ -800,8 +801,7 @@ fn test_save_load_preserves_hyperparameters() {
 
 #[test]
 fn test_load_preserves_fit_state() {
-    // After round-trip, get_classes / get_priors / get_means / get_projection must
-    // all be Some and match the pre-save state
+    // After round-trip, get_classes / get_priors / get_means / get_projection must all be Some
     let (x, y) = make_three_class_2d();
     let mut lda = LDA::new(2).unwrap();
     lda.fit(&x, &y).unwrap();
@@ -828,13 +828,12 @@ fn test_load_preserves_fit_state() {
     );
 }
 
-// 16. Large-batch Rayon paths (fit `use_parallel` + predict parallel scoring)
+// 16. Large-batch correctness check
 
-/// 600-sample (200 per class, > LDA_PARALLEL_THRESHOLD = 500) 3-class 2D dataset
-/// that is linearly separable by construction
+/// 600-sample (200 per class) 3-class 2D dataset that is linearly separable by construction
 ///
 /// Centroids (0,0), (10,10), (20,0) each get a deterministic `sin`-based jitter
-/// bounded by ~1.131, far below the >= 7.071 margin to any class boundary, so
+/// bounded by ~1.131, far below the >= 7.071 margin to any class boundary. So
 /// every sample lies on the correct side and expected accuracy = 1.0
 fn make_large_separable_3class_2d() -> (Array2<f64>, Array1<i32>) {
     const PER_CLASS: usize = 200;
@@ -863,8 +862,8 @@ fn make_large_separable_3class_2d() -> (Array2<f64>, Array1<i32>) {
 
 #[test]
 fn test_fit_predict_large_separable_parallel_paths() {
-    // 600 samples (> 500) exercises both Rayon branches (fit per-class par_iter and
-    // predict parallel scoring); separable data must still reach 100% accuracy
+    // A 600-sample dataset checks correctness at a larger scale. Separable data must still
+    // reach 100% accuracy
     let (x, y) = make_large_separable_3class_2d();
     assert!(
         x.nrows() > 500,
@@ -891,8 +890,8 @@ fn test_fit_predict_large_separable_parallel_paths() {
 // Auto n_components (default = None): the cap is min(n_classes-1, n_features), applied
 // automatically so the default model fits any valid dataset (binary included)
 
-/// `LDA::default()` must fit binary data: the previous default (n_components=2) wrongly
-/// errored because the cap for 2 classes is 1. The corrected default auto-caps to 1.
+/// `LDA::default()` must fit binary data. The default auto-caps `n_components` to
+/// min(n_classes - 1, n_features), which is 1 for 2 classes
 #[test]
 fn test_default_fits_binary_data_via_auto_n_components() {
     let (x, y) = make_two_class_1d();
@@ -1038,13 +1037,10 @@ fn test_decision_function_and_predict_proba_not_fitted_error() {
     ));
 }
 
-// 12. scikit-learn parity of transform()
+// 17. scikit-learn parity of transform()
 
-/// `transform` centers by the training mean, so the projected training data is mean-zero
-///
-/// scikit-learn computes `(X - xbar_) @ scalings_`. Skipping the centering shifts every projected
-/// coordinate by a constant, which is invisible in a scatter plot but wrong the moment the numbers
-/// are compared against a scikit-learn pipeline
+/// `transform` centers input by the training mean before projecting, matching scikit-learn's
+/// `(X - xbar_) @ scalings_`, so the projected training data is mean-zero
 #[test]
 fn test_transform_projected_training_data_is_mean_zero() {
     let x: Array2<f64> = array![
@@ -1071,11 +1067,8 @@ fn test_transform_projected_training_data_is_mean_zero() {
     assert_abs_diff_eq!(overall_mean[1], 5.4, epsilon = 1e-12);
 }
 
-/// The discriminant axes are whitened, not unit-norm, matching scikit-learn's `scalings_`
-///
-/// scikit-learn scales `scalings_` so the projected data has unit within-class covariance (with
-/// the `n - n_classes` denominator). Rescaling each axis to unit L2 norm - which this used to do -
-/// undoes that and puts the projection on a different scale from any ported pipeline
+/// The discriminant axes are whitened, not unit-norm: scikit-learn scales `scalings_` so the
+/// projected data has unit within-class covariance, using the `n - n_classes` denominator
 #[test]
 fn test_transform_axes_whiten_the_within_class_covariance() {
     let x: Array2<f64> = array![

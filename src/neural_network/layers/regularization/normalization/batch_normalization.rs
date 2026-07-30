@@ -1,10 +1,13 @@
-//! Batch normalization layer that normalizes each mini-batch per channel: over the batch axis for
-//! 2-D inputs, and over the batch + spatial axes for rank > 2 (convolutional) inputs
+//! Batch normalization layer that normalizes each mini-batch per channel
 //!
-//! Both are the same pass. Under the crate's channels-last layout the channel axis is innermost, so
-//! a `[batch, spatial..., channels]` buffer already *is* the `[M, C]` matrix the per-channel folds
-//! read, with `M = batch * spatial`. Collapsing the leading axes is a reinterpretation of the same
-//! bytes, not a reshape or a transpose, which is why one code path serves every rank >= 2
+//! It normalizes over the batch axis for 2-D inputs, and over the batch and spatial axes for
+//! rank > 2 (convolutional) inputs
+//!
+//! Both are the same pass. Under the crate's channels-last layout, the channel axis is
+//! innermost. A `[batch, spatial..., channels]` buffer already *is* the `[M, C]` matrix the
+//! per-channel folds read, with `M = batch * spatial`. Collapsing the leading axes is a
+//! reinterpretation of the same bytes, not a reshape or a transpose. That is why 1 code path
+//! serves every rank >= 2
 
 use super::folds::{par_col_dot, par_col_sum};
 use crate::error::Error;
@@ -26,34 +29,33 @@ use rayon::iter::{
 use std::borrow::Cow;
 
 tunable_gate! {
-    /// Total-element count above which forward/backward switch from sequential to parallel
+    /// Total-element count above which forward and backward switch from sequential to parallel
     ///
-    /// The centering/variance/normalize passes stream several arrays like a fused optimizer step
-    /// does, so the threshold is mapped from the multi-stream elementwise class (crossover bracket
-    /// 256K-1M elements) rather than measured directly on this layer
+    /// Gates the centering, normalize, and gradient passes, each of which streams several
+    /// arrays over the full tensor
     ///
     /// Overridable via [`crate::tuning`]
     pub(crate) BATCH_NORM_PARALLEL_THRESHOLD => batch_norm_parallel_threshold / set_batch_norm_parallel_threshold = 262_144
 }
 
 tunable_gate! {
-    /// Element count (`M x C`) above which the per-channel statistics reductions of **2-D** inputs
-    /// (mean, variance, and the backward sums) run as row-block deterministic folds
+    /// Element count (`M x C`) above which the per-channel statistics reductions (mean,
+    /// variance, and the backward sums) run as row-block deterministic folds
     ///
-    /// Crossover bracket 64K-256K elements, 2.8-4.5x at 1-4M (C=64), 12x for narrow C. A
-    /// channel-chunked alternative that would have preserved the serial accumulation order
-    /// measured 0.3-0.9x everywhere and was rejected
+    /// Applies to every input of rank >= 2. A `[batch, *spatial, channels]` input collapses to
+    /// the same `[M, C]` view as a 2-D input, with `M = batch * spatial`. So 1 gate covers both
     ///
     /// Overridable via [`crate::tuning`]
     pub(crate) BN_COL_STATS_PARALLEL_MIN_ELEMS => bn_col_stats_parallel_min_elems / set_bn_col_stats_parallel_min_elems = 262_144
 }
 
 tunable_gate! {
-    /// Element count above which the per-channel statistics reductions of **rank >= 3** inputs
-    /// (the plane folds over the native `[batch, *spatial, channels]` layout) run on rayon
+    /// Element count above which the per-channel statistics reductions of rank >= 3 inputs run
+    /// on rayon
     ///
-    /// Crossover bracket 64K-256K elements (0.36x at 64K, 1.37x at 256K), 2.8-3.8x at 1M, 11.7x at
-    /// the conv-scale 8.4M
+    /// Reserved for a plane-fold path over the native `[batch, *spatial, channels]` layout. The
+    /// forward and backward passes here use [`BN_COL_STATS_PARALLEL_MIN_ELEMS`] for every rank
+    /// >= 2 input instead, so this gate has no effect yet
     ///
     /// Overridable via [`crate::tuning`]
     pub(crate) BN_PLANE_STATS_PARALLEL_MIN_ELEMS => bn_plane_stats_parallel_min_elems / set_bn_plane_stats_parallel_min_elems = 262_144
@@ -120,11 +122,11 @@ impl BatchNormalization {
     /// - `input_shape` - Shape of the input tensor, with the **batch** as dimension 0 and the
     ///   **channel/feature** as the **last** dimension. The trainable `gamma`/`beta` (and the
     ///   running mean/variance) are per-channel, length `input_shape.last()`. For a 2-D
-    ///   `[batch, features]` input this is standard per-feature BN; for a rank > 2
-    ///   `[batch, *spatial, channels]` input the statistics reduce over batch **and** all spatial
-    ///   positions (spatial BN, matching Keras), so there is one mean/variance/scale/shift per
-    ///   channel. A 1-D `input_shape` (e.g. `vec![4]`) has no channel axis and yields scalar
-    ///   (length-1) parameters broadcast over the whole input; pass `vec![batch, 4]` to mean
+    ///   `[batch, features]` input this is standard per-feature BN. For a rank > 2
+    ///   `[batch, *spatial, channels]` input, the statistics reduce over batch **and** all
+    ///   spatial positions (spatial BN, matching Keras). So there is 1 mean/variance/scale/shift
+    ///   per channel. A 1-D `input_shape` (e.g. `vec![4]`) has no channel axis and yields scalar
+    ///   (length-1) parameters broadcast over the whole input. Pass `vec![batch, 4]` to mean
     ///   "4 features"
     /// - `momentum` - Momentum for the moving average of mean and variance (typically 0.9 or 0.99)
     /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
@@ -137,13 +139,13 @@ impl BatchNormalization {
     ///
     /// - `Error::EmptyInput` - If `input_shape` is empty
     /// - `Error::InvalidParameter` - If `momentum` is not between 0.0 and 1.0
-    /// - `Error::InvalidParameter` - If `epsilon` is not positive
+    /// - `Error::InvalidParameter` - If `epsilon` is not positive or not finite
     pub fn new(input_shape: Vec<usize>, momentum: f32, epsilon: f32) -> Result<Self, Error> {
         validate_input_shape_not_empty(&input_shape)?;
         validate_momentum(momentum)?;
         validate_epsilon(epsilon)?;
 
-        // Parameters are per-channel, and the channel axis is the trailing one
+        // Parameters are per-channel. The channel axis is the trailing axis
         let param_shape = if input_shape.len() > 1 {
             vec![input_shape[input_shape.len() - 1]]
         } else {
@@ -212,9 +214,10 @@ impl Layer for BatchNormalization {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
 
-        // The parallel passes below need a contiguous slice. A standard-layout input already is
-        // one, so only a non-contiguous view pays for a copy - `as_standard_layout().into_owned()`
-        // would copy unconditionally, which on a conv-scale tensor costs more than the pass itself
+        // The parallel passes below need a contiguous slice. A standard-layout input is
+        // already contiguous, so only a non-contiguous view pays for a copy.
+        // `as_standard_layout().into_owned()` would copy unconditionally, which on a
+        // conv-scale tensor costs more than the pass itself
         let owned;
         let input = if input.is_standard_layout() {
             input
@@ -225,13 +228,13 @@ impl Layer for BatchNormalization {
 
         if self.training {
             let total_elements = input.len();
-            // Under the channels-last layout the channel axis is innermost, so a
+            // Under the channels-last layout, the channel axis is innermost. A
             // `[batch, spatial..., channels]` buffer already *is* the `[M, C]` matrix the
-            // per-channel folds want, with `M = batch * spatial`. No reshape and no transpose:
-            // one path serves every rank >= 2, and the statistics of a rank > 2 input reduce
-            // over batch and every spatial position exactly as spatial batch norm requires.
-            // A 1-D input has no channel axis (see `new`) and keeps the serial ndarray path
-            // with its 0-d statistics shapes
+            // per-channel folds want, with `M = batch * spatial`. This needs no reshape and no
+            // transpose, so 1 path serves every rank >= 2. The statistics of a rank > 2 input
+            // reduce over batch and every spatial position, exactly as spatial batch norm
+            // requires. A 1-D input has no channel axis (see `new`) and keeps the serial
+            // ndarray path, with its 0-d statistics shapes
             let use_col_fold = input.ndim() >= 2;
             let channels = if use_col_fold {
                 input.shape()[input.ndim() - 1]
@@ -256,11 +259,11 @@ impl Layer for BatchNormalization {
 
             // Center the data
             //
-            // The per-channel table is bound to a slice *outside* the loop. Calling
-            // `as_slice().unwrap()` inside would re-read a dynamic-dimension array's heap-allocated
-            // shape and re-run its standard-layout check on every element, and because the body
-            // stores through a `&mut f32` the compiler cannot prove the call loop-invariant and
-            // will not hoist it. Measured at roughly 2x on this pass
+            // The per-channel table is bound to a slice outside the loop. Calling
+            // `as_slice().unwrap()` inside the loop would re-read the array's heap-allocated shape
+            // and re-run its standard-layout check on every element. The loop body also stores
+            // through a `&mut f32`, so the compiler cannot prove the call is loop-invariant and
+            // will not hoist it
             let x_centered = if total_elements >= batch_norm_parallel_threshold() {
                 let mut x_centered = Tensor::zeros(input.raw_dim());
                 let mean_s = batch_mean.as_slice().unwrap();
@@ -279,7 +282,7 @@ impl Layer for BatchNormalization {
                 input - &batch_mean
             };
 
-            // Per-channel variance of the centered data; the fused fold avoids the
+            // Per-channel variance of the centered data. The fused fold avoids the
             // squared-diff temp the serial form materializes
             let batch_var = match x_centered.as_slice() {
                 Some(s) if use_col_fold => {
@@ -288,13 +291,13 @@ impl Layer for BatchNormalization {
                 _ => (&x_centered * &x_centered).mean_axis(Axis(0)).unwrap(),
             };
 
-            // Normalize, then scale and shift - in one sweep
+            // Normalize, then scale and shift, in 1 sweep
             //
-            // Both outputs are needed (`x_normalized` is cached for the backward pass), but they
-            // are the same walk over the same array, so writing them together saves a whole extra
-            // read and write of a conv-scale tensor. Centering cannot join them: the variance is
-            // folded from `x_centered`, so that pass has to finish first. Element for element this
-            // is the same arithmetic in the same order as the two passes it replaces
+            // Both outputs are needed. `x_normalized` is cached for the backward pass, but the 2
+            // outputs are the same walk over the same array. Writing them together saves a whole
+            // extra read and write of a conv-scale tensor. Centering cannot join this sweep: the
+            // variance is folded from `x_centered`, so that pass has to finish first. Element for
+            // element, this is the same arithmetic in the same order as the 2 passes it replaces
             let std_dev = (&batch_var + self.epsilon).mapv(|x| x.sqrt());
             let (x_normalized, output) = if total_elements >= batch_norm_parallel_threshold() {
                 let mut x_normalized = Tensor::zeros(x_centered.raw_dim());
@@ -352,8 +355,8 @@ impl Layer for BatchNormalization {
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
 
-        // The per-channel statistics are `[C]` and the channel axis is innermost, so ndarray's
-        // trailing-axis broadcast lines them up against an input of any rank on its own
+        // The per-channel statistics are `[C]` and the channel axis is innermost. This lets
+        // ndarray's trailing-axis broadcast line them up against an input of any rank on its own
         let std_dev = (&self.running_var + self.epsilon).mapv(|x| x.sqrt());
         let x_normalized = (input - &self.running_mean) / &std_dev;
         let output = &x_normalized * &self.gamma + &self.beta;
@@ -394,7 +397,7 @@ impl Layer for BatchNormalization {
 
         let channels = self.gamma.len();
         // As in `forward`: any rank >= 2 gradient is already the `[M, C]` matrix the folds want.
-        // `batch_size` is that `M` - batch times spatial - which is exactly the sample count the
+        // `batch_size` is that `M` (batch times spatial), which is exactly the sample count the
         // per-channel statistics were taken over. 1-D (scalar-parameter) inputs keep the serial
         // ndarray path and its 0-d statistics shapes
         let use_col_fold = grad_output.ndim() >= 2;
@@ -473,7 +476,7 @@ impl Layer for BatchNormalization {
         let grad_input = if total_elements >= batch_norm_parallel_threshold() {
             // Parallel computation
             let mut grad_inp = Tensor::zeros(grad_output.raw_dim());
-            // Three per-channel tables, so this pass paid the re-read three times per element
+            // 3 per-channel tables, so this pass pays the re-read 3 times per element
             let inv_std_s = inv_std.as_slice().unwrap();
             let grad_var_s = grad_var.as_slice().unwrap();
             let grad_mean_s = grad_mean.as_slice().unwrap();
@@ -548,6 +551,7 @@ impl Layer for BatchNormalization {
     mode_dependent_layer_trait!();
 }
 
+/// Unit tests for the batch-normalization layer and its column-fold kernels
 #[cfg(test)]
 mod tests {
     use super::super::folds::rows_per_block;
@@ -616,9 +620,9 @@ mod tests {
         }
     }
 
-    /// On integer-valued data every per-channel sum is exact in f32, so the row-block fold
-    /// must agree with ndarray's serial sum_axis exactly regardless of grouping - this
-    /// pins the fold against the serial path it replaces above the gate
+    /// On integer-valued data, every per-channel sum is exact in f32. The row-block fold must
+    /// therefore agree with ndarray's serial sum_axis exactly, regardless of grouping. This pins
+    /// the fold against the serial path it replaces above the gate
     #[test]
     fn par_col_folds_exact_on_integer_data() {
         let (m, c) = (4096usize, 64usize);
@@ -654,10 +658,10 @@ mod tests {
 
     /// A rank-4 input normalizes per channel over batch and every spatial position
     ///
-    /// Channel 0 holds 1..4 and channel 1 holds 5..8 across the four spatial positions, so each
-    /// channel has mean `2.5`/`6.5` and variance `1.25`. Deriving those by hand is what makes this
-    /// a layout test: if the channel axis were read anywhere but last, the two channels would mix
-    /// and neither number would come out
+    /// Channel 0 holds 1..4 and channel 1 holds 5..8 across the 4 spatial positions, so each
+    /// channel has mean `2.5`/`6.5` and variance `1.25`. Deriving those by hand is what makes
+    /// this a layout test. If the channel axis were read anywhere but last, the 2 channels
+    /// would mix, and neither number would come out
     #[test]
     fn spatial_forward_normalizes_per_channel_hand_derived() {
         let mut layer = BatchNormalization::new(vec![1, 2, 2, 2], 0.9, 1e-5).unwrap();

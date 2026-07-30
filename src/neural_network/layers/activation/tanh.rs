@@ -13,7 +13,7 @@ use crate::neural_network::traits::Layer;
 /// Applies `tanh(x)` element-wise to the input tensor, mapping values to (-1, 1) while
 /// preserving the input shape
 ///
-/// The activation math comes from [`Activation::Tanh`]; this layer adds boundary
+/// [`Activation::Tanh`] provides the activation math. This layer adds boundary
 /// validation and the caching required for backpropagation
 ///
 /// # Examples
@@ -52,7 +52,7 @@ impl Tanh {
     ///
     /// # Returns
     ///
-    /// - `Self` - A new `Tanh` layer instance
+    /// - `Self` - A new `Tanh` layer
     pub fn new() -> Self {
         Tanh { output_cache: None }
     }
@@ -70,7 +70,7 @@ impl Layer for Tanh {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Apply tanh; large-magnitude inputs saturate toward -1/+1 by construction
+        // Apply tanh. Large-magnitude inputs saturate toward -1/+1 by construction
         let output = Activation::Tanh.forward(input)?;
 
         // Cache the activated output for backpropagation
@@ -85,7 +85,7 @@ impl Layer for Tanh {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Apply tanh; large-magnitude inputs saturate toward -1/+1 by construction
+        // Apply tanh. Large-magnitude inputs saturate toward -1/+1 by construction
         Activation::Tanh.forward(input)
     }
 

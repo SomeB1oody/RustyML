@@ -1,4 +1,4 @@
-//! Spatial dropout layer for 2D feature maps, dropping whole channels at once
+//! Spatial dropout layer for 2D feature maps. Drops whole channels at once.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -72,8 +72,8 @@ impl SpatialDropout2D {
     ///
     /// # Notes
     ///
-    /// The mask RNG is seeded from the global seed or entropy by default. For reproducible masks,
-    /// set a seed with [`SpatialDropout2D::with_random_state`]
+    /// By default, `new` seeds the mask RNG from the global seed or entropy. For reproducible
+    /// masks, set a seed with [`SpatialDropout2D::with_random_state`]
     ///
     /// # Errors
     ///
@@ -92,8 +92,8 @@ impl SpatialDropout2D {
 
     /// Sets the seed for reproducible mask sampling
     ///
-    /// By default the RNG is seeded from the global seed or entropy (see [`crate::random`]). This
-    /// re-seeds it deterministically from `random_state`
+    /// By default, `new` seeds the RNG from the global seed or entropy (see [`crate::random`]).
+    /// This method re-seeds it deterministically from `random_state`
     ///
     /// # Parameters
     ///
@@ -138,7 +138,7 @@ impl Layer for SpatialDropout2D {
         let batch_size = shape[0];
         let channels = shape[shape.len() - 1];
 
-        // Per-channel mask of shape (batch_size, channels): one keep/drop value per channel
+        // Per-channel mask of shape (batch_size, channels): 1 keep/drop value per channel
         let mut mask_2d = Tensor::random_using(
             IxDyn(&[batch_size, channels]),
             Uniform::new(0.0, 1.0).unwrap(),

@@ -1,27 +1,31 @@
 //! Machine learning models for clustering, classification, regression, dimensionality
 //! reduction, and anomaly detection
 //!
-//! Models are grouped by algorithm family into submodules: [`clustering`](crate::machine_learning::clustering),
-//! [`decomposition`](crate::machine_learning::decomposition), [`linear_model`](crate::machine_learning::linear_model),
+//! This module groups models by algorithm family into submodules:
+//! [`clustering`](crate::machine_learning::clustering),
+//! [`decomposition`](crate::machine_learning::decomposition),
+//! [`linear_model`](crate::machine_learning::linear_model),
 //! [`manifold`](crate::machine_learning::manifold), [`svm`](crate::machine_learning::svm),
 //! [`tree`](crate::machine_learning::tree), [`neighbors`](crate::machine_learning::neighbors),
 //! [`discriminant_analysis`](crate::machine_learning::discriminant_analysis), and
-//! [`ensemble`](crate::machine_learning::ensemble). Every estimator is also re-exported here,
+//! [`ensemble`](crate::machine_learning::ensemble). This module also re-exports every estimator,
 //! so it is reachable directly as `machine_learning::<Model>`. Supervised and unsupervised
 //! estimators implement the shared [`Fit`](crate::traits::Fit) /
-//! [`Predict`](crate::traits::Predict) traits; the dimensionality-reduction
+//! [`Predict`](crate::traits::Predict) traits. The dimensionality-reduction
 //! transformers implement [`Transform`](crate::traits::Transform) /
-//! [`FitTransform`](crate::traits::FitTransform)
+//! [`FitTransform`](crate::traits::FitTransform).
 //!
 //! # Supervised learning
 //!
 //! ## Classification
 //! - **LogisticRegression**: binary classification via gradient descent, with L1/L2 regularization
-//! - **KNN**: k-nearest neighbors with selectable distance metric (Euclidean/Manhattan/Minkowski) and weighting
+//! - **KNN**: k-nearest neighbors with selectable distance metric
+//!   (Euclidean/Manhattan/Minkowski) and weighting
 //! - **DecisionTree**: classifier supporting ID3, C4.5, and CART, with pruning options
 //! - **SVC**: support vector classifier using Sequential Minimal Optimization (SMO) with kernels
 //! - **LinearSVC**: linear support vector classifier for large datasets, with hinge loss
-//! - **LDA**: linear discriminant analysis for classification and supervised dimensionality reduction
+//! - **LDA**: linear discriminant analysis for classification and supervised
+//!   dimensionality reduction
 //!
 //! ## Regression
 //! - **LinearRegression**: simple and multivariate linear regression with L1/L2 regularization
@@ -43,9 +47,10 @@
 //!
 //! # Shared types
 //!
-//! - [`DistanceCalculationMetric`](crate::math::DistanceCalculationMetric): Euclidean/Manhattan/Minkowski
-//!   dispatcher, re-exported from [`crate::math`]
-//! - [`RegularizationType`](crate::machine_learning::types::RegularizationType): L1 / L2 regularization
+//! - [`DistanceCalculationMetric`](crate::math::DistanceCalculationMetric):
+//!   Euclidean/Manhattan/Minkowski dispatcher, re-exported from [`crate::math`]
+//! - [`RegularizationType`](crate::machine_learning::types::RegularizationType): L1 / L2
+//!   regularization
 //! - [`KernelType`](crate::machine_learning::types::KernelType) /
 //!   [`Gamma`](crate::machine_learning::types::Gamma): kernel selection and coefficient
 //!
@@ -62,7 +67,7 @@
 //! ```
 
 pub use crate::math::DistanceCalculationMetric;
-/// The crate-wide estimator traits, re-exported here for convenience; their canonical
+/// The crate-wide estimator traits, re-exported here for convenience. Their canonical
 /// home is [`crate::traits`]
 pub use crate::traits::{Fit, FitTransform, Predict, Transform};
 pub use types::{Gamma, KernelType, RegularizationType};
@@ -89,13 +94,16 @@ pub mod tree;
 /// Decision-tree error type, aggregated into the crate-wide [`Error`](crate::error::Error)
 pub mod error;
 
-/// Internal linear-algebra primitives shared across estimator families: dense factorizations (symmetric eigendecomposition, SVD, thin QR) plus iterative top-`k` eigensolvers (power iteration, Lanczos)
+/// Internal linear-algebra primitives shared across estimator families: dense factorizations
+/// (symmetric eigendecomposition, SVD, thin QR) plus iterative top-`k` eigensolvers (power
+/// iteration, Lanczos)
 pub(crate) mod linalg;
 /// Internal shared helpers for parallel/sequential dispatch across models
 mod parallel;
 /// Internal kd-tree spatial index for fixed-radius and k-nearest-neighbor queries
 pub(crate) mod spatial;
-/// kernels (`KernelType`), kernel coefficient (`Gamma`), and regularization (`RegularizationType`)
+/// Shared configuration types: kernel selection (`KernelType`), kernel coefficient (`Gamma`), and
+/// regularization (`RegularizationType`)
 pub mod types;
 /// Internal shared input-validation helpers used by every model
 mod validation;
