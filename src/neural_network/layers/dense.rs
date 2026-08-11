@@ -95,6 +95,8 @@ impl Dense {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `input_dim` or `units` is zero
+    /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
+    ///   [`Activation::validate`])
     pub fn new(
         input_dim: usize,
         units: usize,
@@ -110,6 +112,8 @@ impl Dense {
         if units == 0 {
             return Err(Error::invalid_parameter("units", "must be greater than 0"));
         }
+        let activation = activation.into();
+        activation.validate()?;
 
         Ok(Self {
             input_dim,
@@ -120,7 +124,7 @@ impl Dense {
             output_cache: None,
             grad_weights: None,
             grad_bias: None,
-            activation: activation.into(),
+            activation,
         })
     }
 
@@ -190,7 +194,7 @@ impl Dense {
     /// lowers to [`Bias::PerCol`]
     ///
     /// The activation stays a fused epilogue only where the backend has a vectorized one,
-    /// `ReLU` ([`FusedActivation::Relu`]). `Sigmoid`, `Tanh`, and `Softmax` run as a separate
+    /// `ReLU` ([`FusedActivation::Relu`]). Every other activation runs as a separate
     /// [`Activation::forward`] pass instead
     ///
     /// A fused `f32` epilogue matches the unfused product plus scalar activation bit for bit,

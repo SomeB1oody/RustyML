@@ -14,7 +14,7 @@ use crate::neural_network::traits::Layer;
 /// that sums to 1 for each row while preserving the input shape
 ///
 /// [`Activation::Softmax`] provides the activation math. This layer only adds boundary
-/// validation and the caching required for backpropagation
+/// validation and the caching needed for backpropagation
 ///
 /// # Examples
 ///

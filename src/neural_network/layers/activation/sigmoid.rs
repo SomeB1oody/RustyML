@@ -14,7 +14,7 @@ use crate::neural_network::traits::Layer;
 /// while preserving the input shape
 ///
 /// [`Activation::Sigmoid`] provides the activation math. This layer adds boundary
-/// validation and the caching required for backpropagation
+/// validation and the caching needed for backpropagation
 ///
 /// # Examples
 ///

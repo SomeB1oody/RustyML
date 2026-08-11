@@ -126,7 +126,7 @@ impl DepthwiseConv2D {
     /// - `kernel_size` - Size of the convolution kernel as (height, width)
     /// - `input_shape` - Shape of the input tensor as \[batch_size, height, width, channels\]
     /// - `strides` - Stride of the convolution as (height_stride, width_stride)
-    /// - `activation` - Activation function applied to the output (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `activation` - Activation function applied to the output
     ///
     /// # Returns
     ///
@@ -146,6 +146,8 @@ impl DepthwiseConv2D {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If any kernel dimension or stride is 0
+    /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
+    ///   [`Activation::validate`])
     /// - `Error::InvalidInput` - If `input_shape` is not 4D, has 0 channels, or is smaller
     ///   than the kernel
     pub fn new(
@@ -157,6 +159,8 @@ impl DepthwiseConv2D {
         validate_kernel_size_2d(kernel_size)?;
         validate_strides_2d(strides)?;
         validate_input_shape_2d(&input_shape, kernel_size)?;
+        let activation = activation.into();
+        activation.validate()?;
 
         let channels = input_shape[3];
         let weights = Self::init_weights_array(channels, 1, kernel_size, None);
@@ -170,7 +174,7 @@ impl DepthwiseConv2D {
             padding: PaddingType::Valid,
             weights,
             bias,
-            activation: activation.into(),
+            activation,
             output_cache: None,
             input: None,
             input_shape,

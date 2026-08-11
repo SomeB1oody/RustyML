@@ -13,7 +13,7 @@
 //!
 //! ## Layers
 //! - **Dense**: fully connected layer with a configurable activation
-//! - **Activation**: standalone activation layers (ReLU, Sigmoid, Tanh, Softmax, Linear, ...)
+//! - **Activation**: standalone activation layers (ReLU, LeakyReLU, ELU, SELU, Sigmoid, Tanh, ...)
 //! - **Convolution**: 1D/2D/3D convolution, plus depthwise and separable variants
 //! - **Pooling**: max and average pooling and their global variants for 1D, 2D, and 3D
 //! - **Recurrent**: SimpleRNN, LSTM, and GRU sequence layers

@@ -86,8 +86,8 @@ impl SimpleRNN {
     ///
     /// - `input_dim` - Size of each input sample
     /// - `units` - Number of output units
-    /// - `activation` - Activation function from the activation module (Linear, ReLU, Sigmoid,
-    ///   Tanh, or Softmax)
+    /// - `activation` - Activation function from the activation module (any [`Activation`]
+    ///   variant, or any standalone activation layer)
     ///
     /// # Returns
     ///
@@ -101,12 +101,16 @@ impl SimpleRNN {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `input_dim` or `units` is 0
+    /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
+    ///   [`Activation::validate`])
     pub fn new(
         input_dim: usize,
         units: usize,
         activation: impl Into<Activation>,
     ) -> Result<Self, Error> {
         validate_recurrent_dimensions(input_dim, units)?;
+        let activation = activation.into();
+        activation.validate()?;
 
         let (kernel, recurrent_kernel) = Self::init_weights_arrays(input_dim, units, None);
         let bias = Array::zeros((1, units));
@@ -121,7 +125,7 @@ impl SimpleRNN {
             grad_kernel: None,
             grad_recurrent_kernel: None,
             grad_bias: None,
-            activation: activation.into(),
+            activation,
         })
     }
 
@@ -228,8 +232,8 @@ impl SimpleRNN {
     /// as the pre-projected `x_t @ kernel` slice. The recurrent product accumulates into it
     /// because `beta = 1`, and the bias add rides the same GEMM epilogue. This removes 2
     /// separate allocating broadcast adds that unfused code would need. `ReLU` also fuses into
-    /// the backend's vectorized `Relu` epilogue. `Sigmoid`, `Tanh`, and `Softmax` instead run as
-    /// a separate vectorized [`Activation::forward`] pass. They run this way because a
+    /// the backend's vectorized `Relu` epilogue. Every other activation instead runs as a
+    /// separate vectorized [`Activation::forward`] pass. It runs this way because a
     /// per-element closure epilogue (`gemm_map`) would need 1 indirect scalar call per element.
     ///
     /// A fused `f32` epilogue matches the unfused product plus scalar activation bit for bit,

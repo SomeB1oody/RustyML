@@ -7,8 +7,15 @@
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
 use rustyml::neural_network::Tensor;
+use rustyml::neural_network::layers::activation::elu::ELU;
+use rustyml::neural_network::layers::activation::exponential::Exponential;
+use rustyml::neural_network::layers::activation::hard_sigmoid::HardSigmoid;
+use rustyml::neural_network::layers::activation::leaky_relu::LeakyReLU;
 use rustyml::neural_network::layers::activation::linear::Linear;
+use rustyml::neural_network::layers::activation::selu::SELU;
 use rustyml::neural_network::layers::activation::softmax::Softmax;
+use rustyml::neural_network::layers::activation::softplus::Softplus;
+use rustyml::neural_network::layers::activation::softsign::Softsign;
 use rustyml::neural_network::layers::activation::tanh::Tanh;
 use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
@@ -450,6 +457,89 @@ fn softmax_input_gradient_matches_finite_difference() {
         .unwrap()
         .into_dyn();
     check_input_gradient_weighted(&mut softmax, &x, 1e-3, 2e-2);
+}
+
+// The remaining standalone activation layers. Each map is elementwise, so L = sum(output) stays
+// non-degenerate and the ones-based helper applies. A central finite difference is only valid
+// where the function is differentiable. Every probe below keeps each element clear of a kink by
+// much more than `eps`.
+
+/// LeakyReLU with a non-default slope, so a backward pass that assumes the 0.3 default fails
+#[test]
+fn leaky_relu_input_gradient_matches_finite_difference() {
+    // The kink sits at x = 0, so every probe stays at least 0.2 away from it
+    let mut leaky_relu = LeakyReLU::new(0.2).unwrap();
+    let x = Array::from_shape_vec((2, 4), vec![0.8, -0.5, 1.2, -1.4, 0.3, -0.9, 1.6, -0.2])
+        .unwrap()
+        .into_dyn();
+    check_input_gradient(&mut leaky_relu, &x, 1e-3, 1e-2);
+}
+
+/// ELU with a non-default alpha, which scales both the negative branch and its derivative
+#[test]
+fn elu_input_gradient_matches_finite_difference() {
+    // The kink sits at x = 0, so every probe stays at least 0.25 away from it
+    let mut elu = ELU::new(1.5).unwrap();
+    let x = Array::from_shape_vec((2, 4), vec![0.7, -0.4, 1.1, -1.3, 0.3, -0.8, 1.6, -0.25])
+        .unwrap()
+        .into_dyn();
+    check_input_gradient(&mut elu, &x, 1e-3, 1e-2);
+}
+
+/// SELU, whose 2 fixed constants must appear on both branches of the derivative
+#[test]
+fn selu_input_gradient_matches_finite_difference() {
+    // The kink sits at x = 0, so every probe stays at least 0.3 away from it
+    let mut selu = SELU::new();
+    let x = Array::from_shape_vec((2, 4), vec![0.6, -0.3, 1.0, -1.2, 0.4, -0.7, 1.8, -0.9])
+        .unwrap()
+        .into_dyn();
+    check_input_gradient(&mut selu, &x, 1e-3, 1e-2);
+}
+
+/// Softplus, which is smooth everywhere, so any moderate probe is valid
+#[test]
+fn softplus_input_gradient_matches_finite_difference() {
+    let mut softplus = Softplus::new();
+    let x = Array::from_shape_vec((2, 4), vec![0.6, -0.9, 1.4, -1.8, 0.2, -0.4, 2.2, -1.2])
+        .unwrap()
+        .into_dyn();
+    check_input_gradient(&mut softplus, &x, 1e-3, 1e-2);
+}
+
+/// Softsign, which is smooth everywhere, with probes far enough out to reach the flat tail
+#[test]
+fn softsign_input_gradient_matches_finite_difference() {
+    let mut softsign = Softsign::new();
+    let x = Array::from_shape_vec((2, 4), vec![0.5, -0.7, 1.5, -2.0, 0.9, -0.3, 2.5, -1.1])
+        .unwrap()
+        .into_dyn();
+    check_input_gradient(&mut softsign, &x, 1e-3, 1e-2);
+}
+
+/// HardSigmoid on the linear segment only, where the derivative is the constant 1/6
+#[test]
+fn hard_sigmoid_input_gradient_matches_finite_difference() {
+    // Kinks sit at x = -3 and x = 3. Every probe stays inside that interval by at least 0.5.
+    // This test leaves out a saturated probe, because a finite difference across a breakpoint
+    // matches neither one-sided derivative.
+    let mut hard_sigmoid = HardSigmoid::new();
+    let x = Array::from_shape_vec((2, 4), vec![0.5, -0.5, 1.5, -1.5, 2.5, -2.5, 0.9, -2.0])
+        .unwrap()
+        .into_dyn();
+    check_input_gradient(&mut hard_sigmoid, &x, 1e-3, 1e-2);
+}
+
+/// Exponential, whose derivative is its own output
+#[test]
+fn exponential_input_gradient_matches_finite_difference() {
+    // Probes stay inside [-1.0, 1.5], because e^x and its curvature both grow fast. The
+    // truncation error of a central difference is proportional to the third derivative
+    let mut exponential = Exponential::new();
+    let x = Array::from_shape_vec((2, 4), vec![0.4, -0.6, 1.2, -1.0, 0.8, -0.2, 1.5, 0.1])
+        .unwrap()
+        .into_dyn();
+    check_input_gradient(&mut exponential, &x, 1e-3, 1e-2);
 }
 
 // Pooling layers (no trainable parameters -> input gradient only)

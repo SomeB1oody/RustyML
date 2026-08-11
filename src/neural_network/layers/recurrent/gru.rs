@@ -100,8 +100,8 @@ impl GRU {
     ///
     /// - `input_dim` - Dimensionality of input features (number of features per timestep)
     /// - `units` - Number of GRU units/neurons in the layer (determines output dimensionality)
-    /// - `activation` - Activation from the activation module (Linear, ReLU, Sigmoid, Tanh,
-    ///   Softmax)
+    /// - `activation` - Activation from the activation module (any [`Activation`] variant, or
+    ///   any standalone activation layer)
     ///
     /// # Returns
     ///
@@ -115,12 +115,16 @@ impl GRU {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `input_dim` or `units` is 0
+    /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
+    ///   [`Activation::validate`])
     pub fn new(
         input_dim: usize,
         units: usize,
         activation: impl Into<Activation>,
     ) -> Result<Self, Error> {
         validate_recurrent_dimensions(input_dim, units)?;
+        let activation = activation.into();
+        activation.validate()?;
 
         Ok(Self {
             input_dim,
@@ -128,7 +132,7 @@ impl GRU {
             gates: Self::init_gates(input_dim, units, None)?,
             input_cache: None,
             caches: None,
-            activation: activation.into(),
+            activation,
         })
     }
 

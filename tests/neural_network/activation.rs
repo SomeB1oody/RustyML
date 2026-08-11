@@ -9,16 +9,32 @@
 //!   - non-finite input propagates (pure math, no rejection)
 //!   - empty input -> Error::EmptyInput
 //!   - Activation enum forward delegation, and the Linear layer
+//!   - parameter validation: LeakyReLU and ELU reject an unusable parameter, in the layer
+//!     constructor and in a trainable layer that embeds the activation
+//!   - Default() equals the explicit Keras parameter, and a standalone layer equals the
+//!     matching Activation variant
+
+// The pinned float32 values in this file are the exact digits Keras 3.15 printed. Keep them as
+// written, so a reader can compare them to the reference output character by character.
+#![allow(clippy::excessive_precision)]
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array2};
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::Activation;
+use rustyml::neural_network::layers::activation::elu::ELU;
+use rustyml::neural_network::layers::activation::exponential::Exponential;
+use rustyml::neural_network::layers::activation::hard_sigmoid::HardSigmoid;
+use rustyml::neural_network::layers::activation::leaky_relu::LeakyReLU;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::activation::relu::ReLU;
+use rustyml::neural_network::layers::activation::selu::SELU;
 use rustyml::neural_network::layers::activation::sigmoid::Sigmoid;
 use rustyml::neural_network::layers::activation::softmax::Softmax;
+use rustyml::neural_network::layers::activation::softplus::Softplus;
+use rustyml::neural_network::layers::activation::softsign::Softsign;
 use rustyml::neural_network::layers::activation::tanh::Tanh;
+use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
@@ -498,6 +514,407 @@ fn linear_predict_non_finite_propagates() {
     assert!(out.as_slice().expect("contiguous")[0].is_nan());
 }
 
+// LeakyReLU layer.
+// The pinned forward values of the 7 sections below come from Keras 3.15 in float32.
+
+/// LeakyReLU(x) = x for x >= 0, and negative_slope * x below 0, on known values
+#[test]
+fn leaky_relu_forward_known_values() {
+    let mut layer = LeakyReLU::new(0.3).expect("slope 0.3 is valid");
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let output = layer.forward(&input).expect("LeakyReLU forward failed");
+
+    let expected = tensor2(2, 3, vec![-0.30000001, 2.0, -0.90000004, 4.0, -1.5, 6.0]);
+    assert_allclose(&output, &expected, 1e-6_f32);
+}
+
+/// predict() equals forward()
+#[test]
+fn leaky_relu_predict_equals_forward() {
+    let mut layer = LeakyReLU::new(0.3).expect("slope 0.3 is valid");
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let fwd = layer.forward(&input).expect("forward");
+    let pred = layer.predict(&input).expect("predict");
+    assert_allclose(&pred, &fwd, 1e-7_f32);
+}
+
+/// backward before forward returns NnError::ForwardPassNotRun
+#[test]
+fn leaky_relu_backward_before_forward_is_error() {
+    let mut layer = LeakyReLU::new(0.3).expect("slope 0.3 is valid");
+    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
+    let result = layer.backward(&grad);
+    assert!(
+        matches!(
+            result,
+            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(
+                "LeakyReLU"
+            )))
+        ),
+        "expected ForwardPassNotRun, got {:?}",
+        result
+    );
+}
+
+/// LeakyReLU takes the positive branch at exactly 0, so its derivative there is 1, not the slope
+#[test]
+fn leaky_relu_backward_derivative_at_zero_is_one() {
+    let mut layer = LeakyReLU::new(0.3).expect("slope 0.3 is valid");
+    let input = tensor2(1, 3, vec![-2.0, 0.0, 2.0]);
+    layer.forward(&input).expect("LeakyReLU forward");
+
+    let grad_output = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
+    let grad_in = layer.backward(&grad_output).expect("LeakyReLU backward");
+
+    let expected = tensor2(1, 3, vec![0.3, 1.0, 1.0]);
+    assert_allclose(&grad_in, &expected, 1e-6_f32);
+}
+
+// ELU layer
+
+/// ELU(x) = x for x > 0, and alpha * (e^x - 1) at 0 and below, on known values
+#[test]
+fn elu_forward_known_values() {
+    let mut layer = ELU::new(1.0).expect("alpha 1.0 is valid");
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let output = layer.forward(&input).expect("ELU forward failed");
+
+    let expected = tensor2(
+        2,
+        3,
+        vec![-0.63212055, 2.0, -0.95021296, 4.0, -0.99326205, 6.0],
+    );
+    assert_allclose(&output, &expected, 1e-6_f32);
+}
+
+/// predict() equals forward()
+#[test]
+fn elu_predict_equals_forward() {
+    let mut layer = ELU::new(1.0).expect("alpha 1.0 is valid");
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let fwd = layer.forward(&input).expect("forward");
+    let pred = layer.predict(&input).expect("predict");
+    assert_allclose(&pred, &fwd, 1e-7_f32);
+}
+
+/// backward before forward returns NnError::ForwardPassNotRun
+#[test]
+fn elu_backward_before_forward_is_error() {
+    let mut layer = ELU::new(1.0).expect("alpha 1.0 is valid");
+    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
+    let result = layer.backward(&grad);
+    assert!(
+        matches!(
+            result,
+            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun("ELU")))
+        ),
+        "expected ForwardPassNotRun, got {:?}",
+        result
+    );
+}
+
+/// ELU takes the negative branch at exactly 0, so its derivative there is alpha, not 1
+#[test]
+fn elu_backward_derivative_at_zero_is_alpha() {
+    let mut layer = ELU::new(0.5).expect("alpha 0.5 is valid");
+    let input = tensor2(1, 2, vec![0.0, 3.0]);
+    layer.forward(&input).expect("ELU forward");
+
+    let grad_output = tensor2(1, 2, vec![1.0, 1.0]);
+    let grad_in = layer.backward(&grad_output).expect("ELU backward");
+
+    let expected = tensor2(1, 2, vec![0.5, 1.0]);
+    assert_allclose(&grad_in, &expected, 1e-6_f32);
+}
+
+// SELU layer.
+// The 2 constants are fixed at alpha = 1.6732632 and scale = 1.0507010, so their product is
+// 1.7580993.
+
+/// SELU(x) = scale * x for x > 0, and scale * alpha * (e^x - 1) at 0 and below, on known values
+#[test]
+fn selu_forward_known_values() {
+    let mut layer = SELU::new();
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let output = layer.forward(&input).expect("SELU forward failed");
+
+    let expected = tensor2(
+        2,
+        3,
+        vec![
+            -1.1113307, 2.101402, -1.6705688, 4.2028041, -1.7462534, 6.3042059,
+        ],
+    );
+    assert_allclose(&output, &expected, 1e-6_f32);
+}
+
+/// predict() equals forward()
+#[test]
+fn selu_predict_equals_forward() {
+    let mut layer = SELU::new();
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let fwd = layer.forward(&input).expect("forward");
+    let pred = layer.predict(&input).expect("predict");
+    assert_allclose(&pred, &fwd, 1e-7_f32);
+}
+
+/// backward before forward returns NnError::ForwardPassNotRun
+#[test]
+fn selu_backward_before_forward_is_error() {
+    let mut layer = SELU::new();
+    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
+    let result = layer.backward(&grad);
+    assert!(
+        matches!(
+            result,
+            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun("SELU")))
+        ),
+        "expected ForwardPassNotRun, got {:?}",
+        result
+    );
+}
+
+/// SELU takes the negative branch at exactly 0, so its derivative there is scale * alpha
+#[test]
+fn selu_backward_derivative_at_zero_is_scale_times_alpha() {
+    let mut layer = SELU::new();
+    let input = tensor2(1, 2, vec![0.0, 3.0]);
+    layer.forward(&input).expect("SELU forward");
+
+    let grad_output = tensor2(1, 2, vec![1.0, 1.0]);
+    let grad_in = layer.backward(&grad_output).expect("SELU backward");
+
+    let expected = tensor2(1, 2, vec![1.7580993, 1.0507010]);
+    assert_allclose(&grad_in, &expected, 1e-6_f32);
+}
+
+// Softplus layer
+
+/// Softplus(x) = ln(1 + e^x) on known values
+#[test]
+fn softplus_forward_known_values() {
+    let mut layer = Softplus::new();
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let output = layer.forward(&input).expect("Softplus forward failed");
+
+    let expected = tensor2(
+        2,
+        3,
+        vec![
+            0.31326169,
+            2.1269281,
+            0.048587352,
+            4.0181499,
+            0.0067153485,
+            6.0024757,
+        ],
+    );
+    assert_allclose(&output, &expected, 1e-6_f32);
+}
+
+/// Outputs stay strictly positive, even far down the negative tail
+#[test]
+fn softplus_forward_outputs_positive() {
+    let mut layer = Softplus::new();
+    let input = tensor2(1, 4, vec![-30.0, -5.0, 0.0, 5.0]);
+    let output = layer.forward(&input).expect("Softplus forward failed");
+    for &v in output.iter() {
+        assert!(v > 0.0, "softplus output {v} should be strictly positive");
+    }
+}
+
+/// predict() equals forward()
+#[test]
+fn softplus_predict_equals_forward() {
+    let mut layer = Softplus::new();
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let fwd = layer.forward(&input).expect("forward");
+    let pred = layer.predict(&input).expect("predict");
+    assert_allclose(&pred, &fwd, 1e-7_f32);
+}
+
+/// backward before forward returns NnError::ForwardPassNotRun
+#[test]
+fn softplus_backward_before_forward_is_error() {
+    let mut layer = Softplus::new();
+    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
+    let result = layer.backward(&grad);
+    assert!(
+        matches!(
+            result,
+            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun("Softplus")))
+        ),
+        "expected ForwardPassNotRun, got {:?}",
+        result
+    );
+}
+
+// Softsign layer
+
+/// Softsign(x) = x / (1 + |x|) on known values
+#[test]
+fn softsign_forward_known_values() {
+    let mut layer = Softsign::new();
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let output = layer.forward(&input).expect("Softsign forward failed");
+
+    let expected = tensor2(
+        2,
+        3,
+        vec![-0.5, 0.66666669, -0.75, 0.80000001, -0.83333331, 0.85714287],
+    );
+    assert_allclose(&output, &expected, 1e-6_f32);
+}
+
+/// Outputs stay strictly inside (-1, 1), because the saturation is polynomial
+#[test]
+fn softsign_forward_outputs_bounded() {
+    let mut layer = Softsign::new();
+    let input = tensor2(1, 5, vec![-1000.0, -1.0, 0.0, 1.0, 1000.0]);
+    let output = layer.forward(&input).expect("Softsign forward failed");
+    for &v in output.iter() {
+        assert!(
+            v > -1.0 && v < 1.0,
+            "softsign output {v} should be strictly in (-1, 1)"
+        );
+    }
+}
+
+/// predict() equals forward()
+#[test]
+fn softsign_predict_equals_forward() {
+    let mut layer = Softsign::new();
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let fwd = layer.forward(&input).expect("forward");
+    let pred = layer.predict(&input).expect("predict");
+    assert_allclose(&pred, &fwd, 1e-7_f32);
+}
+
+/// backward before forward returns NnError::ForwardPassNotRun
+#[test]
+fn softsign_backward_before_forward_is_error() {
+    let mut layer = Softsign::new();
+    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
+    let result = layer.backward(&grad);
+    assert!(
+        matches!(
+            result,
+            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun("Softsign")))
+        ),
+        "expected ForwardPassNotRun, got {:?}",
+        result
+    );
+}
+
+// HardSigmoid layer
+
+/// HardSigmoid(x) = clip(x/6 + 0.5, 0, 1) on known values
+#[test]
+fn hard_sigmoid_forward_known_values() {
+    let mut layer = HardSigmoid::new();
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let output = layer.forward(&input).expect("HardSigmoid forward failed");
+
+    let expected = tensor2(2, 3, vec![0.33333334, 0.83333337, 0.0, 1.0, 0.0, 1.0]);
+    assert_allclose(&output, &expected, 1e-6_f32);
+}
+
+/// predict() equals forward()
+#[test]
+fn hard_sigmoid_predict_equals_forward() {
+    let mut layer = HardSigmoid::new();
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let fwd = layer.forward(&input).expect("forward");
+    let pred = layer.predict(&input).expect("predict");
+    assert_allclose(&pred, &fwd, 1e-7_f32);
+}
+
+/// backward before forward returns NnError::ForwardPassNotRun
+#[test]
+fn hard_sigmoid_backward_before_forward_is_error() {
+    let mut layer = HardSigmoid::new();
+    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
+    let result = layer.backward(&grad);
+    assert!(
+        matches!(
+            result,
+            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(
+                "HardSigmoid"
+            )))
+        ),
+        "expected ForwardPassNotRun, got {:?}",
+        result
+    );
+}
+
+// Exponential layer.
+// The pinned values reach 403, where 1 float32 unit in the last place is already about 3e-5,
+// so this section uses a tolerance of 1e-3.
+
+/// Exponential(x) = e^x on known values
+#[test]
+fn exponential_forward_known_values() {
+    let mut layer = Exponential::new();
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let output = layer.forward(&input).expect("Exponential forward failed");
+
+    let expected = tensor2(
+        2,
+        3,
+        vec![
+            0.36787945,
+            7.3890562,
+            0.049787067,
+            54.598148,
+            0.006737947,
+            403.4288,
+        ],
+    );
+    assert_allclose(&output, &expected, 1e-3_f32);
+}
+
+/// predict() equals forward()
+#[test]
+fn exponential_predict_equals_forward() {
+    let mut layer = Exponential::new();
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let fwd = layer.forward(&input).expect("forward");
+    let pred = layer.predict(&input).expect("predict");
+    assert_allclose(&pred, &fwd, 1e-3_f32);
+}
+
+/// backward before forward returns NnError::ForwardPassNotRun
+#[test]
+fn exponential_backward_before_forward_is_error() {
+    let mut layer = Exponential::new();
+    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
+    let result = layer.backward(&grad);
+    assert!(
+        matches!(
+            result,
+            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(
+                "Exponential"
+            )))
+        ),
+        "expected ForwardPassNotRun, got {:?}",
+        result
+    );
+}
+
+/// The exponential is its own derivative, so backward with an all-ones upstream gradient
+/// returns the forward output
+#[test]
+fn exponential_backward_derivative_equals_output() {
+    let mut layer = Exponential::new();
+    let input = tensor2(1, 3, vec![-1.0, 0.0, 2.0]);
+    let output = layer.forward(&input).expect("Exponential forward");
+
+    let grad_output = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
+    let grad_in = layer.backward(&grad_output).expect("Exponential backward");
+
+    assert_allclose(&grad_in, &output, 1e-6_f32);
+}
+
 // Activation enum: forward() delegates to the standalone layers, so its output
 // must match theirs
 
@@ -723,4 +1140,129 @@ fn sigmoid_backward_derivative_from_definition() {
     assert_abs_diff_eq!(vals[0], 0.25_f32, epsilon = 1e-6);
     assert_abs_diff_eq!(vals[1], 0.1049936_f32, epsilon = 1e-5);
     assert_abs_diff_eq!(vals[2], 0.1049936_f32, epsilon = 1e-5);
+}
+
+// Parameterized activations: bounds, defaults, and agreement with the enum.
+// The lower bound on `negative_slope` and on `alpha` is strict. The backward pass separates
+// the 2 branches by the sign of the activated output. A value of 0 collapses the whole
+// negative side onto a = 0, which erases the branch. A negative value reads the wrong branch.
+// Use Activation::ReLU for a slope of 0.
+
+/// LeakyReLU::new rejects a slope of 0 and a negative slope
+#[test]
+fn leaky_relu_new_rejects_unusable_slope() {
+    for slope in [0.0_f32, -0.1] {
+        let result = LeakyReLU::new(slope);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "slope {slope}: expected InvalidParameter, got {:?}",
+            result
+        );
+    }
+}
+
+/// ELU::new rejects an alpha of 0 and a negative alpha
+#[test]
+fn elu_new_rejects_unusable_alpha() {
+    for alpha in [0.0_f32, -1.0] {
+        let result = ELU::new(alpha);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "alpha {alpha}: expected InvalidParameter, got {:?}",
+            result
+        );
+    }
+}
+
+/// LeakyReLU::default() uses the Keras slope of 0.3, so it matches LeakyReLU::new(0.3)
+#[test]
+fn leaky_relu_default_matches_explicit_slope() {
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let default_out = LeakyReLU::default()
+        .forward(&input)
+        .expect("default forward");
+    let explicit_out = LeakyReLU::new(0.3)
+        .expect("slope 0.3 is valid")
+        .forward(&input)
+        .expect("explicit forward");
+    assert_allclose(&default_out, &explicit_out, 0.0_f32);
+}
+
+/// ELU::default() uses the Keras alpha of 1.0, so it matches ELU::new(1.0)
+#[test]
+fn elu_default_matches_explicit_alpha() {
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let default_out = ELU::default().forward(&input).expect("default forward");
+    let explicit_out = ELU::new(1.0)
+        .expect("alpha 1.0 is valid")
+        .forward(&input)
+        .expect("explicit forward");
+    assert_allclose(&default_out, &explicit_out, 0.0_f32);
+}
+
+/// A trainable layer rejects an unusable LeakyReLU slope where the model is built
+#[test]
+fn dense_rejects_unusable_leaky_relu_slope() {
+    let result = Dense::new(
+        2,
+        2,
+        Activation::LeakyReLU {
+            negative_slope: -0.1,
+        },
+    );
+    assert!(
+        matches!(result, Err(Error::InvalidParameter { .. })),
+        "expected InvalidParameter, got {:?}",
+        result
+    );
+}
+
+/// A trainable layer rejects an unusable ELU alpha where the model is built
+#[test]
+fn dense_rejects_unusable_elu_alpha() {
+    let result = Dense::new(2, 2, Activation::ELU { alpha: 0.0 });
+    assert!(
+        matches!(result, Err(Error::InvalidParameter { .. })),
+        "expected InvalidParameter, got {:?}",
+        result
+    );
+}
+
+/// HardSigmoid saturates to exactly 0 and 1, and its derivative on both saturated ends is 0
+#[test]
+fn hard_sigmoid_saturates_exactly() {
+    let mut layer = HardSigmoid::new();
+    let input = tensor2(1, 4, vec![-3.0, 3.0, -10.0, 10.0]);
+    let output = layer.forward(&input).expect("HardSigmoid forward");
+
+    let expected = tensor2(1, 4, vec![0.0, 1.0, 0.0, 1.0]);
+    assert_allclose(&output, &expected, 0.0_f32);
+
+    let grad_output = tensor2(1, 4, vec![1.0, 1.0, 1.0, 1.0]);
+    let grad_in = layer.backward(&grad_output).expect("HardSigmoid backward");
+
+    let expected_grad = tensor2(1, 4, vec![0.0, 0.0, 0.0, 0.0]);
+    assert_allclose(&grad_in, &expected_grad, 0.0_f32);
+}
+
+/// The SELU layer is a thin wrapper, so its forward equals Activation::SELU.forward exactly
+#[test]
+fn selu_layer_matches_activation_enum() {
+    let mut layer = SELU::new();
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let layer_out = layer.forward(&input).expect("SELU layer forward");
+    let enum_out = Activation::SELU.forward(&input).expect("enum SELU forward");
+    assert_allclose(&layer_out, &enum_out, 0.0_f32);
+}
+
+/// The Softplus layer is a thin wrapper, so its forward equals Activation::Softplus.forward
+#[test]
+fn softplus_layer_matches_activation_enum() {
+    let mut layer = Softplus::new();
+    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
+    let layer_out = layer.forward(&input).expect("Softplus layer forward");
+    let enum_out = Activation::Softplus
+        .forward(&input)
+        .expect("enum Softplus forward");
+    assert_allclose(&layer_out, &enum_out, 0.0_f32);
 }

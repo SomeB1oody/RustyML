@@ -30,16 +30,17 @@
 // f32 classes (neural-network layers)
 
 tunable_gate! {
-    /// Cheap memory-bound `f32` maps: ReLU's `max(0, x)`, the dropout layers' compare-into-mask
-    /// thresholding, and similar one-stream copy-speed loops. Gated on the total element count.
+    /// Cheap memory-bound `f32` maps: the activations with no transcendental call, such as
+    /// ReLU's `max(0, x)`, the dropout layers' compare-into-mask thresholding, and similar
+    /// one-stream copy-speed loops. Gated on the total element count.
     #[cfg(feature = "neural_network")]
     pub(crate) CHEAP_MAP_PARALLEL_THRESHOLD
         => cheap_map_parallel_threshold / set_cheap_map_parallel_threshold = 4_000_000
 }
 
 tunable_gate! {
-    /// Exp-dominated `f32` maps: sigmoid, tanh, and softmax, whose per-element cost is
-    /// dominated by the shifted `exp`. Gated on the total element count.
+    /// Exp-dominated `f32` maps: sigmoid, tanh, softmax, ELU, SELU, softplus, and exponential,
+    /// where 1 `exp` call dominates the per-element cost. Gated on the total element count.
     #[cfg(feature = "neural_network")]
     pub(crate) EXP_MAP_PARALLEL_THRESHOLD
         => exp_map_parallel_threshold / set_exp_map_parallel_threshold = 131_072

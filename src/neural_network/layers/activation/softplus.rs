@@ -1,5 +1,5 @@
-//! ReLU activation layer that applies `max(0, x)` elementwise and caches the output for
-//! backpropagation
+//! Softplus activation layer that applies `ln(1 + e^x)` elementwise and caches the output
+//! for backpropagation
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -9,19 +9,22 @@ use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
 
-/// ReLU (Rectified Linear Unit) activation layer
+/// Softplus activation layer
 ///
-/// Applies `max(0, x)` elementwise to the input tensor, keeping the original shape.
+/// Applies `ln(1 + e^x)` elementwise to the input tensor, keeping the original shape.
 /// Common inputs include 2D tensors for dense layers and 4D tensors for convolutional layers
 ///
-/// [`Activation::ReLU`] provides the activation math. This layer only adds boundary
+/// Softplus is a smooth approximation of ReLU. The output is strictly positive, and the
+/// gradient never reaches 0, so there is no dead-unit failure mode
+///
+/// [`Activation::Softplus`] provides the activation math. This layer only adds boundary
 /// validation and the caching needed for backpropagation
 ///
 /// # Examples
 ///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
-/// use rustyml::neural_network::layers::activation::relu::ReLU;
+/// use rustyml::neural_network::layers::activation::softplus::Softplus;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::MeanSquaredError;
 /// use ndarray::Array2;
@@ -31,47 +34,47 @@ use crate::neural_network::traits::Layer;
 ///     .unwrap()
 ///     .into_dyn();
 ///
-/// // Build a model with ReLU activation
+/// // Build a model with Softplus activation
 /// let mut model = Sequential::new();
 /// model
-///     .add(ReLU::new())
+///     .add(Softplus::new())
 ///     .compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Forward propagation
 /// let output = model.predict(&x);
 ///
-/// // Output will be: [[0.0, 2.0, 0.0], [4.0, 0.0, 6.0]]
+/// // Output will be: [[0.31326169, 2.1269281, 0.048587352], [4.0181499, 0.0067153485, 6.0024757]]
 /// ```
 #[derive(Debug)]
-pub struct ReLU {
+pub struct Softplus {
     /// Cached activated output from the forward pass, used during backpropagation
     output_cache: Option<Tensor>,
 }
 
-impl ReLU {
-    /// Creates a new ReLU activation layer
+impl Softplus {
+    /// Creates a new Softplus activation layer
     ///
     /// # Returns
     ///
-    /// - `Self` - A new `ReLU` layer
+    /// - `Self` - A new `Softplus` layer
     pub fn new() -> Self {
-        ReLU { output_cache: None }
+        Softplus { output_cache: None }
     }
 }
 
-impl Default for ReLU {
+impl Default for Softplus {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Layer for ReLU {
+impl Layer for Softplus {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
 
-        let output = Activation::ReLU.forward(input)?;
+        let output = Activation::Softplus.forward(input)?;
 
         // Cache activated output for backpropagation
         self.output_cache = Some(output.clone());
@@ -85,25 +88,25 @@ impl Layer for ReLU {
             return Err(Error::empty_input("input tensor"));
         }
 
-        Activation::ReLU.forward(input)
+        Activation::Softplus.forward(input)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         if let Some(output) = &self.output_cache {
-            // ReLU preserves shape, so gradient must match the cached output
+            // Softplus preserves shape, so gradient must match the cached output
             if grad_output.shape() != output.shape() {
                 return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
             }
 
-            // ReLU derivative is 1 for x > 0, and 0 for x <= 0
-            Activation::ReLU.backward(output, grad_output)
+            // Softplus derivative is the logistic sigmoid of the input
+            Activation::Softplus.backward(output, grad_output)
         } else {
-            Err(Error::forward_pass_not_run("ReLU"))
+            Err(Error::forward_pass_not_run("Softplus"))
         }
     }
 
     fn layer_type(&self) -> &str {
-        "ReLU"
+        "Softplus"
     }
 
     fn output_shape(&self) -> String {

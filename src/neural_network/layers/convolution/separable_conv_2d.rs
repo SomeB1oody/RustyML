@@ -119,7 +119,7 @@ impl SeparableConv2D {
     /// - `input_shape` - Shape of the input tensor as \[batch_size, height, width, channels\]
     /// - `strides` - Stride values for the convolution as (vertical, horizontal)
     /// - `depth_multiplier` - Number of depthwise convolution filters per input channel
-    /// - `activation` - Activation applied to the output (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `activation` - Activation applied to the output
     ///
     /// # Returns
     ///
@@ -137,6 +137,8 @@ impl SeparableConv2D {
     /// - `Error::InvalidParameter` - If `filters` is 0
     /// - `Error::InvalidParameter` - If any kernel dimension or stride is 0
     /// - `Error::InvalidParameter` - If `depth_multiplier` is 0
+    /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
+    ///   [`Activation::validate`])
     /// - `Error::InvalidInput` - If `input_shape` is not 4D or has 0 channels
     /// - `Error::InvalidInput` - If input dimensions are smaller than kernel size
     pub fn new(
@@ -152,6 +154,8 @@ impl SeparableConv2D {
         validate_strides_2d(strides)?;
         validate_depth_multiplier(depth_multiplier)?;
         validate_input_shape_2d(&input_shape, kernel_size)?;
+        let activation = activation.into();
+        activation.validate()?;
 
         let channels = input_shape[3];
         let (depthwise_weights, pointwise_weights) =
@@ -167,7 +171,7 @@ impl SeparableConv2D {
             depthwise_weights,
             pointwise_weights,
             bias,
-            activation: activation.into(),
+            activation,
             output_cache: None,
             input_cache: None,
             depthwise_output_cache: None,

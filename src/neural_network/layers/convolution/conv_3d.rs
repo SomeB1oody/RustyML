@@ -125,6 +125,8 @@ impl Conv3D {
     /// - `Error::InvalidParameter` - If any kernel dimension or stride is 0
     /// - `Error::InvalidInput` - If `input_shape` is not 5D or has a dimension equal to 0
     /// - `Error::InvalidInput` - If input spatial dimensions are smaller than kernel size
+    /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
+    ///   [`Activation::validate`])
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize, usize),
@@ -136,6 +138,8 @@ impl Conv3D {
         validate_kernel_size_3d(kernel_size)?;
         validate_strides_3d(strides)?;
         validate_input_shape_3d(&input_shape, kernel_size)?;
+        let activation = activation.into();
+        activation.validate()?;
 
         let channels = input_shape[4];
         let weights = Self::init_weights_array(filters, channels, kernel_size, None);
@@ -148,7 +152,7 @@ impl Conv3D {
             padding: PaddingType::Valid,
             weights,
             bias,
-            activation: activation.into(),
+            activation,
             output_cache: None,
             input_cache: None,
             input_shape,

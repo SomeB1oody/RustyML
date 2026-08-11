@@ -5,6 +5,15 @@ This change log records updates after 2025-3-24, summarized per version — each
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [Unreleased]
+### Added
+- **7 new `Activation` variants: `LeakyReLU`, `ELU`, `SELU`, `Softplus`, `Softsign`, `HardSigmoid`, and `Exponential`.** Each one also ships as a thin standalone layer of the same name in `neural_network::layers::activation`. `LeakyReLU::new(negative_slope)` and `ELU::new(alpha)` return a `Result`, the other 5 take no argument, and the 2 defaults match Keras at `0.3` and `1.0`.
+- **New `Activation::validate`, and all 9 trainable layer constructors call it** (`Dense`, `Conv1D`, `Conv2D`, `Conv3D`, `DepthwiseConv2D`, `SeparableConv2D`, `SimpleRNN`, `LSTM`, and `GRU`). A `negative_slope` or `alpha` that is not finite and greater than 0 is now `Error::InvalidParameter` at construction, not at the first forward pass. The bound is strict because the backward pass separates the 2 branches by the sign of the activated output. Use `Activation::ReLU` for a slope of 0.
+- **The branch conventions match Keras 3 exactly.** `LeakyReLU` takes the positive branch at `x >= 0`, while `ELU` and `SELU` take it at `x > 0`. The derivative at exactly 0 is therefore 1 for `LeakyReLU`, `alpha` for `ELU`, and `scale * alpha` for `SELU`. The tests pin the forward and derivative tables against Keras 3.15 as literals.
+
+### Changed
+- **Breaking: `Activation` no longer derives `Eq`,** because `LeakyReLU` and `ELU` carry an `f32` parameter. It still derives `PartialEq`. Only code that uses `Activation` as a `HashMap` key or in a `HashSet` needs an edit.
+
 ## [v0.14.0] - 2026-07-29
 ### Added
 - **New `utils::scaler` module: `StandardScaler`, `MinMaxScaler`, `MaxAbsScaler`, `RobustScaler`, and `Normalizer`** — the scikit-learn transformer family, with a shared `fit` / `transform` / `inverse_transform` contract, the `Fit`/`Transform`/`FitTransform` traits, `partial_fit` wherever the statistics merge exactly, and `save_to_path` persistence. `StandardScaler` reproduces `standardize` bit-for-bit.
