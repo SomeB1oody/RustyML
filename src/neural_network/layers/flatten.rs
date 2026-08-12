@@ -58,8 +58,11 @@ use ndarray::IxDyn;
 pub struct Flatten {
     /// Number of features after flattening (product of all dimensions except batch)
     flattened_features: usize,
-    /// Cached input tensor from the forward pass, used during backpropagation
-    input_cache: Option<Tensor>,
+    /// Shape of the most recent forward input. The backward pass restores it
+    ///
+    /// A flatten moves no data, so the backward pass needs the shape alone. Holding the input
+    /// values would cost a copy of the whole activation on every forward pass
+    input_shape: Option<Vec<usize>>,
 }
 
 impl Flatten {
@@ -99,7 +102,7 @@ impl Flatten {
 
         Ok(Flatten {
             flattened_features,
-            input_cache: None,
+            input_shape: None,
         })
     }
 }
@@ -114,8 +117,8 @@ impl Layer for Flatten {
             )));
         }
 
-        // Save input for backpropagation
-        self.input_cache = Some(input.clone());
+        // Save the input shape for backpropagation. The values are not needed
+        self.input_shape = Some(input_shape.to_vec());
 
         let batch_size = input_shape[0];
         let flattened_features: usize = input_shape[1..].iter().product();
@@ -146,9 +149,7 @@ impl Layer for Flatten {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        if let Some(input) = &self.input_cache {
-            let input_shape = input.shape().to_vec();
-
+        if let Some(input_shape) = &self.input_shape {
             let expected_grad_shape = [input_shape[0], input_shape[1..].iter().product()];
             if grad_output.shape() != expected_grad_shape {
                 return Err(Error::shape_mismatch(
@@ -159,7 +160,7 @@ impl Layer for Flatten {
 
             // Reshape gradient back to input shape
             let reshaped_grad = grad_output
-                .to_shape(IxDyn(&input_shape))
+                .to_shape(IxDyn(input_shape))
                 .context("reshape gradient")?
                 .to_owned();
 

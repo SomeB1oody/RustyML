@@ -14,6 +14,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 
 ### Changed
 - **Breaking: `Activation` no longer derives `Eq`,** because `LeakyReLU` and `ELU` carry an `f32` parameter. It still derives `PartialEq`. Only code that uses `Activation` as a `HashMap` key or in a `HashSet` needs an edit.
+- **`Flatten` caches only the input shape, not the input tensor.** Its backward pass never read the values, since a flatten moves no data, so every forward pass was copying the whole activation for nothing. `Flatten::forward` now does 1 pass over the activation instead of 2, and the layer holds 1 fewer copy of it. The public API and every result are unchanged.
 
 ## [v0.14.0] - 2026-07-29
 ### Added
