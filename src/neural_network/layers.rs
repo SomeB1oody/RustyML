@@ -14,8 +14,9 @@
 //!   [`dense`](crate::neural_network::layers::dense),
 //!   [`flatten`](crate::neural_network::layers::flatten),
 //!   [`pooling`](crate::neural_network::layers::pooling),
-//!   [`recurrent`](crate::neural_network::layers::recurrent), and
-//!   [`regularization`](crate::neural_network::layers::regularization)
+//!   [`recurrent`](crate::neural_network::layers::recurrent),
+//!   [`regularization`](crate::neural_network::layers::regularization), and
+//!   [`reshape`](crate::neural_network::layers::reshape)
 //! - Weight containers: [`layer_weight`](crate::neural_network::layers::layer_weight)
 //! - Shared (private) helpers: `conv_op_helpers` (2D/4D convolution zero-padding) and
 //!   `shape_helpers` (pooling/convolution output-shape calculators)
@@ -60,6 +61,8 @@ pub mod pooling;
 pub mod recurrent;
 /// A module containing regularization layers for neural networks
 pub mod regularization;
+/// A layer that rewrites the axes after the batch axis into a target shape
+pub mod reshape;
 /// Model-level serialization scaffolding (whole-model snapshot and load-time weight application)
 pub mod serialize_model;
 /// Output-shape calculators for pooling and convolution layers
@@ -74,6 +77,7 @@ pub use flatten::*;
 pub use pooling::*;
 pub use recurrent::*;
 pub use regularization::*;
+pub use reshape::*;
 
 /// Generates the trait method stubs for layers without trainable parameters
 ///

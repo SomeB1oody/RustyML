@@ -45,6 +45,7 @@ use rustyml::neural_network::layers::regularization::normalization::instance_nor
 use rustyml::neural_network::layers::regularization::normalization::layer_normalization::{
     LayerNormalization, LayerNormalizationAxis,
 };
+use rustyml::neural_network::layers::reshape::Reshape;
 use rustyml::neural_network::traits::Layer;
 
 /// Compares `layer.backward(ones)` against a central finite-difference estimate of
@@ -626,6 +627,33 @@ fn global_average_pooling_3d_input_gradient_matches_finite_difference() {
     let mut pool = GlobalAveragePooling3D::new();
     let x = ramp(&[1, 2, 2, 2, 2]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
+}
+
+// Reshape (no trainable parameters -> input gradient only)
+// A reshape is a pure index remapping, so each input gradient is exactly 1. A shape-only assertion
+// misses a backward pass that reshapes to the wrong target or that permutes the elements.
+
+#[test]
+fn reshape_split_input_gradient_matches_finite_difference() {
+    // Rank 2 -> rank 3: the -1 axis resolves to 3, so [2, 6] becomes [2, 3, 2]
+    let mut reshape = Reshape::new(vec![-1, 2]).unwrap();
+    let x = Array::from_shape_vec((2, 6), (0..12).map(|v| 0.1 * v as f32 - 0.6).collect())
+        .unwrap()
+        .into_dyn();
+    check_input_gradient(&mut reshape, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn reshape_merge_input_gradient_matches_finite_difference() {
+    // Rank 4 -> rank 2: the -1 axis merges the 3 trailing axes, so [2, 2, 3, 2] becomes [2, 12]
+    let mut reshape = Reshape::new(vec![-1]).unwrap();
+    let x = Array::from_shape_vec(
+        (2, 2, 3, 2),
+        (0..24).map(|v| 0.05 * v as f32 - 0.6).collect(),
+    )
+    .unwrap()
+    .into_dyn();
+    check_input_gradient(&mut reshape, &x, 1e-3, 1e-2);
 }
 
 // Convolution with `Same` padding takes a different backward code path than `Valid` (every

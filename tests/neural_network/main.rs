@@ -40,6 +40,8 @@ mod pooling_max;
 mod recurrent;
 /// Tests for the reproducibility and RNG API.
 mod reproducibility;
+/// Tests for the Reshape layer: target-shape resolution, error paths, and round trips.
+mod reshape;
 /// Tests for `Sequential`: add, compile, fit, predict, and summary.
 mod sequential;
 /// Tests for `Sequential` model save and load round trips.
