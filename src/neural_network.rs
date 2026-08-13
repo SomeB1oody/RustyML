@@ -16,6 +16,8 @@
 //! - **Shape**: `Flatten` collapses to rank 2, and `Reshape` rewrites the non-batch axes
 //! - **Border**: `ZeroPadding1D/2D/3D` and `Cropping1D/2D/3D` resize the spatial axes at
 //!   their ends
+//! - **Axis order**: `Permute` reorders the non-batch axes, and `RepeatVector` repeats a
+//!   feature vector into a sequence
 //! - **Activation**: standalone activation layers (ReLU, LeakyReLU, ELU, SELU, Sigmoid, Tanh, ...)
 //! - **Convolution**: 1D/2D/3D convolution, plus depthwise and separable variants
 //! - **Pooling**: max and average pooling and their global variants for 1D, 2D, and 3D

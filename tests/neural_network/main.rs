@@ -34,6 +34,8 @@ mod norm_batch_layer;
 mod norm_group_instance;
 /// Tests for the optimizers: SGD, Adam, AdamW, RMSprop, and AdaGrad.
 mod optimizers;
+/// Tests for the Permute and RepeatVector layers: axis order, layout, and error paths.
+mod permute_repeat;
 /// Tests for AveragePooling and GlobalAveragePooling.
 mod pooling_avg;
 /// Tests for MaxPooling and GlobalMaxPooling in 1D, 2D, and 3D.

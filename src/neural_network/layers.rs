@@ -14,9 +14,11 @@
 //!   [`convolution`](crate::neural_network::layers::convolution),
 //!   [`dense`](crate::neural_network::layers::dense),
 //!   [`flatten`](crate::neural_network::layers::flatten),
+//!   [`permute`](crate::neural_network::layers::permute),
 //!   [`pooling`](crate::neural_network::layers::pooling),
 //!   [`recurrent`](crate::neural_network::layers::recurrent),
-//!   [`regularization`](crate::neural_network::layers::regularization), and
+//!   [`regularization`](crate::neural_network::layers::regularization),
+//!   [`repeat_vector`](crate::neural_network::layers::repeat_vector), and
 //!   [`reshape`](crate::neural_network::layers::reshape)
 //! - Weight containers: [`layer_weight`](crate::neural_network::layers::layer_weight)
 //! - Shared (private) helpers: `conv_op_helpers` (2D/4D convolution zero-padding) and
@@ -58,12 +60,16 @@ pub mod dense;
 pub mod flatten;
 /// Container for different types of neural network layer weights
 pub mod layer_weight;
+/// A layer that reorders the axes after the batch axis
+pub mod permute;
 /// Pooling layer for neural networks
 pub mod pooling;
 /// Recurrent layer for neural networks
 pub mod recurrent;
 /// A module containing regularization layers for neural networks
 pub mod regularization;
+/// A layer that repeats a feature vector into a sequence
+pub mod repeat_vector;
 /// A layer that rewrites the axes after the batch axis into a target shape
 pub mod reshape;
 /// Model-level serialization scaffolding (whole-model snapshot and load-time weight application)
@@ -78,9 +84,11 @@ pub use border::*;
 pub use convolution::*;
 pub use dense::*;
 pub use flatten::*;
+pub use permute::*;
 pub use pooling::*;
 pub use recurrent::*;
 pub use regularization::*;
+pub use repeat_vector::*;
 pub use reshape::*;
 
 /// Generates the trait method stubs for layers without trainable parameters

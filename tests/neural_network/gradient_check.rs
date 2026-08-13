@@ -30,6 +30,7 @@ use rustyml::neural_network::layers::convolution::conv_3d::Conv3D;
 use rustyml::neural_network::layers::convolution::depthwise_conv_2d::DepthwiseConv2D;
 use rustyml::neural_network::layers::convolution::separable_conv_2d::SeparableConv2D;
 use rustyml::neural_network::layers::dense::Dense;
+use rustyml::neural_network::layers::permute::Permute;
 use rustyml::neural_network::layers::pooling::average_pooling_1d::AveragePooling1D;
 use rustyml::neural_network::layers::pooling::average_pooling_2d::AveragePooling2D;
 use rustyml::neural_network::layers::pooling::average_pooling_3d::AveragePooling3D;
@@ -51,6 +52,7 @@ use rustyml::neural_network::layers::regularization::normalization::instance_nor
 use rustyml::neural_network::layers::regularization::normalization::layer_normalization::{
     LayerNormalization, LayerNormalizationAxis,
 };
+use rustyml::neural_network::layers::repeat_vector::RepeatVector;
 use rustyml::neural_network::layers::reshape::Reshape;
 use rustyml::neural_network::traits::Layer;
 
@@ -709,6 +711,34 @@ fn cropping_3d_input_gradient_matches_finite_difference() {
     let mut crop = Cropping3D::new(((1, 0), (0, 1), (1, 1)));
     let x = ramp(&[1, 3, 3, 4, 2]);
     check_input_gradient_weighted(&mut crop, &x, 1e-3, 1e-2);
+}
+
+// Permute and RepeatVector (no trainable parameters -> input gradient only)
+// A permute routes each output gradient back to exactly 1 input, so the weighted loss catches an
+// inverse order that is wrong. A repeat sends every step of the output back to the same input, so
+// each input gradient is the sum of its n step weights. The ones-based helper would hide both,
+// because it makes every gradient 1 and n.
+
+#[test]
+fn permute_swap_input_gradient_matches_finite_difference() {
+    let mut permute = Permute::new(vec![2, 1]).unwrap();
+    let x = ramp(&[2, 3, 4]);
+    check_input_gradient_weighted(&mut permute, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn permute_rotate_input_gradient_matches_finite_difference() {
+    // A rotation moves every axis, so a backward pass that inverts only 1 pair fails here
+    let mut permute = Permute::new(vec![3, 1, 2]).unwrap();
+    let x = ramp(&[2, 2, 3, 2]);
+    check_input_gradient_weighted(&mut permute, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn repeat_vector_input_gradient_matches_finite_difference() {
+    let mut repeat = RepeatVector::new(3).unwrap();
+    let x = ramp(&[3, 4]);
+    check_input_gradient_weighted(&mut repeat, &x, 1e-3, 1e-2);
 }
 
 // Convolution with `Same` padding takes a different backward code path than `Valid` (every

@@ -7,7 +7,7 @@ pub use crate::neural_network::layers::convolution::*;
 pub use crate::neural_network::layers::pooling::*;
 pub use crate::neural_network::layers::recurrent::*;
 pub use crate::neural_network::layers::regularization::*;
-pub use crate::neural_network::layers::{Dense, Flatten, Reshape};
+pub use crate::neural_network::layers::{Dense, Flatten, Permute, RepeatVector, Reshape};
 pub use crate::neural_network::losses::*;
 pub use crate::neural_network::optimizers::*;
 pub use crate::neural_network::sequential::{History, Sequential};
