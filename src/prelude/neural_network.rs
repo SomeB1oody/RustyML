@@ -2,6 +2,7 @@
 
 pub use crate::neural_network::Tensor;
 pub use crate::neural_network::layers::activation::*;
+pub use crate::neural_network::layers::border::*;
 pub use crate::neural_network::layers::convolution::*;
 pub use crate::neural_network::layers::pooling::*;
 pub use crate::neural_network::layers::recurrent::*;

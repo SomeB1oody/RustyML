@@ -10,6 +10,7 @@
 //! The submodules fall into a few categories:
 //!
 //! - Core layers (re-exported): [`activation`](crate::neural_network::layers::activation),
+//!   [`border`](crate::neural_network::layers::border),
 //!   [`convolution`](crate::neural_network::layers::convolution),
 //!   [`dense`](crate::neural_network::layers::dense),
 //!   [`flatten`](crate::neural_network::layers::flatten),
@@ -45,6 +46,8 @@ pub enum TrainingParameters {
 
 /// A module containing activation layer implementations for neural networks
 pub mod activation;
+/// Zero-padding and cropping layers that resize the spatial axes at their ends
+pub mod border;
 /// Convolution-internal helpers (output assembly, gradient accumulation, padding)
 mod conv_op_helpers;
 /// Convolutional layer for neural networks
@@ -71,6 +74,7 @@ mod shape_helpers;
 mod validation;
 
 pub use activation::*;
+pub use border::*;
 pub use convolution::*;
 pub use dense::*;
 pub use flatten::*;

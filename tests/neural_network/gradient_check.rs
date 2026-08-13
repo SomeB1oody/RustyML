@@ -17,6 +17,12 @@ use rustyml::neural_network::layers::activation::softmax::Softmax;
 use rustyml::neural_network::layers::activation::softplus::Softplus;
 use rustyml::neural_network::layers::activation::softsign::Softsign;
 use rustyml::neural_network::layers::activation::tanh::Tanh;
+use rustyml::neural_network::layers::border::cropping_1d::Cropping1D;
+use rustyml::neural_network::layers::border::cropping_2d::Cropping2D;
+use rustyml::neural_network::layers::border::cropping_3d::Cropping3D;
+use rustyml::neural_network::layers::border::zero_padding_1d::ZeroPadding1D;
+use rustyml::neural_network::layers::border::zero_padding_2d::ZeroPadding2D;
+use rustyml::neural_network::layers::border::zero_padding_3d::ZeroPadding3D;
 use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
 use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
@@ -654,6 +660,55 @@ fn reshape_merge_input_gradient_matches_finite_difference() {
     .unwrap()
     .into_dyn();
     check_input_gradient(&mut reshape, &x, 1e-3, 1e-2);
+}
+
+// Border layers (no trainable parameters -> input gradient only)
+// A zero-padding layer drops the gradient of every padded position, and a cropping layer drops
+// the gradient of every removed position. Every other position keeps its gradient
+// unchanged. The weighted loss gives each output position its own weight, so a border that
+// lands 1 position off changes the analytic gradient. Every border below is uneven, which a
+// symmetric border would hide. All 6 layers are exactly linear, so the tolerance is tight.
+
+#[test]
+fn zero_padding_1d_input_gradient_matches_finite_difference() {
+    let mut pad = ZeroPadding1D::new((2, 1));
+    let x = ramp(&[2, 4, 3]);
+    check_input_gradient_weighted(&mut pad, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn zero_padding_2d_input_gradient_matches_finite_difference() {
+    let mut pad = ZeroPadding2D::new(((1, 2), (0, 1)));
+    let x = ramp(&[2, 3, 4, 2]);
+    check_input_gradient_weighted(&mut pad, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn zero_padding_3d_input_gradient_matches_finite_difference() {
+    let mut pad = ZeroPadding3D::new(((1, 0), (0, 2), (1, 1)));
+    let x = ramp(&[1, 2, 3, 2, 2]);
+    check_input_gradient_weighted(&mut pad, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn cropping_1d_input_gradient_matches_finite_difference() {
+    let mut crop = Cropping1D::new((1, 2));
+    let x = ramp(&[2, 6, 3]);
+    check_input_gradient_weighted(&mut crop, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn cropping_2d_input_gradient_matches_finite_difference() {
+    let mut crop = Cropping2D::new(((2, 1), (0, 1)));
+    let x = ramp(&[2, 5, 4, 2]);
+    check_input_gradient_weighted(&mut crop, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn cropping_3d_input_gradient_matches_finite_difference() {
+    let mut crop = Cropping3D::new(((1, 0), (0, 1), (1, 1)));
+    let x = ramp(&[1, 3, 3, 4, 2]);
+    check_input_gradient_weighted(&mut crop, &x, 1e-3, 1e-2);
 }
 
 // Convolution with `Same` padding takes a different backward code path than `Valid` (every
