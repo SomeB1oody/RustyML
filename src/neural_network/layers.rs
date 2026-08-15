@@ -14,6 +14,7 @@
 //!   [`convolution`](crate::neural_network::layers::convolution),
 //!   [`dense`](crate::neural_network::layers::dense),
 //!   [`flatten`](crate::neural_network::layers::flatten),
+//!   [`identity`](crate::neural_network::layers::identity),
 //!   [`permute`](crate::neural_network::layers::permute),
 //!   [`pooling`](crate::neural_network::layers::pooling),
 //!   [`recurrent`](crate::neural_network::layers::recurrent),
@@ -58,6 +59,8 @@ pub mod convolution;
 pub mod dense;
 /// A layer that flattens a 3D, 4D, or 5D tensor into a 2D tensor
 pub mod flatten;
+/// A layer that passes its input through unchanged
+pub mod identity;
 /// Container for different types of neural network layer weights
 pub mod layer_weight;
 /// A layer that reorders the axes after the batch axis
@@ -84,6 +87,7 @@ pub use border::*;
 pub use convolution::*;
 pub use dense::*;
 pub use flatten::*;
+pub use identity::*;
 pub use permute::*;
 pub use pooling::*;
 pub use recurrent::*;

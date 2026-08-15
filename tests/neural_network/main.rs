@@ -24,6 +24,8 @@ mod conv_3d_variants;
 mod dense;
 /// Tests for Dropout and the SpatialDropout variants.
 mod dropout;
+/// Tests for the Identity layer: pass-through, layout, and error paths.
+mod identity;
 /// Tests for the loss functions: forward values, gradients, and error paths.
 mod losses;
 /// Tests for GaussianNoise and GaussianDropout.
@@ -32,6 +34,8 @@ mod noise;
 mod norm_batch_layer;
 /// Tests for GroupNormalization and InstanceNormalization.
 mod norm_group_instance;
+/// Tests for UnitNormalization: axis forms, the near-zero cap, layout, and error paths.
+mod norm_unit;
 /// Tests for the optimizers: SGD, Adam, AdamW, RMSprop, and AdaGrad.
 mod optimizers;
 /// Tests for the Permute and RepeatVector layers: axis order, layout, and error paths.

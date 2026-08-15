@@ -1,4 +1,5 @@
-//! Normalization layers (batch, group, instance, layer) and the shared group-normalization core.
+//! Normalization layers (batch, group, instance, layer, unit) and the shared
+//! group-normalization core.
 //!
 //! Group and instance normalization are the same operation at different group counts, so both
 //! delegate to `group_norm_forward_core` / `group_norm_backward_core` here.
@@ -416,11 +417,14 @@ pub mod group_normalization;
 pub mod instance_normalization;
 /// Layer Normalization layer for neural networks
 pub mod layer_normalization;
+/// Unit Normalization layer for neural networks
+pub mod unit_normalization;
 
 pub use batch_normalization::BatchNormalization;
 pub use group_normalization::GroupNormalization;
 pub use instance_normalization::InstanceNormalization;
 pub use layer_normalization::{LayerNormalization, LayerNormalizationAxis};
+pub use unit_normalization::{UnitNormalization, UnitNormalizationAxis};
 
 // Macros are defined after the `mod` declarations and path-exported via a `pub(in ...) use`
 // re-export. Callers therefore import them explicitly instead of relying on textual macro

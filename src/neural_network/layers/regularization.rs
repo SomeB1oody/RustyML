@@ -14,11 +14,13 @@
 //! - normalization: [`BatchNormalization`](crate::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization),
 //!   [`LayerNormalization`](crate::neural_network::layers::regularization::normalization::layer_normalization::LayerNormalization),
 //!   [`GroupNormalization`](crate::neural_network::layers::regularization::normalization::group_normalization::GroupNormalization),
-//!   and [`InstanceNormalization`](crate::neural_network::layers::regularization::normalization::instance_normalization::InstanceNormalization)
+//!   [`InstanceNormalization`](crate::neural_network::layers::regularization::normalization::instance_normalization::InstanceNormalization),
+//!   and [`UnitNormalization`](crate::neural_network::layers::regularization::normalization::unit_normalization::UnitNormalization)
 //!
-//! Every layer behaves differently in training versus inference. The module defines 2 macros to
-//! toggle the shared `training` field. `mode_dependent_layer_set_training` generates the inherent
-//! `set_training` method. `mode_dependent_layer_trait` generates the
+//! Every layer here behaves differently in training versus inference, except
+//! `UnitNormalization`, which reads no statistic of the batch and draws from no RNG. The module
+//! defines 2 macros to toggle the shared `training` field. `mode_dependent_layer_set_training`
+//! generates the inherent `set_training` method. `mode_dependent_layer_trait` generates the
 //! `set_training_if_mode_dependent` trait method that calls it.
 
 /// Dropout layers for neural networks

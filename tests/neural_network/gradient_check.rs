@@ -30,6 +30,7 @@ use rustyml::neural_network::layers::convolution::conv_3d::Conv3D;
 use rustyml::neural_network::layers::convolution::depthwise_conv_2d::DepthwiseConv2D;
 use rustyml::neural_network::layers::convolution::separable_conv_2d::SeparableConv2D;
 use rustyml::neural_network::layers::dense::Dense;
+use rustyml::neural_network::layers::identity::Identity;
 use rustyml::neural_network::layers::permute::Permute;
 use rustyml::neural_network::layers::pooling::average_pooling_1d::AveragePooling1D;
 use rustyml::neural_network::layers::pooling::average_pooling_2d::AveragePooling2D;
@@ -51,6 +52,9 @@ use rustyml::neural_network::layers::regularization::normalization::group_normal
 use rustyml::neural_network::layers::regularization::normalization::instance_normalization::InstanceNormalization;
 use rustyml::neural_network::layers::regularization::normalization::layer_normalization::{
     LayerNormalization, LayerNormalizationAxis,
+};
+use rustyml::neural_network::layers::regularization::normalization::unit_normalization::{
+    UnitNormalization, UnitNormalizationAxis,
 };
 use rustyml::neural_network::layers::repeat_vector::RepeatVector;
 use rustyml::neural_network::layers::reshape::Reshape;
@@ -739,6 +743,41 @@ fn repeat_vector_input_gradient_matches_finite_difference() {
     let mut repeat = RepeatVector::new(3).unwrap();
     let x = ramp(&[3, 4]);
     check_input_gradient_weighted(&mut repeat, &x, 1e-3, 1e-2);
+}
+
+// An identity layer routes every output gradient back to the same input, so each entry must be
+// exactly the upstream value. The ones-based helper is enough.
+
+#[test]
+fn identity_input_gradient_matches_finite_difference() {
+    let mut identity = Identity::new();
+    let x = ramp(&[3, 4]);
+    check_input_gradient(&mut identity, &x, 1e-3, 1e-2);
+}
+
+// UnitNormalization throws the length of each group away, so sum(output) barely moves with the
+// input and the ones-based helper is degenerate. The weighted loss is not. The 3 checks below
+// cover the trailing-axis row path, a middle axis, and 2 axes that are not next to each other.
+
+#[test]
+fn unit_normalization_input_gradient_weighted_matches_finite_difference() {
+    let mut unit = UnitNormalization::new(UnitNormalizationAxis::Default).unwrap();
+    let x = ramp(&[4, 5]);
+    check_input_gradient_weighted(&mut unit, &x, 1e-3, 5e-2);
+}
+
+#[test]
+fn unit_normalization_middle_axis_input_gradient_matches_finite_difference() {
+    let mut unit = UnitNormalization::new(UnitNormalizationAxis::Custom(1)).unwrap();
+    let x = ramp(&[2, 4, 3]);
+    check_input_gradient_weighted(&mut unit, &x, 1e-3, 5e-2);
+}
+
+#[test]
+fn unit_normalization_separated_axes_input_gradient_matches_finite_difference() {
+    let mut unit = UnitNormalization::new(UnitNormalizationAxis::Multiple(vec![0, 2])).unwrap();
+    let x = ramp(&[2, 4, 3]);
+    check_input_gradient_weighted(&mut unit, &x, 1e-3, 5e-2);
 }
 
 // Convolution with `Same` padding takes a different backward code path than `Valid` (every
