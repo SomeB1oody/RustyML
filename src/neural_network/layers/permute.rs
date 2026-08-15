@@ -168,9 +168,9 @@ impl Permute {
 /// Copies `input` under a new axis order, into a tensor that is in C order
 ///
 /// `permuted_axes` reorders the strides and shares the buffer, so it moves no data. `to_owned`
-/// on such a view keeps those reordered strides, which leaves the result out of C order.
-/// [`Activation::Softmax`](crate::neural_network::layers::activation::Activation::Softmax)
-/// rejects a tensor that is out of C order, so this layer pays for a real copy instead
+/// on such a view keeps those reordered strides, which leaves the result out of C order. Every
+/// layer here emits C order, so a consumer can read any layer output as 1 contiguous slice.
+/// This layer pays for a real copy to hold that contract
 fn permute_into(input: &Tensor, axes: &[usize]) -> Tensor {
     let view = input.view().permuted_axes(IxDyn(axes));
     let mut output = Tensor::zeros(view.raw_dim());

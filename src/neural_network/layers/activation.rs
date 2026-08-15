@@ -656,8 +656,12 @@ fn softmax_forward(input: &Tensor) -> Result<Tensor, Error> {
     let batch_size: usize = shape[..ndim - 1].iter().product();
     let num_features = shape[ndim - 1];
 
+    // `to_owned` keeps the strides of an array that is not in C order, and
+    // `into_shape_with_order` refuses such an array. `as_standard_layout` settles the layout
+    // first, for the same 1 copy this line needs anyway
     let mut output_2d = input
-        .to_owned()
+        .as_standard_layout()
+        .into_owned()
         .into_shape_with_order((batch_size, num_features))
         .context("Failed to reshape for softmax computation")?;
 
@@ -792,6 +796,33 @@ mod tests {
         let output = softmax_forward(&input).expect("softmax_forward failed");
         let vals = output.as_slice().expect("not contiguous");
         assert_abs_diff_eq!(vals[0], 1.0_f32, epsilon = 1e-6);
+    }
+
+    /// An input that is not in C order gives the same result as the same values in C order
+    ///
+    /// `Permute` produces C order on purpose, but a caller can hand a transposed tensor
+    /// straight to this layer. Every other layer accepts one
+    #[test]
+    fn softmax_forward_accepts_input_that_is_not_in_c_order() {
+        use ndarray::IxDyn;
+
+        // `permuted_axes` reorders the strides only, and `to_owned` keeps them. The result
+        // owns a contiguous buffer while `is_standard_layout` stays false
+        let base = tensor2(2, 3, vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
+        let transposed = base.view().permuted_axes(IxDyn(&[1, 0])).to_owned();
+        assert!(
+            !transposed.is_standard_layout(),
+            "the test input must not be in C order"
+        );
+
+        let output = softmax_forward(&transposed).expect("softmax_forward must accept it");
+        assert_eq!(output.shape(), &[3, 2]);
+
+        let c_order: Tensor = transposed.as_standard_layout().into_owned();
+        let want = softmax_forward(&c_order).expect("softmax_forward failed");
+        for (got, expected) in output.iter().zip(want.iter()) {
+            assert_abs_diff_eq!(*got, *expected, epsilon = 1e-6);
+        }
     }
 
     /// A 1-D input (ndim < 2) returns an error

@@ -160,7 +160,7 @@ fn permute_forward_serves_rank_5() {
     assert_eq!(out.shape(), &[2, 6, 5, 4, 3]);
 }
 
-/// The output is in C order, which `Activation::Softmax` needs from its input
+/// The output is in C order, so a consumer can read it as 1 contiguous slice
 #[test]
 fn permute_output_is_in_c_order() {
     let mut p = Permute::new(vec![2, 1]).unwrap();
