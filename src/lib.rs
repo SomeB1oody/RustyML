@@ -34,8 +34,8 @@
 //! ### [`neural_network`]
 //! Neural network framework built around a sequential model. Tensors are channels-last, and
 //! kernel shapes match Keras, so a layout carried over from Keras needs no permutation:
-//! - **Layers**: Dense, SimpleRNN, LSTM, GRU, Convolution, Pooling, Upsampling, Border, Shape,
-//!   Normalization, Dropout
+//! - **Layers**: Dense, Embedding, SimpleRNN, LSTM, GRU, Convolution, Pooling, Upsampling,
+//!   Border, Shape, Normalization, Dropout
 //! - **Optimizers**: SGD, Adam, AdamW, RMSprop, AdaGrad
 //! - **Loss Functions**: MSE, MAE, Binary/Categorical/Sparse Categorical Cross-Entropy
 //! - **Models**: Sequential architecture for feed-forward networks. `fit` and `fit_with_batches`

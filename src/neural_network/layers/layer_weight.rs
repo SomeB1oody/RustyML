@@ -24,6 +24,8 @@ pub mod conv_3d_weight;
 pub mod dense_weight;
 /// Per-layer weight container for the DepthwiseConv2D layer
 pub mod depthwise_conv_2d_weight;
+/// Per-layer weight container for the Embedding layer
+pub mod embedding_weight;
 /// Per-layer weight container for the GroupNormalization layer
 pub mod group_normalization_weight;
 /// Per-layer weight container for the GRU layer
@@ -45,6 +47,7 @@ pub use conv_2d_weight::*;
 pub use conv_3d_weight::*;
 pub use dense_weight::*;
 pub use depthwise_conv_2d_weight::*;
+pub use embedding_weight::*;
 pub use group_normalization_weight::*;
 pub use gru_weight::*;
 pub use instance_normalization_weight::*;
@@ -66,6 +69,13 @@ pub use simple_rnn_weight::*;
 /// this type exists per layer, built at save or load time, never in a hot path. Boxing the
 /// wide variant would add an allocation to a type whose only purpose is to borrow the live
 /// arrays without copying
+///
+/// **Append a new variant at the end.** postcard writes the variant index, so a variant inserted
+/// in the middle renumbers every variant after it. An existing file would then decode a saved
+/// layer as the wrong one. Appending keeps every earlier index, so a file written before the new
+/// variant existed still loads, and
+/// [`MODEL_FORMAT_VERSION`](crate::neural_network::layers::serialize_model::MODEL_FORMAT_VERSION)
+/// needs no bump
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LayerWeight<'a> {
@@ -97,4 +107,6 @@ pub enum LayerWeight<'a> {
     GroupNormalization(GroupNormalizationLayerWeight<'a>),
     /// Layer with no trainable parameters
     Empty,
+    /// Weights for embedding layers
+    Embedding(EmbeddingLayerWeight<'a>),
 }

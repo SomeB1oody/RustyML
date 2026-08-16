@@ -21,6 +21,9 @@ use rustyml::neural_network::layers::convolution::conv_3d::Conv3D;
 use rustyml::neural_network::layers::convolution::depthwise_conv_2d::DepthwiseConv2D;
 use rustyml::neural_network::layers::convolution::separable_conv_2d::SeparableConv2D;
 use rustyml::neural_network::layers::dense::Dense;
+use rustyml::neural_network::layers::embedding::Embedding;
+use rustyml::neural_network::layers::flatten::Flatten;
+use rustyml::neural_network::layers::layer_weight::{EmbeddingLayerWeight, LayerWeight};
 use rustyml::neural_network::layers::recurrent::gru::GRU;
 use rustyml::neural_network::layers::recurrent::lstm::LSTM;
 use rustyml::neural_network::layers::recurrent::simple_rnn::SimpleRNN;
@@ -415,6 +418,41 @@ fn gru_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
+// Embedding round-trip: the lookup table is the only weight, and a reloaded table must gather
+// the identical vectors
+#[test]
+fn embedding_trained_round_trip_preserves_the_lookup_table() {
+    let tmp = TempFile::new("embedding");
+
+    let make_arch = || {
+        let mut m = Sequential::new();
+        m.add(Embedding::new(6, 4).unwrap().with_random_state(21))
+            .add(Flatten::new(vec![2, 3, 4]).unwrap())
+            .add(Dense::new(12, 1, Linear::new()).unwrap());
+        m
+    };
+
+    let x: Tensor = Array::from_shape_vec((2, 3), vec![1.0f32, 5.0, 0.0, 3.0, 3.0, 2.0])
+        .unwrap()
+        .into_dyn();
+    let y: Tensor = Array::from_shape_vec((2, 1), vec![0.5f32, -0.5])
+        .unwrap()
+        .into_dyn();
+
+    // Train first, so the saved table differs from the one a fresh model initializes
+    let mut model = make_arch();
+    model.compile(
+        SGD::new(0.05, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
+    model.fit(&x, &y, 5).unwrap();
+
+    let before = model.predict(&x).unwrap();
+    let fresh = round_trip(&model, make_arch, tmp.path());
+    let after = fresh.predict(&x).unwrap();
+    assert_allclose(&after, &before, 1e-6_f32);
+}
+
 // BatchNormalization round-trip: trained running_mean/running_var must survive serialization,
 // so eval-mode predict returns the identical tensor afterward
 #[test]
@@ -776,4 +814,27 @@ fn load_wrong_format_version_gives_unsupported_format_error() {
         Err(Error::Io(IoError::UnsupportedModelFormat(_))) => {}
         other => panic!("expected UnsupportedModelFormat, got {:?}", other),
     }
+}
+
+// On-disk variant tags
+
+/// A new `LayerWeight` variant is appended, never inserted, so an existing file keeps its meaning
+///
+/// postcard writes the variant index and not the variant name. A variant placed before `Empty`
+/// would renumber `Empty`, and every saved parameter-free layer would then decode as some other
+/// layer. This pins the tag of the 2 variants at that boundary, so such a change fails here
+/// instead of silently corrupting a checkpoint
+#[test]
+fn layer_weight_variant_tags_stay_stable() {
+    let empty = postcard::to_allocvec(&LayerWeight::Empty).unwrap();
+    assert_eq!(empty, vec![13], "`Empty` must keep variant index 13");
+
+    let table = EmbeddingLayerWeight {
+        embeddings: std::borrow::Cow::Owned(Array::zeros((1, 1))),
+    };
+    let embedding = postcard::to_allocvec(&LayerWeight::Embedding(table)).unwrap();
+    assert_eq!(
+        embedding[0], 14,
+        "`Embedding` must be appended after `Empty`"
+    );
 }

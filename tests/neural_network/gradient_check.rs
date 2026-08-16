@@ -30,6 +30,7 @@ use rustyml::neural_network::layers::convolution::conv_3d::Conv3D;
 use rustyml::neural_network::layers::convolution::depthwise_conv_2d::DepthwiseConv2D;
 use rustyml::neural_network::layers::convolution::separable_conv_2d::SeparableConv2D;
 use rustyml::neural_network::layers::dense::Dense;
+use rustyml::neural_network::layers::embedding::Embedding;
 use rustyml::neural_network::layers::identity::Identity;
 use rustyml::neural_network::layers::permute::Permute;
 use rustyml::neural_network::layers::pooling::average_pooling_1d::AveragePooling1D;
@@ -974,6 +975,29 @@ fn gru_weight_gradient_matches_finite_difference() {
         .unwrap()
         .into_dyn();
     check_weight_gradient(&mut gru, &x, 1e-3, 3e-2);
+}
+
+// Embedding gradients. Only the weight direction is checked. The input holds indices, so
+// perturbing it selects a different row instead of moving along a derivative
+
+#[test]
+fn embedding_weight_gradient_matches_finite_difference() {
+    let mut embedding = Embedding::new(5, 3).unwrap().with_random_state(4);
+    let x = Array::from_shape_vec((2, 3), vec![0.0f32, 4.0, 2.0, 1.0, 3.0, 0.0])
+        .unwrap()
+        .into_dyn();
+    check_weight_gradient(&mut embedding, &x, 1e-3, 1e-2);
+}
+
+/// An index that appears several times accumulates, so its row gets the sum of the positions
+#[test]
+fn embedding_repeated_index_weight_gradient_matches_finite_difference() {
+    let mut embedding = Embedding::new(4, 3).unwrap().with_random_state(5);
+    // Row 1 appears 4 times, row 3 twice, and rows 0 and 2 once each
+    let x = Array::from_shape_vec((2, 4), vec![1.0f32, 1.0, 0.0, 3.0, 3.0, 1.0, 2.0, 1.0])
+        .unwrap()
+        .into_dyn();
+    check_weight_gradient_weighted(&mut embedding, &x, 1e-3, 1e-2);
 }
 
 /// Like [`check_weight_gradient`] but with the weighted loss L = sum(W * output). This avoids

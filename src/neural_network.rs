@@ -13,6 +13,7 @@
 //!
 //! ## Layers
 //! - **Dense**: fully connected layer with a configurable activation
+//! - **Embedding**: trainable lookup table that turns whole-number indices into dense vectors
 //! - **Shape**: `Flatten` collapses to rank 2, and `Reshape` rewrites the non-batch axes
 //! - **Border**: `ZeroPadding1D/2D/3D` and `Cropping1D/2D/3D` resize the spatial axes at
 //!   their ends

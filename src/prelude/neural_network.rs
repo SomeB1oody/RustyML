@@ -8,7 +8,9 @@ pub use crate::neural_network::layers::pooling::*;
 pub use crate::neural_network::layers::recurrent::*;
 pub use crate::neural_network::layers::regularization::*;
 pub use crate::neural_network::layers::upsampling::*;
-pub use crate::neural_network::layers::{Dense, Flatten, Identity, Permute, RepeatVector, Reshape};
+pub use crate::neural_network::layers::{
+    Dense, Embedding, Flatten, Identity, Permute, RepeatVector, Reshape,
+};
 pub use crate::neural_network::losses::*;
 pub use crate::neural_network::optimizers::*;
 pub use crate::neural_network::sequential::{History, Sequential};

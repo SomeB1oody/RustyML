@@ -167,6 +167,7 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///
     /// - `LayerWeight<'_>` - An enum borrowing the layer's weights:
     ///     - `LayerWeight::Dense` for Dense layers with weight and bias
+    ///     - `LayerWeight::Embedding` for Embedding layers with the lookup table
     ///     - `LayerWeight::SimpleRNN` for SimpleRNN layers with kernel, recurrent_kernel, and bias
     ///     - `LayerWeight::LSTM` / `LayerWeight::GRU` for recurrent layers with fused kernel,
     ///       recurrent_kernel, and bias (gate column blocks `[i | f | g | o]` / `[z | r | h]`)

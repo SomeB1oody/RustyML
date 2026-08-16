@@ -24,6 +24,8 @@ mod conv_3d_variants;
 mod dense;
 /// Tests for Dropout and the SpatialDropout variants.
 mod dropout;
+/// Tests for the Embedding layer: lookup values, index rules, and the scatter-add backward pass.
+mod embedding;
 /// Tests for the Identity layer: pass-through, layout, and error paths.
 mod identity;
 /// Tests for the loss functions: forward values, gradients, and error paths.
