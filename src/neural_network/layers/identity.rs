@@ -14,7 +14,7 @@ use crate::neural_network::traits::Layer;
 /// gradient it receives. The layer holds no parameter and reads no configuration
 ///
 /// Its use is a placeholder. A model built by a function that chooses among several layers
-/// needs something to return when the choice is "no operation", and a stack whose depth is a
+/// needs something to return when the choice is "no operation". A stack whose depth is a
 /// runtime value needs a filler that leaves the activations alone. Both are cleaner with a
 /// layer that does nothing than with an `Option` at every position
 ///
@@ -49,8 +49,8 @@ use crate::neural_network::traits::Layer;
 /// # Performance
 ///
 /// The layer copies. It cannot borrow, because a layer returns an owned tensor. The copy is 1
-/// linear pass, so it runs at memory speed. Remove the layer rather than keep it in a model
-/// that is finished
+/// linear pass, so it runs at memory speed. When a model is finished, remove the layer instead
+/// of keeping it
 #[derive(Debug, Default)]
 pub struct Identity {
     /// Shape of the most recent forward input. The backward pass needs it to check the gradient

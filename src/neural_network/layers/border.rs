@@ -78,8 +78,7 @@ impl From<(usize, usize)> for Border1D {
 /// - a pair `(height, width)` puts an equal amount at both ends of each axis
 /// - a pair of pairs `((top, bottom), (left, right))` names all 4 ends
 ///
-/// The 2-integer form gives 1 amount per axis. It does not give the 2 ends of 1 axis. Keras
-/// reads the same form the same way
+/// The 2-integer form gives 1 amount per axis. It does not give the 2 ends of 1 axis
 ///
 /// # Examples
 ///
@@ -125,8 +124,7 @@ impl From<((usize, usize), (usize, usize))> for Border2D {
 /// - a triple `(dim1, dim2, dim3)` puts an equal amount at both ends of each axis
 /// - a triple of pairs names all 6 ends
 ///
-/// The 3-integer form gives 1 amount per axis. It does not give the ends of 1 axis. Keras
-/// reads the same form the same way
+/// The 3-integer form gives 1 amount per axis. It does not give the ends of 1 axis
 ///
 /// # Examples
 ///

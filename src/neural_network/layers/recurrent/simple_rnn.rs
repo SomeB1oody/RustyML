@@ -232,9 +232,10 @@ impl SimpleRNN {
     /// as the pre-projected `x_t @ kernel` slice. The recurrent product accumulates into it
     /// because `beta = 1`, and the bias add rides the same GEMM epilogue. This removes 2
     /// separate allocating broadcast adds that unfused code would need. `ReLU` also fuses into
-    /// the backend's vectorized `Relu` epilogue. Every other activation instead runs as a
-    /// separate vectorized [`Activation::forward`] pass. It runs this way because a
-    /// per-element closure epilogue (`gemm_map`) would need 1 indirect scalar call per element.
+    /// the backend's vectorized `Relu` epilogue, and `Linear` needs no pass at all. Every other
+    /// activation instead runs as a separate vectorized [`Activation::forward`] pass. It runs
+    /// this way because a per-element closure epilogue (`gemm_map`) would need 1 indirect
+    /// scalar call per element.
     ///
     /// A fused `f32` epilogue matches the unfused product plus scalar activation bit for bit,
     /// with 1 exception. gemmkit's fused `Relu` maps `NaN` to `0`, while this crate's scalar

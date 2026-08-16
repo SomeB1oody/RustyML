@@ -54,3 +54,5 @@ mod reshape;
 mod sequential;
 /// Tests for `Sequential` model save and load round trips.
 mod serialize;
+/// Tests for the upsampling layers: shapes, interpolation modes, layout, and error paths.
+mod upsampling;

@@ -82,7 +82,7 @@ impl Default for ELU {
     ///
     /// # Default Values
     ///
-    /// - `alpha` - `1.0`. The scale Keras gives its own ELU layer
+    /// - `alpha` - `1.0`
     ///
     /// # Returns
     ///

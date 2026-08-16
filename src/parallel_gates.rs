@@ -22,6 +22,8 @@
 //! - `CONV_PARALLEL_MIN_FLOPS` and `CONV_MIN_CHUNK_POSITIONS` (the im2col+GEMM engine)
 //! - `POOL_PARALLEL_MIN_OPS`, `POOL_MIN_CHUNK_OUT`, and `POOL_MIN_CHUNK_CHANNELS` (the pooling
 //!   engine)
+//! - `UPSAMPLE_PARALLEL_MIN_OPS` (the upsampling resize engine, whose taps per output position
+//!   run from 1 to 11, so an element count alone would not compare 2 modes)
 //! - `BATCH_NORM_PARALLEL_THRESHOLD` (a per-layer mapping)
 //!
 //! `metrics` keeps its silhouette gate module-local, because it is a lightweight leaf module

@@ -416,7 +416,7 @@ fn repeat_vector_backward_sums_over_the_step_axis() {
     let grad = t3(2, 2, 3, ramp(12));
     let grad_input = r.backward(&grad).unwrap();
 
-    // Sample 0 sums [1, 2, 3] with [4, 5, 6], and sample 1 sums [7, 8, 9] with [10, 11, 12]
+    // Sample 0 sums [1, 2, 3] with [4, 5, 6]. Sample 1 sums [7, 8, 9] with [10, 11, 12]
     let want = t2(2, 3, vec![5.0, 7.0, 9.0, 17.0, 19.0, 21.0]);
     assert_allclose(&grad_input, &want, 1e-6_f32);
 }
@@ -518,7 +518,7 @@ fn repeat_vector_one_instance_serves_every_batch_size() {
 
 // Inside a Sequential model
 
-/// RepeatVector bridges 1 recurrent layer to the next, which is the encoder-decoder shape
+/// RepeatVector bridges 1 recurrent layer to the next, which is the encoder-decoder pattern
 #[test]
 fn repeat_vector_bridges_two_recurrent_layers() {
     // 4 samples, 6 steps, 3 features

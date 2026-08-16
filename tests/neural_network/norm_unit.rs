@@ -1,8 +1,8 @@
 //! Integration tests for the UnitNormalization layer.
 //!
-//! Covers the forward values against Keras 3.15, the axis forms, the row and strided paths,
-//! the near-zero cap, memory layout, and the error paths. `gradient_check.rs` covers the
-//! gradient against finite differences. This file pins the gradient against Keras instead.
+//! Covers the forward values, the axis forms, the row and strided paths, the near-zero cap,
+//! memory layout, and the error paths. `gradient_check.rs` covers the gradient against finite
+//! differences. This file pins the gradient against reference values instead.
 
 use ndarray::{Array2, Array3, Array4, IxDyn};
 use rustyml::neural_network::Tensor;
@@ -40,7 +40,7 @@ fn last_axis() -> UnitNormalization {
     UnitNormalization::new(UnitNormalizationAxis::Default).expect("Default axis is always valid")
 }
 
-/// The upstream gradient `gradient_check.rs` uses, so the pinned Keras tables below were
+/// The upstream gradient `gradient_check.rs` uses, so the pinned reference tables below were
 /// produced from the same weights
 fn upstream(like: &Tensor) -> Tensor {
     let flat: Vec<f32> = (0..like.len())
@@ -56,7 +56,7 @@ fn ramp(shape: &[usize], offset: f32) -> Tensor {
     Tensor::from_shape_vec(IxDyn(shape), data).expect("product of the shape")
 }
 
-// forward values, pinned against Keras 3.15.1
+// forward values, pinned against reference values
 
 /// Hand-derived values on the 2 best known right triangles
 ///
@@ -86,12 +86,12 @@ fn unit_normalization_gives_every_group_a_length_of_1() {
     }
 }
 
-/// The rank-2 forward and backward values match Keras 3.15.1
+/// The rank-2 forward and backward values are pinned against reference values
 ///
-/// Keras computes `x * minimum(rsqrt(sum(x^2)), 1e12)` and differentiates it. The literals
-/// below come from `keras.layers.UnitNormalization` on the JAX backend
+/// The formula `x * minimum(rsqrt(sum(x^2)), 1e12)`, differentiated, produced the pinned
+/// values below.
 #[test]
-fn unit_normalization_matches_keras_on_the_last_axis() {
+fn unit_normalization_matches_reference_on_the_last_axis() {
     let x = t2(2, 3, vec![1.0, 2.0, 3.0, -4.0, 0.0, 3.0]);
     let mut layer = last_axis();
 
@@ -110,7 +110,7 @@ fn unit_normalization_matches_keras_on_the_last_axis() {
 
 /// A middle axis leaves the groups as strided lanes, which is the layer's other path
 #[test]
-fn unit_normalization_matches_keras_on_a_middle_axis() {
+fn unit_normalization_matches_reference_on_a_middle_axis() {
     let x = ramp(&[2, 3, 4], 11.0);
     let mut layer = UnitNormalization::new(UnitNormalizationAxis::Custom(1)).unwrap();
 
@@ -185,7 +185,7 @@ fn unit_normalization_matches_keras_on_a_middle_axis() {
 
 /// 2 axes that are not next to each other still form 1 group each
 #[test]
-fn unit_normalization_matches_keras_on_2_separated_axes() {
+fn unit_normalization_matches_reference_on_2_separated_axes() {
     let x = ramp(&[2, 3, 4], 11.0);
     let mut layer = UnitNormalization::new(UnitNormalizationAxis::Multiple(vec![0, 2])).unwrap();
 
@@ -328,7 +328,7 @@ fn unit_normalization_on_the_batch_axis_normalizes_columns() {
     assert_allclose(&out, &want, 1e-6);
 }
 
-/// The rank the layer serves is set by the input, not by the constructor
+/// The input sets the rank the layer serves, not the constructor
 #[test]
 fn unit_normalization_serves_every_rank_from_2_up() {
     for shape in [
@@ -377,8 +377,8 @@ fn unit_normalization_is_idempotent() {
 
 /// The gradient of an unclamped group is orthogonal to that group's output
 ///
-/// Moving along the output direction only changes the length, which the layer throws away, so
-/// that component of the gradient must be 0
+/// Moving along the output direction only changes the length, which the layer discards, so that
+/// component of the gradient must be 0
 #[test]
 fn unit_normalization_gradient_is_orthogonal_to_its_output() {
     let x = ramp(&[4, 5], 9.0);
@@ -407,8 +407,8 @@ fn unit_normalization_leaves_an_all_zero_group_at_zero() {
     let want = t2(2, 3, vec![0.0, 0.0, 0.0, 0.6, 0.8, 0.0]);
     assert_allclose(&out, &want, 1e-6);
 
-    // The cap scaled the first group, so its gradient is the cap itself. Keras returns NaN
-    // here, because the reciprocal square root it differentiates through overflows
+    // The cap scaled the first group, so its gradient is the cap itself. Without the cap, the
+    // derivative of the reciprocal square root would overflow to NaN here
     let grad = layer.backward(&upstream(&out)).unwrap();
     for c in 0..3 {
         let want = 1e12 * (1.0 + 0.1 * (c as f32 - 3.0));
@@ -418,13 +418,13 @@ fn unit_normalization_leaves_an_all_zero_group_at_zero() {
             grad[[0, c]]
         );
     }
-    // The second group is far from the cap, so Keras' own values still apply
+    // The second group is far from the cap, so the pinned reference values still apply
     assert!((grad[[1, 0]] - 0.02239999).abs() < 1e-6);
     assert!((grad[[1, 1]] + 0.0168).abs() < 1e-6);
     assert!((grad[[1, 2]] - 0.24).abs() < 1e-6);
 }
 
-/// A group below the cap boundary is scaled by the cap, and one above it by its own norm
+/// The cap scales a group below the cap boundary, and the group's own norm scales one above it
 ///
 /// The boundary sits where the norm is `1e-12`, which is a sum of squares of `1e-24`
 #[test]
@@ -473,7 +473,7 @@ fn unit_normalization_capped_group_gradient_drops_the_projection_term() {
     }
 }
 
-/// A group holding a NaN carries it across the whole group, as Keras' `minimum` does
+/// A group holding a NaN carries it across the whole group
 #[test]
 fn unit_normalization_spreads_a_nan_across_its_group() {
     let x = t2(2, 3, vec![f32::NAN, 1.0, 2.0, 3.0, 4.0, 0.0]);
@@ -485,12 +485,12 @@ fn unit_normalization_spreads_a_nan_across_its_group() {
             "column {c} of the NaN group is finite"
         );
     }
-    // A neighbouring group is untouched
+    // A neighboring group is untouched
     assert!((out[[1, 0]] - 0.6).abs() < 1e-6);
     assert!((out[[1, 1]] - 0.8).abs() < 1e-6);
 }
 
-/// A sum of squares that overflows `f32` gives a scale of 0, which is what Keras gives
+/// A sum of squares that overflows `f32` gives a scale of 0
 #[test]
 fn unit_normalization_returns_zero_when_the_sum_of_squares_overflows() {
     let x = t2(1, 3, vec![1e20, 2e20, 3e20]);
@@ -568,8 +568,8 @@ fn unit_normalization_parallel_path_matches_the_serial_path() {
     let data: Vec<f32> = (0..rows * features)
         .map(|k| ((k % 97) as f32 - 48.0) * 0.125)
         .collect();
-    // The upstream gradient is sliced from 1 global pattern, so a half sees the same values at
-    // the same positions as the matching part of the whole
+    // This test slices the upstream gradient from 1 global pattern. A half therefore sees the
+    // same values, at the same positions, as the matching part of the whole
     let upstream_data: Vec<f32> = (0..rows * features)
         .map(|k| 1.0 + 0.1 * ((k % 13) as f32 - 6.0))
         .collect();
@@ -672,7 +672,7 @@ fn unit_normalization_rejects_an_empty_axis_list() {
     let result = UnitNormalization::new(UnitNormalizationAxis::Multiple(vec![]));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
-        "an empty axis list must be rejected"
+        "the constructor must reject an empty axis list"
     );
 }
 
@@ -682,7 +682,7 @@ fn unit_normalization_rejects_a_repeated_axis() {
     let result = UnitNormalization::new(UnitNormalizationAxis::Multiple(vec![1, 0, 1]));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
-        "a repeated axis must be rejected"
+        "the constructor must reject a repeated axis"
     );
 }
 
@@ -718,13 +718,13 @@ fn unit_normalization_rejects_an_axis_out_of_bounds() {
     );
 }
 
-/// An axis with no elements is an error, since no group can be normalized
+/// An axis with no elements is an error, since the layer cannot normalize any group
 #[test]
 fn unit_normalization_rejects_empty_input() {
     let empty = Tensor::zeros(IxDyn(&[0, 3]));
     assert!(
         matches!(last_axis().forward(&empty), Err(Error::EmptyInput(_))),
-        "an input with no element must be rejected"
+        "forward must reject an input with no element"
     );
 }
 
@@ -741,7 +741,7 @@ fn unit_normalization_backward_needs_a_forward_pass() {
     );
 }
 
-/// A gradient that does not have the shape of the forward output is rejected
+/// The backward pass rejects a gradient that does not have the shape of the forward output
 #[test]
 fn unit_normalization_backward_rejects_a_wrong_shape() {
     let mut layer = last_axis();

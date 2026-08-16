@@ -19,8 +19,9 @@
 //!   [`pooling`](crate::neural_network::layers::pooling),
 //!   [`recurrent`](crate::neural_network::layers::recurrent),
 //!   [`regularization`](crate::neural_network::layers::regularization),
-//!   [`repeat_vector`](crate::neural_network::layers::repeat_vector), and
-//!   [`reshape`](crate::neural_network::layers::reshape)
+//!   [`repeat_vector`](crate::neural_network::layers::repeat_vector),
+//!   [`reshape`](crate::neural_network::layers::reshape), and
+//!   [`upsampling`](crate::neural_network::layers::upsampling)
 //! - Weight containers: [`layer_weight`](crate::neural_network::layers::layer_weight)
 //! - Shared (private) helpers: `conv_op_helpers` (2D/4D convolution zero-padding) and
 //!   `shape_helpers` (pooling/convolution output-shape calculators)
@@ -79,6 +80,8 @@ pub mod reshape;
 pub mod serialize_model;
 /// Output-shape calculators for pooling and convolution layers
 mod shape_helpers;
+/// Upsampling layers that enlarge the spatial axes by a whole-number factor
+pub mod upsampling;
 /// Shared input/weight validation for the layer module
 mod validation;
 
@@ -94,6 +97,7 @@ pub use recurrent::*;
 pub use regularization::*;
 pub use repeat_vector::*;
 pub use reshape::*;
+pub use upsampling::*;
 
 /// Generates the trait method stubs for layers without trainable parameters
 ///

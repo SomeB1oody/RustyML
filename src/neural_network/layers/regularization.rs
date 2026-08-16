@@ -14,8 +14,8 @@
 //! - normalization: [`BatchNormalization`](crate::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization),
 //!   [`LayerNormalization`](crate::neural_network::layers::regularization::normalization::layer_normalization::LayerNormalization),
 //!   [`GroupNormalization`](crate::neural_network::layers::regularization::normalization::group_normalization::GroupNormalization),
-//!   [`InstanceNormalization`](crate::neural_network::layers::regularization::normalization::instance_normalization::InstanceNormalization),
-//!   and [`UnitNormalization`](crate::neural_network::layers::regularization::normalization::unit_normalization::UnitNormalization)
+//!   [`InstanceNormalization`](crate::neural_network::layers::InstanceNormalization),
+//!   and [`UnitNormalization`](crate::neural_network::layers::UnitNormalization)
 //!
 //! Every layer here behaves differently in training versus inference, except
 //! `UnitNormalization`, which reads no statistic of the batch and draws from no RNG. The module

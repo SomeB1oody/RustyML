@@ -11,11 +11,11 @@
 //!   - Activation enum forward delegation, and the Linear layer
 //!   - parameter validation: LeakyReLU and ELU reject an unusable parameter, in the layer
 //!     constructor and in a trainable layer that embeds the activation
-//!   - Default() equals the explicit Keras parameter, and a standalone layer equals the
+//!   - Default() equals the layer's own default value, and a standalone layer equals the
 //!     matching Activation variant
 
-// The pinned float32 values in this file are the exact digits Keras 3.15 printed. Keep them as
-// written, so a reader can compare them to the reference output character by character.
+// The pinned float32 values in this file are reference values. Keep them as written, so a
+// reader can compare them to the reference output character by character.
 #![allow(clippy::excessive_precision)]
 
 use approx::assert_abs_diff_eq;
@@ -515,7 +515,7 @@ fn linear_predict_non_finite_propagates() {
 }
 
 // LeakyReLU layer.
-// The pinned forward values of the 7 sections below come from Keras 3.15 in float32.
+// The pinned forward values of the 7 sections below are reference values in float32.
 
 /// LeakyReLU(x) = x for x >= 0, and negative_slope * x below 0, on known values
 #[test]
@@ -1174,7 +1174,7 @@ fn elu_new_rejects_unusable_alpha() {
     }
 }
 
-/// LeakyReLU::default() uses the Keras slope of 0.3, so it matches LeakyReLU::new(0.3)
+/// LeakyReLU::default() uses the default slope of 0.3, so it matches LeakyReLU::new(0.3)
 #[test]
 fn leaky_relu_default_matches_explicit_slope() {
     let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
@@ -1188,7 +1188,7 @@ fn leaky_relu_default_matches_explicit_slope() {
     assert_allclose(&default_out, &explicit_out, 0.0_f32);
 }
 
-/// ELU::default() uses the Keras alpha of 1.0, so it matches ELU::new(1.0)
+/// ELU::default() uses the default alpha of 1.0, so it matches ELU::new(1.0)
 #[test]
 fn elu_default_matches_explicit_alpha() {
     let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);

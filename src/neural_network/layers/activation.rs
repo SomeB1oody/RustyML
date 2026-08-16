@@ -157,14 +157,14 @@ pub enum Activation {
     /// Unlike [`Activation::ReLU`], the negative side keeps a non-zero gradient, so a unit
     /// whose pre-activation stays negative can still recover
     LeakyReLU {
-        /// Slope applied below 0. Must be finite and greater than 0. Keras defaults the
-        /// layer form to `0.3`. Use [`Activation::ReLU`] for a slope of 0
+        /// Slope applied below 0. Must be finite and greater than 0. The layer form
+        /// defaults to `0.3`. Use [`Activation::ReLU`] for a slope of 0
         negative_slope: f32,
     },
     /// Exponential linear unit, `x` for `x > 0` and `alpha * (e^x - 1)` below it
     ELU {
         /// Scale of the saturating negative branch. Must be finite and greater than 0.
-        /// Keras defaults to `1.0`
+        /// The layer form defaults to `1.0`
         alpha: f32,
     },
     /// Scaled exponential linear unit, `scale * x` for `x > 0` and
@@ -890,9 +890,8 @@ mod tests {
         assert_abs_diff_eq!(vals[2], -0.125_f32, epsilon = 1e-6);
     }
 
-    // Forward and derivative tables pinned against Keras 3.15 on the jax backend, evaluated in
-    // float32. These assert agreement with the reference implementation, not merely that
-    // `forward` and `backward` agree with each other
+    // The pinned float32 tables below confirm agreement with reference values, not just
+    // that `forward` and `backward` match each other
 
     /// The probe inputs shared by every pinned table below
     const PROBES: [f32; 11] = [-5.0, -3.0, -2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0, 3.0, 5.0];
@@ -908,7 +907,7 @@ mod tests {
             let tol = 1e-5 * e.abs().max(1.0);
             assert!(
                 (g - e).abs() <= tol,
-                "{name}[{i}] at x = {}: got {g}, Keras gives {e}, tolerance {tol}",
+                "{name}[{i}] at x = {}: got {g}, want {e}, tolerance {tol}",
                 PROBES[i]
             );
         }
@@ -917,7 +916,7 @@ mod tests {
     /// Runs `activation` over [`PROBES`] and checks both the output and the derivative
     ///
     /// An all-ones upstream gradient makes the backward result the derivative itself
-    fn check_against_keras(name: &str, activation: Activation, fwd: &[f32], grad: &[f32]) {
+    fn check_against_reference(name: &str, activation: Activation, fwd: &[f32], grad: &[f32]) {
         let input = tensor2(1, PROBES.len(), PROBES.to_vec());
         let output = activation.forward(&input).expect("forward failed");
         assert_pinned(&format!("{name} forward"), &output, fwd);
@@ -929,11 +928,11 @@ mod tests {
         assert_pinned(&format!("{name} backward"), &derivative, grad);
     }
 
-    /// LeakyReLU with the Keras layer default slope of 0.3. The derivative at exactly 0 is 1,
+    /// LeakyReLU with the layer's default slope of 0.3. The derivative at exactly 0 is 1,
     /// because the positive branch is `x >= 0`
     #[test]
-    fn leaky_relu_matches_keras() {
-        check_against_keras(
+    fn leaky_relu_matches_reference() {
+        check_against_reference(
             "LeakyReLU(0.3)",
             Activation::LeakyReLU {
                 negative_slope: 0.3,
@@ -955,10 +954,10 @@ mod tests {
         );
     }
 
-    /// ELU with the Keras default alpha of 1.0
+    /// ELU with the default alpha of 1.0
     #[test]
-    fn elu_matches_keras() {
-        check_against_keras(
+    fn elu_matches_reference() {
+        check_against_reference(
             "ELU(1.0)",
             Activation::ELU { alpha: 1.0 },
             &[
@@ -995,8 +994,8 @@ mod tests {
     /// At exactly 0 the derivative is `alpha`, not 1, because the positive branch is `x > 0`.
     /// The default alpha of 1.0 hides that, since both branches then give 1
     #[test]
-    fn elu_half_alpha_matches_keras() {
-        check_against_keras(
+    fn elu_half_alpha_matches_reference() {
+        check_against_reference(
             "ELU(0.5)",
             Activation::ELU { alpha: 0.5 },
             &[
@@ -1030,8 +1029,8 @@ mod tests {
 
     /// SELU. The derivative at exactly 0 is `scale * alpha`, the same `x > 0` convention as ELU
     #[test]
-    fn selu_matches_keras() {
-        check_against_keras(
+    fn selu_matches_reference() {
+        check_against_reference(
             "SELU",
             Activation::SELU,
             &[
@@ -1065,8 +1064,8 @@ mod tests {
 
     /// Softplus. The value at 0 is ln(2), and the derivative there is 0.5
     #[test]
-    fn softplus_matches_keras() {
-        check_against_keras(
+    fn softplus_matches_reference() {
+        check_against_reference(
             "Softplus",
             Activation::Softplus,
             &[
@@ -1101,8 +1100,8 @@ mod tests {
 
     /// Softsign
     #[test]
-    fn softsign_matches_keras() {
-        check_against_keras(
+    fn softsign_matches_reference() {
+        check_against_reference(
             "Softsign",
             Activation::Softsign,
             &[
@@ -1136,8 +1135,8 @@ mod tests {
 
     /// HardSigmoid. Both saturated ends are exact, and their derivative is 0
     #[test]
-    fn hard_sigmoid_matches_keras() {
-        check_against_keras(
+    fn hard_sigmoid_matches_reference() {
+        check_against_reference(
             "HardSigmoid",
             Activation::HardSigmoid,
             &[
@@ -1162,7 +1161,7 @@ mod tests {
 
     /// Exponential, whose derivative equals its output
     #[test]
-    fn exponential_matches_keras() {
+    fn exponential_matches_reference() {
         let table = [
             0.006737947,
             0.049787067,
@@ -1176,12 +1175,12 @@ mod tests {
             20.085537,
             148.41316,
         ];
-        check_against_keras("Exponential", Activation::Exponential, &table, &table);
+        check_against_reference("Exponential", Activation::Exponential, &table, &table);
     }
 
     /// The softplus derivative survives the far negative tail
     ///
-    /// At x = -40 the derivative is about 4.25e-18. Computing it as `1 - e^-a` rounds to
+    /// At x = -40 the derivative is about 4.25e-18. The direct form `1 - e^-a` rounds to
     /// exactly 0, because `e^-a` is 1 at f32 precision. `exp_m1` keeps the value
     #[test]
     fn softplus_backward_keeps_the_far_negative_tail() {
@@ -1196,7 +1195,7 @@ mod tests {
         let expected = 4.248_354e-18_f32;
         assert!(
             (got - expected).abs() <= 1e-5 * expected,
-            "softplus derivative at x = -40: got {got}, Keras gives {expected}"
+            "softplus derivative at x = -40: got {got}, want {expected}"
         );
     }
 

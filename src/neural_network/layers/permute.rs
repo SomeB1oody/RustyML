@@ -12,7 +12,7 @@ use ndarray::IxDyn;
 /// Reorders the axes after the batch axis
 ///
 /// The batch axis stays at axis 0 and never moves, so 1 layer instance serves every batch size.
-/// `dims` names the new order of the remaining axes, counting from 1 as Keras does.
+/// `dims` names the new order of the remaining axes, counting from 1.
 /// `Permute::new(vec![2, 1])` on a `[batch, height, width]` input gives `[batch, width, height]`
 ///
 /// The input rank must be `dims.len() + 1`. A rank the layer does not serve is an
@@ -56,8 +56,8 @@ use ndarray::IxDyn;
 /// A permute reads the input in an order its memory layout does not follow, so it costs more
 /// than a plain copy. The cost depends on which axis moves. A permute that leaves the last axis
 /// last keeps whole rows contiguous, and it stays close to copy speed. A permute that moves the
-/// last axis cuts the contiguous run to 1 element, and it costs several times more. Put a
-/// permute where the tensor is small when the model allows a choice
+/// last axis cuts the contiguous run to 1 element, and it costs several times more. When the
+/// model allows a choice, put a permute where the tensor is small
 #[derive(Debug)]
 pub struct Permute {
     /// Axis order the forward pass applies, batch axis included and counted from 0
@@ -85,9 +85,8 @@ impl Permute {
     ///
     /// # Notes
     ///
-    /// Keras accepts an empty `dims` and then serves a rank-1 input. This constructor rejects
-    /// it, because such a layer reorders nothing and every other layer here needs a batch axis
-    /// and at least 1 more axis
+    /// This constructor rejects an empty `dims`. Such a layer reorders nothing, and every other
+    /// layer here needs a batch axis and at least 1 more axis
     ///
     /// # Errors
     ///

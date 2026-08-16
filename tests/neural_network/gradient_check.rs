@@ -58,6 +58,9 @@ use rustyml::neural_network::layers::regularization::normalization::unit_normali
 };
 use rustyml::neural_network::layers::repeat_vector::RepeatVector;
 use rustyml::neural_network::layers::reshape::Reshape;
+use rustyml::neural_network::layers::upsampling::{
+    Interpolation, UpSampling1D, UpSampling2D, UpSampling3D,
+};
 use rustyml::neural_network::traits::Layer;
 
 /// Compares `layer.backward(ones)` against a central finite-difference estimate of
@@ -533,9 +536,8 @@ fn softsign_input_gradient_matches_finite_difference() {
 /// HardSigmoid on the linear segment only, where the derivative is the constant 1/6
 #[test]
 fn hard_sigmoid_input_gradient_matches_finite_difference() {
-    // Kinks sit at x = -3 and x = 3. Every probe stays inside that interval by at least 0.5.
-    // This test leaves out a saturated probe, because a finite difference across a breakpoint
-    // matches neither one-sided derivative.
+    // Kinks sit at x = -3 and x = 3. Every probe here stays at least 0.5 away from both, since
+    // a finite difference cannot cross a breakpoint.
     let mut hard_sigmoid = HardSigmoid::new();
     let x = Array::from_shape_vec((2, 4), vec![0.5, -0.5, 1.5, -1.5, 2.5, -2.5, 0.9, -2.0])
         .unwrap()
@@ -668,7 +670,7 @@ fn reshape_merge_input_gradient_matches_finite_difference() {
     check_input_gradient(&mut reshape, &x, 1e-3, 1e-2);
 }
 
-// Border layers (no trainable parameters -> input gradient only)
+// Border layers (no trainable parameters -> input gradient only).
 // A zero-padding layer drops the gradient of every padded position, and a cropping layer drops
 // the gradient of every removed position. Every other position keeps its gradient
 // unchanged. The weighted loss gives each output position its own weight, so a border that
@@ -717,7 +719,7 @@ fn cropping_3d_input_gradient_matches_finite_difference() {
     check_input_gradient_weighted(&mut crop, &x, 1e-3, 1e-2);
 }
 
-// Permute and RepeatVector (no trainable parameters -> input gradient only)
+// Permute and RepeatVector (no trainable parameters -> input gradient only).
 // A permute routes each output gradient back to exactly 1 input, so the weighted loss catches an
 // inverse order that is wrong. A repeat sends every step of the output back to the same input, so
 // each input gradient is the sum of its n step weights. The ones-based helper would hide both,
@@ -745,6 +747,66 @@ fn repeat_vector_input_gradient_matches_finite_difference() {
     check_input_gradient_weighted(&mut repeat, &x, 1e-3, 1e-2);
 }
 
+// Upsampling layers (no trainable parameters -> input gradient only).
+// Every output position is a weighted sum of input positions, so the input gradient is the
+// transposed weight table. The weighted loss gives each output position its own weight, which is
+// what makes a misplaced tap visible. The ones-based helper would hide it, because the weights of
+// an output position always add up to 1. Every factor below is uneven per axis, which an equal
+// factor would hide.
+// The step is 1e-1 rather than the usual 1e-3, because these layers are exactly linear. A linear
+// function has no truncation error at any step, so the only error left is the float32 rounding
+// of the 2 loss values. A wider step divides that rounding by more.
+
+#[test]
+fn up_sampling_1d_input_gradient_matches_finite_difference() {
+    let mut layer = UpSampling1D::new(3).unwrap();
+    let x = ramp(&[2, 4, 3]);
+    check_input_gradient_weighted(&mut layer, &x, 1e-1, 1e-2);
+}
+
+#[test]
+fn up_sampling_2d_nearest_input_gradient_matches_finite_difference() {
+    let mut layer = UpSampling2D::new((2, 3), Interpolation::Nearest).unwrap();
+    let x = ramp(&[2, 3, 4, 2]);
+    check_input_gradient_weighted(&mut layer, &x, 1e-1, 1e-2);
+}
+
+#[test]
+fn up_sampling_2d_bilinear_input_gradient_matches_finite_difference() {
+    let mut layer = UpSampling2D::new((3, 2), Interpolation::Bilinear).unwrap();
+    let x = ramp(&[2, 3, 4, 2]);
+    check_input_gradient_weighted(&mut layer, &x, 1e-1, 1e-2);
+}
+
+#[test]
+fn up_sampling_2d_bicubic_input_gradient_matches_finite_difference() {
+    let mut layer = UpSampling2D::new((2, 3), Interpolation::Bicubic).unwrap();
+    let x = ramp(&[1, 4, 5, 2]);
+    check_input_gradient_weighted(&mut layer, &x, 1e-1, 1e-2);
+}
+
+#[test]
+fn up_sampling_2d_lanczos3_input_gradient_matches_finite_difference() {
+    let mut layer = UpSampling2D::new((1, 2), Interpolation::Lanczos3).unwrap();
+    let x = ramp(&[1, 4, 6, 2]);
+    check_input_gradient_weighted(&mut layer, &x, 1e-1, 1e-2);
+}
+
+#[test]
+fn up_sampling_2d_lanczos5_input_gradient_matches_finite_difference() {
+    // 12 positions on the wide axis, so the kernel of 11 taps is not clipped everywhere
+    let mut layer = UpSampling2D::new((2, 1), Interpolation::Lanczos5).unwrap();
+    let x = ramp(&[1, 12, 3, 2]);
+    check_input_gradient_weighted(&mut layer, &x, 1e-1, 1e-2);
+}
+
+#[test]
+fn up_sampling_3d_input_gradient_matches_finite_difference() {
+    let mut layer = UpSampling3D::new((2, 1, 3)).unwrap();
+    let x = ramp(&[1, 2, 3, 2, 2]);
+    check_input_gradient_weighted(&mut layer, &x, 1e-1, 1e-2);
+}
+
 // An identity layer routes every output gradient back to the same input, so each entry must be
 // exactly the upstream value. The ones-based helper is enough.
 
@@ -755,7 +817,7 @@ fn identity_input_gradient_matches_finite_difference() {
     check_input_gradient(&mut identity, &x, 1e-3, 1e-2);
 }
 
-// UnitNormalization throws the length of each group away, so sum(output) barely moves with the
+// UnitNormalization discards the length of each group, so sum(output) barely moves with the
 // input and the ones-based helper is degenerate. The weighted loss is not. The 3 checks below
 // cover the trailing-axis row path, a middle axis, and 2 axes that are not next to each other.
 

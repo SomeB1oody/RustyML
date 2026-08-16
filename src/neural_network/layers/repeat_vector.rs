@@ -20,9 +20,8 @@ use ndarray::{Axis, IxDyn};
 /// recurrent layer needs a rank-3 input. This layer bridges the 2, so an `LSTM` can feed another
 /// `LSTM`
 ///
-/// A repeat is not the same as Keras' `return_sequences=True`. Keras emits the state of each
-/// step, and every step differs. This layer emits the same vector at every step, which is the
-/// standard way to seed a decoder with a fixed context
+/// This layer emits the same vector at every step, which is the standard way to seed a decoder
+/// with a fixed context
 ///
 /// # Examples
 ///

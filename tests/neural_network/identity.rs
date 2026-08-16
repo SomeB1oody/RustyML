@@ -25,7 +25,7 @@ fn ramp(shape: &[usize]) -> Tensor {
     Tensor::from_shape_vec(IxDyn(shape), data).expect("product of the shape")
 }
 
-/// Every value comes back untouched, at every rank the framework uses
+/// Every value comes back untouched, at every rank from 1 through 5
 #[test]
 fn identity_passes_every_rank_through_unchanged() {
     for shape in [
@@ -202,13 +202,13 @@ fn identity_rejects_a_rank_0_input() {
     );
 }
 
-/// An axis with no elements is rejected, as it is everywhere else in the framework
+/// An axis with no elements is rejected, as it is everywhere else in this crate
 #[test]
 fn identity_rejects_empty_input() {
     let empty = Tensor::zeros(IxDyn(&[0, 3]));
     assert!(
         matches!(Identity::new().forward(&empty), Err(Error::EmptyInput(_))),
-        "an input with no element must be rejected"
+        "Identity must reject an empty input"
     );
 }
 

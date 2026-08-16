@@ -73,7 +73,8 @@ fn crop_out(input: &Tensor, borders: &[(usize, usize)]) -> Tensor {
 ///
 /// # Errors
 ///
-/// - `Error::InvalidInput` - If the rank is not `rank`, or if any axis has an extent of 0
+/// - `Error::InvalidInput` - If the rank is not `rank`
+/// - `Error::EmptyInput` - If any axis has an extent of 0
 fn validate_input(input: &Tensor, rank: usize, layer: &'static str) -> Result<(), Error> {
     if input.ndim() != rank {
         return Err(Error::invalid_input(format!(

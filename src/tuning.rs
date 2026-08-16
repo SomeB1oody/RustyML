@@ -242,6 +242,16 @@ pub mod pool {
     );
 }
 
+/// Upsampling-engine parallelism gate (`UpSampling1D/2D/3D`).
+#[cfg(feature = "neural_network")]
+pub mod upsampling {
+    fwd!(
+        set_parallel_min_ops => crate::neural_network::layers::upsampling::resize_engine::set_upsample_parallel_min_ops,
+        get_parallel_min_ops => crate::neural_network::layers::upsampling::resize_engine::upsample_parallel_min_ops,
+        "the upsampling-engine element-ops gate (destination elements times taps)"
+    );
+}
+
 /// Normalization-layer parallelism gates (BatchNorm, LayerNorm, GroupNorm).
 #[cfg(feature = "neural_network")]
 pub mod norm {

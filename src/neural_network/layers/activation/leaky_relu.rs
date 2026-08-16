@@ -83,7 +83,7 @@ impl Default for LeakyReLU {
     ///
     /// # Default Values
     ///
-    /// - `negative_slope` - `0.3`. The slope Keras gives its own LeakyReLU layer
+    /// - `negative_slope` - `0.3`
     ///
     /// # Returns
     ///

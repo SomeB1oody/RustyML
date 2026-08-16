@@ -194,8 +194,8 @@ impl Dense {
     /// lowers to [`Bias::PerCol`]
     ///
     /// The activation stays a fused epilogue only where the backend has a vectorized one,
-    /// `ReLU` ([`FusedActivation::Relu`]). Every other activation runs as a separate
-    /// [`Activation::forward`] pass instead
+    /// `ReLU` ([`FusedActivation::Relu`]). `Linear` needs no separate pass, since it changes
+    /// nothing. Every other activation runs as a separate [`Activation::forward`] pass
     ///
     /// A fused `f32` epilogue matches the unfused product plus scalar activation bit for bit,
     /// with 1 exception. gemmkit's fused `Relu` maps `NaN` to `0.0`, while this crate's

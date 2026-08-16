@@ -13,8 +13,7 @@ use ndarray::{Axis, IxDyn, Zip};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
 
-/// Largest scale the layer applies, which is Keras' `1 / epsilon` at its fixed `epsilon` of
-/// `1e-12`
+/// Largest scale the layer applies. It equals `1 / epsilon` for a fixed `epsilon` of `1e-12`
 ///
 /// The bound keeps a group of near-zero elements from being scaled up without limit. Written as
 /// a literal because `1e12` and `1.0 / 1e-12` round to the same `f32`, which is
@@ -23,8 +22,8 @@ const MAX_SCALE: f32 = 1e12;
 
 /// Which axes an L2 norm reduces over
 ///
-/// Defaults to [`UnitNormalizationAxis::Default`], the last axis. That is Keras' `axis=-1`,
-/// and under the channels-last layout it is the channel axis
+/// Defaults to [`UnitNormalizationAxis::Default`], the last axis. Under the channels-last
+/// layout, that is the channel axis
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum UnitNormalizationAxis {
     /// Normalize along the last axis (the feature or channel axis)
@@ -44,23 +43,20 @@ pub enum UnitNormalizationAxis {
 /// input, each sample becomes a unit vector. The layer holds no parameter, and it behaves the
 /// same in training and in inference
 ///
-/// The scale is `1 / sqrt(sum of squares)`, capped at `1e12`. The cap is Keras' `1 / epsilon`
-/// at its fixed `epsilon` of `1e-12`, and it takes over for every group whose norm falls below
+/// The scale is `1 / sqrt(sum of squares)`, capped at `1e12`. The cap is `1 / epsilon` for a
+/// fixed `epsilon` of `1e-12`, and it takes over for every group whose norm falls below
 /// `1e-12`. An all-zero group is the limiting case. It is scaled by `1e12` and stays all zero,
 /// rather than dividing by zero
 ///
-/// Unlike [`LayerNormalization`](crate::neural_network::layers::regularization::normalization::layer_normalization::LayerNormalization),
-/// this layer subtracts no mean and learns no `gamma` or `beta`. It changes the length of each
-/// group and never its direction, so it is the layer for cosine similarity, for a metric or
-/// retrieval head, or for any place a downstream dot product must read as an angle
+/// Unlike [`LayerNormalization`](crate::neural_network::layers::LayerNormalization), this layer
+/// subtracts no mean and learns no `gamma` or `beta`. It changes the length of each group and
+/// never its direction. This makes it the layer for cosine similarity, for a metric or
+/// retrieval head. Use it anywhere a downstream dot product must read as an angle
 ///
 /// # Notes
 ///
-/// The gradient of a group whose scale hit the cap differs from Keras. Keras builds that
-/// gradient by automatic differentiation, and the reciprocal square root it differentiates
-/// through overflows at such a group, so Keras returns `NaN` for every element of it. This
-/// layer returns the derivative of the function it computed, which is the cap itself. The 2
-/// agree everywhere else
+/// A group whose scale hit the cap returns the derivative of the function this layer computed,
+/// which is the cap itself. The value is finite, not `NaN`
 ///
 /// # Examples
 ///
@@ -101,10 +97,10 @@ pub enum UnitNormalizationAxis {
 /// # Performance
 ///
 /// The layer takes a fused row path when the normalized axes are the trailing block of the
-/// shape, which the default axis always is. Each group is then 1 contiguous run, and the pass
-/// costs 2 linear walks of the input, 1 for the norm and 1 for the scale. Any other axis choice
-/// leaves the groups as strided lanes. That path reduces them in place instead of paying for a
-/// transpose in and a transpose back out, but it holds 1 more tensor of the input size while it
+/// shape, which the default axis always is. Each group is then 1 contiguous run. The pass costs
+/// 2 linear walks of the input, 1 for the norm and 1 for the scale. Any other axis choice leaves
+/// the groups as strided lanes. That path reduces the groups in place instead of paying for a
+/// transpose in and a transpose back out. It holds 1 more tensor of the input size while it
 /// folds the squares
 ///
 /// `forward` also keeps a copy of its output, which the backward pass reads. `predict` keeps
@@ -131,7 +127,7 @@ impl UnitNormalization {
     /// # Parameters
     ///
     /// - `axis` - Axes the L2 norm reduces over. Use [`UnitNormalizationAxis::Default`] for the
-    ///   last axis, which is Keras' default
+    ///   last axis
     ///
     /// # Returns
     ///
@@ -265,9 +261,9 @@ fn group_shape(shape: &[usize], axes: &[usize]) -> Vec<usize> {
 /// otherwise
 ///
 /// Under that layout a group is 1 contiguous run of a C-order buffer, so the whole pass reduces
-/// to a walk over equal-length rows. `axes` is in ascending order and holds no duplicate, so
-/// the axes form the trailing block exactly when the first of them sits `axes.len()` positions
-/// from the end
+/// to a walk over equal-length rows. `axes` is in ascending order and holds no duplicate. The
+/// axes form the trailing block exactly when the first of them sits `axes.len()` positions from
+/// the end
 fn trailing_group_len(shape: &[usize], axes: &[usize]) -> Option<usize> {
     (axes[0] == shape.len() - axes.len()).then(|| shape[axes[0]..].iter().product())
 }
@@ -280,8 +276,8 @@ fn into_group_tensor(values: Vec<f32>, group_shape: &[usize]) -> Tensor {
 /// The scale for a group, and whether its norm or the cap decided it
 ///
 /// The comparison is written so that a `square_sum` of `NaN` takes the norm branch and carries
-/// the `NaN` into the output, which is what Keras' `minimum` does. It also sends an infinite
-/// reciprocal, which an all-zero group gives, to the cap
+/// the `NaN` into the output. It also sends an infinite reciprocal, which an all-zero group
+/// gives, to the cap
 fn group_scale(square_sum: f32) -> (f32, f32) {
     let from_norm = 1.0 / square_sum.sqrt();
     if from_norm > MAX_SCALE {

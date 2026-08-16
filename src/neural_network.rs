@@ -16,6 +16,8 @@
 //! - **Shape**: `Flatten` collapses to rank 2, and `Reshape` rewrites the non-batch axes
 //! - **Border**: `ZeroPadding1D/2D/3D` and `Cropping1D/2D/3D` resize the spatial axes at
 //!   their ends
+//! - **Upsampling**: `UpSampling1D/2D/3D` enlarge the spatial axes by a whole-number factor,
+//!   with 5 interpolation modes on the 2D layer
 //! - **Axis order**: `Permute` reorders the non-batch axes, and `RepeatVector` repeats a
 //!   feature vector into a sequence
 //! - **Identity**: passes its input through unchanged, as a placeholder where a model needs a
