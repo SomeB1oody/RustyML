@@ -1,7 +1,8 @@
 //! Convolutional layers and shared padding types
 //!
-//! Re-exports the 1D, 2D, and 3D convolution layers, plus the depthwise and separable
-//! convolution layers. Defines [`PaddingType`], which controls spatial padding
+//! Re-exports the 1D, 2D, and 3D convolution layers, their transposed counterparts, and the
+//! depthwise and separable convolution layers. Defines [`PaddingType`], which controls spatial
+//! padding
 
 /// Padding method used by convolutional and pooling layers
 ///
@@ -21,10 +22,19 @@ pub enum PaddingType {
 
 /// 1D convolutional layer
 pub mod conv_1d;
+/// 1D transposed convolutional layer
+pub mod conv_1d_transpose;
 /// 2D convolutional layer
 pub mod conv_2d;
+/// 2D transposed convolutional layer
+pub mod conv_2d_transpose;
 /// 3D convolutional layer
 pub mod conv_3d;
+/// 3D transposed convolutional layer
+pub mod conv_3d_transpose;
+/// Dimension-generic transposed-convolution engine shared by Conv1DTranspose, Conv2DTranspose,
+/// and Conv3DTranspose
+mod conv_transpose_engine;
 /// Dimension-generic convolution engine shared by Conv1D, Conv2D, Conv3D, and the pointwise
 /// stage of SeparableConv2D
 pub(crate) mod convolution_engine;
@@ -36,7 +46,10 @@ pub mod separable_conv_2d;
 mod validation;
 
 pub use conv_1d::Conv1D;
+pub use conv_1d_transpose::Conv1DTranspose;
 pub use conv_2d::Conv2D;
+pub use conv_2d_transpose::Conv2DTranspose;
 pub use conv_3d::Conv3D;
+pub use conv_3d_transpose::Conv3DTranspose;
 pub use depthwise_conv_2d::DepthwiseConv2D;
 pub use separable_conv_2d::SeparableConv2D;

@@ -25,8 +25,11 @@ use rustyml::neural_network::layers::border::zero_padding_2d::ZeroPadding2D;
 use rustyml::neural_network::layers::border::zero_padding_3d::ZeroPadding3D;
 use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
+use rustyml::neural_network::layers::convolution::conv_1d_transpose::Conv1DTranspose;
 use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
+use rustyml::neural_network::layers::convolution::conv_2d_transpose::Conv2DTranspose;
 use rustyml::neural_network::layers::convolution::conv_3d::Conv3D;
+use rustyml::neural_network::layers::convolution::conv_3d_transpose::Conv3DTranspose;
 use rustyml::neural_network::layers::convolution::depthwise_conv_2d::DepthwiseConv2D;
 use rustyml::neural_network::layers::convolution::separable_conv_2d::SeparableConv2D;
 use rustyml::neural_network::layers::dense::Dense;
@@ -1184,4 +1187,166 @@ fn batch_normalization_spatial_weight_gradient_matches_finite_difference() {
     bn.set_training_if_mode_dependent(true);
     let x = ramp(&[2, 2, 2, 3]);
     check_weight_gradient_weighted(&mut bn, &x, 1e-3, 5e-2);
+}
+
+// A transposed convolution runs the same 2 halves as a plain one, in the other order. Its
+// forward pass is the plain backward's col2im scatter, and its backward pass is the plain
+// forward's im2col gather. So the 2 directions here exercise code that no plain convolution
+// check reaches: the forward scatter's crop, and the backward gather's pad. Both padding modes
+// and a stride above 1 each need their own case, because the crop and the pad are 0 under
+// `Valid` at stride 1.
+
+#[test]
+fn conv1d_transpose_input_gradient_matches_finite_difference() {
+    // Channels-last: [batch, length, channels]
+    let mut conv = Conv1DTranspose::new(2, 3, vec![1, 4, 1], 2, Linear::new()).unwrap();
+    let x = Array::from_shape_vec((1, 4, 1), (0..4).map(|v| 0.1 * v as f32 - 0.3).collect())
+        .unwrap()
+        .into_dyn();
+    check_input_gradient(&mut conv, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn conv1d_transpose_weight_gradient_matches_finite_difference() {
+    let mut conv = Conv1DTranspose::new(2, 3, vec![1, 4, 1], 2, Linear::new()).unwrap();
+    let x = Array::from_shape_vec((1, 4, 1), (0..4).map(|v| 0.1 * v as f32 - 0.3).collect())
+        .unwrap()
+        .into_dyn();
+    check_weight_gradient(&mut conv, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn conv1d_transpose_same_padding_input_gradient_matches_finite_difference() {
+    // `Same` is the mode that crops the scatter buffer on the forward pass and pads the output
+    // gradient back up on the backward pass
+    let mut conv = Conv1DTranspose::new(2, 3, vec![1, 5, 1], 1, Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
+    let x = Array::from_shape_vec((1, 5, 1), (0..5).map(|v| 0.1 * v as f32 - 0.3).collect())
+        .unwrap()
+        .into_dyn();
+    check_input_gradient(&mut conv, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn conv1d_transpose_same_padding_weight_gradient_matches_finite_difference() {
+    let mut conv = Conv1DTranspose::new(2, 3, vec![1, 5, 1], 1, Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
+    let x = Array::from_shape_vec((1, 5, 1), (0..5).map(|v| 0.1 * v as f32 - 0.3).collect())
+        .unwrap()
+        .into_dyn();
+    check_weight_gradient(&mut conv, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn conv2d_transpose_input_gradient_matches_finite_difference() {
+    // Channels-last: [batch, height, width, channels]
+    let mut conv =
+        Conv2DTranspose::new(2, (2, 2), vec![1, 3, 3, 2], (1, 1), Linear::new()).unwrap();
+    let x = Array::from_shape_vec(
+        (1, 3, 3, 2),
+        (0..18).map(|v| 0.05 * v as f32 - 0.4).collect(),
+    )
+    .unwrap()
+    .into_dyn();
+    check_input_gradient(&mut conv, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn conv2d_transpose_weight_gradient_matches_finite_difference() {
+    let mut conv =
+        Conv2DTranspose::new(2, (2, 2), vec![1, 3, 3, 2], (1, 1), Linear::new()).unwrap();
+    let x = Array::from_shape_vec(
+        (1, 3, 3, 2),
+        (0..18).map(|v| 0.05 * v as f32 - 0.4).collect(),
+    )
+    .unwrap()
+    .into_dyn();
+    check_weight_gradient(&mut conv, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn conv2d_transpose_same_padding_input_gradient_matches_finite_difference() {
+    let mut conv = Conv2DTranspose::new(2, (3, 3), vec![1, 3, 3, 1], (2, 2), Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
+    let x = Array::from_shape_vec(
+        (1, 3, 3, 1),
+        (0..9).map(|v| 0.05 * v as f32 - 0.2).collect(),
+    )
+    .unwrap()
+    .into_dyn();
+    check_input_gradient(&mut conv, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn conv2d_transpose_same_padding_weight_gradient_matches_finite_difference() {
+    let mut conv = Conv2DTranspose::new(2, (3, 3), vec![1, 3, 3, 1], (2, 2), Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
+    let x = Array::from_shape_vec(
+        (1, 3, 3, 1),
+        (0..9).map(|v| 0.05 * v as f32 - 0.2).collect(),
+    )
+    .unwrap()
+    .into_dyn();
+    check_weight_gradient(&mut conv, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn conv3d_transpose_input_gradient_matches_finite_difference() {
+    // Channels-last: [batch, depth, height, width, channels]
+    let mut conv =
+        Conv3DTranspose::new(2, (2, 2, 2), vec![1, 2, 2, 2, 1], (1, 1, 1), Linear::new()).unwrap();
+    let x = Array::from_shape_vec(
+        (1, 2, 2, 2, 1),
+        (0..8).map(|v| 0.05 * v as f32 - 0.2).collect(),
+    )
+    .unwrap()
+    .into_dyn();
+    check_input_gradient(&mut conv, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn conv3d_transpose_weight_gradient_matches_finite_difference() {
+    let mut conv =
+        Conv3DTranspose::new(2, (2, 2, 2), vec![1, 2, 2, 2, 1], (1, 1, 1), Linear::new()).unwrap();
+    let x = Array::from_shape_vec(
+        (1, 2, 2, 2, 1),
+        (0..8).map(|v| 0.05 * v as f32 - 0.2).collect(),
+    )
+    .unwrap()
+    .into_dyn();
+    check_weight_gradient(&mut conv, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn conv3d_transpose_same_padding_input_gradient_matches_finite_difference() {
+    let mut conv =
+        Conv3DTranspose::new(2, (3, 3, 3), vec![1, 2, 2, 2, 1], (1, 1, 1), Linear::new())
+            .unwrap()
+            .with_padding(PaddingType::Same);
+    let x = Array::from_shape_vec(
+        (1, 2, 2, 2, 1),
+        (0..8).map(|v| 0.05 * v as f32 - 0.2).collect(),
+    )
+    .unwrap()
+    .into_dyn();
+    check_input_gradient(&mut conv, &x, 1e-3, 2e-2);
+}
+
+#[test]
+fn conv3d_transpose_same_padding_weight_gradient_matches_finite_difference() {
+    let mut conv =
+        Conv3DTranspose::new(2, (3, 3, 3), vec![1, 2, 2, 2, 1], (1, 1, 1), Linear::new())
+            .unwrap()
+            .with_padding(PaddingType::Same);
+    let x = Array::from_shape_vec(
+        (1, 2, 2, 2, 1),
+        (0..8).map(|v| 0.05 * v as f32 - 0.2).collect(),
+    )
+    .unwrap()
+    .into_dyn();
+    check_weight_gradient(&mut conv, &x, 1e-3, 2e-2);
 }

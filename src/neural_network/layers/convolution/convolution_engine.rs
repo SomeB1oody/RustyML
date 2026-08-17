@@ -7,6 +7,11 @@
 //! [`conv_backward`]. `SeparableConv2D` also calls these same 2 functions for its pointwise (1x1)
 //! stage
 //!
+//! The geometry and im2col helpers below are `pub(super)`, because
+//! [`conv_transpose_engine`](super::conv_transpose_engine) reuses every one of them. A transposed
+//! convolution is the adjoint of a plain one, so it needs the same padding rule, the same offset
+//! table, and the same block copy. Only the direction of the 2 GEMMs changes
+//!
 //! # Conventions
 //!
 //! - `Valid` output: `(in - k) / stride + 1`
@@ -63,9 +68,12 @@ tunable_gate! {
 /// Each task's GEMM re-packs the weight matrix, so blocks need enough positions to amortize that
 const CONV_MIN_CHUNK_POSITIONS: usize = 64;
 
-/// Analytic gradients returned by [`conv_backward`]
+/// Analytic gradients returned by [`conv_backward`], and by the transposed-convolution backward
+/// pass
 pub(super) struct ConvGradients {
-    /// Weight gradient, flat row-major `[k..., Cin, F]` (reshape to the layer's weight array)
+    /// Weight gradient, flat row-major in the layer's own kernel layout (reshape to the layer's
+    /// weight array). That is `[k..., Cin, F]` for a plain convolution, and `[k..., F, Cin]` for
+    /// a transposed one
     pub weight_grad: Vec<f32>,
     /// Bias gradient, one value per filter `[F]`
     pub bias_grad: Vec<f32>,
@@ -78,7 +86,7 @@ pub(super) struct ConvGradients {
 /// The channel axis is innermost with stride 1, so the innermost spatial step spans `cin` elements
 /// and each outer axis multiplies up from there. Every offset the engine computes is in these
 /// units, which is why a padded-buffer index lands directly on a position's first channel
-fn spatial_strides(sp: &[usize], cin: usize) -> Vec<usize> {
+pub(super) fn spatial_strides(sp: &[usize], cin: usize) -> Vec<usize> {
     let mut strides = vec![cin; sp.len()];
     for d in (0..sp.len().saturating_sub(1)).rev() {
         strides[d] = strides[d + 1] * sp[d + 1];
@@ -101,7 +109,7 @@ fn increment_index(idx: &mut [usize], dims: &[usize]) -> bool {
 }
 
 /// Runs `f` over `0..n`, in parallel when `parallel`, preserving index order
-fn map_indexed<R, F>(n: usize, parallel: bool, f: F) -> Vec<R>
+pub(super) fn map_indexed<R, F>(n: usize, parallel: bool, f: F) -> Vec<R>
 where
     R: Send,
     F: Fn(usize) -> R + Sync + Send,
@@ -115,9 +123,9 @@ where
 
 /// Geometry a convolution pass needs: output spatial sizes, per-axis leading padding, and padded
 /// spatial sizes, as `(out_sp, pad_before, padded_sp)`
-type ConvGeometry = (Vec<usize>, Vec<usize>, Vec<usize>);
+pub(super) type ConvGeometry = (Vec<usize>, Vec<usize>, Vec<usize>);
 
-fn conv_geometry(
+pub(super) fn conv_geometry(
     sp: &[usize],
     k_dims: &[usize],
     strides: &[usize],
@@ -155,7 +163,7 @@ fn conv_geometry(
 ///
 /// The copy pads only the spatial axes. The `cin` channels of a position stay contiguous and
 /// travel together, so each step of the walk moves a run rather than a single float
-fn build_padded(
+pub(super) fn build_padded(
     in_flat: &[f32],
     items: usize,
     sp: &[usize],
@@ -194,7 +202,7 @@ fn build_padded(
 /// buffer
 ///
 /// Crops the input gradient back to its original spatial size after col2im
-fn crop_padded(
+pub(super) fn crop_padded(
     padded: &[f32],
     items: usize,
     sp: &[usize],
@@ -236,7 +244,7 @@ fn crop_padded(
 /// `cin - 1` channels follow it contiguously. `padded_strides` carries the `cin` scaling (see
 /// [`spatial_strides`]), so the table does not depend on batch. The engine computes it once and
 /// reuses it for every im2col copy and every col2im accumulate
-fn im2col_offsets(
+pub(super) fn im2col_offsets(
     out_sp: &[usize],
     k_dims: &[usize],
     strides: &[usize],
@@ -272,19 +280,22 @@ fn im2col_offsets(
 }
 
 /// Per-pass im2col inputs shared by every task: the padded data and the copy geometry
-struct ColContext<'a> {
-    /// Flat zero-padded input `[batch, padded_spatial..., Cin]`
-    padded: &'a [f32],
-    /// Input channels, which is also the length of one contiguous copy run
-    cin: usize,
+pub(super) struct ColContext<'a> {
+    /// Flat zero-padded source `[batch, padded_spatial..., cin]`
+    pub(super) padded: &'a [f32],
+    /// Channels of the padded source, which is also the length of one contiguous copy run. The
+    /// plain convolution reads the input, so this is `Cin`. The transposed backward pass reads
+    /// the output gradient, so there it is the filter count
+    pub(super) cin: usize,
     /// Elements per padded batch item (`padded_plane * cin`)
-    padded_item: usize,
+    pub(super) padded_item: usize,
     /// Kernel taps per channel
-    k_plane: usize,
-    /// Output positions per batch item
-    out_plane: usize,
+    pub(super) k_plane: usize,
+    /// Positions per batch item that the walk visits. The plain convolution visits its output
+    /// positions. The transposed backward pass visits its input positions
+    pub(super) out_plane: usize,
     /// `[k_plane, out_plane]` copy offsets from [`im2col_offsets`]
-    offsets: &'a [usize],
+    pub(super) offsets: &'a [usize],
 }
 
 /// im2col for one batch item, restricted to the output positions `[c0, c1)`
@@ -294,7 +305,7 @@ struct ColContext<'a> {
 /// slowest and the channels fastest. This is exactly the order the padded buffer already holds
 /// them in, so each tap is 1 `copy_from_slice` of `Cin` floats. Pass the full `[0, out_plane)`
 /// range for the whole item. A sub-range builds one forward task's row block
-fn build_col_range(ctx: &ColContext, b: usize, c0: usize, c1: usize) -> Vec<f32> {
+pub(super) fn build_col_range(ctx: &ColContext, b: usize, c0: usize, c1: usize) -> Vec<f32> {
     let rows = c1 - c0;
     let k_total = ctx.k_plane * ctx.cin;
     let mut col = vec![0.0f32; rows * k_total];

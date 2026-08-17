@@ -20,6 +20,8 @@ mod border;
 mod conv_1d_2d;
 /// Tests for Conv3D, DepthwiseConv2D, and SeparableConv2D.
 mod conv_3d_variants;
+/// Tests for the transposed convolution layers: scatter values, output sizes, and error paths.
+mod conv_transpose;
 /// Tests for Dense and Flatten: forward values, error paths, and parameter counts.
 mod dense;
 /// Tests for Dropout and the SpatialDropout variants.

@@ -16,14 +16,20 @@ use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::activation::tanh::Tanh;
 use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
+use rustyml::neural_network::layers::convolution::conv_1d_transpose::Conv1DTranspose;
 use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
+use rustyml::neural_network::layers::convolution::conv_2d_transpose::Conv2DTranspose;
 use rustyml::neural_network::layers::convolution::conv_3d::Conv3D;
+use rustyml::neural_network::layers::convolution::conv_3d_transpose::Conv3DTranspose;
 use rustyml::neural_network::layers::convolution::depthwise_conv_2d::DepthwiseConv2D;
 use rustyml::neural_network::layers::convolution::separable_conv_2d::SeparableConv2D;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::embedding::Embedding;
 use rustyml::neural_network::layers::flatten::Flatten;
-use rustyml::neural_network::layers::layer_weight::{EmbeddingLayerWeight, LayerWeight};
+use rustyml::neural_network::layers::layer_weight::{
+    Conv1DTransposeLayerWeight, Conv2DTransposeLayerWeight, Conv3DTransposeLayerWeight,
+    EmbeddingLayerWeight, LayerWeight,
+};
 use rustyml::neural_network::layers::recurrent::gru::GRU;
 use rustyml::neural_network::layers::recurrent::lstm::LSTM;
 use rustyml::neural_network::layers::recurrent::simple_rnn::SimpleRNN;
@@ -313,6 +319,87 @@ fn depthwise_conv2d_round_trip() {
     let x: Tensor = Array::from_shape_vec(
         (1, 4, 4, 2),
         (0..32).map(|v| 0.05 * v as f32 - 0.7).collect::<Vec<_>>(),
+    )
+    .unwrap()
+    .into_dyn();
+
+    let before = model.predict(&x).unwrap();
+    let fresh = round_trip(&model, make_arch, tmp.path());
+    let after = fresh.predict(&x).unwrap();
+    assert_allclose(&after, &before, 1e-6_f32);
+}
+
+// Conv1DTranspose round-trip
+#[test]
+fn conv1d_transpose_round_trip() {
+    let tmp = TempFile::new("conv1d_transpose");
+
+    let make_arch = || {
+        let mut m = Sequential::new();
+        m.add(Conv1DTranspose::new(2, 3, vec![1, 4, 1], 2, Linear::new()).unwrap());
+        m
+    };
+
+    let model = make_arch();
+
+    let x: Tensor = Array::from_shape_vec(
+        (1, 4, 1),
+        (0..4).map(|v| 0.1 * v as f32 - 0.3).collect::<Vec<_>>(),
+    )
+    .unwrap()
+    .into_dyn();
+
+    let before = model.predict(&x).unwrap();
+    let fresh = round_trip(&model, make_arch, tmp.path());
+    let after = fresh.predict(&x).unwrap();
+    assert_allclose(&after, &before, 1e-6_f32);
+}
+
+// Conv2DTranspose round-trip
+#[test]
+fn conv2d_transpose_round_trip() {
+    let tmp = TempFile::new("conv2d_transpose");
+
+    let make_arch = || {
+        let mut m = Sequential::new();
+        m.add(Conv2DTranspose::new(2, (3, 3), vec![1, 3, 3, 2], (2, 2), Linear::new()).unwrap());
+        m
+    };
+
+    let model = make_arch();
+
+    let x: Tensor = Array::from_shape_vec(
+        (1, 3, 3, 2),
+        (0..18).map(|v| 0.05 * v as f32 - 0.4).collect::<Vec<_>>(),
+    )
+    .unwrap()
+    .into_dyn();
+
+    let before = model.predict(&x).unwrap();
+    let fresh = round_trip(&model, make_arch, tmp.path());
+    let after = fresh.predict(&x).unwrap();
+    assert_allclose(&after, &before, 1e-6_f32);
+}
+
+// Conv3DTranspose round-trip
+#[test]
+fn conv3d_transpose_round_trip() {
+    let tmp = TempFile::new("conv3d_transpose");
+
+    let make_arch = || {
+        let mut m = Sequential::new();
+        m.add(
+            Conv3DTranspose::new(2, (2, 2, 2), vec![1, 2, 2, 2, 1], (1, 1, 1), Linear::new())
+                .unwrap(),
+        );
+        m
+    };
+
+    let model = make_arch();
+
+    let x: Tensor = Array::from_shape_vec(
+        (1, 2, 2, 2, 1),
+        (0..8).map(|v| 0.05 * v as f32 - 0.2).collect::<Vec<_>>(),
     )
     .unwrap()
     .into_dyn();
@@ -837,4 +924,36 @@ fn layer_weight_variant_tags_stay_stable() {
         embedding[0], 14,
         "`Embedding` must be appended after `Empty`"
     );
+
+    let one = Conv1DTransposeLayerWeight {
+        weight: std::borrow::Cow::Owned(Array::zeros((1, 1, 1))),
+        bias: std::borrow::Cow::Owned(Array::zeros(1)),
+    };
+    let two = Conv2DTransposeLayerWeight {
+        weight: std::borrow::Cow::Owned(Array::zeros((1, 1, 1, 1))),
+        bias: std::borrow::Cow::Owned(Array::zeros(1)),
+    };
+    let three = Conv3DTransposeLayerWeight {
+        weight: std::borrow::Cow::Owned(Array::zeros((1, 1, 1, 1, 1))),
+        bias: std::borrow::Cow::Owned(Array::zeros(1)),
+    };
+    for (index, bytes) in [
+        (
+            15u8,
+            postcard::to_allocvec(&LayerWeight::Conv1DTranspose(one)).unwrap(),
+        ),
+        (
+            16,
+            postcard::to_allocvec(&LayerWeight::Conv2DTranspose(two)).unwrap(),
+        ),
+        (
+            17,
+            postcard::to_allocvec(&LayerWeight::Conv3DTranspose(three)).unwrap(),
+        ),
+    ] {
+        assert_eq!(
+            bytes[0], index,
+            "the transposed convolution variants must keep indices 15, 16, and 17"
+        );
+    }
 }

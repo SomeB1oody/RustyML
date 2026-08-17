@@ -200,6 +200,40 @@ pub(super) fn validate_input_shape_3d(
     Ok(())
 }
 
+/// Validates the input shape of a transposed convolution of the given spatial rank
+///
+/// A transposed convolution grows its input, so it puts no lower bound on the input spatial
+/// size. A 1x1 input under a 3x3 kernel is a normal decoder step. That is the difference from
+/// [`validate_input_shape_2d`] and its siblings, which reject an input smaller than the kernel
+///
+/// # Parameters
+///
+/// - `input_shape` - Shape of the input tensor
+/// - `rank` - Number of spatial axes (1, 2, or 3)
+/// - `layout` - Human-readable axis list, used in the error message
+///
+/// # Errors
+///
+/// Returns `Error::InvalidInput` if the shape does not have `rank + 2` axes, or if any axis is 0
+pub(super) fn validate_transpose_input_shape(
+    input_shape: &[usize],
+    rank: usize,
+    layout: &str,
+) -> Result<(), Error> {
+    if input_shape.len() != rank + 2 {
+        return Err(Error::invalid_input(format!(
+            "Input shape must be {}D: {layout}",
+            rank + 2
+        )));
+    }
+    if input_shape.contains(&0) {
+        return Err(Error::invalid_input(
+            "All input dimensions must be greater than 0",
+        ));
+    }
+    Ok(())
+}
+
 /// Validates depth multiplier for depthwise separable convolution
 ///
 /// # Errors

@@ -173,6 +173,9 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///       recurrent_kernel, and bias (gate column blocks `[i | f | g | o]` / `[z | r | h]`)
     ///     - `LayerWeight::Conv1D`, `LayerWeight::Conv2D`, `LayerWeight::Conv3D` for
     ///       convolutional layers
+    ///     - `LayerWeight::Conv1DTranspose`, `LayerWeight::Conv2DTranspose`, and
+    ///       `LayerWeight::Conv3DTranspose` for the transposed convolutional layers, whose kernel
+    ///       carries its filter axis before its input-channel axis
     ///     - `LayerWeight::SeparableConv2D` for the separable 2D convolution, with a depthwise
     ///       kernel, a pointwise kernel, and a bias
     ///     - `LayerWeight::DepthwiseConv2D` for the depthwise 2D convolution, with a kernel and

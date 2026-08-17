@@ -7,8 +7,9 @@
 
 use crate::error::{Error, IoError};
 use crate::neural_network::layers::convolution::{
-    conv_1d::Conv1D, conv_2d::Conv2D, conv_3d::Conv3D, depthwise_conv_2d::DepthwiseConv2D,
-    separable_conv_2d::SeparableConv2D,
+    conv_1d::Conv1D, conv_1d_transpose::Conv1DTranspose, conv_2d::Conv2D,
+    conv_2d_transpose::Conv2DTranspose, conv_3d::Conv3D, conv_3d_transpose::Conv3DTranspose,
+    depthwise_conv_2d::DepthwiseConv2D, separable_conv_2d::SeparableConv2D,
 };
 use crate::neural_network::layers::dense::Dense;
 use crate::neural_network::layers::embedding::Embedding;
@@ -207,6 +208,33 @@ pub fn apply_weights_to_layer(
                 w,
                 GroupNormalization,
                 "GroupNormalization",
+                expected_type
+            );
+        }
+        LayerWeight::Conv1DTranspose(w) => {
+            apply_weights_simple!(
+                layer_any,
+                w,
+                Conv1DTranspose,
+                "Conv1DTranspose",
+                expected_type
+            );
+        }
+        LayerWeight::Conv2DTranspose(w) => {
+            apply_weights_simple!(
+                layer_any,
+                w,
+                Conv2DTranspose,
+                "Conv2DTranspose",
+                expected_type
+            );
+        }
+        LayerWeight::Conv3DTranspose(w) => {
+            apply_weights_simple!(
+                layer_any,
+                w,
+                Conv3DTranspose,
+                "Conv3DTranspose",
                 expected_type
             );
         }

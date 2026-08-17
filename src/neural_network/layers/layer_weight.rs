@@ -14,10 +14,16 @@ use crate::{Deserialize, Serialize};
 
 /// Per-layer weight container for the BatchNormalization layer
 pub mod batch_normalization_weight;
+/// Per-layer weight container for the Conv1DTranspose layer
+pub mod conv_1d_transpose_weight;
 /// Per-layer weight container for the Conv1D layer
 pub mod conv_1d_weight;
+/// Per-layer weight container for the Conv2DTranspose layer
+pub mod conv_2d_transpose_weight;
 /// Per-layer weight container for the Conv2D layer
 pub mod conv_2d_weight;
+/// Per-layer weight container for the Conv3DTranspose layer
+pub mod conv_3d_transpose_weight;
 /// Per-layer weight container for the Conv3D layer
 pub mod conv_3d_weight;
 /// Per-layer weight container for the Dense layer
@@ -42,8 +48,11 @@ pub mod separable_conv_2d_weight;
 pub mod simple_rnn_weight;
 
 pub use batch_normalization_weight::*;
+pub use conv_1d_transpose_weight::*;
 pub use conv_1d_weight::*;
+pub use conv_2d_transpose_weight::*;
 pub use conv_2d_weight::*;
+pub use conv_3d_transpose_weight::*;
 pub use conv_3d_weight::*;
 pub use dense_weight::*;
 pub use depthwise_conv_2d_weight::*;
@@ -109,4 +118,10 @@ pub enum LayerWeight<'a> {
     Empty,
     /// Weights for embedding layers
     Embedding(EmbeddingLayerWeight<'a>),
+    /// Weights for 1D transposed convolutional layers
+    Conv1DTranspose(Conv1DTransposeLayerWeight<'a>),
+    /// Weights for 2D transposed convolutional layers
+    Conv2DTranspose(Conv2DTransposeLayerWeight<'a>),
+    /// Weights for 3D transposed convolutional layers
+    Conv3DTranspose(Conv3DTransposeLayerWeight<'a>),
 }
