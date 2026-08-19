@@ -6,6 +6,7 @@
 //! live model
 
 use crate::error::{Error, IoError};
+use crate::neural_network::layers::activation::p_relu::PReLU;
 use crate::neural_network::layers::convolution::{
     conv_1d::Conv1D, conv_1d_transpose::Conv1DTranspose, conv_2d::Conv2D,
     conv_2d_transpose::Conv2DTranspose, conv_3d::Conv3D, conv_3d_transpose::Conv3DTranspose,
@@ -138,6 +139,9 @@ pub fn apply_weights_to_layer(
         }
         LayerWeight::Embedding(w) => {
             apply_weights_simple!(layer_any, w, Embedding, "Embedding", expected_type);
+        }
+        LayerWeight::PReLU(w) => {
+            apply_weights_simple!(layer_any, w, PReLU, "PReLU", expected_type);
         }
         LayerWeight::SimpleRNN(w) => {
             apply_weights_simple!(layer_any, w, SimpleRNN, "SimpleRNN", expected_type);

@@ -42,6 +42,8 @@ pub mod instance_normalization_weight;
 pub mod layer_normalization_weight;
 /// Per-layer weight container for the LSTM layer
 pub mod lstm_weight;
+/// Per-layer weight container for the PReLU layer
+pub mod p_relu_weight;
 /// Per-layer weight container for the SeparableConv2D layer
 pub mod separable_conv_2d_weight;
 /// Per-layer weight container for the SimpleRNN layer
@@ -62,6 +64,7 @@ pub use gru_weight::*;
 pub use instance_normalization_weight::*;
 pub use layer_normalization_weight::*;
 pub use lstm_weight::*;
+pub use p_relu_weight::*;
 pub use separable_conv_2d_weight::*;
 pub use simple_rnn_weight::*;
 
@@ -124,4 +127,6 @@ pub enum LayerWeight<'a> {
     Conv2DTranspose(Conv2DTransposeLayerWeight<'a>),
     /// Weights for 3D transposed convolutional layers
     Conv3DTranspose(Conv3DTransposeLayerWeight<'a>),
+    /// Weights for PReLU layers
+    PReLU(PReLULayerWeight<'a>),
 }

@@ -42,6 +42,8 @@ mod norm_group_instance;
 mod norm_unit;
 /// Tests for the optimizers: SGD, Adam, AdamW, RMSprop, and AdaGrad.
 mod optimizers;
+/// Tests for the PReLU layer: the shared-axes rule, both gradients, and the branch at 0.
+mod p_relu;
 /// Tests for the Permute and RepeatVector layers: axis order, layout, and error paths.
 mod permute_repeat;
 /// Tests for AveragePooling and GlobalAveragePooling.

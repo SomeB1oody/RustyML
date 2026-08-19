@@ -24,6 +24,8 @@
 //! - **Identity**: passes its input through unchanged, as a placeholder where a model needs a
 //!   layer that does nothing
 //! - **Activation**: standalone activation layers (ReLU, LeakyReLU, ELU, SELU, Sigmoid, Tanh, ...)
+//! - **PReLU**: a ReLU whose negative-side slope is trainable, with a `shared_axes` rule that
+//!   sets how many slopes it holds
 //! - **Convolution**: 1D/2D/3D convolution, their transposed counterparts for a decoder, plus
 //!   depthwise and separable variants
 //! - **Pooling**: max and average pooling and their global variants for 1D, 2D, and 3D

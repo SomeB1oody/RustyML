@@ -14,6 +14,7 @@ use ndarray::Array;
 use rustyml::error::{Error, IoError};
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::linear::Linear;
+use rustyml::neural_network::layers::activation::p_relu::PReLU;
 use rustyml::neural_network::layers::activation::tanh::Tanh;
 use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
 use rustyml::neural_network::layers::convolution::conv_1d_transpose::Conv1DTranspose;
@@ -28,7 +29,7 @@ use rustyml::neural_network::layers::embedding::Embedding;
 use rustyml::neural_network::layers::flatten::Flatten;
 use rustyml::neural_network::layers::layer_weight::{
     Conv1DTransposeLayerWeight, Conv2DTransposeLayerWeight, Conv3DTransposeLayerWeight,
-    EmbeddingLayerWeight, LayerWeight,
+    EmbeddingLayerWeight, LayerWeight, PReLULayerWeight,
 };
 use rustyml::neural_network::layers::recurrent::gru::GRU;
 use rustyml::neural_network::layers::recurrent::lstm::LSTM;
@@ -540,6 +541,98 @@ fn embedding_trained_round_trip_preserves_the_lookup_table() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
+// PReLU round-trip: the trained slopes must survive, including the shared-axes shape
+#[test]
+fn p_relu_trained_round_trip_preserves_the_slopes() {
+    let tmp = TempFile::new("p_relu");
+
+    let make_arch = || {
+        let mut m = Sequential::new();
+        m.add(Dense::new(3, 3, Linear::new()).unwrap())
+            .add(PReLU::new(vec![4, 3], 0.25).unwrap())
+            .add(Dense::new(3, 1, Linear::new()).unwrap());
+        m
+    };
+
+    let x: Tensor = Array::from_shape_vec(
+        (4, 3),
+        vec![
+            -1.0f32, 0.5, -2.0, 1.0, -0.5, 2.0, -3.0, 1.5, -1.0, 0.25, -2.5, 0.75,
+        ],
+    )
+    .unwrap()
+    .into_dyn();
+    let y: Tensor = Array::from_shape_vec((4, 1), vec![0.5f32, -0.5, 1.0, 0.0])
+        .unwrap()
+        .into_dyn();
+
+    // Train first, so the saved slopes differ from the 0.25 a fresh model starts from
+    let mut model = make_arch();
+    model.compile(
+        SGD::new(0.05, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
+    model.fit(&x, &y, 10).unwrap();
+
+    let before = model.predict(&x).unwrap();
+    let fresh = round_trip(&model, make_arch, tmp.path());
+    let after = fresh.predict(&x).unwrap();
+    assert_allclose(&after, &before, 1e-6_f32);
+}
+
+// PReLU with shared axes carries a rank-3 slope array, which the dynamic-rank container
+// must reproduce exactly
+#[test]
+fn p_relu_shared_axes_round_trip_keeps_the_slope_rank() {
+    let tmp = TempFile::new("p_relu_shared");
+
+    let make_arch = || {
+        let mut m = Sequential::new();
+        m.add(
+            PReLU::new(vec![2, 3, 3, 2], 0.3)
+                .unwrap()
+                .with_shared_axes(vec![1, 2])
+                .unwrap(),
+        );
+        m
+    };
+
+    // The saved model carries injected slopes, so a fresh model cannot match it by accident
+    let mut injected = PReLU::new(vec![2, 3, 3, 2], 0.3)
+        .unwrap()
+        .with_shared_axes(vec![1, 2])
+        .unwrap();
+    injected
+        .set_weights(
+            Array::from_shape_vec((1, 1, 2), vec![0.4f32, -0.6])
+                .unwrap()
+                .into_dyn(),
+        )
+        .unwrap();
+    let mut model = Sequential::new();
+    model.add(injected);
+    match model.get_weights().first() {
+        Some(LayerWeight::PReLU(w)) => assert_eq!(w.alpha.shape(), &[1, 1, 2]),
+        other => panic!("layer 0 must report LayerWeight::PReLU, got {other:?}"),
+    }
+
+    let x: Tensor = Array::from_shape_vec(
+        (2, 3, 3, 2),
+        (0..36).map(|v| 0.1 * v as f32 - 1.85).collect::<Vec<_>>(),
+    )
+    .unwrap()
+    .into_dyn();
+
+    let before = model.predict(&x).unwrap();
+    let fresh = round_trip(&model, make_arch, tmp.path());
+    let after = fresh.predict(&x).unwrap();
+    assert_allclose(&after, &before, 1e-6_f32);
+    match fresh.get_weights().first() {
+        Some(LayerWeight::PReLU(w)) => assert_eq!(w.alpha.shape(), &[1, 1, 2]),
+        other => panic!("the loaded layer must report LayerWeight::PReLU, got {other:?}"),
+    }
+}
+
 // BatchNormalization round-trip: trained running_mean/running_var must survive serialization,
 // so eval-mode predict returns the identical tensor afterward
 #[test]
@@ -956,4 +1049,13 @@ fn layer_weight_variant_tags_stay_stable() {
             "the transposed convolution variants must keep indices 15, 16, and 17"
         );
     }
+
+    let slopes = PReLULayerWeight {
+        alpha: std::borrow::Cow::Owned(Array::zeros(1).into_dyn()),
+    };
+    let p_relu = postcard::to_allocvec(&LayerWeight::PReLU(slopes)).unwrap();
+    assert_eq!(
+        p_relu[0], 18,
+        "`PReLU` must be appended after the transposed convolution variants"
+    );
 }

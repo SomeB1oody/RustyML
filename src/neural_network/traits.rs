@@ -185,6 +185,8 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///     - `LayerWeight::LayerNormalization`, `LayerWeight::InstanceNormalization`, and
     ///       `LayerWeight::GroupNormalization` for their respective layers, each with gamma and
     ///       beta
+    ///     - `LayerWeight::PReLU` for the PReLU layer, with its negative-side slopes, whose
+    ///       rank follows the input rank
     ///     - `LayerWeight::Empty` for layers with no trainable parameters
     fn get_weights(&self) -> LayerWeight<'_>;
 

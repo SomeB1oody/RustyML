@@ -12,6 +12,7 @@ use rustyml::neural_network::layers::activation::exponential::Exponential;
 use rustyml::neural_network::layers::activation::hard_sigmoid::HardSigmoid;
 use rustyml::neural_network::layers::activation::leaky_relu::LeakyReLU;
 use rustyml::neural_network::layers::activation::linear::Linear;
+use rustyml::neural_network::layers::activation::p_relu::PReLU;
 use rustyml::neural_network::layers::activation::selu::SELU;
 use rustyml::neural_network::layers::activation::softmax::Softmax;
 use rustyml::neural_network::layers::activation::softplus::Softplus;
@@ -342,6 +343,48 @@ fn dense_weight_gradient_matches_finite_difference() {
     check_weight_gradient(&mut dense, &x, 1e-3, 1e-2);
 }
 
+/// The slope gradient must sum over the batch axis only, and keep 1 slope per feature
+#[test]
+fn p_relu_weight_gradient_matches_finite_difference() {
+    let mut p_relu = PReLU::new(vec![3, 4], 0.0).unwrap();
+    p_relu
+        .set_weights(Array::from_vec(vec![0.2f32, -0.35, 0.6, 0.45]).into_dyn())
+        .unwrap();
+    // Every probe stays clear of the kink at x = 0, and each column mixes both branches
+    let x = Array::from_shape_vec(
+        (3, 4),
+        vec![
+            0.8, -0.5, 1.2, -1.4, -0.3, 0.9, -1.6, 0.2, 1.1, -0.7, 0.4, -0.6,
+        ],
+    )
+    .unwrap()
+    .into_dyn();
+    check_weight_gradient(&mut p_relu, &x, 1e-3, 1e-2);
+}
+
+/// The same check where each slope also collects the 2 shared spatial axes
+#[test]
+fn p_relu_shared_axes_weight_gradient_matches_finite_difference() {
+    let mut p_relu = PReLU::new(vec![2, 3, 3, 2], 0.0)
+        .unwrap()
+        .with_shared_axes(vec![1, 2])
+        .unwrap();
+    p_relu
+        .set_weights(
+            Array::from_shape_vec((1, 1, 2), vec![0.3f32, -0.4])
+                .unwrap()
+                .into_dyn(),
+        )
+        .unwrap();
+    let x = Array::from_shape_vec(
+        (2, 3, 3, 2),
+        (0..36).map(|v| 0.1 * v as f32 - 1.85).collect::<Vec<_>>(),
+    )
+    .unwrap()
+    .into_dyn();
+    check_weight_gradient(&mut p_relu, &x, 1e-3, 1e-2);
+}
+
 #[test]
 fn conv1d_weight_gradient_matches_finite_difference() {
     let mut conv = Conv1D::new(2, 2, vec![1, 5, 1], 1, Linear::new()).unwrap();
@@ -493,6 +536,44 @@ fn leaky_relu_input_gradient_matches_finite_difference() {
         .unwrap()
         .into_dyn();
     check_input_gradient(&mut leaky_relu, &x, 1e-3, 1e-2);
+}
+
+/// PReLU with a slope per feature, so a backward pass that reads the wrong slope fails
+#[test]
+fn p_relu_input_gradient_matches_finite_difference() {
+    // The kink sits at x = 0, so every probe stays at least 0.2 away from it
+    let mut p_relu = PReLU::new(vec![2, 4], 0.0).unwrap();
+    p_relu
+        .set_weights(Array::from_vec(vec![0.2f32, -0.35, 0.6, 0.45]).into_dyn())
+        .unwrap();
+    let x = Array::from_shape_vec((2, 4), vec![0.8, -0.5, 1.2, -1.4, 0.3, -0.9, 1.6, -0.2])
+        .unwrap()
+        .into_dyn();
+    check_input_gradient(&mut p_relu, &x, 1e-3, 1e-2);
+}
+
+/// PReLU with the 2 spatial axes shared, where 1 slope covers a whole channel plane
+#[test]
+fn p_relu_shared_axes_input_gradient_matches_finite_difference() {
+    let mut p_relu = PReLU::new(vec![2, 3, 3, 2], 0.0)
+        .unwrap()
+        .with_shared_axes(vec![1, 2])
+        .unwrap();
+    p_relu
+        .set_weights(
+            Array::from_shape_vec((1, 1, 2), vec![0.3f32, -0.4])
+                .unwrap()
+                .into_dyn(),
+        )
+        .unwrap();
+    // The kink sits at x = 0, so the ramp skips it
+    let x = Array::from_shape_vec(
+        (2, 3, 3, 2),
+        (0..36).map(|v| 0.1 * v as f32 - 1.85).collect::<Vec<_>>(),
+    )
+    .unwrap()
+    .into_dyn();
+    check_input_gradient(&mut p_relu, &x, 1e-3, 1e-2);
 }
 
 /// ELU with a non-default alpha, which scales both the negative branch and its derivative

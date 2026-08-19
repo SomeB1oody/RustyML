@@ -4,6 +4,9 @@
 //! transform and derivative. The thin layer wrappers delegate their math to it: [`Linear`],
 //! [`ReLU`], [`LeakyReLU`], [`ELU`], [`SELU`], [`Sigmoid`], [`HardSigmoid`], [`Tanh`],
 //! [`Softplus`], [`Softsign`], [`Exponential`], and [`Softmax`]
+//!
+//! [`PReLU`] stands apart. Its negative-side slope is a trainable array, so it holds its own
+//! math and its own weights instead of delegating to the enum
 
 use crate::error::{Context, Error};
 use crate::neural_network::Tensor;
@@ -42,6 +45,8 @@ pub mod hard_sigmoid;
 pub mod leaky_relu;
 /// Linear (Identity) activation layer
 pub mod linear;
+/// PReLU activation layer, whose negative-side slope is a trainable parameter
+pub mod p_relu;
 /// ReLU (Rectified Linear Unit) activation layer
 pub mod relu;
 /// SELU (Scaled Exponential Linear Unit) activation layer
@@ -62,6 +67,7 @@ pub use exponential::Exponential;
 pub use hard_sigmoid::HardSigmoid;
 pub use leaky_relu::LeakyReLU;
 pub use linear::Linear;
+pub use p_relu::PReLU;
 pub use relu::ReLU;
 pub use selu::SELU;
 pub use sigmoid::Sigmoid;
