@@ -27,7 +27,7 @@
 //! - **PReLU**: a ReLU whose negative-side slope is trainable, with a `shared_axes` rule that
 //!   sets how many slopes it holds
 //! - **Convolution**: 1D/2D/3D convolution, their transposed counterparts for a decoder, plus
-//!   depthwise and separable variants
+//!   depthwise and separable variants in 1D and 2D
 //! - **Pooling**: max and average pooling and their global variants for 1D, 2D, and 3D
 //! - **Recurrent**: SimpleRNN, LSTM, and GRU sequence layers
 //! - **Regularization**: dropout (including spatial), noise injection, and normalization layers,

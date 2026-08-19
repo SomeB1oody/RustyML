@@ -81,9 +81,11 @@ tunable_gate! {
 }
 
 tunable_gate! {
-    /// Naive (non-im2col) convolution loop nests: the DepthwiseConv2D forward/backward and the
-    /// SeparableConv2D depthwise stage. Gated on estimated FLOPs
-    /// (`2 * batch * channels [* depth_multiplier] * out_h * out_w * kh * kw`).
+    /// Naive (non-im2col) convolution loop nests: the DepthwiseConv1D and DepthwiseConv2D
+    /// forward/backward, and the depthwise stage of SeparableConv1D and SeparableConv2D. Gated on
+    /// estimated FLOPs
+    /// (`2 * batch * channels [* depth_multiplier] * out_h * out_w * kh * kw`, where a 1D layer
+    /// fixes the height terms at 1).
     #[cfg(feature = "neural_network")]
     pub(crate) NAIVE_CONV_PARALLEL_MIN_FLOPS
         => naive_conv_parallel_min_flops / set_naive_conv_parallel_min_flops = 1_000_000

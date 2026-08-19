@@ -1,5 +1,7 @@
-//! The depthwise convolution kernel, shared by `DepthwiseConv2D` and `SeparableConv2D`'s first
-//! stage
+//! The depthwise convolution kernel, shared by the depthwise and separable convolution layers
+//!
+//! 4 layers share this module: `DepthwiseConv1D` and `DepthwiseConv2D`, plus the first stage of
+//! `SeparableConv1D` and `SeparableConv2D`
 //!
 //! A depthwise convolution never mixes channels. Under the crate's channels-last layout, the
 //! channel axis is a pure vector lane. One kernel tap at one output position reads `channels`
@@ -9,6 +11,16 @@
 //!
 //! The kernels skip out-of-range taps instead of materializing a padded copy, so `Same` padding
 //! costs no extra buffer.
+//!
+//! The geometry below names 2 spatial axes, but the 1D layers use it too. A
+//! `[batch, length, channels]` tensor holds the same values in the same row-major order as
+//! `[batch, 1, length, channels]`. A `[kernel, channels, depth_multiplier]` weight tensor holds
+//! the same order as `[1, kernel, channels, depth_multiplier]`. A 1D layer therefore sets the
+//! height fields to 1 and hands over the flat slices of its own rank-3 arrays. No repacking
+//! runs, and the module needs no separate 1D loop nest
+
+use crate::parallel_gates::naive_conv_parallel_min_flops;
+use rayon::prelude::*;
 
 /// The shape and stride facts a depthwise pass needs, shared by its forward and backward kernels
 pub(super) struct DepthwiseGeometry {
@@ -57,15 +69,48 @@ impl DepthwiseGeometry {
     }
 }
 
+/// Runs the forward pass of a depthwise convolution over a whole batch
+///
+/// `src` is the flat `[batch, height, width, channels]` input and `ker` the flat
+/// `[kh, kw, channels, depth_multiplier]` kernel. `out` is the flat
+/// `[batch, out_height, out_width, channels * depth_multiplier]` output, which this fills.
+/// `bias` seeds every output position when the caller has one. A caller whose bias belongs to a
+/// later stage passes `None`
+///
+/// The work splits into 1 task per (batch item, output row). Output rows are disjoint, so this
+/// needs no halo and no merge. It keeps every core busy even at `batch == 1`
+pub(super) fn depthwise_forward(
+    g: &DepthwiseGeometry,
+    src: &[f32],
+    ker: &[f32],
+    bias: Option<&[f32]>,
+    out: &mut [f32],
+) {
+    // `out.len()` is `batch * out_height * out_width * out_channels`, so this is the same
+    // estimate as a product written out term by term
+    let flops = 2 * out.len() * g.kernel.0 * g.kernel.1;
+    let row_len = g.output.1 * g.out_channels();
+
+    if flops >= naive_conv_parallel_min_flops() {
+        out.par_chunks_mut(row_len)
+            .enumerate()
+            .for_each(|(i, row)| {
+                depthwise_forward_row(g, src, ker, bias, i / g.output.0, i % g.output.0, row)
+            });
+    } else {
+        for (i, row) in out.chunks_mut(row_len).enumerate() {
+            depthwise_forward_row(g, src, ker, bias, i / g.output.0, i % g.output.0, row);
+        }
+    }
+}
+
 /// Fills one output row of a depthwise convolution
 ///
 /// `src` is the whole `[batch, height, width, channels]` input and `ker` the whole
 /// `[kh, kw, channels, depth_multiplier]` kernel, both flat and row-major. `out_row` is the
 /// `[out_width, channels * depth_multiplier]` row for output row `oh` of batch item `b`.
 /// `bias` seeds it when the caller has one. Otherwise the row starts at zero
-///
-/// Output rows are disjoint, so a caller can run these concurrently with no halo and no merge
-pub(super) fn depthwise_forward_row(
+fn depthwise_forward_row(
     g: &DepthwiseGeometry,
     src: &[f32],
     ker: &[f32],
@@ -113,23 +158,70 @@ pub(super) fn depthwise_forward_row(
     }
 }
 
-/// One batch item's depthwise gradients
+/// The gradients of a depthwise convolution
+///
+/// The 2 producers below fill the same struct. `depthwise_item_gradients` covers 1 batch item,
+/// so its `input` field is 1 item long. [`depthwise_backward`] covers a whole batch, so its
+/// `weight` and `bias` fields are already summed over the batch and its `input` field carries
+/// every item
 pub(super) struct DepthwiseGradients {
     /// Weight gradient, flat `[kh, kw, channels, depth_multiplier]`
     pub weight: Vec<f32>,
     /// Bias gradient, one value per output channel
     pub bias: Vec<f32>,
-    /// Input gradient, flat `[height, width, channels]`
+    /// Input gradient, flat `[height, width, channels]` per batch item
     pub input: Vec<f32>,
 }
 
-/// Weight, bias and input gradients for one batch item of a depthwise convolution
+/// Weight, bias, and input gradients of a depthwise convolution over a whole batch
 ///
-/// Splitting the work by batch item keeps every write private. A caller only has to sum the
-/// weight and bias partials in batch order to stay reproducible. Callers with no bias of their own
-/// (the depthwise stage of a separable convolution carries its bias on the pointwise side) can
-/// ignore [`DepthwiseGradients::bias`]
-pub(super) fn depthwise_item_gradients(
+/// `src` is the flat `[batch, height, width, channels]` input, `grad` the flat gradient with
+/// respect to this convolution's output, and `ker` the flat kernel. The returned `input` field
+/// is the flat gradient with respect to `src`, in the same layout
+///
+/// The work splits by batch item, which keeps every write private. This sums the weight and bias
+/// partials in batch order, so the result does not depend on whether the parallel branch ran.
+/// A caller whose bias belongs to a later stage (the depthwise stage of a separable convolution
+/// carries its bias on the pointwise side) ignores the `bias` field
+pub(super) fn depthwise_backward(
+    g: &DepthwiseGeometry,
+    src: &[f32],
+    grad: &[f32],
+    ker: &[f32],
+    batch_size: usize,
+) -> DepthwiseGradients {
+    let flops =
+        2 * batch_size * g.out_channels() * g.output.0 * g.output.1 * g.kernel.0 * g.kernel.1;
+
+    let run = |b: usize| depthwise_item_gradients(g, src, grad, ker, b);
+    let per_item: Vec<DepthwiseGradients> = if flops >= naive_conv_parallel_min_flops() {
+        (0..batch_size).into_par_iter().map(run).collect()
+    } else {
+        (0..batch_size).map(run).collect()
+    };
+
+    let mut weight = vec![0.0f32; g.kernel.0 * g.kernel.1 * g.out_channels()];
+    let mut bias = vec![0.0f32; g.out_channels()];
+    let mut input = Vec::with_capacity(batch_size * g.input_item());
+    for part in per_item {
+        for (acc, v) in weight.iter_mut().zip(part.weight) {
+            *acc += v;
+        }
+        for (acc, v) in bias.iter_mut().zip(part.bias) {
+            *acc += v;
+        }
+        input.extend(part.input);
+    }
+
+    DepthwiseGradients {
+        weight,
+        bias,
+        input,
+    }
+}
+
+/// Weight, bias and input gradients for one batch item of a depthwise convolution
+fn depthwise_item_gradients(
     g: &DepthwiseGeometry,
     src: &[f32],
     grad: &[f32],

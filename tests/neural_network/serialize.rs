@@ -16,20 +16,24 @@ use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::activation::p_relu::PReLU;
 use rustyml::neural_network::layers::activation::tanh::Tanh;
+use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
 use rustyml::neural_network::layers::convolution::conv_1d_transpose::Conv1DTranspose;
 use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
 use rustyml::neural_network::layers::convolution::conv_2d_transpose::Conv2DTranspose;
 use rustyml::neural_network::layers::convolution::conv_3d::Conv3D;
 use rustyml::neural_network::layers::convolution::conv_3d_transpose::Conv3DTranspose;
+use rustyml::neural_network::layers::convolution::depthwise_conv_1d::DepthwiseConv1D;
 use rustyml::neural_network::layers::convolution::depthwise_conv_2d::DepthwiseConv2D;
+use rustyml::neural_network::layers::convolution::separable_conv_1d::SeparableConv1D;
 use rustyml::neural_network::layers::convolution::separable_conv_2d::SeparableConv2D;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::embedding::Embedding;
 use rustyml::neural_network::layers::flatten::Flatten;
 use rustyml::neural_network::layers::layer_weight::{
     Conv1DTransposeLayerWeight, Conv2DTransposeLayerWeight, Conv3DTransposeLayerWeight,
-    EmbeddingLayerWeight, LayerWeight, PReLULayerWeight,
+    DepthwiseConv1DLayerWeight, EmbeddingLayerWeight, LayerWeight, PReLULayerWeight,
+    SeparableConv1DLayerWeight,
 };
 use rustyml::neural_network::layers::recurrent::gru::GRU;
 use rustyml::neural_network::layers::recurrent::lstm::LSTM;
@@ -320,6 +324,74 @@ fn depthwise_conv2d_round_trip() {
     let x: Tensor = Array::from_shape_vec(
         (1, 4, 4, 2),
         (0..32).map(|v| 0.05 * v as f32 - 0.7).collect::<Vec<_>>(),
+    )
+    .unwrap()
+    .into_dyn();
+
+    let before = model.predict(&x).unwrap();
+    let fresh = round_trip(&model, make_arch, tmp.path());
+    let after = fresh.predict(&x).unwrap();
+    assert_allclose(&after, &before, 1e-6_f32);
+}
+
+// DepthwiseConv1D round-trip
+///
+/// `depth_multiplier = 2` widens both the kernel and the bias, so the saved shapes differ from
+/// the constructor default. A container that dropped the multiplier would fail the shape check
+/// on load.
+#[test]
+fn depthwise_conv1d_round_trip() {
+    let tmp = TempFile::new("depthwise_conv1d");
+
+    let make_arch = || {
+        let mut m = Sequential::new();
+        m.add(
+            DepthwiseConv1D::new(3, vec![1, 8, 2], 1, Linear::new())
+                .unwrap()
+                .with_depth_multiplier(2)
+                .unwrap(),
+        );
+        m
+    };
+
+    let model = make_arch();
+
+    let x: Tensor = Array::from_shape_vec(
+        (1, 8, 2),
+        (0..16).map(|v| 0.05 * v as f32 - 0.4).collect::<Vec<_>>(),
+    )
+    .unwrap()
+    .into_dyn();
+
+    let before = model.predict(&x).unwrap();
+    let fresh = round_trip(&model, make_arch, tmp.path());
+    let after = fresh.predict(&x).unwrap();
+    assert_allclose(&after, &before, 1e-6_f32);
+}
+
+// SeparableConv1D round-trip
+///
+/// This carries 3 parameter tensors, so it checks that the container writes and reads all 3 in
+/// the same order.
+#[test]
+fn separable_conv1d_round_trip() {
+    let tmp = TempFile::new("separable_conv1d");
+
+    let make_arch = || {
+        let mut m = Sequential::new();
+        m.add(
+            SeparableConv1D::new(3, 3, vec![1, 8, 2], 1, 2, Linear::new())
+                .unwrap()
+                .with_padding(PaddingType::Same),
+        );
+        m
+    };
+
+    let model = make_arch();
+
+    let x: Tensor = Array::from_shape_vec(
+        (1, 8, 2),
+        (0..16).map(|v| 0.05 * v as f32 - 0.4).collect::<Vec<_>>(),
     )
     .unwrap()
     .into_dyn();
@@ -1058,4 +1130,29 @@ fn layer_weight_variant_tags_stay_stable() {
         p_relu[0], 18,
         "`PReLU` must be appended after the transposed convolution variants"
     );
+
+    let depthwise = DepthwiseConv1DLayerWeight {
+        weight: std::borrow::Cow::Owned(Array::zeros((1, 1, 1))),
+        bias: std::borrow::Cow::Owned(Array::zeros(1)),
+    };
+    let separable = SeparableConv1DLayerWeight {
+        depthwise_weight: std::borrow::Cow::Owned(Array::zeros((1, 1, 1))),
+        pointwise_weight: std::borrow::Cow::Owned(Array::zeros((1, 1, 1))),
+        bias: std::borrow::Cow::Owned(Array::zeros(1)),
+    };
+    for (index, bytes) in [
+        (
+            19u8,
+            postcard::to_allocvec(&LayerWeight::DepthwiseConv1D(depthwise)).unwrap(),
+        ),
+        (
+            20,
+            postcard::to_allocvec(&LayerWeight::SeparableConv1D(separable)).unwrap(),
+        ),
+    ] {
+        assert_eq!(
+            bytes[0], index,
+            "the 1D depthwise and separable variants must keep indices 19 and 20"
+        );
+    }
 }

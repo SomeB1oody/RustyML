@@ -10,7 +10,8 @@ use crate::neural_network::layers::activation::p_relu::PReLU;
 use crate::neural_network::layers::convolution::{
     conv_1d::Conv1D, conv_1d_transpose::Conv1DTranspose, conv_2d::Conv2D,
     conv_2d_transpose::Conv2DTranspose, conv_3d::Conv3D, conv_3d_transpose::Conv3DTranspose,
-    depthwise_conv_2d::DepthwiseConv2D, separable_conv_2d::SeparableConv2D,
+    depthwise_conv_1d::DepthwiseConv1D, depthwise_conv_2d::DepthwiseConv2D,
+    separable_conv_1d::SeparableConv1D, separable_conv_2d::SeparableConv2D,
 };
 use crate::neural_network::layers::dense::Dense;
 use crate::neural_network::layers::embedding::Embedding;
@@ -167,6 +168,24 @@ pub fn apply_weights_to_layer(
                 w,
                 SeparableConv2D,
                 "SeparableConv2D",
+                expected_type
+            );
+        }
+        LayerWeight::SeparableConv1D(w) => {
+            apply_weights_simple!(
+                layer_any,
+                w,
+                SeparableConv1D,
+                "SeparableConv1D",
+                expected_type
+            );
+        }
+        LayerWeight::DepthwiseConv1D(w) => {
+            apply_weights_simple!(
+                layer_any,
+                w,
+                DepthwiseConv1D,
+                "DepthwiseConv1D",
                 expected_type
             );
         }

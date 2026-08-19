@@ -18,6 +18,8 @@ mod activation;
 mod border;
 /// Tests for Conv1D and Conv2D forward values, shapes, and error paths.
 mod conv_1d_2d;
+/// Tests for DepthwiseConv1D and SeparableConv1D: channel independence, padding, and shapes.
+mod conv_1d_variants;
 /// Tests for Conv3D, DepthwiseConv2D, and SeparableConv2D.
 mod conv_3d_variants;
 /// Tests for the transposed convolution layers: scatter values, output sizes, and error paths.

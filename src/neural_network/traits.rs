@@ -176,10 +176,10 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///     - `LayerWeight::Conv1DTranspose`, `LayerWeight::Conv2DTranspose`, and
     ///       `LayerWeight::Conv3DTranspose` for the transposed convolutional layers, whose kernel
     ///       carries its filter axis before its input-channel axis
-    ///     - `LayerWeight::SeparableConv2D` for the separable 2D convolution, with a depthwise
-    ///       kernel, a pointwise kernel, and a bias
-    ///     - `LayerWeight::DepthwiseConv2D` for the depthwise 2D convolution, with a kernel and
-    ///       a bias
+    ///     - `LayerWeight::SeparableConv1D` and `LayerWeight::SeparableConv2D` for the
+    ///       separable convolutions, each with a depthwise kernel, a pointwise kernel, and a bias
+    ///     - `LayerWeight::DepthwiseConv1D` and `LayerWeight::DepthwiseConv2D` for the depthwise
+    ///       convolutions, each with a kernel and a bias
     ///     - `LayerWeight::BatchNormalization` for batch normalization, with gamma, beta, and
     ///       the running mean and variance
     ///     - `LayerWeight::LayerNormalization`, `LayerWeight::InstanceNormalization`, and

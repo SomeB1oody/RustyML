@@ -31,7 +31,9 @@ use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
 use rustyml::neural_network::layers::convolution::conv_2d_transpose::Conv2DTranspose;
 use rustyml::neural_network::layers::convolution::conv_3d::Conv3D;
 use rustyml::neural_network::layers::convolution::conv_3d_transpose::Conv3DTranspose;
+use rustyml::neural_network::layers::convolution::depthwise_conv_1d::DepthwiseConv1D;
 use rustyml::neural_network::layers::convolution::depthwise_conv_2d::DepthwiseConv2D;
+use rustyml::neural_network::layers::convolution::separable_conv_1d::SeparableConv1D;
 use rustyml::neural_network::layers::convolution::separable_conv_2d::SeparableConv2D;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::embedding::Embedding;
@@ -221,6 +223,105 @@ fn depthwise_conv2d_same_padding_weight_gradient_matches_finite_difference() {
     .unwrap()
     .into_dyn();
     check_weight_gradient(&mut conv, &x, 1e-3, 2e-2);
+}
+
+/// A `[1, length, channels]` ramp fixture for the 1D depthwise and separable checks
+fn seq_1d(length: usize, channels: usize) -> Tensor {
+    Array::from_shape_vec(
+        (1, length, channels),
+        (0..length * channels)
+            .map(|v| 0.05 * v as f32 - 0.7)
+            .collect(),
+    )
+    .unwrap()
+    .into_dyn()
+}
+
+#[test]
+fn depthwise_conv1d_input_gradient_matches_finite_difference() {
+    // `new` Xavier-initializes the weights, so the layer is a genuine (non-constant) map
+    let mut conv = DepthwiseConv1D::new(3, vec![1, 8, 2], 1, Linear::new()).unwrap();
+    check_input_gradient(&mut conv, &seq_1d(8, 2), 1e-3, 2e-2);
+}
+
+#[test]
+fn depthwise_conv1d_weight_gradient_matches_finite_difference() {
+    let mut conv = DepthwiseConv1D::new(3, vec![1, 8, 2], 1, Linear::new()).unwrap();
+    check_weight_gradient(&mut conv, &seq_1d(8, 2), 1e-3, 2e-2);
+}
+
+#[test]
+fn depthwise_conv1d_same_padding_input_gradient_matches_finite_difference() {
+    // A width-3 `Same` kernel needs padding at both ends. This guards that the layer skips each
+    // out-of-range tap instead of reading past the input.
+    let mut conv = DepthwiseConv1D::new(3, vec![1, 8, 2], 1, Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
+    check_input_gradient(&mut conv, &seq_1d(8, 2), 1e-3, 2e-2);
+}
+
+#[test]
+fn depthwise_conv1d_same_padding_weight_gradient_matches_finite_difference() {
+    // Companion to the check above. The taps that fall in the padding must also drop out of the
+    // weight-gradient sum.
+    let mut conv = DepthwiseConv1D::new(3, vec![1, 8, 2], 1, Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
+    check_weight_gradient(&mut conv, &seq_1d(8, 2), 1e-3, 2e-2);
+}
+
+/// At `depth_multiplier = 2` the shared kernel leaves its `dm == 1` fast path. Both gradients
+/// must still route each multiplier back to its own input channel.
+#[test]
+fn depthwise_conv1d_depth_multiplier_2_gradients_match_finite_difference() {
+    let mut conv = DepthwiseConv1D::new(3, vec![1, 8, 2], 2, Linear::new())
+        .unwrap()
+        .with_depth_multiplier(2)
+        .unwrap()
+        .with_padding(PaddingType::Same);
+    check_input_gradient(&mut conv, &seq_1d(8, 2), 1e-3, 2e-2);
+
+    let mut twin = DepthwiseConv1D::new(3, vec![1, 8, 2], 2, Linear::new())
+        .unwrap()
+        .with_depth_multiplier(2)
+        .unwrap()
+        .with_padding(PaddingType::Same);
+    check_weight_gradient(&mut twin, &seq_1d(8, 2), 1e-3, 2e-2);
+}
+
+#[test]
+fn separable_conv1d_input_gradient_matches_finite_difference() {
+    let mut conv = SeparableConv1D::new(3, 3, vec![1, 8, 2], 1, 1, Linear::new()).unwrap();
+    check_input_gradient(&mut conv, &seq_1d(8, 2), 1e-3, 2e-2);
+}
+
+#[test]
+fn separable_conv1d_weight_gradient_matches_finite_difference() {
+    let mut conv = SeparableConv1D::new(3, 3, vec![1, 8, 2], 1, 1, Linear::new()).unwrap();
+    check_weight_gradient(&mut conv, &seq_1d(8, 2), 1e-3, 2e-2);
+}
+
+#[test]
+fn separable_conv1d_same_padding_input_gradient_matches_finite_difference() {
+    let mut conv = SeparableConv1D::new(3, 3, vec![1, 8, 2], 1, 1, Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
+    check_input_gradient(&mut conv, &seq_1d(8, 2), 1e-3, 2e-2);
+}
+
+/// The `Same` and `depth_multiplier = 2` case at once. It covers all 3 parameter tensors while
+/// the depthwise stage is padding at both ends.
+#[test]
+fn separable_conv1d_same_padding_depth_multiplier_2_gradients_match_finite_difference() {
+    let mut conv = SeparableConv1D::new(3, 3, vec![1, 8, 2], 2, 2, Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
+    check_input_gradient(&mut conv, &seq_1d(8, 2), 1e-3, 2e-2);
+
+    let mut twin = SeparableConv1D::new(3, 3, vec![1, 8, 2], 2, 2, Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
+    check_weight_gradient(&mut twin, &seq_1d(8, 2), 1e-3, 2e-2);
 }
 
 #[test]

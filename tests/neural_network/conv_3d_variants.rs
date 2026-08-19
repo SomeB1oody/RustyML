@@ -355,6 +355,22 @@ fn depthwise_conv2d_with_depth_multiplier_rejects_zero() {
     );
 }
 
+/// `output_shape` reports `channels * depth_multiplier`, which is what forward emits
+///
+/// `output_shape` feeds `summary()`. The shared 2D calculator carries the input channel count
+/// through, which suits a plain convolution but not a depthwise one.
+#[test]
+fn depthwise_conv2d_output_shape_reports_the_multiplied_channel_count() {
+    let mut conv = DepthwiseConv2D::new((2, 2), vec![1, 4, 4, 3], (1, 1), Linear::new())
+        .unwrap()
+        .with_depth_multiplier(2)
+        .unwrap();
+    let x = Array::ones((1_usize, 4, 4, 3)).into_dyn();
+    let out = conv.forward(&x).unwrap();
+    assert_eq!(out.shape(), &[1, 3, 3, 6]);
+    assert_eq!(conv.output_shape(), "(1, 3, 3, 6)");
+}
+
 /// A runtime input whose channel count differs from the declared one returns DimensionMismatch,
 /// instead of a panic.
 #[test]
@@ -638,6 +654,25 @@ fn separable_conv2d_output_shape_dm2() {
         out.shape(),
         &[1, 2, 2, 4],
         "SeparableConv2D dm=2 output shape mismatch"
+    );
+}
+
+/// A runtime input whose channel count differs from the declared one returns DimensionMismatch,
+/// instead of reading past the end of the depthwise kernel.
+#[test]
+fn separable_conv2d_forward_rejects_wrong_channels() {
+    let mut conv =
+        SeparableConv2D::new(2, (2, 2), vec![1, 4, 4, 2], (1, 1), 1, Linear::new()).unwrap();
+    let x = Array::ones((1_usize, 4, 4, 3)).into_dyn();
+    let err = conv.forward(&x).unwrap_err();
+    assert!(
+        matches!(err, Error::DimensionMismatch { .. }),
+        "expected DimensionMismatch, got {err:?}"
+    );
+    let err = conv.predict(&x).unwrap_err();
+    assert!(
+        matches!(err, Error::DimensionMismatch { .. }),
+        "expected DimensionMismatch from predict, got {err:?}"
     );
 }
 

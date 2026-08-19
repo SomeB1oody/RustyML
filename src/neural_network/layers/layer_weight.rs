@@ -28,6 +28,8 @@ pub mod conv_3d_transpose_weight;
 pub mod conv_3d_weight;
 /// Per-layer weight container for the Dense layer
 pub mod dense_weight;
+/// Per-layer weight container for the DepthwiseConv1D layer
+pub mod depthwise_conv_1d_weight;
 /// Per-layer weight container for the DepthwiseConv2D layer
 pub mod depthwise_conv_2d_weight;
 /// Per-layer weight container for the Embedding layer
@@ -44,6 +46,8 @@ pub mod layer_normalization_weight;
 pub mod lstm_weight;
 /// Per-layer weight container for the PReLU layer
 pub mod p_relu_weight;
+/// Per-layer weight container for the SeparableConv1D layer
+pub mod separable_conv_1d_weight;
 /// Per-layer weight container for the SeparableConv2D layer
 pub mod separable_conv_2d_weight;
 /// Per-layer weight container for the SimpleRNN layer
@@ -57,6 +61,7 @@ pub use conv_2d_weight::*;
 pub use conv_3d_transpose_weight::*;
 pub use conv_3d_weight::*;
 pub use dense_weight::*;
+pub use depthwise_conv_1d_weight::*;
 pub use depthwise_conv_2d_weight::*;
 pub use embedding_weight::*;
 pub use group_normalization_weight::*;
@@ -65,6 +70,7 @@ pub use instance_normalization_weight::*;
 pub use layer_normalization_weight::*;
 pub use lstm_weight::*;
 pub use p_relu_weight::*;
+pub use separable_conv_1d_weight::*;
 pub use separable_conv_2d_weight::*;
 pub use simple_rnn_weight::*;
 
@@ -129,4 +135,8 @@ pub enum LayerWeight<'a> {
     Conv3DTranspose(Conv3DTransposeLayerWeight<'a>),
     /// Weights for PReLU layers
     PReLU(PReLULayerWeight<'a>),
+    /// Weights for 1D depthwise convolutional layers
+    DepthwiseConv1D(DepthwiseConv1DLayerWeight<'a>),
+    /// Weights for 1D separable convolutional layers
+    SeparableConv1D(SeparableConv1DLayerWeight<'a>),
 }
