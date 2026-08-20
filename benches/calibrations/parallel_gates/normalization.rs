@@ -159,14 +159,14 @@ fn bench_plane_sum(x: &[f32], c: usize, p: usize, parallel: bool) -> Array1<f32>
     let n_blocks = len_per_chan.div_ceil(BLOCK);
     let segment_sum = |seg: &[f32]| -> f32 {
         let mut lanes = [0.0f32; 8];
-        let mut chunks = seg.chunks_exact(8);
-        for ch in chunks.by_ref() {
+        let (chunks, rest) = seg.as_chunks::<8>();
+        for ch in chunks {
             for (l, &v) in lanes.iter_mut().zip(ch) {
                 *l += v;
             }
         }
         let mut tail = 0.0f32;
-        for &v in chunks.remainder() {
+        for &v in rest {
             tail += v;
         }
         ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3]))
@@ -255,14 +255,14 @@ fn bench_ln_row_pass(
 ) {
     let segment_sum = |seg: &[f32]| -> f32 {
         let mut lanes = [0.0f32; 8];
-        let mut chunks = seg.chunks_exact(8);
-        for ch in chunks.by_ref() {
+        let (chunks, rest) = seg.as_chunks::<8>();
+        for ch in chunks {
             for (l, &v) in lanes.iter_mut().zip(ch) {
                 *l += v;
             }
         }
         let mut tail = 0.0f32;
-        for &v in chunks.remainder() {
+        for &v in rest {
             tail += v;
         }
         ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3]))

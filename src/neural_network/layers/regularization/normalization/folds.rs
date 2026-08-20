@@ -17,14 +17,14 @@ use rayon::slice::ParallelSlice;
 /// on scheduling. The lanes keep the dependency chain short enough to vectorize
 pub(super) fn segment_sum(seg: &[f32], scale: f32) -> f32 {
     let mut lanes = [0.0f32; 8];
-    let mut chunks = seg.chunks_exact(8);
-    for ch in chunks.by_ref() {
+    let (chunks, rest) = seg.as_chunks::<8>();
+    for ch in chunks {
         for (l, &v) in lanes.iter_mut().zip(ch) {
             *l += v * scale;
         }
     }
     let mut tail = 0.0f32;
-    for &v in chunks.remainder() {
+    for &v in rest {
         tail += v * scale;
     }
     ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3]))
@@ -36,15 +36,15 @@ pub(super) fn segment_sum(seg: &[f32], scale: f32) -> f32 {
 /// contiguous segments
 pub(super) fn segment_dot(a: &[f32], b: &[f32], scale: f32) -> f32 {
     let mut lanes = [0.0f32; 8];
-    let mut chunks_a = a.chunks_exact(8);
-    let mut chunks_b = b.chunks_exact(8);
-    for (ca, cb) in chunks_a.by_ref().zip(chunks_b.by_ref()) {
+    let (chunks_a, rest_a) = a.as_chunks::<8>();
+    let (chunks_b, rest_b) = b.as_chunks::<8>();
+    for (ca, cb) in chunks_a.iter().zip(chunks_b) {
         for ((l, &va), &vb) in lanes.iter_mut().zip(ca).zip(cb) {
             *l += va * vb * scale;
         }
     }
     let mut tail = 0.0f32;
-    for (&va, &vb) in chunks_a.remainder().iter().zip(chunks_b.remainder()) {
+    for (&va, &vb) in rest_a.iter().zip(rest_b) {
         tail += va * vb * scale;
     }
     ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3]))
@@ -60,15 +60,15 @@ pub(super) fn segment_dot(a: &[f32], b: &[f32], scale: f32) -> f32 {
 /// in a register, so callers can skip the centered temporary
 pub(super) fn segment_sq_dev(seg: &[f32], mean: f32) -> f32 {
     let mut lanes = [0.0f32; 8];
-    let mut chunks = seg.chunks_exact(8);
-    for ch in chunks.by_ref() {
+    let (chunks, rest) = seg.as_chunks::<8>();
+    for ch in chunks {
         for (l, &v) in lanes.iter_mut().zip(ch) {
             let d = v - mean;
             *l += d * d;
         }
     }
     let mut tail = 0.0f32;
-    for &v in chunks.remainder() {
+    for &v in rest {
         let d = v - mean;
         tail += d * d;
     }
@@ -83,25 +83,16 @@ pub(super) fn segment_sq_dev(seg: &[f32], mean: f32) -> f32 {
 /// Terms are left-associated to match the 2-step `(a * b)` then `segment_dot` composition
 pub(super) fn segment_dot3(a: &[f32], b: &[f32], c: &[f32], scale: f32) -> f32 {
     let mut lanes = [0.0f32; 8];
-    let mut chunks_a = a.chunks_exact(8);
-    let mut chunks_b = b.chunks_exact(8);
-    let mut chunks_c = c.chunks_exact(8);
-    for ((ca, cb), cc) in chunks_a
-        .by_ref()
-        .zip(chunks_b.by_ref())
-        .zip(chunks_c.by_ref())
-    {
+    let (chunks_a, rest_a) = a.as_chunks::<8>();
+    let (chunks_b, rest_b) = b.as_chunks::<8>();
+    let (chunks_c, rest_c) = c.as_chunks::<8>();
+    for ((ca, cb), cc) in chunks_a.iter().zip(chunks_b).zip(chunks_c) {
         for (((l, &va), &vb), &vc) in lanes.iter_mut().zip(ca).zip(cb).zip(cc) {
             *l += va * vb * vc * scale;
         }
     }
     let mut tail = 0.0f32;
-    for ((&va, &vb), &vc) in chunks_a
-        .remainder()
-        .iter()
-        .zip(chunks_b.remainder())
-        .zip(chunks_c.remainder())
-    {
+    for ((&va, &vb), &vc) in rest_a.iter().zip(rest_b).zip(rest_c) {
         tail += va * vb * vc * scale;
     }
     ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3]))
