@@ -662,9 +662,8 @@ fn softmax_forward(input: &Tensor) -> Result<Tensor, Error> {
     let batch_size: usize = shape[..ndim - 1].iter().product();
     let num_features = shape[ndim - 1];
 
-    // `to_owned` keeps the strides of an array that is not in C order, and
-    // `into_shape_with_order` refuses such an array. `as_standard_layout` settles the layout
-    // first, for the same 1 copy this line needs anyway
+    // `to_owned` keeps a non-C-order array's strides, so `into_shape_with_order` then
+    // refuses it. `as_standard_layout` puts the array in C order first.
     let mut output_2d = input
         .as_standard_layout()
         .into_owned()

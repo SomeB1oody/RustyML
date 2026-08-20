@@ -54,8 +54,8 @@ type Kernel = fn(f64) -> f64;
 /// A weighted gather along 1 axis
 ///
 /// Each destination position reads `taps` source positions in a row, the first of them named by
-/// `starts`. In a forward band, the weights of 1 destination position add up to 1. A backward
-/// band regroups those same weights by source position, so its rows need not add up to 1
+/// `starts`. In a forward band, the weights of 1 destination position sum to 1. A backward
+/// band regroups those same weights by source position, so its rows need not sum to 1
 struct Band {
     /// Extent of the axis after the pass
     out_len: usize,
@@ -185,8 +185,8 @@ fn transpose_weights(src_len: usize, taps: usize, starts: &[usize], weights: &[f
     let mut back_weights = vec![0.0f32; src_len * back_taps];
     let rows = back_weights.chunks_exact_mut(back_taps);
     for ((i, row), (&first, &count)) in rows.enumerate().zip(firsts.iter().zip(&counts)) {
-        // The run must sit inside the axis to be stored at a fixed stride. It is never longer
-        // than `back_taps`, so pulling it back from the end still covers all of it
+        // Each row holds `back_taps` slots, so the run must fit inside it. The run is never
+        // longer than `back_taps`, so moving the start back from the end still covers all of it
         let start = first.min(out_len - back_taps);
         for position in first..first + count {
             row[position - start] = weights[position * taps + (i - starts[position])];
@@ -385,9 +385,8 @@ pub(super) fn upsample_forward(
         return Err(Error::empty_input("input tensor"));
     }
 
-    // A factor is only bounded below at construction, so a large 1 can take the output past
-    // what an index can hold. Reporting that is better than the wrap or the panic a plain
-    // multiply would give
+    // A factor is bounded below only at construction, so a large factor can push the output past
+    // what an index can hold. This report beats the wrap or the panic a plain multiply gives
     let mut elements = input.len();
     for (spatial, &factor) in factors.iter().enumerate() {
         elements = elements.checked_mul(factor).ok_or_else(|| {

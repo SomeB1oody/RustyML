@@ -25,7 +25,7 @@ fn ramp(shape: &[usize]) -> Tensor {
     Tensor::from_shape_vec(IxDyn(shape), data).expect("product of the shape")
 }
 
-/// Every value comes back untouched, at every rank from 1 through 5
+/// Every value returns untouched, at every rank from 1 through 5
 #[test]
 fn identity_passes_every_rank_through_unchanged() {
     for shape in [
@@ -107,7 +107,7 @@ fn identity_holds_no_parameter() {
     assert!(layer.parameters().is_empty());
 }
 
-/// The summary reads "Unknown" until a tensor has been through the layer
+/// The summary reads "Unknown" until a tensor has passed through the layer
 #[test]
 fn identity_output_shape_needs_a_forward_pass() {
     let mut layer = Identity::new();

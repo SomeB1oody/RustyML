@@ -28,7 +28,7 @@ use std::borrow::Cow;
 ///
 /// `depth_multiplier` (default 1, set with [`DepthwiseConv1D::with_depth_multiplier`]) is how many
 /// kernels each input channel gets. The output channel for input channel `c` and multiplier index
-/// `m` is `c * depth_multiplier + m`, which matches Keras
+/// `m` is `c * depth_multiplier + m`
 ///
 /// This is the 1D form of
 /// [`DepthwiseConv2D`](crate::neural_network::layers::convolution::depthwise_conv_2d::DepthwiseConv2D).
@@ -115,11 +115,13 @@ impl DepthwiseConv1D {
     ///
     /// There is no `filters` argument. A depthwise convolution derives its output channel count
     /// from the input, as `channels * depth_multiplier`. `depth_multiplier` defaults to 1. Set it
-    /// with [`DepthwiseConv1D::with_depth_multiplier`]. Padding defaults to
-    /// [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
-    /// [`DepthwiseConv1D::with_padding`]. The layer seeds weights from the global seed or entropy
-    /// by default. For reproducible initialization, set a seed with
-    /// [`DepthwiseConv1D::with_random_state`]
+    /// with [`DepthwiseConv1D::with_depth_multiplier`].
+    ///
+    /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
+    /// [`DepthwiseConv1D::with_padding`].
+    ///
+    /// The layer seeds weights from the global seed or entropy by default. For reproducible
+    /// initialization, set a seed with [`DepthwiseConv1D::with_random_state`]
     ///
     /// # Errors
     ///
@@ -233,12 +235,12 @@ impl DepthwiseConv1D {
         kernel_size: usize,
         random_state: Option<u64>,
     ) -> Array3<f32> {
-        // Keras' `compute_fans` reads only the kernel tensor's last 2 axes. For shape
+        // The fan calculation reads only the kernel tensor's last 2 axes. For shape
         // [kernel_size, channels, depth_multiplier] this gives `fan_in = channels * kernel_size`
         // and `fan_out = depth_multiplier * kernel_size`. A depthwise unit sees only 1 input
-        // channel. This fan_in is therefore `channels` times the true receptive field. The
-        // resulting bound is narrower by about sqrt(channels) than a per-channel count would
-        // give. This matches `Conv1D` and Keras rather than a depthwise-specific formula
+        // channel, so this fan_in is `channels` times the true receptive field. The resulting
+        // bound is narrower than a per-channel count by about sqrt(channels). `Conv1D` derives
+        // its fan_in and fan_out the same way, not with a depthwise-specific formula
         let fan_in = channels * kernel_size;
         let fan_out = depth_multiplier * kernel_size;
         let weight_bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
@@ -484,7 +486,7 @@ mod tests {
     }
 
     /// With `depth_multiplier`, input channel `c`'s multiplier `m` lands at output channel
-    /// `c * depth_multiplier + m`, the Keras ordering
+    /// `c * depth_multiplier + m`
     #[test]
     fn depthwise_1d_depth_multiplier_output_channel_order() {
         let mut layer = DepthwiseConv1D::new(1, vec![1, 1, 2], 1, Linear::new())

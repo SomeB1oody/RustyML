@@ -432,9 +432,8 @@ impl Layer for DepthwiseConv2D {
                 self.strides,
                 &self.padding,
             );
-            // `calculate_output_shape_2d` carries the input channel count through, which is
-            // right for a plain convolution. A depthwise convolution emits
-            // `channels * depth_multiplier` instead, so the last axis comes from the layer
+            // `calculate_output_shape_2d` carries the input channel count. A depthwise convolution
+            // emits `channels * depth_multiplier`, so the last axis comes from the layer instead
             format!(
                 "({}, {}, {}, {})",
                 output_shape[0],

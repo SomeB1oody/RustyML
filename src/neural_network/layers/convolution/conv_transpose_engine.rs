@@ -2,27 +2,28 @@
 //! `Conv2DTranspose`, and `Conv3DTranspose`
 //!
 //! A transposed convolution is the adjoint of a plain convolution. It maps a tensor with the
-//! shape of a convolution output back to the shape of that convolution input, and it keeps the
+//! shape of a convolution output back to the shape of the convolution input, and it keeps the
 //! same connectivity. So this engine is [`convolution_engine`](super::convolution_engine) with
 //! its 2 halves exchanged. The forward pass here is the col2im half of `conv_backward`, and the
-//! backward pass here is the im2col half of `conv_forward`. Every geometry helper, the offset
-//! table, and the block copy are reused unchanged
+//! backward pass here is the im2col half of `conv_forward`. This engine reuses every geometry
+//! helper, the offset table, and the block copy unchanged
 //!
 //! # Conventions
 //!
 //! - `Valid` output: `in * stride + max(kernel - stride, 0)`
 //! - `Same` output: `in * stride`
 //! - Weights are flat row-major `[k..., F, Cin]`. The filter axis comes before the input-channel
-//!   axis, which is the reverse of the plain convolution kernel. That is the layout a transposed
+//!   axis, which is the reverse of the plain convolution kernel. This is the layout a transposed
 //!   convolution needs, because the pass reads `Cin` and writes `F`
 //! - Each input position `i` writes to output position `i * stride + tap - pad_before`
-//! - The bias is added last, once per output position, including positions that no input reached
+//! - This engine adds the bias last, once per output position, including positions that no input
+//!   reached
 //!
 //! # Geometry
 //!
-//! The layer picks its output size with the 2 rules above. Everything else follows from 1 fact:
-//! the plain convolution that maps that output size back to the input size, at the same kernel,
-//! stride, and padding mode, is the convolution this pass transposes. So
+//! The layer picks its output size with the 2 rules above. Everything else follows from 1 fact.
+//! The plain convolution that maps the output size back to the input size is the convolution
+//! this pass transposes. It uses the same kernel, stride, and padding mode. So
 //! [`conv_geometry`] applied to the *output* size returns the input size, the leading padding to
 //! crop, and the padded extent to scatter into. No second padding rule exists
 //!
@@ -31,9 +32,10 @@
 //! Both passes fan out over batch items only. The forward scatter accumulates into overlapping
 //! output positions whenever `stride < kernel`, so splitting 1 item by output position would need
 //! a merge. Batch items stay disjoint, so they need none. Below a full batch the per-item GEMMs
-//! run parallel instead, which keeps a batch of 1 from running on 1 core. The pass reduces the
-//! weight and bias partials in batch order, so rerunning on the same machine gives the same
-//! result. The gate is the convolution engine's
+//! run parallel instead, which keeps a batch of 1 from running on 1 core.
+//!
+//! The pass reduces the weight and bias partials in batch order, so rerunning on the same machine
+//! gives the same result. The gate is the convolution engine's
 //! [`conv_parallel_min_flops`](super::convolution_engine::conv_parallel_min_flops), because both
 //! engines run the same 2 GEMM shapes. The gate selects the batch fan-out, and through it the
 //! per-item GEMM parallelism. The backend gives the same product at either setting, so moving the
@@ -81,7 +83,7 @@ pub(super) fn transpose_output_length(
 struct TransposeGeometry {
     /// Output spatial sizes
     out_sp: Vec<usize>,
-    /// Leading padding to crop off the scatter buffer, one entry per spatial axis
+    /// Leading padding to crop off the scatter buffer, 1 entry per spatial axis
     pad_before: Vec<usize>,
     /// Spatial sizes of the scatter buffer, which is the output plus its padding
     padded_sp: Vec<usize>,
@@ -148,7 +150,7 @@ fn check_channels(weight_shape: &[usize], r: usize, cin: usize) -> Result<(), Er
 /// Returns `(parallel_over_batch, per_item_gemm_parallelism)`. The per-item GEMMs drop to serial
 /// only when the fan-out runs and the batch by itself fills the pool. A batch task then never
 /// forks rayon again inside its own GEMM. In every other case the GEMM keeps the backend's own
-/// scheduling. That is what lets a batch of 1 use more than 1 core, on either side of the gate
+/// scheduling. This is what lets a batch of 1 use more than 1 core, on either side of the gate
 fn parallel_plan(gemm_flops: usize, batch: usize) -> (bool, Parallelism) {
     let parallel = gemm_flops >= conv_parallel_min_flops();
     let gemm_par = if parallel && batch >= rayon::current_num_threads() {
@@ -208,16 +210,16 @@ pub(super) fn conv_transpose_forward(
             ArrayView2::from_shape((in_plane, cin), &in_flat[b * in_item..(b + 1) * in_item])
                 .expect("input slice matches [in_plane, Cin]");
         // `[in_plane, k*F]`: row `i` holds everything input position `i` sends out, laid out tap
-        // slowest and filter fastest. That is the order the scatter below walks, and the same
+        // slowest and filter fastest. This is the order the scatter below walks, and the same
         // order `build_col_range` builds for the backward pass
         let dcol = dot_par(&x_mat, &w_mat.t(), gemm_par);
         let dcol = dcol.as_slice().expect("matmul result is standard layout");
 
         let mut pad_out = vec![0.0f32; padded_item];
-        // Tap outer, position inner. At a fixed tap consecutive input positions write runs that
-        // advance by the stride (adjacent runs at unit stride), so the read-modify-write side
-        // stays 1 forward stream. Windows overlap whenever `stride < kernel`, which is why this
-        // accumulates instead of copying
+        // Tap outer, position inner. At a fixed tap, consecutive input positions write runs that
+        // advance by the stride. Adjacent runs touch at unit stride, so the read-modify-write
+        // side stays 1 forward stream. Windows overlap whenever `stride < kernel`, which is why
+        // this accumulates instead of copying
         for kk in 0..k_plane {
             let off = kk * in_plane;
             let kbase = kk * filters;
@@ -236,7 +238,7 @@ pub(super) fn conv_transpose_forward(
             pad_out
         };
         // The bias reaches every output position, including any that no input position wrote.
-        // Adding it after the crop keeps those positions at exactly the bias
+        // Adding it after the crop keeps these positions at exactly the bias
         for position in out_b.chunks_exact_mut(filters) {
             for (value, &b_f) in position.iter_mut().zip(bias) {
                 *value += b_f;
@@ -267,8 +269,8 @@ pub(super) fn conv_transpose_forward(
 }
 
 /// Runs the backward transposed convolution. `input` is the original forward input.
-/// `grad_output` is the gradient of the transposed-convolution output, taken after the activation
-/// backward
+/// `grad_output` is the gradient of the transposed-convolution output, taken after the
+/// activation's backward pass
 ///
 /// # Errors
 ///
@@ -319,8 +321,9 @@ pub(super) fn conv_transpose_backward(
         .as_slice()
         .expect("standard-layout array is contiguous");
 
-    // The forward cropped the scatter buffer down to the output, so the backward pads the output
-    // gradient back up. Every position the forward wrote then has a gradient to read
+    // The forward pass cropped the scatter buffer down to the output, so the backward pass pads
+    // the output gradient back up. Every position the forward pass wrote then has a gradient to
+    // read
     let padded_storage = if padded_sp != out_sp {
         Some(build_padded(
             grad_flat, batch, out_sp, padded_sp, pad_before, filters,
@@ -344,8 +347,8 @@ pub(super) fn conv_transpose_backward(
         offsets: &offsets,
     };
     let process_b = |b: usize, gemm_par: Parallelism| -> (Array2<f32>, Vec<f32>, Vec<f32>) {
-        // `[in_plane, k*F]`, the exact matrix the forward scattered from. Gathering it back is
-        // what makes the 2 GEMMs below plain products
+        // `[in_plane, k*F]`, the exact matrix the forward pass scattered from. Gathering it back
+        // is what makes the 2 GEMMs below plain products
         let col = build_col_range(&ctx, b, 0, in_plane);
         let col_mat = ArrayView2::from_shape((in_plane, k_total), &col)
             .expect("col length matches [in_plane, k*F]");
@@ -404,6 +407,8 @@ pub(super) fn conv_transpose_backward(
     })
 }
 
+/// Tests the output-length formula, the geometry derivation, and the forward scatter against
+/// hand-derived values.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -466,7 +471,8 @@ mod tests {
         assert_eq!(g.padded_sp, vec![8]);
     }
 
-    /// A 0-size spatial axis is refused instead of underflowing the padding math
+    /// The geometry function rejects a 0-size spatial axis instead of letting the padding math
+    /// underflow
     #[test]
     fn test_transpose_geometry_rejects_empty_axis() {
         let result = transpose_geometry(&[0], &[3], &[1], PaddingType::Same);
@@ -478,9 +484,10 @@ mod tests {
 
     // conv_transpose_forward: hand-derived values
     //
-    // The forward pass is checked against numbers worked out by hand from the scatter definition.
-    // A gradient check compares a layer against a finite difference of itself, so it agrees even
-    // when an axis is transposed. Only an independently derived value catches a moved axis.
+    // These tests check the forward pass against numbers worked out by hand from the scatter
+    // definition. A gradient check compares a layer against a finite difference of itself, so it
+    // agrees even when an axis is transposed. Only an independently derived value catches a moved
+    // axis.
 
     /// 1-D, 1 batch item, 2 input positions at 1 channel, a length-2 all-ones kernel, 1 filter,
     /// stride 1, `Valid`. Input `[1, 2]` scatters to `[1, 1+2, 2]`, and the bias lands once per
@@ -509,7 +516,7 @@ mod tests {
         );
     }
 
-    /// A stride above the kernel leaves gaps that no input position reaches. Those positions hold
+    /// A stride above the kernel leaves gaps that no input position reaches. These positions hold
     /// exactly the bias
     #[test]
     fn test_conv_transpose_forward_gap_positions_hold_only_the_bias() {
@@ -580,7 +587,7 @@ mod tests {
 
             // 1 flat array serves both passes. The transposed kernel is `[k, F, Cin]`. The plain
             // convolution that runs the other way reads `filters` channels and writes `cin` of
-            // them, so its `[k, Cin, F]` kernel is the same `[k, filters, cin]` block
+            // them. Its `[k, Cin, F]` kernel is the same `[k, filters, cin]` block
             let weights: Vec<f32> = (0..k * filters * cin)
                 .map(|v| (v as f32) * 0.25 - 1.0)
                 .collect();

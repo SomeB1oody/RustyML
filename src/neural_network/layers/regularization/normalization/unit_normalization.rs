@@ -45,8 +45,8 @@ pub enum UnitNormalizationAxis {
 ///
 /// The scale is `1 / sqrt(sum of squares)`, capped at `1e12`. The cap is `1 / epsilon` for a
 /// fixed `epsilon` of `1e-12`, and it takes over for every group whose norm falls below
-/// `1e-12`. An all-zero group is the limiting case. It is scaled by `1e12` and stays all zero,
-/// rather than dividing by zero
+/// `1e-12`. An all-zero group is the limiting case. The cap scales it by `1e12`, and it stays
+/// all zero, rather than dividing by zero
 ///
 /// Unlike [`LayerNormalization`](crate::neural_network::layers::LayerNormalization), this layer
 /// subtracts no mean and learns no `gamma` or `beta`. It changes the length of each group and
@@ -135,8 +135,8 @@ impl UnitNormalization {
     ///
     /// # Notes
     ///
-    /// An axis is only checked against the input rank at the forward pass, because the
-    /// constructor sees no tensor. Only the shape of the axis list itself is checked here
+    /// The forward pass checks an axis against the input rank, because the constructor sees no
+    /// tensor. The constructor checks only the shape of the axis list itself
     ///
     /// # Errors
     ///
@@ -275,9 +275,9 @@ fn into_group_tensor(values: Vec<f32>, group_shape: &[usize]) -> Tensor {
 
 /// The scale for a group, and whether its norm or the cap decided it
 ///
-/// The comparison is written so that a `square_sum` of `NaN` takes the norm branch and carries
-/// the `NaN` into the output. It also sends an infinite reciprocal, which an all-zero group
-/// gives, to the cap
+/// The comparison sends a `square_sum` of `NaN` to the norm branch, which carries the `NaN`
+/// into the output. It also sends an infinite reciprocal, which an all-zero group gives, to
+/// the cap
 fn group_scale(square_sum: f32) -> (f32, f32) {
     let from_norm = 1.0 / square_sum.sqrt();
     if from_norm > MAX_SCALE {
@@ -338,7 +338,7 @@ fn row_forward(
 /// Composes the input gradient of a standard-layout `[groups, group_len]` slice
 ///
 /// `dx = scale * (grad_output - output * dot(grad_output, output))`, where the dot product runs
-/// over the group. A group the cap took over was scaled by a constant, so its second term drops
+/// over the group. The cap scales a group it took over by a constant, so its second term drops
 fn row_backward(
     grad_output: &[f32],
     output: &[f32],
@@ -447,7 +447,7 @@ fn strided_backward(
         .for_each(|o, &g, &y| *o = g * y);
 
     let mut dot = reduce_to_groups(products, axes, scale.shape());
-    // A group the cap took over was scaled by a constant, so its second term drops
+    // The cap scales a group it took over by a constant, so its second term drops
     Zip::from(&mut dot).and(from_norm).for_each(|d, &n| *d *= n);
 
     let mut grad_input = Tensor::zeros(grad_output.raw_dim());

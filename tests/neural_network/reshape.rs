@@ -322,7 +322,7 @@ fn reshape_backward_wrong_grad_shape_returns_err() {
 
 // Reshape: the batch axis is free
 
-/// 1 layer instance serves every batch size, since the batch axis passes through untouched
+/// 1 layer instance serves every batch size, since the batch axis remains untouched
 #[test]
 fn reshape_one_instance_serves_every_batch_size() {
     let mut r = Reshape::new(vec![2, 3]).unwrap();

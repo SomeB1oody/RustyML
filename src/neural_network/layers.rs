@@ -9,20 +9,21 @@
 //!
 //! The submodules fall into a few categories:
 //!
-//! - Core layers (re-exported): [`activation`](crate::neural_network::layers::activation),
-//!   [`border`](crate::neural_network::layers::border),
-//!   [`convolution`](crate::neural_network::layers::convolution),
-//!   [`dense`](crate::neural_network::layers::dense),
-//!   [`embedding`](crate::neural_network::layers::embedding),
-//!   [`flatten`](crate::neural_network::layers::flatten),
-//!   [`identity`](crate::neural_network::layers::identity),
-//!   [`permute`](crate::neural_network::layers::permute),
-//!   [`pooling`](crate::neural_network::layers::pooling),
-//!   [`recurrent`](crate::neural_network::layers::recurrent),
-//!   [`regularization`](crate::neural_network::layers::regularization),
-//!   [`repeat_vector`](crate::neural_network::layers::repeat_vector),
-//!   [`reshape`](crate::neural_network::layers::reshape), and
-//!   [`upsampling`](crate::neural_network::layers::upsampling)
+//! - Core layers (re-exported):
+//!   - [`activation`](crate::neural_network::layers::activation)
+//!   - [`border`](crate::neural_network::layers::border)
+//!   - [`convolution`](crate::neural_network::layers::convolution)
+//!   - [`dense`](crate::neural_network::layers::dense)
+//!   - [`embedding`](crate::neural_network::layers::embedding)
+//!   - [`flatten`](crate::neural_network::layers::flatten)
+//!   - [`identity`](crate::neural_network::layers::identity)
+//!   - [`permute`](crate::neural_network::layers::permute)
+//!   - [`pooling`](crate::neural_network::layers::pooling)
+//!   - [`recurrent`](crate::neural_network::layers::recurrent)
+//!   - [`regularization`](crate::neural_network::layers::regularization)
+//!   - [`repeat_vector`](crate::neural_network::layers::repeat_vector)
+//!   - [`reshape`](crate::neural_network::layers::reshape)
+//!   - [`upsampling`](crate::neural_network::layers::upsampling)
 //! - Weight containers: [`layer_weight`](crate::neural_network::layers::layer_weight)
 //! - Shared (private) helpers: `conv_op_helpers` (2D/4D convolution zero-padding) and
 //!   `shape_helpers` (pooling/convolution output-shape calculators)

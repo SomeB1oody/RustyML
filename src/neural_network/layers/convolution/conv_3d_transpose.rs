@@ -48,7 +48,7 @@ use std::borrow::Cow;
 /// Unlike `Conv3D`, this layer puts no lower bound on the input size. A 1x1x1 input under a
 /// 3x3x3 kernel is a normal first decoder step.
 ///
-/// A stride wider than the kernel leaves output positions that no input position reaches. Those
+/// A stride wider than the kernel leaves output positions that no input position reaches. These
 /// positions hold exactly the bias.
 ///
 /// # Examples
@@ -315,10 +315,8 @@ impl Layer for Conv3DTranspose {
             return Err(Error::invalid_input("input tensor is not 5D"));
         }
 
-        // Cache input for backpropagation
         self.input_cache = Some(input.clone());
 
-        // Transposed convolution (dimension-generic engine), then activation
         let output = conv_transpose_forward(
             input,
             self.weights.as_slice().expect("weights must be contiguous"),
@@ -351,7 +349,6 @@ impl Layer for Conv3DTranspose {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // Activation backward pass first
         let activated = self
             .output_cache
             .take()

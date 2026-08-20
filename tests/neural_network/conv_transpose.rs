@@ -3,8 +3,8 @@
 //!
 //! Layout is channels-last: Conv1DTranspose sees \[batch, length, channels\] and Conv2DTranspose
 //! sees \[batch, height, width, channels\]. A transposed kernel is \[k, F, Cin\] and
-//! \[kh, kw, F, Cin\], so the filter axis comes before the input-channel axis, which is the
-//! reverse of the plain convolution kernel. Every bias is rank-1 of length `filters`.
+//! \[kh, kw, F, Cin\]. The filter axis comes before the input-channel axis, which is the reverse
+//! of the plain convolution kernel. Every bias is rank-1 of length `filters`.
 //!
 //! Expected values come from the scatter definition with known weights, worked out in a comment
 //! next to each one, not from recorded implementation output. Every pinned number was also
@@ -50,7 +50,7 @@ fn ramp_of(shape: &[usize]) -> Tensor {
 
 // Conv1DTranspose - forward with known weights
 
-/// Every input position writes its value times the whole kernel, and the writes add up where
+/// Every input position writes its value times the whole kernel, and the writes accumulate where
 /// they overlap
 #[test]
 fn conv1d_transpose_scatters_each_input_across_the_kernel() {
@@ -63,8 +63,8 @@ fn conv1d_transpose_scatters_each_input_across_the_kernel() {
     let input = t3((1, 2, 1), vec![1.0, 2.0]);
     let output = layer.forward(&input).unwrap();
 
-    // Valid at stride 1 gives 2 * 1 + (2 - 1) = 3 positions. out[o] = sum over i + k == o
-    // out[0] = 1*2 = 2, out[1] = 1*3 + 2*2 = 7, out[2] = 2*3 = 6, then the bias adds 0.5
+    // Valid at stride 1 gives 2 * 1 + (2 - 1) = 3 positions. out[o] = sum over i + k == o.
+    // out[0] = 1*2 = 2. out[1] = 1*3 + 2*2 = 7. out[2] = 2*3 = 6. The bias adds 0.5.
     assert_eq!(output.shape(), &[1, 3, 1]);
     let expected = t3((1, 3, 1), vec![2.5f32, 7.5, 6.5]);
     assert_allclose(&output, &expected, 1e-6f32);
@@ -102,9 +102,9 @@ fn conv1d_transpose_same_padding_keeps_the_length() {
     let input = t3((1, 3, 1), vec![1.0, 2.0, 3.0]);
     let output = layer.forward(&input).unwrap();
 
-    // Same at stride 1 gives 3 * 1 = 3 positions, and pad_before = (3 - 1) / 2 = 1, so
-    // out[o] = sum over i + k == o + 1
-    // out[0] = 1*3 + 2*2 = 7, out[1] = 1*5 + 2*3 + 3*2 = 17, out[2] = 2*5 + 3*3 = 19
+    // Same at stride 1 gives 3 * 1 = 3 positions, and pad_before = (3 - 1) / 2 = 1.
+    // So out[o] = sum over i + k == o + 1.
+    // out[0] = 1*3 + 2*2 = 7. out[1] = 1*5 + 2*3 + 3*2 = 17. out[2] = 2*5 + 3*3 = 19.
     assert_eq!(output.shape(), &[1, 3, 1]);
     let expected = t3((1, 3, 1), vec![7.0f32, 17.0, 19.0]);
     assert_allclose(&output, &expected, 1e-6f32);
@@ -122,9 +122,9 @@ fn conv1d_transpose_same_padding_at_stride_2_crops_the_tail() {
     let input = t3((1, 2, 1), vec![1.0, 2.0]);
     let output = layer.forward(&input).unwrap();
 
-    // Same at stride 2 gives 2 * 2 = 4 positions, and pad_before = (3 - 2) / 2 = 0, so
-    // out[o] = sum over 2*i + k == o. Input 0 writes 2, 3, 5 at 0, 1, 2, and input 1 writes
-    // 4, 6, 10 at 2, 3, 4. Position 4 falls past the output and drops
+    // Same at stride 2 gives 2 * 2 = 4 positions, and pad_before = (3 - 2) / 2 = 0.
+    // So out[o] = sum over 2*i + k == o. Input 0 writes 2, 3, 5 at 0, 1, 2, and input 1 writes
+    // 4, 6, 10 at 2, 3, 4. Position 4 falls past the output and drops.
     assert_eq!(output.shape(), &[1, 4, 1]);
     let expected = t3((1, 4, 1), vec![2.0f32, 3.0, 9.0, 6.0]);
     assert_allclose(&output, &expected, 1e-6f32);
@@ -144,9 +144,8 @@ fn conv1d_transpose_two_input_channels_cross_channel_sum() {
     let input = t3((1, 2, 2), vec![1.0, 10.0, 2.0, 20.0]);
     let output = layer.forward(&input).unwrap();
 
-    // out[0] = 1*1 + 10*2 = 21
-    // out[1] = (1*3 + 10*4) + (2*1 + 20*2) = 43 + 42 = 85
-    // out[2] = 2*3 + 20*4 = 86
+    // out[0] = 1*1 + 10*2 = 21. out[1] = (1*3 + 10*4) + (2*1 + 20*2) = 43 + 42 = 85.
+    // out[2] = 2*3 + 20*4 = 86.
     assert_eq!(output.shape(), &[1, 3, 1]);
     let expected = t3((1, 3, 1), vec![21.0f32, 85.0, 86.0]);
     assert_allclose(&output, &expected, 1e-6f32);
@@ -283,12 +282,10 @@ fn conv2d_transpose_overlapping_windows_add_up() {
     let input = t4((1, 2, 2, 1), vec![1.0, 2.0, 3.0, 4.0]);
     let output = layer.forward(&input).unwrap();
 
-    // out[oh, ow] = sum over ih + kh == oh and iw + kw == ow of x[ih, iw] * w[kh, kw]
-    // out[0,0] = 1*1 = 1                          out[0,1] = 1*2 + 2*1 = 4
-    // out[0,2] = 2*2 = 4                           out[1,0] = 1*3 + 3*1 = 6
-    // out[1,1] = 1*4 + 2*3 + 3*2 + 4*1 = 20        out[1,2] = 2*4 + 4*2 = 16
-    // out[2,0] = 3*3 = 9                           out[2,1] = 3*4 + 4*3 = 24
-    // out[2,2] = 4*4 = 16
+    // out[oh, ow] = sum over ih + kh == oh and iw + kw == ow of x[ih, iw] * w[kh, kw].
+    // out[0,0] = 1*1 = 1. out[0,1] = 1*2 + 2*1 = 4. out[0,2] = 2*2 = 4.
+    // out[1,0] = 1*3 + 3*1 = 6. out[1,1] = 1*4 + 2*3 + 3*2 + 4*1 = 20. out[1,2] = 2*4 + 4*2 = 16.
+    // out[2,0] = 3*3 = 9. out[2,1] = 3*4 + 4*3 = 24. out[2,2] = 4*4 = 16.
     assert_eq!(output.shape(), &[1, 3, 3, 1]);
     let expected = t4(
         (1, 3, 3, 1),
@@ -341,11 +338,11 @@ fn conv2d_transpose_same_padding_doubles_both_axes() {
     let input = t4((1, 2, 2, 1), vec![1.0, 2.0, 3.0, 4.0]);
     let output = layer.forward(&input).unwrap();
 
-    // Same at stride 2 gives 2 * 2 = 4 on each axis, and pad_before = (3 - 2) / 2 = 0, so
-    // out[oh, ow] = sum over 2*ih + kh == oh and 2*iw + kw == ow
-    // out[0,0] = 1*w[0,0] = 1
-    // out[2,2] = 1*w[2,2] + 2*w[2,0] + 3*w[0,2] + 4*w[0,0] = 9 + 14 + 9 + 4 = 36
-    // out[3,3] = 4*w[1,1] = 20
+    // Same at stride 2 gives 2 * 2 = 4 on each axis, and pad_before = (3 - 2) / 2 = 0.
+    // So out[oh, ow] = sum over 2*ih + kh == oh and 2*iw + kw == ow.
+    // out[0,0] = 1*w[0,0] = 1.
+    // out[2,2] = 1*w[2,2] + 2*w[2,0] + 3*w[0,2] + 4*w[0,0] = 9 + 14 + 9 + 4 = 36.
+    // out[3,3] = 4*w[1,1] = 20.
     assert_eq!(output.shape(), &[1, 4, 4, 1]);
     let expected = t4(
         (1, 4, 4, 1),
@@ -422,7 +419,7 @@ fn conv2d_transpose_get_weights_correct_shapes() {
 fn conv2d_transpose_reports_its_type_and_output_shape() {
     let layer = Conv2DTranspose::new(3, (3, 2), vec![2, 5, 5, 1], (2, 1), Linear::new()).unwrap();
     assert_eq!(layer.layer_type(), "Conv2DTranspose");
-    // Valid: 5 * 2 + (3 - 2) = 11 on the height, and 5 * 1 + (2 - 1) = 6 on the width
+    // Valid: 5 * 2 + (3 - 2) = 11 on the height. 5 * 1 + (2 - 1) = 6 on the width.
     assert_eq!(layer.output_shape(), "(2, 11, 6, 3)");
 }
 
@@ -538,9 +535,9 @@ fn conv3d_transpose_weights_and_param_count() {
 /// A transposed convolution returns to the shape the matching convolution consumed
 ///
 /// The 2 layers share the kernel size, the stride, and the padding mode. The round trip is exact
-/// when the convolution kept every input position: `(in - kernel)` divisible by the stride under
-/// `Valid`, and `in` divisible by the stride under `Same`. The next test covers what happens
-/// when it is not
+/// when the convolution kept every input position. `(in - kernel)` is divisible by the stride
+/// under `Valid`, and `in` is divisible by the stride under `Same`. The next test covers what
+/// happens when it is not
 #[test]
 fn conv2d_transpose_returns_to_the_shape_the_convolution_consumed() {
     use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
@@ -579,7 +576,7 @@ fn conv2d_transpose_returns_to_the_shape_the_convolution_consumed() {
     }
 }
 
-/// A stride that does not divide the input makes the round trip fall short by the remainder
+/// A stride that does not divide the input makes the round trip short by the remainder
 ///
 /// The convolution drops the trailing positions its last window cannot reach, so the transposed
 /// convolution has nothing to rebuild them from. An 8-wide input at kernel 3 and stride 2 gives 3
@@ -602,10 +599,10 @@ fn conv2d_transpose_falls_short_when_the_stride_does_not_divide() {
 /// The transposed forward pass IS the plain convolution's input gradient
 ///
 /// This is the identity that defines the layer. Give a `Conv2D` and a `Conv2DTranspose` the same
-/// flat kernel, the same stride, and the same padding mode, and make the transposed layer read
-/// the convolution's `filters` channels and write its `channels` filters. Then
+/// flat kernel, the same stride, and the same padding mode. Make the transposed layer read the
+/// convolution's `filters` channels and write its `channels` filters. Then
 /// `Conv2D::backward(g)` and `Conv2DTranspose::forward(g)` must agree to the last bit. The 2
-/// kernels need no permutation, because `[kh, kw, Cin, F]` for the plain layer and
+/// kernels need no permutation. `[kh, kw, Cin, F]` for the plain layer and
 /// `[kh, kw, filters, channels]` for the transposed one are the same block once the roles swap.
 ///
 /// A finite-difference check cannot catch a transposed axis, because it compares a layer against
@@ -951,7 +948,7 @@ fn conv_transpose_layers_reject_backward_before_forward() {
 
 /// predict returns the same values as forward at every rank
 ///
-/// A save and load round trip cannot pin this, because both of its sides go through `predict`
+/// A save and load round trip cannot pin this, because both of its sides use `predict`
 #[test]
 fn conv_transpose_layers_predict_equals_forward() {
     let mut two = Conv2DTranspose::new(2, (3, 2), vec![1, 3, 4, 2], (2, 1), Linear::new())
@@ -974,7 +971,7 @@ fn conv_transpose_layers_predict_equals_forward() {
 
 /// Conv3DTranspose seeds its kernel from the channel axis, and reports its axes in order
 ///
-/// The channel count, the 3 kernel extents, and the filter count are all different here, so an
+/// The channel count, the 3 kernel extents, and the filter count are all different here. An
 /// index that reads the wrong axis cannot coincide with the right one
 #[test]
 fn conv3d_transpose_with_random_state_is_reproducible() {
@@ -1006,7 +1003,7 @@ fn conv3d_transpose_with_random_state_is_reproducible() {
 
 // Layout
 
-/// An input that is not in C order gives the same values as the same data in C order, and the
+/// An input that is not in C order gives the same values as the same data in C order. The
 /// output is in C order either way
 #[test]
 fn conv2d_transpose_accepts_an_input_that_is_not_in_c_order() {
@@ -1139,10 +1136,10 @@ fn conv2d_transpose_parallel_path_matches_the_serial_path() {
 
 /// Above the gate the weight gradient is still the plain count of the taps that landed
 ///
-/// With every weight, every input, and every upstream gradient at 1, and a stride equal to the
-/// kernel, each (tap, filter, channel) triple receives exactly 1 contribution per input position
-/// of every batch item. So each weight gradient is `batch * in_plane`, each bias gradient is
-/// `batch * out_plane`, and each input gradient is `k_plane * filters`
+/// Every weight, every input, and every upstream gradient is 1, and the stride equals the
+/// kernel. Each (tap, filter, channel) triple then receives exactly 1 contribution per input
+/// position of every batch item. So each weight gradient is `batch * in_plane`, each bias
+/// gradient is `batch * out_plane`, and each input gradient is `k_plane * filters`
 #[test]
 fn conv2d_transpose_parallel_gradient_counts_are_constant() {
     let gate = rustyml::tuning::conv::get_parallel_min_flops();
@@ -1169,7 +1166,7 @@ fn conv2d_transpose_parallel_gradient_counts_are_constant() {
 
     let x = Array::ones((batch, side, side, cin)).into_dyn();
     let out = layer.forward(&x).unwrap();
-    // A stride equal to the kernel makes the windows disjoint, so each output position collects
+    // A stride equal to the kernel makes the windows disjoint. Each output position then collects
     // exactly 1 tap from 1 input position, over all `cin` channels
     let out_side = side * k;
     assert_eq!(out.shape(), &[batch, out_side, out_side, filters]);

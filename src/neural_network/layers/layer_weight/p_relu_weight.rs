@@ -9,9 +9,9 @@ use std::borrow::Cow;
 
 /// Weights of a PReLU layer
 ///
-/// Stored as [`Cow`] so saving borrows the live layer array without cloning, while loading
-/// deserializes it into an owned array. The layer holds 1 parameter tensor, so this container
-/// holds 1 field
+/// This struct stores the field as [`Cow`]. Saving borrows the live layer array without cloning.
+/// Loading deserializes it into an owned array. The layer holds 1 parameter tensor, so this
+/// container holds 1 field.
 ///
 /// The rank of `alpha` follows the input rank, less 1, because the batch axis carries no slope.
 /// A shared axis keeps its place in the array at extent 1, so the rank does not drop with it

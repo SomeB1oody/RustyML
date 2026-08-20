@@ -9,7 +9,7 @@
 //!
 //! The geometry and im2col helpers below are `pub(super)`, because
 //! [`conv_transpose_engine`](super::conv_transpose_engine) reuses every one of them. A transposed
-//! convolution is the adjoint of a plain one, so it needs the same padding rule, the same offset
+//! convolution is the adjoint of a plain one. It needs the same padding rule, the same offset
 //! table, and the same block copy. Only the direction of the 2 GEMMs changes
 //!
 //! # Conventions
@@ -283,7 +283,7 @@ pub(super) fn im2col_offsets(
 pub(super) struct ColContext<'a> {
     /// Flat zero-padded source `[batch, padded_spatial..., cin]`
     pub(super) padded: &'a [f32],
-    /// Channels of the padded source, which is also the length of one contiguous copy run. The
+    /// Channels of the padded source, which is also the length of 1 contiguous copy run. The
     /// plain convolution reads the input, so this is `Cin`. The transposed backward pass reads
     /// the output gradient, so there it is the filter count
     pub(super) cin: usize,

@@ -60,7 +60,7 @@ fn ramp(shape: &[usize], offset: f32) -> Tensor {
 
 /// Hand-derived values on the 2 best known right triangles
 ///
-/// 3-4-5 gives 0.6 and 0.8, and 5-12-13 gives 5/13 and 12/13. Neither number can come out of a
+/// 3-4-5 gives 0.6 and 0.8, and 5-12-13 gives 5/13 and 12/13. Neither number can arise from a
 /// wrong axis or a wrong reduction by accident
 #[test]
 fn unit_normalization_forward_hand_derived() {
@@ -397,7 +397,7 @@ fn unit_normalization_gradient_is_orthogonal_to_its_output() {
 
 // the near-zero cap
 
-/// An all-zero group comes back all zero instead of dividing by zero
+/// An all-zero group returns all zero instead of dividing by zero
 #[test]
 fn unit_normalization_leaves_an_all_zero_group_at_zero() {
     let x = t2(2, 3, vec![0.0, 0.0, 0.0, 3.0, 4.0, 0.0]);
@@ -574,7 +574,7 @@ fn unit_normalization_parallel_path_matches_the_serial_path() {
         .map(|k| 1.0 + 0.1 * ((k % 13) as f32 - 6.0))
         .collect();
 
-    // Run the whole tensor and then each half through forward and backward, and compare the
+    // Run the whole tensor and then each half through forward and backward. Compare the
     // concatenated halves against the whole
     let run = |chunk: &[f32], grad_chunk: &[f32], count: usize| -> (Vec<f32>, Vec<f32>) {
         let x = t2(count, features, chunk.to_vec());
@@ -634,7 +634,7 @@ fn unit_normalization_holds_no_parameter() {
     assert!(layer.parameters().is_empty());
 }
 
-/// The summary reads "Unknown" until a tensor has been through the layer
+/// The summary reads "Unknown" until a tensor has passed through the layer
 #[test]
 fn unit_normalization_output_shape_needs_a_forward_pass() {
     let mut layer = last_axis();

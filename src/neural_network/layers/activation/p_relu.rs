@@ -22,23 +22,23 @@ use std::borrow::Cow;
 ///
 /// The layer holds 1 slope per position of the input shape with the batch axis removed. An
 /// input of shape `[batch, 4, 5, 6]` therefore carries `4 * 5 * 6` slopes.
-/// [`PReLU::with_shared_axes`] makes the named axes share 1 slope, which is how a convolutional
-/// stack gets 1 slope per channel instead of 1 per pixel.
+/// [`PReLU::with_shared_axes`] makes the named axes share 1 slope. This gives 1 slope per
+/// channel instead of 1 per pixel in a convolutional stack.
 ///
 /// # Notes
 ///
 /// A shared axis accepts any extent at forward time, because its slope broadcasts. Every other
-/// axis after the batch axis must match the configured `input_shape`. The batch axis itself is
-/// never checked, so the layer takes a batch of any size.
+/// axis after the batch axis must match the configured `input_shape`. The layer never checks
+/// the batch axis itself, so it takes a batch of any size.
 ///
 /// The derivative at exactly 0 is 0, which is neither branch. An `alpha` of 0 therefore gives
 /// the same forward transform and the same gradient as
-/// [`ReLU`](crate::neural_network::layers::activation::relu::ReLU), which is what makes 0 the
-/// natural starting value. `LeakyReLU` instead has a derivative of 1 at exactly 0.
+/// [`ReLU`](crate::neural_network::layers::activation::relu::ReLU). This makes 0 the natural
+/// starting value. `LeakyReLU` instead has a derivative of 1 at exactly 0.
 ///
 /// Weight decay skips `alpha`, in every optimizer that takes a `weight_decay` argument. Decay
-/// pulls a parameter toward 0, and a slope of 0 turns this layer back into `ReLU`, so it would
-/// fight the very thing the layer learns.
+/// pulls a parameter toward 0. A slope of 0 turns this layer back into `ReLU`, which would
+/// fight what the layer learns.
 ///
 /// [`Activation`](crate::neural_network::layers::activation::Activation) has no PReLU variant,
 /// and it cannot get one. A variant carries no state, and this layer carries a trainable array.
@@ -170,7 +170,7 @@ impl PReLU {
     /// for a convolutional stack, where a per-pixel slope both overfits and grows the parameter
     /// count with the image size.
     ///
-    /// A shared axis also stops being checked at forward time, so the layer accepts any extent
+    /// The layer also stops checking a shared axis at forward time, so it accepts any extent
     /// on it. The same layer then serves images of several sizes.
     ///
     /// # Parameters
@@ -329,9 +329,10 @@ impl Layer for PReLU {
 
     /// Splits the upstream gradient between the input and the slopes
     ///
-    /// The input gradient passes `g` where the input was above 0, scales it by the slope where
-    /// the input was below 0, and is 0 at exactly 0. The slope gradient sums `g * x` over every
-    /// negative element that the slope covers, which is the batch axis and every shared axis
+    /// The input gradient passes `g` unchanged where the input was above 0. It scales `g` by
+    /// the slope where the input was below 0, and it is 0 at exactly 0. The slope gradient sums
+    /// `g * x` over every negative element that the slope covers, which is the batch axis and
+    /// every shared axis
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         let Self {
             shared_axes,
@@ -380,7 +381,7 @@ impl Layer for PReLU {
         }
 
         // The batch axis always collapses. A shared axis collapses too, but it keeps extent 1
-        // so that the result still lines up with the slope array. Putting the axis straight
+        // so that the result still matches the slope array. Putting the axis straight
         // back holds the rank constant, so no later axis index shifts
         let mut reduced = contribution.sum_axis(Axis(0));
         for &axis in shared_axes.iter() {
@@ -400,7 +401,7 @@ impl Layer for PReLU {
 
     fn output_shape(&self) -> String {
         // A shared axis accepts any extent, so the observed shape can differ from the
-        // configured one. Report what the layer last saw, and fall back to the configuration
+        // configured one
         match &self.input_cache {
             Some(input) => format_shape(input.shape()),
             None => format_shape(&self.input_shape),

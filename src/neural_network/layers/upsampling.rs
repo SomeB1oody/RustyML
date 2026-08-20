@@ -37,7 +37,7 @@ pub use up_sampling_3d::UpSampling3D;
 /// mode of the 1D and 3D layers. Every other mode resamples with a separable kernel, so a new
 /// position takes a weighted sum of its neighbors
 ///
-/// The weights of 1 output position always add up to 1. Near an edge, the kernel reaches past
+/// The weights of 1 output position always sum to 1. Near an edge, the kernel reaches past
 /// the input, so the layer rescales the remaining weights to keep that sum
 ///
 /// # Examples

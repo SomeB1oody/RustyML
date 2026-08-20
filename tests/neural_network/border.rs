@@ -529,7 +529,7 @@ fn border_output_shape_after_forward() {
 
 // The batch axis is free
 
-/// 1 layer instance serves every batch size, since the batch axis passes through untouched
+/// 1 layer instance serves every batch size, since the batch axis remains untouched
 #[test]
 fn one_instance_serves_every_batch_size() {
     let mut pad = ZeroPadding2D::new(1);
@@ -566,7 +566,7 @@ fn border_layers_inside_sequential_model_train() {
 
     let mut model = Sequential::new();
     model
-        // 4x4 grows to 6x6, the 3x3 valid convolution brings it back to 4x4, and the crop
+        // 4x4 grows to 6x6, the 3x3 valid convolution restores it to 4x4, and the crop
         // trims it to 2x2
         .add(ZeroPadding2D::new(1))
         .add(Conv2D::new(2, (3, 3), vec![4, 6, 6, 1], (1, 1), Linear::new()).unwrap())

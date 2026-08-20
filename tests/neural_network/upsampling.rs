@@ -195,8 +195,8 @@ fn up_sampling_2d_interpolated_modes_match_reference() {
 }
 
 /// A constant image stays constant under every mode, because the weights of an output position
-/// always add up to 1. The edge positions are the ones that would drift, because part of their
-/// kernel falls outside the input
+/// always sum to 1. The edge positions are the ones that would drift, because part of their
+/// kernel lies outside the input
 #[test]
 fn up_sampling_2d_keeps_a_constant_image_constant() {
     for mode in MODES {
@@ -256,8 +256,8 @@ fn up_sampling_1d_backward_sums_each_repeated_run() {
     assert_eq!(grad[[0, 1, 1]], 8.0 + 10.0 + 12.0);
 }
 
-/// Under an all-ones upstream the gradient of every input position is the total weight it sent
-/// out. Each of the 4 pixels feeds 4 output pixels whose weights add up to 1, so every entry is
+/// Under an all-ones upstream the gradient of every input position is the total weight it sent.
+/// Each of the 4 pixels feeds 4 output pixels whose weights sum to 1, so every entry is
 /// exactly 4
 #[test]
 fn up_sampling_2d_bilinear_backward_matches_reference() {
@@ -362,14 +362,14 @@ fn up_sampling_layers_emit_gradients_in_c_order() {
 
 /// The repeat mode above the parallel gate gives the same bits as the same work below it
 ///
-/// Samples never mix, so 1 batch of 2 must equal 2 batches of 1. The whole clears the gate on
-/// the forward pass and on the backward pass, and each single sample stays under it
+/// Samples never mix, so 1 batch of 2 must equal 2 batches of 1. The whole batch clears the gate
+/// on the forward pass and on the backward pass, and each single sample stays under it
 #[test]
 fn up_sampling_repeat_parallel_path_matches_the_serial_path() {
     let gate = rustyml::tuning::upsampling::get_parallel_min_ops();
     let (samples, steps, channels, factor) = (2usize, 64usize, 2048usize, 8usize);
     // Forward reads 1 position per output element, and backward reads `factor` per input
-    // element, so both passes come to the same element-op count here
+    // element, so both passes reach the same element-op count here
     let work = samples * steps * factor * channels;
     assert!(work >= gate, "the whole batch must clear the gate");
     assert!(work / samples < gate, "1 sample must stay below the gate");
@@ -631,7 +631,7 @@ fn up_sampling_2d_survives_a_save_and_load_round_trip() {
     std::fs::remove_file(&path).unwrap();
 }
 
-/// A decoder that upsamples and then convolves trains without an error, and the loss falls
+/// A decoder that upsamples and then convolves trains without an error, and the loss decreases
 #[test]
 fn up_sampling_2d_trains_inside_a_decoder() {
     let x = Tensor::from_shape_vec(
@@ -639,7 +639,7 @@ fn up_sampling_2d_trains_inside_a_decoder() {
         (0..32).map(|k| (k % 7) as f32 * 0.1).collect(),
     )
     .unwrap();
-    // A 3x3 kernel with no padding takes the 8x8 the upsampling produced down to 6x6
+    // A 3x3 kernel with no padding reduces the 8x8 the upsampling produced to 6x6
     let y = Tensor::from_shape_vec(
         IxDyn(&[2, 6, 6, 2]),
         (0..144).map(|k| (k % 5) as f32 * 0.05).collect(),

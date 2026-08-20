@@ -21,7 +21,7 @@ use crate::neural_network::traits::Layer;
 /// forward pass fails when the 2 amounts on an axis together reach its extent
 ///
 /// A common use is a decoder that upsamples past the wanted size. The layer then trims the
-/// output back to the size of the matching encoder feature map
+/// output to the size of the matching encoder feature map
 ///
 /// [`ZeroPadding2D`](crate::neural_network::layers::border::ZeroPadding2D) is the inverse
 /// layer, and it is also this layer's backward pass

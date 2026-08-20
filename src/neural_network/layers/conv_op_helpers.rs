@@ -16,8 +16,8 @@
 //! `[batch, length, channels]` tensor holds the same values in the same row-major order as
 //! `[batch, 1, length, channels]`. A `[kernel, channels, depth_multiplier]` weight tensor holds
 //! the same order as `[1, kernel, channels, depth_multiplier]`. A 1D layer therefore sets the
-//! height fields to 1 and hands over the flat slices of its own rank-3 arrays. No repacking
-//! runs, and the module needs no separate 1D loop nest
+//! height fields to 1 and passes the flat slices of its own rank-3 arrays. No repacking runs,
+//! and the module needs no separate 1D loop nest
 
 use crate::parallel_gates::naive_conv_parallel_min_flops;
 use rayon::prelude::*;
@@ -87,7 +87,7 @@ pub(super) fn depthwise_forward(
     out: &mut [f32],
 ) {
     // `out.len()` is `batch * out_height * out_width * out_channels`, so this is the same
-    // estimate as a product written out term by term
+    // estimate as a product expanded term by term
     let flops = 2 * out.len() * g.kernel.0 * g.kernel.1;
     let row_len = g.output.1 * g.out_channels();
 
@@ -181,8 +181,8 @@ pub(super) struct DepthwiseGradients {
 ///
 /// The work splits by batch item, which keeps every write private. This sums the weight and bias
 /// partials in batch order, so the result does not depend on whether the parallel branch ran.
-/// A caller whose bias belongs to a later stage (the depthwise stage of a separable convolution
-/// carries its bias on the pointwise side) ignores the `bias` field
+/// A caller whose bias belongs to a later stage ignores the `bias` field. The depthwise stage of
+/// a separable convolution is 1 example, since it carries its bias on the pointwise side
 pub(super) fn depthwise_backward(
     g: &DepthwiseGeometry,
     src: &[f32],
@@ -220,7 +220,7 @@ pub(super) fn depthwise_backward(
     }
 }
 
-/// Weight, bias and input gradients for one batch item of a depthwise convolution
+/// Weight, bias and input gradients for 1 batch item of a depthwise convolution
 fn depthwise_item_gradients(
     g: &DepthwiseGeometry,
     src: &[f32],

@@ -1,14 +1,14 @@
 //! Integration tests for the `PReLU` layer.
 //!
-//! Covers the constructor, the `shared_axes` rule, forward values, the 2 gradients, the
-//! branch at exactly 0, memory layout, the parallel gate, the error paths, and the weight
-//! surface. `gradient_check.rs` covers the gradients against finite differences, and
+//! Covers the constructor, the `shared_axes` rule, forward values, and the 2 gradients. It also
+//! covers the branch at exactly 0, memory layout, the parallel gate, the error paths, and the
+//! weight surface. `gradient_check.rs` covers the gradients against finite differences, and
 //! `serialize.rs` covers the save and load round trip. This file does not duplicate them.
 //!
-//! Every pinned number here is exact in `f32`, so it is written as a plain decimal rather than
-//! as a rounded reference value. The branch rule at exactly 0, which is the one place where a
-//! reasonable implementation could differ, was confirmed against Keras 3.15 on the jax backend:
-//! the derivative there is 0, and not 1 and not `alpha`.
+//! Every pinned number here is exact in `f32`, so the test writes it as a plain decimal rather
+//! than as a rounded reference value. The branch rule at exactly 0 is the one place a reasonable
+//! implementation could differ. A comparison with Keras 3.15 on the jax backend confirms this.
+//! The derivative there is 0, and not 1 and not `alpha`.
 
 use ndarray::{Array, Array1, Array2, Array4, ArrayD, IxDyn};
 use rustyml::neural_network::Tensor;
@@ -282,8 +282,8 @@ fn p_relu_with_a_zero_slope_matches_relu() {
     );
 }
 
-/// A uniform slope gives the LeakyReLU transform, and the 2 layers part company only at
-/// exactly 0, where LeakyReLU passes the gradient and this layer stops it
+/// A uniform slope gives the LeakyReLU transform. The 2 layers part company only at exactly 0,
+/// where LeakyReLU passes the gradient and this layer stops it
 #[test]
 fn p_relu_with_a_uniform_slope_matches_leaky_relu_away_from_0() {
     let x = tensor(&[2, 4], vec![-1.5, 0.5, 2.0, -0.25, 3.0, -4.0, 1.0, 0.75]);
@@ -528,7 +528,7 @@ fn p_relu_accepts_any_extent_on_a_shared_axis() {
     }
 }
 
-/// The batch axis is never checked, so a partial final mini-batch still passes
+/// The layer never checks the batch axis, so a partial final mini-batch still passes
 #[test]
 fn p_relu_accepts_any_batch_size() {
     let mut layer = PReLU::new(vec![8, 3], 0.25).unwrap();

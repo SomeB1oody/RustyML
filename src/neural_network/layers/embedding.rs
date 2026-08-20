@@ -14,8 +14,8 @@ use std::borrow::Cow;
 
 /// Half-width of the uniform range that initializes the lookup table
 ///
-/// The table starts from `Uniform(-0.05, 0.05)`, which is the `"uniform"` initializer that Keras
-/// gives this layer. A dense layer starts from Xavier/Glorot instead, because its fan-in is the
+/// The table starts from `Uniform(-0.05, 0.05)`, which is this layer's `"uniform"` initializer.
+/// A dense layer starts from Xavier/Glorot instead, because its fan-in is the
 /// whole input vector. An embedding reads exactly 1 row per index, so its fan-in is 1, and a
 /// fan-based rule has nothing to scale
 const INIT_LIMIT: f32 = 0.05;
@@ -34,19 +34,20 @@ const TASK_ELEMENTS: usize = 16_384;
 /// rank is always 1 more than the input rank
 ///
 /// This is the entry point for text and for any other categorical sequence. A word index enters,
-/// and a learned vector leaves. The layer is the same function as a `Dense` layer without a bias
-/// applied to a one-hot input, but it reads 1 row instead of multiplying by a mostly-zero matrix
+/// and a learned vector leaves. The layer is the same function as a `Dense` layer without a
+/// bias, applied to a one-hot input. It reads 1 row instead of multiplying by a mostly-zero
+/// matrix
 ///
 /// # Notes
 ///
-/// A [`Tensor`] holds `f32`, so the indices arrive as floating-point values. Each value is
-/// truncated toward zero and then range-checked. `2.0` and `2.9` both select row 2, and `-0.5`
-/// selects row 0. This matches the cast to `int32` that Keras applies to a float input
+/// A [`Tensor`] holds `f32`, so the indices arrive as floating-point values. The layer truncates
+/// each value toward zero and then range-checks it. `2.0` and `2.9` both select row 2, and
+/// `-0.5` selects row 0.
 ///
 /// An index outside `0..input_dim` after truncation is an `Error::InvalidInput`, and so is a
-/// non-finite value. Keras leaves both cases to the backend, where an out-of-range index gives
-/// `NaN` and a negative index silently wraps to the end of the table. Neither result is a useful
-/// contract, so this layer reports the bad index instead
+/// non-finite value. An unchecked backend can turn an out-of-range index into `NaN`, or
+/// silently wrap a negative index to the end of the table. Neither result is a useful contract,
+/// so this layer reports the bad index instead
 ///
 /// # Examples
 ///
@@ -95,8 +96,8 @@ const TASK_ELEMENTS: usize = 16_384;
 /// data really uses
 ///
 /// A momentum-based or weight-decaying optimizer moves a row whose gradient is 0, because both
-/// rules act on the parameter and not only on the gradient. This matches the dense update path
-/// of Keras
+/// rules act on the parameter and not only on the gradient. This matches the update path of a
+/// `Dense` layer
 #[derive(Debug)]
 pub struct Embedding {
     /// Number of rows in the table, which is the vocabulary size
@@ -127,8 +128,8 @@ impl Embedding {
     ///
     /// # Notes
     ///
-    /// The table is seeded from the global seed or from entropy by default. For a reproducible
-    /// table, set a seed with [`Embedding::with_random_state`]
+    /// The layer seeds the table from the global seed or from entropy by default. For a
+    /// reproducible table, set a seed with [`Embedding::with_random_state`]
     ///
     /// # Errors
     ///
@@ -159,9 +160,9 @@ impl Embedding {
 
     /// Sets the seed used to initialize the table and re-initializes it deterministically
     ///
-    /// By default the table is seeded from the global seed or from entropy (see
-    /// [`crate::random`]). This re-runs the uniform initialization with `random_state`, so call it
-    /// before assigning custom weights or training
+    /// By default the layer seeds the table from the global seed or from entropy (see
+    /// [`crate::random`]). This re-runs the uniform initialization with `random_state`, so call
+    /// it before assigning custom weights or training
     ///
     /// # Parameters
     ///
@@ -208,7 +209,7 @@ impl Embedding {
 
     /// Turns the floating-point input into checked row indices, in output order
     ///
-    /// Each value is truncated toward zero, as a cast to a whole number does, and then checked
+    /// Truncates each value toward zero, as a cast to a whole number does, and then checks it
     /// against the table height
     ///
     /// # Errors
@@ -229,7 +230,7 @@ impl Embedding {
         let mut indices = Vec::with_capacity(input.len());
         for &value in input.iter() {
             // The cast saturates. It folds every value at or below 0, and every `NaN`, into row
-            // 0, and it folds `inf` and every huge value into `usize::MAX`. The first 2 tests
+            // 0. It folds `inf` and every huge value into `usize::MAX`. The first 2 tests
             // reject what the low end of that fold would hide. The third test rejects the rest.
             // Comparing after the cast keeps the upper bound exact, which a comparison against
             // `input_dim as f32` would not be for a table of over 2^24 rows

@@ -28,8 +28,8 @@ use std::borrow::Cow;
 /// Final output shape is \[batch_size, length', filters\]
 ///
 /// The intermediate channel for input channel `c` and multiplier index `m` is
-/// `c * depth_multiplier + m`, which is Keras' ordering. It is also the row order of the
-/// pointwise weight `\[1, channels * depth_multiplier, filters\]`. This lets the 2 stages line up
+/// `c * depth_multiplier + m`. It is also the row order of the
+/// pointwise weight `\[1, channels * depth_multiplier, filters\]`. This aligns the 2 stages
 /// with no repacking between them
 ///
 /// The separable convolution runs 2 steps:
@@ -129,9 +129,10 @@ impl SeparableConv1D {
     /// # Notes
     ///
     /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
-    /// [`SeparableConv1D::with_padding`]. The layer seeds weights from the global seed or entropy
-    /// by default. For reproducible initialization, set a seed with
-    /// [`SeparableConv1D::with_random_state`]
+    /// [`SeparableConv1D::with_padding`].
+    ///
+    /// The layer seeds weights from the global seed or entropy by default. For reproducible
+    /// initialization, set a seed with [`SeparableConv1D::with_random_state`]
     ///
     /// # Errors
     ///
@@ -236,7 +237,7 @@ impl SeparableConv1D {
         depth_multiplier: usize,
         random_state: Option<u64>,
     ) -> (Array3<f32>, Array3<f32>) {
-        // Xavier init for the depthwise weights. Keras' `compute_fans` derives both fans from the
+        // Xavier init for the depthwise weights. The fan calculation derives both fans from the
         // kernel tensor's last 2 axes. For shape [kernel_size, channels, dm] this makes the
         // depthwise kernel count `channels` in its fan_in, even though a depthwise unit sees only
         // 1 channel
@@ -354,7 +355,7 @@ impl SeparableConv1D {
     /// pointwise weights `[1, C*dm, filters]` already match the engine's flat `[k..., Cin, F]`
     /// layout. The bias is already its per-filter `[F]` vector. The depthwise stage emits its
     /// channels in `c * depth_multiplier + m` order, which is exactly the row order the pointwise
-    /// weight is indexed by. Nothing repacks the data between the stages
+    /// weight uses. Nothing repacks the data between the stages
     fn pointwise_convolve(&self, input: &Tensor) -> Tensor {
         conv_forward(
             input,

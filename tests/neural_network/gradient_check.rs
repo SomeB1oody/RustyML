@@ -262,7 +262,7 @@ fn depthwise_conv1d_same_padding_input_gradient_matches_finite_difference() {
 
 #[test]
 fn depthwise_conv1d_same_padding_weight_gradient_matches_finite_difference() {
-    // Companion to the check above. The taps that fall in the padding must also drop out of the
+    // Companion to the check above. The taps that lie in the padding must not enter the
     // weight-gradient sum.
     let mut conv = DepthwiseConv1D::new(3, vec![1, 8, 2], 1, Linear::new())
         .unwrap()
@@ -310,7 +310,7 @@ fn separable_conv1d_same_padding_input_gradient_matches_finite_difference() {
 }
 
 /// The `Same` and `depth_multiplier = 2` case at once. It covers all 3 parameter tensors while
-/// the depthwise stage is padding at both ends.
+/// the depthwise stage pads at both ends.
 #[test]
 fn separable_conv1d_same_padding_depth_multiplier_2_gradients_match_finite_difference() {
     let mut conv = SeparableConv1D::new(3, 3, vec![1, 8, 2], 2, 2, Linear::new())
@@ -536,7 +536,7 @@ fn separable_conv2d_weight_gradient_matches_finite_difference() {
 #[test]
 fn separable_conv2d_same_padding_weight_gradient_matches_finite_difference() {
     // Companion to the `Same` input-gradient check. The out-of-range taps that the depthwise
-    // stage skips must also drop out of its weight-gradient sum.
+    // stage skips must not enter its weight-gradient sum.
     let mut conv = SeparableConv2D::new(2, (3, 3), vec![1, 4, 4, 2], (1, 1), 1, Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
@@ -937,8 +937,9 @@ fn repeat_vector_input_gradient_matches_finite_difference() {
 // Every output position is a weighted sum of input positions, so the input gradient is the
 // transposed weight table. The weighted loss gives each output position its own weight, which is
 // what makes a misplaced tap visible. The ones-based helper would hide it, because the weights of
-// an output position always add up to 1. Every factor below is uneven per axis, which an equal
+// an output position always sum to 1. Every factor below is uneven per axis, which an equal
 // factor would hide.
+//
 // The step is 1e-1 rather than the usual 1e-3, because these layers are exactly linear. A linear
 // function has no truncation error at any step, so the only error left is the float32 rounding
 // of the 2 loss values. A wider step divides that rounding by more.
@@ -1162,7 +1163,7 @@ fn gru_weight_gradient_matches_finite_difference() {
     check_weight_gradient(&mut gru, &x, 1e-3, 3e-2);
 }
 
-// Embedding gradients. Only the weight direction is checked. The input holds indices, so
+// Embedding gradients test only the weight direction. The input holds indices, so
 // perturbing it selects a different row instead of moving along a derivative
 
 #[test]
@@ -1375,8 +1376,8 @@ fn batch_normalization_spatial_weight_gradient_matches_finite_difference() {
 // forward pass is the plain backward's col2im scatter, and its backward pass is the plain
 // forward's im2col gather. So the 2 directions here exercise code that no plain convolution
 // check reaches: the forward scatter's crop, and the backward gather's pad. Both padding modes
-// and a stride above 1 each need their own case, because the crop and the pad are 0 under
-// `Valid` at stride 1.
+// and a stride above 1 need their own case, because the crop and the pad are 0 under `Valid`
+// at stride 1.
 
 #[test]
 fn conv1d_transpose_input_gradient_matches_finite_difference() {

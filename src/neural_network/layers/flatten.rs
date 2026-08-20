@@ -60,8 +60,7 @@ pub struct Flatten {
     flattened_features: usize,
     /// Shape of the most recent forward input. The backward pass restores it
     ///
-    /// A flatten moves no data, so the backward pass needs the shape alone. Holding the input
-    /// values would cost a copy of the whole activation on every forward pass
+    /// A flatten moves no data, so the backward pass needs the shape alone
     input_shape: Option<Vec<usize>>,
 }
 
@@ -117,7 +116,6 @@ impl Layer for Flatten {
             )));
         }
 
-        // Save the input shape for backpropagation. The values are not needed
         self.input_shape = Some(input_shape.to_vec());
 
         let batch_size = input_shape[0];

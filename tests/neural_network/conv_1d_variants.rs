@@ -127,7 +127,7 @@ fn depthwise_conv1d_forward_rejects_non_3d_input() {
 #[test]
 fn depthwise_conv1d_cross_channel_no_bleed() {
     let mut conv = DepthwiseConv1D::new(3, vec![1, 6, 3], 1, Linear::new()).unwrap();
-    // Distinct, non-zero weights everywhere, so a leak between channels cannot cancel out
+    // Distinct, non-zero weights everywhere, so a leak between channels cannot cancel
     let w = Array3::from_shape_vec((3, 3, 1), ramp(9)).unwrap();
     conv.set_weights(w, Array1::from_vec(vec![0.25, -0.5, 0.75]))
         .unwrap();
@@ -328,7 +328,7 @@ fn depthwise_conv1d_set_weights_shape_mismatch_errors() {
     );
 }
 
-/// Forward output and input gradient come back in C order even from a strided input
+/// Forward output and input gradient return in C order even from a strided input
 #[test]
 fn depthwise_conv1d_emits_c_order_tensors_from_a_strided_input() {
     // Permuting the length and channel axes makes the array non-contiguous
@@ -538,7 +538,7 @@ fn separable_conv1d_identity_reproduces_input() {
 fn separable_conv1d_known_weight_forward_values() {
     let mut conv = SeparableConv1D::new(1, 3, vec![1, 5, 1], 1, 1, Linear::new()).unwrap();
 
-    // depthwise [k, C, dm]: taps 1, 0, 1 pick up position i and i+2
+    // depthwise [k, C, dm]: taps 1, 0, 1 select position i and i+2
     let dw = Array3::from_shape_vec((3, 1, 1), vec![1.0, 0.0, 1.0]).unwrap();
     // pointwise [1, C*dm, F]: scale by 2
     let pw = Array3::from_shape_vec((1, 1, 1), vec![2.0]).unwrap();
@@ -712,7 +712,7 @@ fn separable_conv1d_set_weights_shape_mismatch_errors() {
     }
 }
 
-/// Forward output and input gradient come back in C order even from a strided input
+/// Forward output and input gradient return in C order even from a strided input
 #[test]
 fn separable_conv1d_emits_c_order_tensors_from_a_strided_input() {
     let strided = Array::from_shape_vec((1_usize, 6, 4), ramp(24))
@@ -744,7 +744,7 @@ fn separable_conv1d_emits_c_order_tensors_from_a_strided_input() {
 
 // Weight containers
 
-/// `get_weights` hands back the matching variant, with the shapes the layer declares
+/// `get_weights` returns the matching variant, with the shapes the layer declares
 #[test]
 fn conv_1d_variants_report_their_weight_containers() {
     let depthwise = DepthwiseConv1D::new(3, vec![1, 10, 4], 1, Linear::new())

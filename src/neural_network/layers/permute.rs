@@ -20,9 +20,9 @@ use ndarray::IxDyn;
 ///
 /// Unlike [`Reshape`](crate::neural_network::layers::reshape::Reshape), this layer moves data.
 /// A reshape reads the same buffer in the same order under a new shape. A permute reads it in a
-/// new order, so the output holds the same values at different positions. Use a permute when the
-/// axis meaning must follow the values, such as before a layer that reads the last axis as the
-/// channel axis
+/// new order, so the output holds the same values at different positions. When the axis meaning
+/// must follow the values, use a permute. One example is a layer that reads the last axis as
+/// the channel axis
 ///
 /// # Examples
 ///

@@ -58,7 +58,7 @@ fn ramp_of(shape: &[usize]) -> Tensor {
 
 // Permute: the constructor
 
-/// A permutation of 1..=n is accepted at every rank the layer serves
+/// The constructor accepts any permutation of 1..=n at every rank the layer serves
 #[test]
 fn permute_new_accepts_every_permutation() {
     for dims in [

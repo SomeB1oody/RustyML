@@ -9,8 +9,8 @@ use std::borrow::Cow;
 
 /// Weights of a Conv3DTranspose layer
 ///
-/// Stored as [`Cow`] so saving borrows the live layer arrays without cloning, while loading
-/// deserializes them into owned arrays
+/// This struct stores each field as [`Cow`]. Saving borrows the live layer arrays without
+/// cloning. Loading deserializes them into owned arrays.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Conv3DTransposeLayerWeight<'a> {
     /// 5D transposed convolution kernel with shape (kernel_depth, kernel_height, kernel_width,

@@ -9,9 +9,9 @@ use std::borrow::Cow;
 
 /// Weights of an Embedding layer
 ///
-/// Stored as [`Cow`] so saving borrows the live layer array without cloning, while loading
-/// deserializes it into an owned array. The layer holds 1 parameter tensor, so this container
-/// holds 1 field
+/// This struct stores the field as [`Cow`]. Saving borrows the live layer array without cloning.
+/// Loading deserializes it into an owned array. The layer holds 1 parameter tensor, so this
+/// container holds 1 field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingLayerWeight<'a> {
     /// Lookup table of shape (input_dim, output_dim). Row `i` is the vector for index `i`

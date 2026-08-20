@@ -5,7 +5,7 @@
 //! `gradient_check.rs` covers gradient values against finite differences. This file does not
 //! duplicate them.
 //!
-//! The pinned reference numbers come from Keras 3.15 on the jax backend. Each one is written in
+//! The pinned reference numbers come from Keras 3.15 on the jax backend. Each one appears in
 //! the shortest decimal form that reads back as the same `f32`.
 
 use ndarray::{Array1, Array2, Array3, IxDyn};
@@ -180,8 +180,8 @@ fn embedding_accepts_an_input_that_is_not_in_c_order() {
 
 /// The gradient of a row is the sum over every position that selected it
 ///
-/// The values come from Keras 3.15 case `grad_repeated_indices_linear`, where row 1 is selected
-/// 4 times, row 3 twice, and rows 0 and 2 once each
+/// The values come from Keras 3.15 case `grad_repeated_indices_linear`. The index list selects
+/// row 1 4 times, row 3 twice, and rows 0 and 2 once each
 #[test]
 fn embedding_backward_matches_the_keras_scatter_add_reference() {
     let mut layer = embedding_with_table(4, 3, reference_table());
@@ -222,7 +222,8 @@ fn embedding_backward_leaves_an_unused_row_at_zero() {
         -0.801, 0.112, -0.008, 0.734, -0.247, -0.6, 0.372, 0.384, -0.024, -0.424,
     ];
     let mut layer = embedding_with_table(5, 2, table);
-    // Keras case `grad_rank1_untouched_rows_stay_zero`: rows 1, 3, and 4 are never selected
+    // Keras case `grad_rank1_untouched_rows_stay_zero`: the index list never selects rows 1, 3,
+    // and 4
     let x = Array1::from_vec(vec![2.0f32, 2.0, 2.0, 0.0]).into_dyn();
     layer.forward(&x).unwrap();
 
@@ -488,7 +489,7 @@ fn embedding_with_random_state_is_reproducible_and_bounded() {
 
 // Model integration
 
-/// An embedding front end trains inside a model, and the loss falls
+/// An embedding front end trains inside a model, and the loss decreases
 #[test]
 fn embedding_trains_inside_a_sequential_model() {
     // 4 samples of 3 word indices each, drawn from a vocabulary of 6

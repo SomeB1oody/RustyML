@@ -9,8 +9,8 @@ use std::borrow::Cow;
 
 /// Weights of a SeparableConv1D layer
 ///
-/// Stored as [`Cow`] so saving borrows the live layer arrays without cloning, while loading
-/// deserializes them into owned arrays
+/// This struct stores each field as [`Cow`]. Saving borrows the live layer arrays without
+/// cloning. Loading deserializes them into owned arrays.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SeparableConv1DLayerWeight<'a> {
     /// 3D depthwise kernel with shape (kernel_size, channels, depth_multiplier)

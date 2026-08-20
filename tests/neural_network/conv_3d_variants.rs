@@ -357,8 +357,8 @@ fn depthwise_conv2d_with_depth_multiplier_rejects_zero() {
 
 /// `output_shape` reports `channels * depth_multiplier`, which is what forward emits
 ///
-/// `output_shape` feeds `summary()`. The shared 2D calculator carries the input channel count
-/// through, which suits a plain convolution but not a depthwise one.
+/// `output_shape` feeds `summary()`. The shared 2D calculator preserves the input channel count,
+/// which suits a plain convolution but not a depthwise one.
 #[test]
 fn depthwise_conv2d_output_shape_reports_the_multiplied_channel_count() {
     let mut conv = DepthwiseConv2D::new((2, 2), vec![1, 4, 4, 3], (1, 1), Linear::new())

@@ -35,10 +35,9 @@ pub const MODEL_MAGIC: u32 = 0x524D_4C4D;
 /// On-disk model format version written by this build
 ///
 /// Bump this on any change to a weight container's tensor layout, rank, or field order. Bump it
-/// for a change to the variant order of
-/// [`LayerWeight`] too, because
-/// postcard writes the variant index and not the variant name. A new variant appended at the end
-/// of that enum leaves every existing index alone, so it needs no bump. The
+/// for a change to the variant order of [`LayerWeight`] too. postcard writes the variant index
+/// and not the variant name. A new variant appended at the end of that enum leaves every
+/// existing index alone, so it needs no bump. The
 /// load path checks structural details: layer count, layer type name, and weight extents.
 /// These checks can all pass for a file whose weights suit a different release, when the
 /// extents happen to match. This version number is what makes a stale checkpoint fail,

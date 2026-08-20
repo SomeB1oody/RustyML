@@ -48,7 +48,7 @@ use std::borrow::Cow;
 /// Unlike `Conv2D`, this layer puts no lower bound on the input size. A 1x1 input under a 3x3
 /// kernel is a normal first decoder step.
 ///
-/// A stride wider than the kernel leaves output positions that no input position reaches. Those
+/// A stride wider than the kernel leaves output positions that no input position reaches. These
 /// positions hold exactly the bias. A stride narrower than the kernel makes the windows overlap,
 /// which is the source of the checkerboard pattern a transposed convolution can produce. Pick a
 /// kernel size that the stride divides evenly to avoid it. Every output position then collects
@@ -301,10 +301,8 @@ impl Layer for Conv2DTranspose {
             return Err(Error::invalid_input("input tensor is not 4D"));
         }
 
-        // Cache input for backpropagation
         self.input_cache = Some(input.clone());
 
-        // Transposed convolution (dimension-generic engine), then activation
         let output = conv_transpose_forward(
             input,
             self.weights.as_slice().expect("weights must be contiguous"),
@@ -337,7 +335,6 @@ impl Layer for Conv2DTranspose {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // Activation backward pass first
         let activated = self
             .output_cache
             .take()
