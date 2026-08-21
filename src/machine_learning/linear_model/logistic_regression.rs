@@ -10,7 +10,7 @@ use crate::machine_learning::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_regularization_type, validate_tolerance,
 };
-use crate::math::exp_reduce_min_elems;
+use crate::math::EXP_REDUCE_MIN_ELEMS;
 use crate::math::matmul::matvec;
 use crate::math::reduction::det_reduce_range;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, exp_map_f64_parallel_threshold};
@@ -313,7 +313,7 @@ impl LogisticRegression {
             let total_loss = match (predictions.as_slice(), y.as_slice()) {
                 (Some(px), Some(py)) => det_reduce_range(
                     px.len(),
-                    px.len() >= exp_reduce_min_elems(),
+                    px.len() >= EXP_REDUCE_MIN_ELEMS,
                     |range| range.map(|i| loss_term(px[i], py[i])).sum::<f64>(),
                     |a, b| a + b,
                     0.0,

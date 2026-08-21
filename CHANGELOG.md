@@ -5,6 +5,19 @@ This change log records updates after 2025-3-24, summarized per version — each
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [Unreleased]
+### Removed
+- **5 public tuning items, none of which had a caller.** `tuning::norm::set_/get_bn_plane_stats` governed a plane-fold path that was never written, so the gate had no effect on any input. `tuning::reduction::set_/get_exp_reduce` and the whole `tuning::metrics` module (`set_/get_silhouette`) are gone as well; both gates stay, as plain constants.
+  - The silhouette gate must stay a constant. Its parallel fill matches the serial fill numerically but not bit for bit, so a public setter there changed a returned score. Every gate `tuning` exposes selects an execution strategy only, and never changes a result. That promise now holds with no exception.
+  - The exp-reduction gate is fixed by the block size. The fold splits its range into `DET_REDUCE_BLOCK` blocks, so a value below 2 blocks gives 1 task and no parallelism. A setter could not improve it.
+- **`math::matmul::gemm_chunk_rows` and `math::matmul::cache_resident` are now crate-internal.** Both carried `#[doc(hidden)]` and a written notice that they were not part of the public API. Use the `tuning::matmul` knobs that govern them, `set_/get_chunk_elems` and `set_/get_cache_resident_max_bytes`, which are unchanged.
+- **`bench_internals::KdTree`**, whose only consumer was a deleted calibration section. `KdTree` itself is unchanged and still serves DBSCAN and KNN.
+- **The `matmul_kernels` benchmark target**, and 4 calibration sections that measured nothing the crate can act on: the channel-chunked BatchNorm fold and the reserved plane fold, which have no path in `src`; the f32 `DET_REDUCE_BLOCK` sweep, which repeats 1 serial timing across all its rows; and the kd-tree ladder, which ran rayon in both of its columns and therefore reported 2 parallel timings as a crossover.
+
+### Changed
+- **`cargo bench --bench parallel_gates` no longer writes into the source tree.** The report goes to `target/parallel_gates/RESULTS.md`. Set `RUSTYML_WRITE_RESULTS=1` to refresh the tracked copy at `benches/calibrations/RESULTS.md`. A write failure now prints a warning instead of a panic.
+- **The `nn_end_to_end` Dense benchmark times `predict`, not `forward`.** `forward` writes an input cache and an output cache, so the old loop held 2 extra tensors live per iteration and measured the allocator as much as the kernel.
+
 ## [v0.15.0] - 2026-08-20
 ### Added
 - **7 new `Activation` variants: `LeakyReLU`, `ELU`, `SELU`, `Softplus`, `Softsign`, `HardSigmoid`, and `Exponential`.** Each one also ships as a thin standalone layer of the same name in `neural_network::layers::activation`. `LeakyReLU::new(negative_slope)` and `ELU::new(alpha)` return a `Result` and default to `0.3` and `1.0`, and the other 5 take no argument. The new `Activation::validate` runs in all 14 trainable layer constructors. A `negative_slope` or `alpha` that is not finite and above 0 is now `Error::InvalidParameter` at construction, not at the first forward pass.

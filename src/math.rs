@@ -44,12 +44,13 @@ pub use distance::{
     squared_euclidean_distance_row,
 };
 
-tunable_gate! {
-    /// Parallel gate for exp-heavy `f64` reductions (the logistic-regression log-loss). Below
-    /// this element count, the deterministic blocked fold cannot beat the serial sum.
-    ///
-    /// Sits below the cheap-sum gate because each element costs an `exp` plus an `ln`.
-    ///
-    /// Overridable through [`crate::tuning`].
-    pub(crate) EXP_REDUCE_MIN_ELEMS => exp_reduce_min_elems / set_exp_reduce_min_elems = 32_768
-}
+/// Parallel gate for exp-heavy `f64` reductions (the logistic-regression log-loss). Below this
+/// element count, the deterministic blocked fold cannot beat the serial sum.
+///
+/// Sits below the cheap-sum gate because each element costs an `exp` plus an `ln`.
+///
+/// The fold splits the range into [`reduction::DET_REDUCE_BLOCK`]-sized blocks, so a value below
+/// 2 blocks gives 1 task and no parallelism at all. That floor is what fixes this constant, so it
+/// is not runtime-tunable.
+#[cfg(feature = "machine_learning")]
+pub(crate) const EXP_REDUCE_MIN_ELEMS: usize = 32_768;

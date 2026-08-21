@@ -121,10 +121,8 @@ tunable_gate! {
 }
 
 /// Rows per chunk when tiling a product with `row_len`-wide output rows under `gemm_chunk_elems`.
-///
-/// Crate-internal tiling policy. Not part of the public API and carries no stability guarantee.
-#[doc(hidden)]
-pub fn gemm_chunk_rows(row_len: usize) -> usize {
+#[cfg(feature = "machine_learning")]
+pub(crate) fn gemm_chunk_rows(row_len: usize) -> usize {
     (gemm_chunk_elems() / row_len.max(1)).clamp(16, 4096)
 }
 
@@ -143,11 +141,8 @@ tunable_gate! {
 
 /// Whether an `[rows, cols]` matrix of `T` is small enough to treat as cache-resident for
 /// repeated row-GEMV sweeps (see `cache_resident_max_bytes`).
-///
-/// Crate-internal strategy policy. Not part of the public API and carries no stability
-/// guarantee.
-#[doc(hidden)]
-pub fn cache_resident<T>(rows: usize, cols: usize) -> bool {
+#[cfg(feature = "machine_learning")]
+pub(crate) fn cache_resident<T>(rows: usize, cols: usize) -> bool {
     rows.saturating_mul(cols)
         .saturating_mul(std::mem::size_of::<T>())
         < cache_resident_max_bytes()

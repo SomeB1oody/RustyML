@@ -49,18 +49,6 @@ tunable_gate! {
     pub(crate) BN_COL_STATS_PARALLEL_MIN_ELEMS => bn_col_stats_parallel_min_elems / set_bn_col_stats_parallel_min_elems = 262_144
 }
 
-tunable_gate! {
-    /// Element count above which the per-channel statistics reductions of rank >= 3 inputs run
-    /// on rayon
-    ///
-    /// Reserved for a plane-fold path over the native `[batch, *spatial, channels]` layout. The
-    /// forward and backward passes here use [`BN_COL_STATS_PARALLEL_MIN_ELEMS`] for every rank
-    /// >= 2 input instead, so this gate has no effect yet
-    ///
-    /// Overridable via [`crate::tuning`]
-    pub(crate) BN_PLANE_STATS_PARALLEL_MIN_ELEMS => bn_plane_stats_parallel_min_elems / set_bn_plane_stats_parallel_min_elems = 262_144
-}
-
 /// Batch Normalization layer for neural networks
 ///
 /// Normalizes each mini-batch to keep activations centered and scaled, improving training

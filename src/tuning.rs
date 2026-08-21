@@ -193,12 +193,6 @@ pub mod reduction {
         get_scan_f64 => crate::parallel_gates::scan_f64_parallel_min_elems,
         "the f64 short-row-scan (arg-min, distance-scan) scanned-element gate"
     );
-    #[cfg(feature = "math")]
-    fwd!(
-        set_exp_reduce => crate::math::set_exp_reduce_min_elems,
-        get_exp_reduce => crate::math::exp_reduce_min_elems,
-        "the logistic-loss exp-reduction element-count gate"
-    );
 }
 
 /// Tree-walk and split-search parallelism gates for the tree models. See
@@ -270,11 +264,6 @@ pub mod norm {
         "the BatchNorm 2-D per-channel statistics reduction gate"
     );
     fwd!(
-        set_bn_plane_stats => bn::set_bn_plane_stats_parallel_min_elems,
-        get_bn_plane_stats => bn::bn_plane_stats_parallel_min_elems,
-        "the BatchNorm rank>=3 per-channel statistics reduction gate"
-    );
-    fwd!(
         set_ln_row => ln::set_ln_row_parallel_min_elems,
         get_ln_row => ln::ln_row_parallel_min_elems,
         "the LayerNorm per-row fold gate"
@@ -293,16 +282,6 @@ pub mod norm {
         set_gn_param_grad => gn::set_gn_param_grad_parallel_min_elems,
         get_gn_param_grad => gn::gn_param_grad_parallel_min_elems,
         "the GroupNorm per-channel gradient column-fold gate"
-    );
-}
-
-/// Metrics parallelism gate (silhouette score). See [`crate::metrics`].
-#[cfg(feature = "metrics")]
-pub mod metrics {
-    fwd!(
-        set_silhouette => crate::metrics::clustering::set_silhouette_parallel_min_elems,
-        get_silhouette => crate::metrics::clustering::silhouette_parallel_min_elems,
-        "the silhouette-score pairwise-distance-fill scanned-element gate"
     );
 }
 

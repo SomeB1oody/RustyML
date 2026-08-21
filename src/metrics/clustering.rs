@@ -26,17 +26,18 @@ use crate::math::squared_euclidean_distance_row;
 /// clustering and the score is defined to be `1.0`
 const DEGENERATE_DENOM: f64 = 1e-10;
 
-tunable_gate! {
-    /// Total scanned-element work (`n * n * d`) at or above which [`silhouette_score`] fills its
-    /// pairwise-distance matrix in parallel. Below the gate, the fill uses the serial path
-    ///
-    /// The fill runs `n` tasks of an `O(n * d)` distance-row scan each, the same cost class as the
-    /// crate's calibrated f64 row-scan gate. The constant is restated here instead of imported
-    /// because `metrics` stays a lightweight leaf module
-    ///
-    /// Overridable via [`crate::tuning`]
-    pub(crate) SILHOUETTE_PARALLEL_MIN_ELEMS => silhouette_parallel_min_elems / set_silhouette_parallel_min_elems = 262_144
-}
+/// Total scanned-element work (`n * n * d`) at or above which [`silhouette_score`] fills its
+/// pairwise-distance matrix in parallel. Below the gate, the fill uses the serial path
+///
+/// The fill runs `n` tasks of an `O(n * d)` distance-row scan each, the same cost class as the
+/// crate's calibrated f64 row-scan gate. The constant is restated here instead of imported because
+/// `metrics` stays a lightweight leaf module
+///
+/// This gate is not runtime-tunable, and it is the 1 gate in the crate that must not be. The
+/// parallel fill matches the serial fill numerically but not bit for bit, so moving this value
+/// would change a returned score. Every gate that [`crate::tuning`] exposes selects a strategy
+/// only, and never changes a result
+const SILHOUETTE_PARALLEL_MIN_ELEMS: usize = 262_144;
 
 /// Maps each distinct label to a dense index in `0..k` in order of first appearance
 fn label_index(labels: &[isize]) -> AHashMap<isize, usize> {
@@ -426,7 +427,7 @@ where
     let n = x.nrows();
     let scan_work = n.saturating_mul(n).saturating_mul(x.ncols());
 
-    if scan_work < silhouette_parallel_min_elems() {
+    if scan_work < SILHOUETTE_PARALLEL_MIN_ELEMS {
         let mut dist = Array2::<f64>::zeros((n, k));
         accumulate_upper_triangle(&mut dist, 0..n, x, cluster, metric);
         return dist;
