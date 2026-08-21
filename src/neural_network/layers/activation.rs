@@ -210,31 +210,27 @@ impl Activation {
         match self {
             Activation::Linear => Ok(z.clone()),
             Activation::ReLU => {
-                let mut out = z.clone();
                 let relu = |x: f32| if x <= 0.0 { 0.0 } else { x };
-                if out.len() >= cheap_map_parallel_threshold() {
-                    out.par_mapv_inplace(relu);
+                let out = if z.len() >= cheap_map_parallel_threshold() {
+                    Zip::from(z).par_map_collect(|&x| relu(x))
                 } else {
-                    out.mapv_inplace(relu);
-                }
+                    z.mapv(relu)
+                };
                 Ok(out)
             }
             Activation::Sigmoid => {
-                let mut out = z.clone();
                 let sigmoid = |x: f32| 1.0 / (1.0 + (-x).exp());
-                if out.len() >= exp_map_parallel_threshold() {
-                    out.par_mapv_inplace(sigmoid);
+                let out = if z.len() >= exp_map_parallel_threshold() {
+                    Zip::from(z).par_map_collect(|&x| sigmoid(x))
                 } else {
-                    out.mapv_inplace(sigmoid);
-                }
+                    z.mapv(sigmoid)
+                };
                 Ok(out)
             }
             Activation::Tanh => {
                 let tanh = |x: f32| x.tanh();
                 let out = if z.len() >= exp_map_parallel_threshold() {
-                    let mut out = z.clone();
-                    out.par_mapv_inplace(tanh);
-                    out
+                    Zip::from(z).par_map_collect(|&x| tanh(x))
                 } else {
                     z.mapv(tanh)
                 };
@@ -245,9 +241,7 @@ impl Activation {
                 let slope = *negative_slope;
                 let leaky_relu = |x: f32| if x >= 0.0 { x } else { slope * x };
                 let out = if z.len() >= cheap_map_parallel_threshold() {
-                    let mut out = z.clone();
-                    out.par_mapv_inplace(leaky_relu);
-                    out
+                    Zip::from(z).par_map_collect(|&x| leaky_relu(x))
                 } else {
                     z.mapv(leaky_relu)
                 };
@@ -258,9 +252,7 @@ impl Activation {
                 // `exp_m1` keeps the full precision of `e^x - 1` as x approaches 0
                 let elu = |x: f32| if x > 0.0 { x } else { alpha * x.exp_m1() };
                 let out = if z.len() >= exp_map_parallel_threshold() {
-                    let mut out = z.clone();
-                    out.par_mapv_inplace(elu);
-                    out
+                    Zip::from(z).par_map_collect(|&x| elu(x))
                 } else {
                     z.mapv(elu)
                 };
@@ -275,9 +267,7 @@ impl Activation {
                     }
                 };
                 let out = if z.len() >= exp_map_parallel_threshold() {
-                    let mut out = z.clone();
-                    out.par_mapv_inplace(selu);
-                    out
+                    Zip::from(z).par_map_collect(|&x| selu(x))
                 } else {
                     z.mapv(selu)
                 };
@@ -294,9 +284,7 @@ impl Activation {
                     }
                 };
                 let out = if z.len() >= exp_map_parallel_threshold() {
-                    let mut out = z.clone();
-                    out.par_mapv_inplace(softplus);
-                    out
+                    Zip::from(z).par_map_collect(|&x| softplus(x))
                 } else {
                     z.mapv(softplus)
                 };
@@ -305,9 +293,7 @@ impl Activation {
             Activation::Softsign => {
                 let softsign = |x: f32| x / (1.0 + x.abs());
                 let out = if z.len() >= cheap_map_parallel_threshold() {
-                    let mut out = z.clone();
-                    out.par_mapv_inplace(softsign);
-                    out
+                    Zip::from(z).par_map_collect(|&x| softsign(x))
                 } else {
                     z.mapv(softsign)
                 };
@@ -316,9 +302,7 @@ impl Activation {
             Activation::HardSigmoid => {
                 let hard_sigmoid = |x: f32| (x + 3.0).clamp(0.0, 6.0) / 6.0;
                 let out = if z.len() >= cheap_map_parallel_threshold() {
-                    let mut out = z.clone();
-                    out.par_mapv_inplace(hard_sigmoid);
-                    out
+                    Zip::from(z).par_map_collect(|&x| hard_sigmoid(x))
                 } else {
                     z.mapv(hard_sigmoid)
                 };
@@ -327,9 +311,7 @@ impl Activation {
             Activation::Exponential => {
                 let exponential = |x: f32| x.exp();
                 let out = if z.len() >= exp_map_parallel_threshold() {
-                    let mut out = z.clone();
-                    out.par_mapv_inplace(exponential);
-                    out
+                    Zip::from(z).par_map_collect(|&x| exponential(x))
                 } else {
                     z.mapv(exponential)
                 };

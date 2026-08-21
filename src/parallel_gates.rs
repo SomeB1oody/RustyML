@@ -154,6 +154,11 @@ tunable_gate! {
     /// Above the gate, callers must use [`crate::math::reduction::det_reduce`] (or its
     /// index-range twin). A bare rayon `sum`/`reduce` does not reproduce across runs on the
     /// same machine.
+    ///
+    /// A caller whose work metric is a product, and not the length of the axis the fold blocks,
+    /// must also check that axis against 2 blocks of
+    /// [`DET_REDUCE_BLOCK`](crate::math::reduction::DET_REDUCE_BLOCK). The gate can otherwise
+    /// clear on a wide, short input while the fold still has 1 task.
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
     pub(crate) SUM_F64_PARALLEL_MIN_ELEMS
         => sum_f64_parallel_min_elems / set_sum_f64_parallel_min_elems = 262_144

@@ -544,9 +544,14 @@ impl KMeans {
             // Folds every sample's row into its cluster's running sum. Also accumulates the
             // per-cluster counts and the total inertia. Runs as a deterministic blocked range
             // fold, on rayon above the sum gate (work metric: samples x features)
+            //
+            // The fold blocks the sample axis, not the product, so the feature count inflates
+            // the work estimate without adding a task. Below 2 blocks there is 1 task and the
+            // parallel path is pure overhead, whatever the product says
             let n_clusters = self.n_clusters;
-            let accumulate_parallel =
-                n_samples.saturating_mul(n_features) >= sum_f64_parallel_min_elems();
+            let accumulate_parallel = n_samples.saturating_mul(n_features)
+                >= sum_f64_parallel_min_elems()
+                && n_samples >= 2 * DET_REDUCE_BLOCK;
             let (sums, new_counts, inertia) = det_reduce_range(
                 n_samples,
                 accumulate_parallel,
@@ -751,10 +756,11 @@ impl KMeans {
             (0..n_samples).map(assign).collect()
         };
 
-        // Deterministic blocked sum, so the parallel and serial paths agree
+        // Deterministic blocked sum, so the parallel and serial paths agree. The fold blocks the
+        // sample axis, so it also needs at least 2 blocks to have more than 1 task
         let inertia = det_reduce_range(
             n_samples,
-            scan_work >= sum_f64_parallel_min_elems(),
+            scan_work >= sum_f64_parallel_min_elems() && n_samples >= 2 * DET_REDUCE_BLOCK,
             |range| range.map(|i| results[i].1).sum::<f64>(),
             |a, b| a + b,
             0.0,

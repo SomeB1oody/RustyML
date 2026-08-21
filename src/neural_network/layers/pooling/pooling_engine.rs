@@ -435,12 +435,18 @@ pub(super) fn windowed_pool_backward(
     };
 
     // One task per (batch item, channel slab)
+    //
+    // The gate is calibrated on the forward pass, which splits the output positions. This pass
+    // splits the channels instead, and the slab has a floor, so a narrow-channel input reaches
+    // 1 task however much work it holds. The task count therefore gets its own check: the gate
+    // decides whether the work is worth spreading, and the count decides whether it can be
+    // spread at all
     let total_ops = batch
         .saturating_mul(plane_out)
         .saturating_mul(channels)
         .saturating_mul(pool.iter().product::<usize>());
-    let parallel = total_ops >= pool_parallel_min_ops();
-    let slab = if parallel && batch > 0 && channels > 0 {
+    let worth_parallel = total_ops >= pool_parallel_min_ops();
+    let slab = if worth_parallel && batch > 0 && channels > 0 {
         let slabs_per_item = rayon::current_num_threads().div_ceil(batch);
         channels
             .div_ceil(slabs_per_item)
@@ -449,6 +455,7 @@ pub(super) fn windowed_pool_backward(
     } else {
         channels.max(1)
     };
+    let parallel = worth_parallel && batch.saturating_mul(channels.div_ceil(slab.max(1))) > 1;
     let tasks: Vec<(usize, usize, usize)> = (0..batch)
         .flat_map(|b| {
             (0..channels)
@@ -547,6 +554,8 @@ pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Op
         (acc, arg)
     };
 
+    // A global pool has 1 output position, so the tap count per item is exactly `item_in` and
+    // this metric is the same element-ops count the windowed passes use
     let parallel = batch.saturating_mul(item_in) >= pool_parallel_min_ops();
     let partials: Vec<(Vec<f32>, Vec<usize>)> = if parallel {
         tasks.par_iter().map(run).collect()

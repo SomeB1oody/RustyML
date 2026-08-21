@@ -938,8 +938,10 @@ fn max_pooling_2d_forward_non_square_spatial() {
 
 // The pooling engine runs in parallel once batch * out_positions * channels * window taps
 // clears the gate in `crate::tuning::pool`. Forward splits work over output-position blocks.
-// Backward splits over channel slabs. Each test below picks a shape that clears the gate on
-// its own axis. Distinct per-position and per-channel values then catch a mis-ordered
+// Backward splits over channel slabs, and it also needs more than 1 slab: a 1-item batch with
+// no more channels than the slab floor gives 1 task, which the engine keeps serial whatever the
+// gate says. Each test below picks a shape that clears the gate on its own axis, and the
+// backward shapes carry enough channels to split. Distinct per-position and per-channel values then catch a mis-ordered
 // reassembly of the split pieces.
 
 /// Parallel forward keeps every output position and channel in place across position blocks

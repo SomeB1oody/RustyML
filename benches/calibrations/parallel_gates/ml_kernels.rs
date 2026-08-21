@@ -240,8 +240,11 @@ pub fn calibrate_exp_reduction() -> Section {
 /// The per-iteration k-means pass that folds every sample's row into its cluster's centroid sum
 /// (plus counts and inertia). Serial is the production scatter loop. Parallel is the
 /// deterministic blocked range fold with an (Array2 sums, counts, inertia) accumulator per
-/// block. The work metric is samples x features. The d=8 rungs land in the same bracket as the
-/// d=32 rungs, which is what justifies gating on the product.
+/// block. The work metric is samples x features, but the fold blocks the sample axis alone, so
+/// the feature count inflates the estimate without adding a task. The d=8 and d=32 rungs
+/// therefore do NOT share a bracket at equal work: every rung tracks the block count, which is
+/// `ceil(n / DET_REDUCE_BLOCK)`. The call site pairs the product with a 2-block floor on the
+/// sample count for that reason.
 pub fn calibrate_kmeans_accumulate() -> Section {
     let mut rows = Vec::new();
     for &(n, d, k) in &[
@@ -306,7 +309,8 @@ pub fn calibrate_kmeans_accumulate() -> Section {
         });
     }
     Section {
-        title: "k-means assign-accumulate (SUM gate on samples x features)",
+        title: "k-means assign-accumulate (SUM gate; every rung tracks ceil(n / \
+                DET_REDUCE_BLOCK), not the product)",
         work_unit: "samples x features",
         pick_fastest: false,
         rows,
