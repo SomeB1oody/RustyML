@@ -10,7 +10,7 @@
 //! serves every rank >= 2
 
 use super::col_fold_parallel_min_elems;
-use super::folds::{par_col_dot, par_col_sum};
+use super::folds::{par_col_dot, par_col_sum, rows_per_block};
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -24,9 +24,8 @@ use crate::neural_network::layers::regularization::validation::{
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::Axis;
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
-};
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+use rayon::slice::{ParallelSlice, ParallelSliceMut};
 use std::borrow::Cow;
 
 tunable_gate! {
@@ -251,14 +250,21 @@ impl Layer for BatchNormalization {
                 let mut x_centered = Tensor::zeros(input.raw_dim());
                 let mean_s = batch_mean.as_slice().unwrap();
                 let feature_size = mean_s.len();
+                let chunk = rows_per_block(feature_size) * feature_size;
                 x_centered
                     .as_slice_mut()
                     .unwrap()
-                    .par_iter_mut()
-                    .zip(input.as_slice().unwrap().par_iter())
-                    .enumerate()
-                    .for_each(|(i, (centered, &val))| {
-                        *centered = val - mean_s[i % feature_size];
+                    .par_chunks_mut(chunk)
+                    .zip(input.as_slice().unwrap().par_chunks(chunk))
+                    .for_each(|(out_c, in_c)| {
+                        let rows = out_c
+                            .chunks_exact_mut(feature_size)
+                            .zip(in_c.chunks_exact(feature_size));
+                        for (out_row, in_row) in rows {
+                            for ((o, &v), &m) in out_row.iter_mut().zip(in_row).zip(mean_s.iter()) {
+                                *o = v - m;
+                            }
+                        }
                     });
                 x_centered
             } else {
@@ -292,17 +298,24 @@ impl Layer for BatchNormalization {
                     let gamma_s = self.gamma.as_slice().unwrap();
                     let beta_s = self.beta.as_slice().unwrap();
                     let feature_size = std_s.len();
+                    let chunk = rows_per_block(feature_size) * feature_size;
                     x_normalized
                         .as_slice_mut()
                         .unwrap()
-                        .par_iter_mut()
-                        .zip(output.as_slice_mut().unwrap().par_iter_mut())
-                        .zip(x_centered.as_slice().unwrap().par_iter())
-                        .enumerate()
-                        .for_each(|(i, ((norm, out), &centered))| {
-                            let f = i % feature_size;
-                            *norm = centered / std_s[f];
-                            *out = *norm * gamma_s[f] + beta_s[f];
+                        .par_chunks_mut(chunk)
+                        .zip(output.as_slice_mut().unwrap().par_chunks_mut(chunk))
+                        .zip(x_centered.as_slice().unwrap().par_chunks(chunk))
+                        .for_each(|((norm_c, out_c), cen_c)| {
+                            let rows = norm_c
+                                .chunks_exact_mut(feature_size)
+                                .zip(out_c.chunks_exact_mut(feature_size))
+                                .zip(cen_c.chunks_exact(feature_size));
+                            for ((norm_row, out_row), cen_row) in rows {
+                                for f in 0..feature_size {
+                                    norm_row[f] = cen_row[f] / std_s[f];
+                                    out_row[f] = norm_row[f] * gamma_s[f] + beta_s[f];
+                                }
+                            }
                         });
                 }
                 (x_normalized, output)
@@ -425,14 +438,22 @@ impl Layer for BatchNormalization {
             let mut grad_x_norm = Tensor::zeros(grad_output.raw_dim());
             let gamma_s = self.gamma.as_slice().unwrap();
             let feature_size = gamma_s.len();
+            let chunk = rows_per_block(feature_size) * feature_size;
             grad_x_norm
                 .as_slice_mut()
                 .unwrap()
-                .par_iter_mut()
-                .zip(grad_output.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, (g_norm, &g_out))| {
-                    *g_norm = g_out * gamma_s[i % feature_size];
+                .par_chunks_mut(chunk)
+                .zip(grad_output.as_slice().unwrap().par_chunks(chunk))
+                .for_each(|(norm_c, out_c)| {
+                    let rows = norm_c
+                        .chunks_exact_mut(feature_size)
+                        .zip(out_c.chunks_exact(feature_size));
+                    for (norm_row, out_row) in rows {
+                        for ((n, &g), &gam) in norm_row.iter_mut().zip(out_row).zip(gamma_s.iter())
+                        {
+                            *n = g * gam;
+                        }
+                    }
                 });
             grad_x_norm
         } else {
@@ -489,18 +510,28 @@ impl Layer for BatchNormalization {
             let grad_var_s = grad_var.as_slice().unwrap();
             let grad_mean_s = grad_mean.as_slice().unwrap();
             let feature_size = inv_std_s.len();
+            let chunk = rows_per_block(feature_size) * feature_size;
             grad_inp
                 .as_slice_mut()
                 .unwrap()
-                .par_iter_mut()
-                .zip(grad_x_normalized.as_slice().unwrap().par_iter())
-                .zip(x_centered.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, ((g_inp, &g_norm), &x_cent))| {
-                    let f = i % feature_size;
-                    *g_inp = g_norm * inv_std_s[f]
-                        + grad_var_s[f] * x_cent * 2.0 / batch_size
-                        + grad_mean_s[f] / batch_size;
+                .par_chunks_mut(chunk)
+                .zip(grad_x_normalized.as_slice().unwrap().par_chunks(chunk))
+                .zip(x_centered.as_slice().unwrap().par_chunks(chunk))
+                .for_each(|((inp_c, norm_c), cen_c)| {
+                    let rows = inp_c
+                        .chunks_exact_mut(feature_size)
+                        .zip(norm_c.chunks_exact(feature_size))
+                        .zip(cen_c.chunks_exact(feature_size));
+                    for ((inp_row, norm_row), cen_row) in rows {
+                        for f in 0..feature_size {
+                            // The 2nd term keeps the serial arm's association,
+                            // `grad_var * ((x_centered * 2) / batch_size)`. Multiplying the
+                            // product first rounds somewhere else and changes the last bit
+                            inp_row[f] = norm_row[f] * inv_std_s[f]
+                                + grad_var_s[f] * (cen_row[f] * 2.0 / batch_size)
+                                + grad_mean_s[f] / batch_size;
+                        }
+                    }
                 });
             grad_inp
         } else {

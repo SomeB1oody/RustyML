@@ -2,7 +2,7 @@
 //! running-stats, and error-path behavior. Expected values come from the mathematical
 //! definition. Gradient correctness lives in tests/neural_network/gradient_check.rs.
 
-use ndarray::ArrayD;
+use ndarray::{ArrayD, Dimension};
 use rustyml::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization;
 use rustyml::neural_network::layers::regularization::normalization::layer_normalization::{
     LayerNormalization, LayerNormalizationAxis,
@@ -952,4 +952,132 @@ fn bn_spatial_4d_backward_shape() {
     let grad_in = bn.backward(&grad).unwrap();
     assert_eq!(grad_in.shape(), &[2, 3, 2, 2]);
     assert!(grad_in.iter().all(|v| v.is_finite()));
+}
+
+// Gate contract: moving a threshold must not change a single bit
+
+/// RAII guard for the 2 process-global gates BatchNormalization reads
+///
+/// The gates are process-global atomics and the test harness runs tests in parallel, so a test
+/// that moves one must put it back, even on a panic. A sibling test that runs on the other path
+/// meanwhile still gets the same values, which is exactly the property under test here
+#[must_use = "bind the guard to a variable; an unbound guard restores the gates immediately"]
+struct BatchNormGateGuard {
+    batch_norm: usize,
+    col_fold: usize,
+}
+
+impl BatchNormGateGuard {
+    /// Puts both gates at `value` and remembers what they were
+    fn set(value: usize) -> Self {
+        let guard = BatchNormGateGuard {
+            batch_norm: rustyml::tuning::norm::get_batch_norm(),
+            col_fold: rustyml::tuning::norm::get_col_fold(),
+        };
+        rustyml::tuning::norm::set_batch_norm(value);
+        rustyml::tuning::norm::set_col_fold(value);
+        guard
+    }
+}
+
+impl Drop for BatchNormGateGuard {
+    fn drop(&mut self) {
+        rustyml::tuning::norm::set_batch_norm(self.batch_norm);
+        rustyml::tuning::norm::set_col_fold(self.col_fold);
+    }
+}
+
+/// 1 training forward and 1 backward, with both gates forced to the given side
+///
+/// Returns the output, the input gradient, and the flat gamma and beta gradients
+fn bn_run(shape: &[usize], gate: usize) -> (ArrayD<f32>, ArrayD<f32>, Vec<f32>) {
+    let _guard = BatchNormGateGuard::set(gate);
+
+    let x: ArrayD<f32> = ArrayD::from_shape_fn(shape.to_vec(), |idx| {
+        let k: usize = idx
+            .slice()
+            .iter()
+            .enumerate()
+            .map(|(a, d)| d * (a + 1))
+            .sum();
+        ((k % 23) as f32) * 0.125 - 1.5
+    });
+    let grad: ArrayD<f32> = ArrayD::from_shape_fn(shape.to_vec(), |idx| {
+        let k: usize = idx
+            .slice()
+            .iter()
+            .enumerate()
+            .map(|(a, d)| d * (a + 3))
+            .sum();
+        ((k % 19) as f32) * 0.0625 - 0.5
+    });
+
+    let mut bn = BatchNormalization::new(shape.to_vec(), 0.9, 1e-5).unwrap();
+    let out = bn.forward(&x).unwrap();
+    let grad_in = bn.backward(&grad).unwrap();
+    // `parameters` hands out gamma and beta with the gradients the backward pass just wrote
+    let grads: Vec<f32> = bn
+        .parameters()
+        .iter()
+        .flat_map(|p| p.grad.iter().copied())
+        .collect();
+    assert!(!grads.is_empty(), "the backward pass must write gradients");
+    (out, grad_in, grads)
+}
+
+/// Moving the BatchNormalization gates must not change a single bit
+///
+/// `crate::tuning` documents that a gate selects an execution strategy and never changes a
+/// result. Every pass the 2 gates control is elementwise or a shape-blocked fold, so the serial
+/// and the parallel arm must agree exactly, and not merely to a tolerance. The shape clears the
+/// shipped threshold and its channel count divides neither the block size nor a power of 2, so
+/// the parallel arm's row chunking has to handle a partial block
+#[test]
+fn bn_gate_move_does_not_change_any_bit() {
+    // 11 * 64 * 96 * 5 = 337,920 elements, above the shipped 262,144 gate
+    //
+    // The row count `M = 11 * 64 * 96 = 67,584` must NOT be a power of 2, and the channel count
+    // must divide neither a power of 2 nor the fold block size. A power-of-2 `M` makes the
+    // division by it exact, which hides any difference in how the 2 arms associate their
+    // multiplications, and a convenient channel count hides a partial row chunk
+    let shape = [11usize, 64, 96, 5];
+    let rows: usize = shape[..shape.len() - 1].iter().product();
+    assert!(!rows.is_power_of_two(), "M must not be a power of 2");
+    let work: usize = shape.iter().product();
+    assert!(
+        work >= rustyml::tuning::norm::get_batch_norm(),
+        "the shape must clear the shipped gate"
+    );
+
+    let (s_out, s_grad, s_par) = bn_run(&shape, usize::MAX);
+    let (p_out, p_grad, p_par) = bn_run(&shape, 0);
+
+    for (name, a, b) in [
+        (
+            "output",
+            s_out.as_slice().unwrap(),
+            p_out.as_slice().unwrap(),
+        ),
+        (
+            "grad_input",
+            s_grad.as_slice().unwrap(),
+            p_grad.as_slice().unwrap(),
+        ),
+        ("gamma/beta gradients", &s_par[..], &p_par[..]),
+    ] {
+        assert_eq!(a.len(), b.len(), "{name} length differs");
+        let mismatches = a
+            .iter()
+            .zip(b.iter())
+            .enumerate()
+            .filter(|(_, (x, y))| x.to_bits() != y.to_bits())
+            .take(3)
+            .map(|(i, (x, y))| format!("[{i}] serial {x:e} vs parallel {y:e}"))
+            .collect::<Vec<_>>();
+        assert!(
+            mismatches.is_empty(),
+            "{name}: the serial and parallel arms differ; first mismatches: {}",
+            mismatches.join(", ")
+        );
+    }
 }
