@@ -149,6 +149,11 @@ fn bench_ln_row_pass(
 /// The trailing-axis LayerNorm forward pass: forced serial vs forced parallel of the same
 /// fused row sweep. Per-row bits are scheduling-invariant, so the gate is a pure performance
 /// knob. Spans transformer-scale shapes plus wide-row and narrow-row extremes
+///
+/// The last rung is a reference point rather than a candidate for the gate. It holds the input
+/// plus 3 working buffers, which is 4 times its own size, so the working set overflows a typical
+/// shared L3 and both columns fall to memory bandwidth. Its label says so, because a bare speedup
+/// near 1.00x there reads like a scheduling result and is not one
 pub fn calibrate_ln_row_pass() -> Section {
     let mut rows = Vec::new();
     for &(r, n) in &[
@@ -158,6 +163,7 @@ pub fn calibrate_ln_row_pass() -> Section {
         (2_048, 512),
         (64, 16_384),
         (32_768, 32),
+        // 4 buffers of this size overflow a typical shared L3: bandwidth-bound, not scheduling
         (16_384, 768),
     ] {
         let x = random_matrix(r, n, 109);
@@ -178,7 +184,11 @@ pub fn calibrate_ln_row_pass() -> Section {
             black_box(&bufs.2);
         });
         rows.push(Row {
-            label: format!("R={r} N={n}"),
+            label: if r == 16_384 && n == 768 {
+                format!("R={r} N={n} (bandwidth-bound)")
+            } else {
+                format!("R={r} N={n}")
+            },
             work: r * n,
             serial_ns: s,
             parallel_ns: p,

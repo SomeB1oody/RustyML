@@ -36,6 +36,15 @@ pub fn time_per_call_ns<F: FnMut()>(mut f: F) -> f64 {
     best
 }
 
+/// Speedup at or below which a rung counts as a loss. The margin filters the ~1.00x ties that
+/// would otherwise read as a crossover
+const WIN_MARGIN: f64 = 1.05;
+
+/// Losing rungs above the crossover that do not invalidate it. A ladder usually has at most 1:
+/// either a noisy measurement, or a largest shape whose working set overflows the cache, where a
+/// wide machine returns single-thread throughput
+const MAX_INTERIOR_DIPS: usize = 1;
+
 /// 1 measured ladder rung
 pub struct Row {
     /// Label for this rung, used in the printed table and the markdown report
@@ -97,28 +106,82 @@ impl Section {
                 best.speedup()
             );
         }
-        match self.crossover() {
-            Some((0, hi)) => format!(
-                "crossover below {hi} {} (parallel wins everywhere)",
-                self.work_unit
+        let ladder = self.ladder();
+        match self.crossover(&ladder) {
+            Some((None, hi, dips)) => format!(
+                "crossover at or below {hi} {} (parallel wins from the first rung){}",
+                self.work_unit,
+                Self::dip_note(&dips, self.work_unit)
             ),
-            Some((lo, hi)) => format!("crossover between {lo} and {hi} {}", self.work_unit),
-            None => "no crossover observed in this ladder".to_string(),
+            Some((Some(lo), hi, dips)) => format!(
+                "crossover between {lo} and {hi} {}{}",
+                self.work_unit,
+                Self::dip_note(&dips, self.work_unit)
+            ),
+            None => {
+                let best = ladder
+                    .iter()
+                    .max_by(|a, b| a.1.total_cmp(&b.1))
+                    .expect("ladder has rows");
+                format!(
+                    "no crossover in this ladder (best {:.2}x at {} {})",
+                    best.1, best.0, self.work_unit
+                )
+            }
         }
     }
 
-    /// The work bracket where the parallel path starts winning for good. It is the rung after
-    /// the *last* rung (in work order) whose speedup stays within the noise margin of losing.
-    /// The 1.05x threshold filters out ~1.00x ties that would otherwise read as early
-    /// crossovers.
-    fn crossover(&self) -> Option<(usize, usize)> {
-        let mut sorted: Vec<&Row> = self.rows.iter().collect();
-        sorted.sort_by_key(|r| r.work);
-        let last_loss = sorted.iter().rposition(|r| r.speedup() <= 1.05);
-        match last_loss {
-            None => Some((0, sorted.first()?.work)),
-            Some(i) if i + 1 < sorted.len() => Some((sorted[i].work, sorted[i + 1].work)),
-            Some(_) => None,
+    /// The rungs in work order, with tied work values collapsed to their slowest rung
+    ///
+    /// Several ladders repeat a work value at different shapes, because a work estimate is 1
+    /// number and a shape is not. A tie collapses to its slowest rung: a crossover claim must
+    /// hold for every shape that reaches that work, and not only for the best of them
+    fn ladder(&self) -> Vec<(usize, f64)> {
+        let mut rungs: Vec<(usize, f64)> =
+            self.rows.iter().map(|r| (r.work, r.speedup())).collect();
+        rungs.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
+        rungs.dedup_by(|later, first| first.0 == later.0);
+        rungs
+    }
+
+    /// The work bracket from which the parallel path wins, plus every rung above it that falls
+    /// back to a loss
+    ///
+    /// The rule finds the first rung that wins and has no more than [`MAX_INTERIOR_DIPS`] losing
+    /// rungs above it. An earlier rule keyed on the LAST loss instead, which let 1 slow top rung
+    /// erase a whole ladder. That is exactly what a largest shape produces when its working set
+    /// stops fitting in cache, so the rule discarded the ladders that needed it most. The same
+    /// rule also pushed a bracket past a real win whenever 1 interior rung dipped.
+    fn crossover(&self, ladder: &[(usize, f64)]) -> Option<(Option<usize>, usize, Vec<usize>)> {
+        for i in 0..ladder.len() {
+            if ladder[i].1 <= WIN_MARGIN {
+                continue;
+            }
+            let dips: Vec<usize> = ladder[i..]
+                .iter()
+                .filter(|(_, sp)| *sp <= WIN_MARGIN)
+                .map(|(w, _)| *w)
+                .collect();
+            if dips.len() <= MAX_INTERIOR_DIPS {
+                let lo = if i == 0 { None } else { Some(ladder[i - 1].0) };
+                return Some((lo, ladder[i].0, dips));
+            }
+        }
+        None
+    }
+
+    /// Names the tolerated losing rungs, so a bracket never hides one
+    fn dip_note(dips: &[usize], unit: &str) -> String {
+        match dips {
+            [] => String::new(),
+            [w] => format!("; the {w} {unit} rung above it falls back to a loss"),
+            _ => format!(
+                "; these rungs above it fall back to a loss: {}",
+                dips.iter()
+                    .map(|w| w.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         }
     }
 
