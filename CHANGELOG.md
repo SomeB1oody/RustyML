@@ -11,14 +11,20 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
   - The silhouette gate must stay a constant. Its parallel fill matches the serial fill numerically but not bit for bit, so a public setter there changed a returned score. Every gate `tuning` exposes selects an execution strategy only, and never changes a result. That promise now holds with no exception.
   - The exp-reduction gate is fixed by the block size. The fold splits its range into `DET_REDUCE_BLOCK` blocks, so a value below 2 blocks gives 1 task and no parallelism. A setter could not improve it.
 - **`math::matmul::gemm_chunk_rows` and `math::matmul::cache_resident` are now crate-internal.** Both carried `#[doc(hidden)]` and a written notice that they were not part of the public API. Use the `tuning::matmul` knobs that govern them, `set_/get_chunk_elems` and `set_/get_cache_resident_max_bytes`, which are unchanged.
+- **6 unreachable `match` arms in `BatchNormalization`.** Each guard discriminated on `Some`/`None` for a buffer the surrounding code already guarantees is contiguous, so only the rank >= 2 half was ever live, and the other half was a plain rank test computed 2 lines earlier. Verified with a temporary assertion over the whole test suite before the change.
+- **`apply_spatial_dropout_threshold`,** whose parallel arm was gated at 4,000,000 elements on a mask that holds 1 value per `(batch, channel)`. The largest shape in the repository reaches 131,072, which is 30x below the gate. The 1 surviving line moves to its 3 call sites.
 - **`bench_internals::KdTree`**, whose only consumer was a deleted calibration section. `KdTree` itself is unchanged and still serves DBSCAN and KNN.
 - **The `matmul_kernels` benchmark target**, and 4 calibration sections that measured nothing the crate can act on: the channel-chunked BatchNorm fold and the reserved plane fold, which have no path in `src`; the f32 `DET_REDUCE_BLOCK` sweep, which repeats 1 serial timing across all its rows; and the kd-tree ladder, which ran rayon in both of its columns and therefore reported 2 parallel timings as a crossover.
 
+### Fixed
+- **Sigmoid, tanh, and softmax backward no longer fork rayon about 30x too early.** All 3 reuse the cached activation and call no `exp`, so they belong to the cheap-map class at 4,000,000 elements and not the exp-map class at 131,072. The exp-free arms beside them (LeakyReLU, ELU, SELU, Softsign, HardSigmoid, Exponential) were already classed correctly. Softplus backward stays in the exp class, because its derivative calls `exp_m1`.
+- **Softmax forward and backward no longer fan out over a single row.** Both spread work 1 row per task, but both compared the total element count against the gate, so a `[1, 200000]` input cleared it and forked a 1-item rayon iterator. Both now also require more than 1 row.
+
+### Changed
 - **4 more normalization gates, merged rather than deleted.** `tuning::norm` had 7 gates for 3 layers, all shipping the same value. Below `set_/get_batch_norm` the 3 layers share only 2 kernel shapes, so 2 gates now cover them.
   - `set_/get_col_fold` replaces `set_/get_bn_col_stats`, `set_/get_ln_col_stats`, and `set_/get_gn_param_grad`. All 3 fed the same 2 fold kernels with the same `[M, C]` view, in the same argument position.
   - `set_/get_row_pass` replaces `set_/get_ln_row` and `set_/get_gn_row`. Both gated a row-block sweep of the same shape.
   - No result bits move. The fold kernels take their block boundaries from the input shape alone, so the flag decides where the work runs and never what it computes. Both merged gates keep 262_144.
-### Changed
 - **`cargo bench --bench parallel_gates` no longer writes into the source tree.** The report goes to `target/parallel_gates/RESULTS.md`. Set `RUSTYML_WRITE_RESULTS=1` to refresh the tracked copy at `benches/calibrations/RESULTS.md`. A write failure now prints a warning instead of a panic.
 - **The `nn_end_to_end` Dense benchmark times `predict`, not `forward`.** `forward` writes an input cache and an output cache, so the old loop held 2 extra tensors live per iteration and measured the allocator as much as the kernel.
 

@@ -381,7 +381,9 @@ impl Activation {
                 let sigmoid_grad = |g: &mut f32, &a: &f32| {
                     *g *= a * (1.0 - a);
                 };
-                if grad.len() >= exp_map_parallel_threshold() {
+                // The derivative reuses the cached activation, so this pass calls no `exp`. It
+                // is a cheap map, not an exp map
+                if grad.len() >= cheap_map_parallel_threshold() {
                     Zip::from(&mut grad)
                         .and(activated)
                         .par_for_each(sigmoid_grad);
@@ -396,7 +398,8 @@ impl Activation {
                 let tanh_grad = |g: &mut f32, &a: &f32| {
                     *g *= 1.0 - a * a;
                 };
-                if activated.len() >= exp_map_parallel_threshold() {
+                // Also a cheap map: the derivative is a product of the cached activation
+                if activated.len() >= cheap_map_parallel_threshold() {
                     Zip::from(&mut grad).and(activated).par_for_each(tanh_grad);
                 } else {
                     Zip::from(&mut grad).and(activated).for_each(tanh_grad);
@@ -679,7 +682,8 @@ fn softmax_forward(input: &Tensor) -> Result<Tensor, Error> {
         row.map_inplace(|x| *x /= sum);
     };
 
-    if batch_size * num_features >= exp_map_parallel_threshold() {
+    // The task is 1 row, so a single-row input has nothing to spread and must stay serial
+    if batch_size > 1 && batch_size * num_features >= exp_map_parallel_threshold() {
         output_2d
             .axis_iter_mut(Axis(0))
             .into_par_iter()
@@ -726,7 +730,9 @@ fn softmax_backward(output: &Tensor, grad_output: &Tensor) -> Result<Tensor, Err
         }
     };
 
-    if batch_size * num_features >= exp_map_parallel_threshold() {
+    // The backward pass is a row dot and a scale, with no `exp`, so it is a cheap map. The task
+    // is 1 row, so a single-row input stays serial
+    if batch_size > 1 && batch_size * num_features >= cheap_map_parallel_threshold() {
         Zip::from(grad_input_2d.axis_iter_mut(Axis(0)))
             .and(output_2d.axis_iter(Axis(0)))
             .and(grad_output_2d.axis_iter(Axis(0)))

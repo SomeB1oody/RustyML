@@ -24,10 +24,13 @@
 //!   engine)
 //! - `UPSAMPLE_PARALLEL_MIN_OPS` (the upsampling resize engine, whose taps per output position
 //!   run from 1 to 11, so an element count alone would not compare 2 modes)
-//! - `BATCH_NORM_PARALLEL_THRESHOLD` (a per-layer mapping)
+//! - `BATCH_NORM_PARALLEL_THRESHOLD` (a per-layer mapping), plus the 2 gates the 3
+//!   normalization layers share, `COL_FOLD_PARALLEL_MIN_ELEMS` and `ROW_PASS_PARALLEL_MIN_ELEMS`
 //!
-//! `metrics` keeps its silhouette gate module-local, because it is a lightweight leaf module
-//! that does not import crate internals.
+//! 2 thresholds are plain constants rather than gates. `metrics` fixes its silhouette threshold,
+//! because its parallel fill is not bit-for-bit equal to its serial fill, so a movable value
+//! there would change a returned score. `math` fixes its exp-reduction threshold, because the
+//! block size already sets the smallest value that gives more than 1 task.
 
 // f32 classes (neural-network layers)
 
@@ -41,8 +44,13 @@ tunable_gate! {
 }
 
 tunable_gate! {
-    /// Exp-dominated `f32` maps: sigmoid, tanh, softmax, ELU, SELU, softplus, and exponential,
-    /// where 1 `exp` call dominates the per-element cost. Gated on the total element count.
+    /// Exp-dominated `f32` maps: the forward passes of sigmoid, tanh, softmax, ELU, SELU,
+    /// softplus, and exponential, where 1 `exp` call dominates the per-element cost. Gated on the
+    /// total element count.
+    ///
+    /// Most of the matching backward passes are NOT in this class. They reuse the cached
+    /// activation and call no `exp`, which puts them in the cheap-map class. Softplus is the 1
+    /// exception, because its derivative calls `exp_m1`.
     #[cfg(feature = "neural_network")]
     pub(crate) EXP_MAP_PARALLEL_THRESHOLD
         => exp_map_parallel_threshold / set_exp_map_parallel_threshold = 131_072

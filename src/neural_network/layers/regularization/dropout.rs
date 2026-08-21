@@ -17,8 +17,6 @@
 //!   stored mask)
 //! - `dropout_output_shape` - formats the (unchanged) output shape, since dropout preserves the
 //!   input shape
-//! - `apply_spatial_dropout_threshold` - thresholds a random mask into a binary keep/drop mask,
-//!   parallel or sequential by element count
 //! - `spatial_dropout_scale` and `spatial_dropout_backward` - apply the per-channel
 //!   inverted-dropout scale to a `[batch, *spatial, channels]` tensor from a small
 //!   `[batch, channels]` mask without building a full-size mask
@@ -96,26 +94,6 @@ fn dropout_output_shape(input_shape: &[usize]) -> String {
         )
     } else {
         String::from("Unknown")
-    }
-}
-
-/// Thresholds a random mask into a binary mask, in parallel or sequentially
-///
-/// All spatial dropout layers use this to convert a random mask into a binary mask based
-/// on the dropout rate. Larger masks use parallel computation
-///
-/// # Parameters
-///
-/// - `mask_2d` - The random mask to convert to binary (modified in place)
-/// - `rate` - The dropout rate threshold
-/// - `parallel_threshold` - Element count at or above which the pass runs in parallel
-fn apply_spatial_dropout_threshold(mask_2d: &mut Tensor, rate: f32, parallel_threshold: usize) {
-    let total_elements = mask_2d.len();
-
-    if total_elements >= parallel_threshold {
-        mask_2d.par_mapv_inplace(|x| if x >= rate { 1.0 } else { 0.0 });
-    } else {
-        mask_2d.mapv_inplace(|x| if x >= rate { 1.0 } else { 0.0 });
     }
 }
 

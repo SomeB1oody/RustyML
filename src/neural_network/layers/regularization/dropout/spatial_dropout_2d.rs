@@ -6,8 +6,7 @@ use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::layers::regularization::dropout::{
-    apply_spatial_dropout_threshold, dropout_output_shape, spatial_dropout_backward,
-    spatial_dropout_scale,
+    dropout_output_shape, spatial_dropout_backward, spatial_dropout_scale,
 };
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
@@ -15,9 +14,7 @@ use crate::neural_network::layers::regularization::validation::{
     validate_input_ndim, validate_input_shape, validate_rate,
 };
 use crate::neural_network::traits::Layer;
-use crate::parallel_gates::{
-    cheap_map_parallel_threshold, spatial_dropout_scale_parallel_min_elems,
-};
+use crate::parallel_gates::spatial_dropout_scale_parallel_min_elems;
 use ndarray::IxDyn;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
@@ -145,8 +142,10 @@ impl Layer for SpatialDropout2D {
             &mut self.rng,
         );
 
-        // Threshold the samples into a binary keep/drop mask
-        apply_spatial_dropout_threshold(&mut mask_2d, self.rate, cheap_map_parallel_threshold());
+        // Threshold the samples into a binary keep/drop mask. The mask holds 1 value per
+        // (batch, channel), so it stays far too small for rayon to pay
+        let rate = self.rate;
+        mask_2d.mapv_inplace(|x| if x >= rate { 1.0 } else { 0.0 });
 
         let channel_mask = mask_2d.as_slice().expect("per-channel mask is contiguous");
         let output = spatial_dropout_scale(

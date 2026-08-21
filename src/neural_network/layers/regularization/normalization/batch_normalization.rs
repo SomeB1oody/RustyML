@@ -213,6 +213,9 @@ impl Layer for BatchNormalization {
             // reduce over batch and every spatial position, exactly as spatial batch norm
             // requires. A 1-D input has no channel axis (see `new`) and keeps the serial
             // ndarray path, with its 0-d statistics shapes
+            // `input` was put in standard layout above, and every buffer derived from it below
+            // is either a fresh `Tensor::zeros` or an owned ndarray result, so all of them are
+            // contiguous. The rank >= 2 arms therefore take the slice directly
             let use_col_fold = input.ndim() >= 2;
             let channels = if use_col_fold {
                 input.shape()[input.ndim() - 1]
@@ -228,11 +231,13 @@ impl Layer for BatchNormalization {
 
             // Mean across the batch dimension (axis 0): a row-block deterministic fold, on
             // rayon above the column-stats gate
-            let batch_mean = match input.as_slice() {
-                Some(s) if use_col_fold => {
-                    par_col_sum(s, channels, col_stats_parallel, 1.0) / m_rows as f32
-                }
-                _ => input.mean_axis(Axis(0)).unwrap(),
+            let batch_mean = if use_col_fold {
+                let s = input
+                    .as_slice()
+                    .expect("rank >= 2 batch-norm buffers are standard layout");
+                par_col_sum(s, channels, col_stats_parallel, 1.0) / m_rows as f32
+            } else {
+                input.mean_axis(Axis(0)).unwrap()
             };
 
             // Center the data
@@ -262,11 +267,13 @@ impl Layer for BatchNormalization {
 
             // Per-channel variance of the centered data. The fused fold avoids the
             // squared-diff temp the serial form materializes
-            let batch_var = match x_centered.as_slice() {
-                Some(s) if use_col_fold => {
-                    par_col_dot(s, s, channels, col_stats_parallel, 1.0) / m_rows as f32
-                }
-                _ => (&x_centered * &x_centered).mean_axis(Axis(0)).unwrap(),
+            let batch_var = if use_col_fold {
+                let s = x_centered
+                    .as_slice()
+                    .expect("rank >= 2 batch-norm buffers are standard layout");
+                par_col_dot(s, s, channels, col_stats_parallel, 1.0) / m_rows as f32
+            } else {
+                (&x_centered * &x_centered).mean_axis(Axis(0)).unwrap()
             };
 
             // Normalize, then scale and shift, in 1 sweep
@@ -378,6 +385,9 @@ impl Layer for BatchNormalization {
         // `batch_size` is that `M` (batch times spatial), which is exactly the sample count the
         // per-channel statistics were taken over. 1-D (scalar-parameter) inputs keep the serial
         // ndarray path and its 0-d statistics shapes
+        // `grad_output` was put in standard layout above. `x_normalized` and `x_centered` come
+        // from the forward cache, and `grad_x_normalized` is built here, so all of them are
+        // contiguous. The rank >= 2 arms therefore take the slice directly
         let use_col_fold = grad_output.ndim() >= 2;
         let batch_size = if use_col_fold {
             (total_elements / channels.max(1)) as f32
@@ -388,15 +398,22 @@ impl Layer for BatchNormalization {
 
         // Compute gradients for gamma and beta: fused row-block folds (no [M, C] product
         // temp), on rayon above the column-stats gate
-        let (grad_gamma, grad_beta) = match (grad_output.as_slice(), x_normalized.as_slice()) {
-            (Some(g), Some(xn)) if use_col_fold => (
+        let (grad_gamma, grad_beta) = if use_col_fold {
+            let g = grad_output
+                .as_slice()
+                .expect("rank >= 2 batch-norm buffers are standard layout");
+            let xn = x_normalized
+                .as_slice()
+                .expect("rank >= 2 batch-norm buffers are standard layout");
+            (
                 par_col_dot(g, xn, channels, col_stats_parallel, 1.0),
                 par_col_sum(g, channels, col_stats_parallel, 1.0),
-            ),
-            _ => (
+            )
+        } else {
+            (
                 (grad_output * x_normalized).sum_axis(Axis(0)),
                 grad_output.sum_axis(Axis(0)),
-            ),
+            )
         };
 
         self.grad_gamma = Some(grad_gamma);
@@ -429,23 +446,36 @@ impl Layer for BatchNormalization {
 
         // The -0.5 / -1.0 scales are applied per term inside the folds, matching the serial
         // elementwise forms
-        let grad_var_sum = match (grad_x_normalized.as_slice(), x_centered.as_slice()) {
-            (Some(g), Some(xc)) if use_col_fold => {
-                par_col_dot(g, xc, channels, col_stats_parallel, -0.5)
-            }
-            _ => (&grad_x_normalized * x_centered * -0.5).sum_axis(Axis(0)),
+        let grad_var_sum = if use_col_fold {
+            let g = grad_x_normalized
+                .as_slice()
+                .expect("rank >= 2 batch-norm buffers are standard layout");
+            let xc = x_centered
+                .as_slice()
+                .expect("rank >= 2 batch-norm buffers are standard layout");
+            par_col_dot(g, xc, channels, col_stats_parallel, -0.5)
+        } else {
+            (&grad_x_normalized * x_centered * -0.5).sum_axis(Axis(0))
         };
         let grad_var = grad_var_sum * &inv_std * &inv_std * &inv_std;
 
         // Compute gradient with respect to mean
-        let grad_mean_1_sum = match grad_x_normalized.as_slice() {
-            Some(g) if use_col_fold => par_col_sum(g, channels, col_stats_parallel, -1.0),
-            _ => (&grad_x_normalized * -1.0).sum_axis(Axis(0)),
+        let grad_mean_1_sum = if use_col_fold {
+            let g = grad_x_normalized
+                .as_slice()
+                .expect("rank >= 2 batch-norm buffers are standard layout");
+            par_col_sum(g, channels, col_stats_parallel, -1.0)
+        } else {
+            (&grad_x_normalized * -1.0).sum_axis(Axis(0))
         };
         let grad_mean_1 = grad_mean_1_sum * &inv_std;
-        let x_centered_col_sum = match x_centered.as_slice() {
-            Some(xc) if use_col_fold => par_col_sum(xc, channels, col_stats_parallel, 1.0),
-            _ => x_centered.sum_axis(Axis(0)),
+        let x_centered_col_sum = if use_col_fold {
+            let xc = x_centered
+                .as_slice()
+                .expect("rank >= 2 batch-norm buffers are standard layout");
+            par_col_sum(xc, channels, col_stats_parallel, 1.0)
+        } else {
+            x_centered.sum_axis(Axis(0))
         };
         let grad_mean_2 = &grad_var * (x_centered_col_sum * -2.0 / batch_size);
         let grad_mean = grad_mean_1 + grad_mean_2;
