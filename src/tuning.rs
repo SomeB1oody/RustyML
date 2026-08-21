@@ -4,7 +4,7 @@
 //! strategy, by comparing a work estimate against a calibrated threshold. This module overrides
 //! the defaults at runtime, without a recompile, to match a different machine's core count,
 //! cache size, or memory bandwidth. The defaults come from calibration on an AMD Ryzen 9 9950X
-//! with 16 cores, 32 threads, and 64 MiB L3.
+//! with 16 cores, 32 threads, and 64 MiB of L3 in 2 instances, which is 32 MiB per die.
 //!
 //! # What a gate does and does not change
 //!
@@ -27,8 +27,8 @@
 //! // Retune the GEMM serial/parallel work gate for a machine with fewer, faster cores
 //! // (a gemmkit knob, forwarded through the `backend` alias)
 //! rustyml::tuning::matmul::backend::set_parallel_threshold(2_000_000);
-//! // Match the tiled-product policy to the machine's actual shared L3
-//! rustyml::tuning::matmul::set_cache_resident_max_bytes(32 * 1024 * 1024);
+//! // Match the tiled-product policy to the L3 1 core of this machine reaches
+//! rustyml::tuning::matmul::set_cache_resident_max_bytes(16 * 1024 * 1024);
 //! ```
 
 /// Generates a `set_*` / `get_*` forwarding pair that calls a per-site gate's `pub(crate)`
@@ -90,7 +90,7 @@ macro_rules! fwd {
 ///
 /// What remains here is the caller-side tiling policy. `chunk_elems` sizes the row-chunks of a
 /// tiled product. `cache_resident_max_bytes` picks a GEMV-swarm or a tiled GEMM. Set it to the
-/// machine's actual shared L3 size.
+/// L3 that 1 core of the machine reaches directly.
 #[cfg(feature = "math")]
 pub mod matmul {
     use crate::math::matmul as b;
@@ -113,7 +113,7 @@ pub mod matmul {
         set_cache_resident_max_bytes => b::set_cache_resident_max_bytes,
         get_cache_resident_max_bytes => b::cache_resident_max_bytes,
         "the cache-resident size threshold (bytes) for the per-row-GEMV-swarm vs. tiled-GEMM \
-         decision - set this to the machine's actual shared-L3 size"
+         decision - set this to the L3 that 1 core reaches directly, and never to a package total"
     );
 }
 

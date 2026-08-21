@@ -131,12 +131,21 @@ tunable_gate! {
     /// cache-resident, making a per-row GEMV swarm faster than a tiled GEMM.
     ///
     /// When many tasks each compute `X . v` against the same `X`, the whole of `X` gets re-read
-    /// per task. That re-read is free while `X` fits in the shared L3. It becomes a DRAM
-    /// re-stream once `X` overflows the cache, and a tiled GEMM, which streams `X` once per
-    /// chunk, wins instead. The default sits at a typical L3 size. Override it through
-    /// [`crate::tuning::matmul`] to match a machine's actual L3.
+    /// per task. That re-read is free while `X` fits in the cache the reading core reaches. It
+    /// becomes a DRAM re-stream once `X` overflows it, and a tiled GEMM, which streams `X` once
+    /// per chunk, wins instead.
+    ///
+    /// Set this to the L3 that 1 core can reach directly, and never to a package total. Each
+    /// sweep runs inside its own rayon task, so what matters is the slice local to the core that
+    /// runs it. On a multi-die part, another die's slice costs a fabric round trip that is close
+    /// to DRAM. The backend states the same rule for its own topology figures. The default is
+    /// the per-die L3 of the calibration machine. Override it through
+    /// [`crate::tuning::matmul`].
+    ///
+    /// The band around this value is not calibrated. The gate also prices only the shared
+    /// matrix, and not the projection buffer the tiled branch allocates.
     pub(crate) CACHE_RESIDENT_MAX_BYTES
-        => cache_resident_max_bytes / set_cache_resident_max_bytes = 64 * 1024 * 1024
+        => cache_resident_max_bytes / set_cache_resident_max_bytes = 32 * 1024 * 1024
 }
 
 /// Whether an `[rows, cols]` matrix of `T` is small enough to treat as cache-resident for
