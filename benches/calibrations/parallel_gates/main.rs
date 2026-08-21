@@ -3,8 +3,9 @@
 //! Every `*_MIN_FLOPS` / `*_MIN_OPS` / `*_PARALLEL_THRESHOLD` constant in the crate decides when
 //! a pass is worth spreading across rayon. This bench times the forced-serial and
 //! forced-parallel implementations of each kernel class across a size ladder. It prints the
-//! tables and rewrites `benches/calibrations/RESULTS.md` with the measurements, so the
-//! constants can be set from data instead of estimates.
+//! tables and writes the measurements to `target/parallel_gates/RESULTS.md`, so the constants
+//! can be set from data instead of estimates. Set `RUSTYML_WRITE_RESULTS=1` to refresh the
+//! tracked copy at `benches/calibrations/RESULTS.md` instead.
 //!
 //! Run with:
 //!
@@ -19,13 +20,13 @@
 
 /// The timing loop, the `Row`/`Section` table model, and the random-data generators.
 mod harness;
-/// f64 elementwise classes and the deterministic blocked reductions.
+/// f64 elementwise classes and the deterministic blocked reduction.
 mod ml_kernels;
 /// Conv and pooling engines plus the f32 elementwise classes.
 mod nn_kernels;
 /// BatchNorm and LayerNorm statistics folds.
 mod normalization;
-/// Tree traversal, sort-scan, tree build, and the kd-tree dimension crossover.
+/// Tree traversal, sort-scan, and tree build.
 mod trees;
 
 use std::fmt::Write as _;
@@ -72,13 +73,9 @@ fn main() {
     sections.push(ml_kernels::calibrate_exp_reduction());
     sections.push(ml_kernels::calibrate_kmeans_accumulate());
     sections.push(ml_kernels::calibrate_f32_sq_sum());
-    sections.push(ml_kernels::calibrate_det_reduce_block_f32());
-    sections.push(normalization::calibrate_bn_col_stats());
     sections.push(normalization::calibrate_bn_col_stats_rowblock());
-    sections.push(normalization::calibrate_bn_plane_stats());
     sections.push(normalization::calibrate_ln_row_pass());
     sections.push(nn_kernels::calibrate_spatial_dropout_scale());
-    sections.push(trees::calibrate_kd_tree_dims());
 
     for s in &sections {
         s.print();
@@ -105,13 +102,30 @@ fn main() {
     let _ = writeln!(
         md,
         "## End-to-end benchmarks\n\nThe end-to-end numbers are tracked separately by criterion: \
-         `cargo bench --bench nn_end_to_end` (neural-network layer forwards, a training epoch) and \
-         `cargo bench --bench ml_end_to_end --features full` (classical-ML/utils fits, predicts, \
-         and transforms); detailed reports and saved baselines live under `target/criterion/` \
-         (use `-- --save-baseline <name>` / `-- --baseline <name>` to compare across changes)."
+         `cargo bench --bench nn_end_to_end` (neural-network layer forwards, a training epoch), \
+         `cargo bench --bench ml_end_to_end` (classical-ML/utils fits, predicts, and transforms), \
+         `cargo bench --bench eigensolver` (the power-iteration eigensolver), and \
+         `cargo bench --bench silhouette` (the silhouette pairwise-distance fill); detailed \
+         reports and saved baselines live under `target/criterion/` (use \
+         `-- --save-baseline <name>` / `-- --baseline <name>` to compare across changes)."
     );
 
-    let path = std::path::Path::new("benches/calibrations/RESULTS.md");
-    std::fs::write(path, md).expect("write benches/calibrations/RESULTS.md");
-    println!("\nwrote {}", path.display());
+    // The report goes to the build directory, because a benchmark run must not change the source
+    // tree. To refresh the tracked copy, set `RUSTYML_WRITE_RESULTS=1`
+    let tracked = std::env::var_os("RUSTYML_WRITE_RESULTS").is_some();
+    let path = if tracked {
+        std::path::PathBuf::from("benches/calibrations/RESULTS.md")
+    } else {
+        std::path::PathBuf::from("target/parallel_gates/RESULTS.md")
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    match std::fs::write(&path, md) {
+        Ok(()) => println!("\nwrote {}", path.display()),
+        Err(e) => eprintln!("\nwarning: could not write {}: {e}", path.display()),
+    }
+    if !tracked {
+        println!("set RUSTYML_WRITE_RESULTS=1 to refresh benches/calibrations/RESULTS.md");
+    }
 }

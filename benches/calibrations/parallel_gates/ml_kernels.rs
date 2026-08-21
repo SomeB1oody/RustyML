@@ -171,7 +171,8 @@ pub fn calibrate_det_reduce_block() -> Section {
         });
     }
     Section {
-        title: "deterministic blocked reduction block size (DET_REDUCE_BLOCK)",
+        title: "deterministic blocked reduction block size (DET_REDUCE_BLOCK); plateau check, \
+                not a recommendation",
         work_unit: "elements per block",
         pick_fastest: true,
         rows,
@@ -359,38 +360,6 @@ pub fn calibrate_f32_sq_sum() -> Section {
         title: "f32 -> f64 square-sum (SQ_SUM_F32_PARALLEL_MIN_ELEMS: grad norm)",
         work_unit: "elements",
         pick_fastest: false,
-        rows,
-    }
-}
-
-/// DET_REDUCE_BLOCK validation on f32 elements. The constant counts elements, so an f32 block
-/// is half the bytes of the calibrated f64 one. This confirms 16K still sits on the plateau.
-pub fn calibrate_det_reduce_block_f32() -> Section {
-    let data = random_vector_f32(4_194_304, 102);
-    let slice = data.as_slice().unwrap();
-    let serial = time_per_call_ns(|| {
-        black_box(slice.iter().map(|&v| (v as f64) * (v as f64)).sum::<f64>());
-    });
-    let mut rows = Vec::new();
-    for &block in &[4096usize, 8192, 16384, 32768, 65536] {
-        let p = time_per_call_ns(|| {
-            let parts: Vec<f64> = slice
-                .par_chunks(block)
-                .map(|c| c.iter().map(|&v| (v as f64) * (v as f64)).sum::<f64>())
-                .collect();
-            black_box(parts.into_iter().fold(0.0, |a, b| a + b));
-        });
-        rows.push(Row {
-            label: format!("4.2M f32 sq-sum, block {block}"),
-            work: block,
-            serial_ns: serial,
-            parallel_ns: p,
-        });
-    }
-    Section {
-        title: "deterministic blocked reduction block size, f32 elements (DET_REDUCE_BLOCK)",
-        work_unit: "elements per block",
-        pick_fastest: true,
         rows,
     }
 }

@@ -99,13 +99,6 @@ path = "benches/benchmarks/eigensolver.rs"
 harness = false
 required-features = ["machine_learning"]
 
-# Kernel-level GEMM shape sweep through Dense::forward
-[[bench]]
-name = "matmul_kernels"
-path = "benches/benchmarks/matmul_kernels.rs"
-harness = false
-required-features = ["neural_network"]
-
 # Parallel/serial gate calibration for the conv/pooling/normalization/tree/elementwise kernels
 [[bench]]
 name = "parallel_gates"

@@ -19,14 +19,18 @@ use rustyml::neural_network::sequential::Sequential;
 use rustyml::neural_network::traits::Layer;
 use std::hint::black_box;
 
-/// Dense forward on a batch large enough to engage the block-parallel GEMM
+/// Dense inference on a batch large enough to engage the block-parallel GEMM
+///
+/// This calls `predict`, not `forward`. `forward` writes an input cache and an output cache
+/// (`dense.rs`), so a timed loop over it holds 2 extra tensors live per iteration and measures
+/// the allocator as much as the kernel
 fn dense_forward(c: &mut Criterion) {
-    let mut layer = Dense::new(784, 512, Activation::ReLU)
+    let layer = Dense::new(784, 512, Activation::ReLU)
         .unwrap()
         .with_random_state(42);
     let x = Array::from_elem((256, 784), 0.5f32).into_dyn();
-    c.bench_function("dense_forward_256x784x512", |b| {
-        b.iter(|| black_box(layer.forward(&x).unwrap()))
+    c.bench_function("dense_predict_256x784x512", |b| {
+        b.iter(|| black_box(layer.predict(&x).unwrap()))
     });
 }
 
@@ -46,7 +50,8 @@ fn conv2d_forward_batch1(c: &mut Criterion) {
 /// 2 GEMMs. At this scale, each per-item GEMM is large enough to fork rayon on its own. The 2
 /// batch sizes probe how batch parallelism and GEMM parallelism interact:
 /// - batch 16: too few tasks to fill the thread pool from the batch axis alone
-/// - batch 32: enough tasks to fill the thread pool, leaving no slack for an inner GEMM fork
+/// - batch 32: the engine forces the per-item GEMMs serial once `batch >= threads`, so this rung
+///   shows that rule on a pool of 32 threads or fewer
 fn conv2d_backward(c: &mut Criterion) {
     let mut group = c.benchmark_group("conv2d_backward");
     group.sample_size(10);

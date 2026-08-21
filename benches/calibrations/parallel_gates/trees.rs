@@ -1,12 +1,9 @@
 //! Coarse-task tree gates: per-sample tree traversal (DecisionTree/IsolationForest predict),
-//! the per-feature sort-scan of `find_best_split`, parallel isolation-tree construction, and the
-//! kd-tree vs brute-force dimension crossover
+//! the per-feature sort-scan of `find_best_split`, and parallel isolation-tree construction
 
 use crate::harness::{Row, Section, random_matrix_f64, time_per_call_ns};
 use ndarray::Array2;
 use rayon::prelude::*;
-use rustyml::bench_internals::KdTree;
-use rustyml::math::DistanceCalculationMetric;
 use std::hint::black_box;
 
 // coarse-task classes: tree traversal / sort-scan / tree build
@@ -174,65 +171,6 @@ pub fn calibrate_tree_build() -> Section {
     Section {
         title: "tree-build class (IsolationForest fit, one task per tree)",
         work_unit: "trees",
-        pick_fastest: false,
-        rows,
-    }
-}
-
-// kd-tree vs brute force by dimension: KNN/DBSCAN_KD_TREE_MAX_DIMS
-
-/// The "serial" column is the kd-tree path. The "parallel" column is the brute-force scan, so
-/// the crossover reads as the dimension bracket where brute force starts winning for good.
-/// This ladder uses uniform data. Clustered data shifts the boundary, so this is a
-/// same-distribution comparison, not a universal constant
-pub fn calibrate_kd_tree_dims() -> Section {
-    let n_train = 20_000usize;
-    let n_query = 512usize;
-    let k = 8usize;
-    let mut rows = Vec::new();
-    for &d in &[2usize, 4, 8, 12, 16, 20, 24, 32] {
-        let x_train = random_matrix_f64(n_train, d, 71);
-        let queries = random_matrix_f64(n_query, d, 72);
-        let train_sq: Vec<f64> = x_train.rows().into_iter().map(|r| r.dot(&r)).collect();
-        let tree = KdTree::build(x_train.view(), DistanceCalculationMetric::Euclidean);
-
-        let t_tree = time_per_call_ns(|| {
-            let res: Vec<usize> = (0..n_query)
-                .into_par_iter()
-                .map(|qi| tree.k_nearest(queries.row(qi), k)[0].0)
-                .collect();
-            black_box(res);
-        });
-        let t_brute = time_per_call_ns(|| {
-            let res: Vec<usize> = (0..n_query)
-                .into_par_iter()
-                .map(|qi| {
-                    let q = queries.row(qi);
-                    let proj = x_train.dot(&q);
-                    let mut dists: Vec<(f64, usize)> = proj
-                        .iter()
-                        .zip(train_sq.iter())
-                        .enumerate()
-                        .map(|(j, (&p, &sq))| (sq - 2.0 * p, j))
-                        .collect();
-                    dists.select_nth_unstable_by(k - 1, |a, b| {
-                        a.0.total_cmp(&b.0).then(a.1.cmp(&b.1))
-                    });
-                    dists[0].1
-                })
-                .collect();
-            black_box(res);
-        });
-        rows.push(Row {
-            label: format!("d={d} (20k train, 512 queries, k=8)"),
-            work: d,
-            serial_ns: t_tree,
-            parallel_ns: t_brute,
-        });
-    }
-    Section {
-        title: "kd-tree (serial col) vs brute force (parallel col) by dimension (KD_TREE_MAX_DIMS); uniform data",
-        work_unit: "dimensions",
         pick_fastest: false,
         rows,
     }

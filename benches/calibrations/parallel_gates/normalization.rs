@@ -1,83 +1,12 @@
 //! Normalization-layer statistics gates.
 //!
-//! It covers the BatchNorm column-stats folds: a channel-chunked negative result, and the
-//! viable row-block fold. It also covers the rank >= 3 plane fold for the reserved
-//! `BN_PLANE_STATS_PARALLEL_MIN_ELEMS` gate, and the trailing-axis LayerNorm fused row pass.
+//! It covers the BatchNorm column-stats row-block fold and the trailing-axis LayerNorm
+//! fused row pass.
 
 use crate::harness::{Row, Section, random_matrix, time_per_call_ns};
 use ndarray::{Array1, Array2, Axis};
 use rayon::prelude::*;
 use std::hint::black_box;
-
-// BatchNorm column statistics: channel-chunked parallel vs serial mean_axis
-
-/// 1 cache line of `f32` per channel chunk, used only by this bench's negative-result variant
-const BENCH_CHANNEL_CHUNK: usize = 16;
-
-/// Channel-chunked parallel column sums of a standard-layout [M, C] f32 matrix. Each channel
-/// accumulates in row order (bitwise identical to ndarray's serial `sum_axis(Axis(0))`).
-/// Parallelism only splits the channel axis, so the task count is C / 16
-fn bench_par_col_sum(x: &Array2<f32>) -> Array1<f32> {
-    let c = x.ncols();
-    let slice = x.as_slice().unwrap();
-    let mut out = Array1::<f32>::zeros(c);
-    out.as_slice_mut()
-        .unwrap()
-        .par_chunks_mut(BENCH_CHANNEL_CHUNK)
-        .enumerate()
-        .for_each(|(g, acc)| {
-            let j0 = g * BENCH_CHANNEL_CHUNK;
-            let width = acc.len();
-            for row in slice.chunks_exact(c) {
-                for (a, &v) in acc.iter_mut().zip(&row[j0..j0 + width]) {
-                    *a += v;
-                }
-            }
-        });
-    out
-}
-
-/// The BatchNorm statistics reduction: per-channel sums over batch x spatial rows. The win is
-/// capped by the channel-chunk task count (C / 16). Narrow-C rungs document where the parallel
-/// path merely ties.
-///
-/// This is a negative result, kept as the record of why production uses row blocks instead.
-/// The channel split preserves the serial per-channel accumulation order (bitwise identical to
-/// `mean_axis`), but it loses to the serial fold. That row-streaming fold is already
-/// bandwidth-efficient and SIMD-wide, and column-chunk tasks break exactly that.
-pub fn calibrate_bn_col_stats() -> Section {
-    let mut rows = Vec::new();
-    for &(m, c) in &[
-        (4_096usize, 64usize),
-        (16_384, 64),
-        (65_536, 64),
-        (524_288, 64),
-        (2_048, 512),
-        (16_384, 512),
-        (262_144, 8),
-    ] {
-        let x = random_matrix(m, c, 103);
-        let s = time_per_call_ns(|| {
-            black_box(x.mean_axis(Axis(0)).unwrap());
-        });
-        let p = time_per_call_ns(|| {
-            let sums = bench_par_col_sum(&x);
-            black_box(sums / m as f32);
-        });
-        rows.push(Row {
-            label: format!("M={m} C={c}"),
-            work: m * c,
-            serial_ns: s,
-            parallel_ns: p,
-        });
-    }
-    Section {
-        title: "BatchNorm column stats, channel-chunked (negative result; see row-block section)",
-        work_unit: "elements (M x C)",
-        pick_fastest: false,
-        rows,
-    }
-}
 
 /// Row-block deterministic fold for the same per-channel sums. Each block streams whole rows
 /// (the same bandwidth-friendly, SIMD-across-channels pattern as the serial fold) into a local
@@ -141,100 +70,6 @@ pub fn calibrate_bn_col_stats_rowblock() -> Section {
     Section {
         title: "BatchNorm column stats, row-block fold (BN_COL_STATS_PARALLEL_MIN_ELEMS)",
         work_unit: "elements (M x C)",
-        pick_fastest: false,
-        rows,
-    }
-}
-
-// BatchNorm plane statistics on a [B, C, P] layout: BN_PLANE_STATS_PARALLEL_MIN_ELEMS (reserved,
-// not wired into the production forward or backward pass)
-
-/// A candidate plane fold: per-channel sums over a `[B, C, P]` layout. Each channel's logical
-/// sequence (its planes in batch order) folds in 16K-element blocks. Contiguous segments
-/// accumulate in 8 SIMD-friendly lanes, and block partials merge in block order. The
-/// `parallel` flag only moves the (channel, block) tasks onto rayon
-fn bench_plane_sum(x: &[f32], c: usize, p: usize, parallel: bool) -> Array1<f32> {
-    const BLOCK: usize = 16_384;
-    let len_per_chan = x.len() / c;
-    let n_blocks = len_per_chan.div_ceil(BLOCK);
-    let segment_sum = |seg: &[f32]| -> f32 {
-        let mut lanes = [0.0f32; 8];
-        let (chunks, rest) = seg.as_chunks::<8>();
-        for ch in chunks {
-            for (l, &v) in lanes.iter_mut().zip(ch) {
-                *l += v;
-            }
-        }
-        let mut tail = 0.0f32;
-        for &v in rest {
-            tail += v;
-        }
-        ((lanes[0] + lanes[1]) + (lanes[2] + lanes[3]))
-            + ((lanes[4] + lanes[5]) + (lanes[6] + lanes[7]))
-            + tail
-    };
-    let fold = |t: usize| {
-        let (ch, blk) = (t / n_blocks, t % n_blocks);
-        let (start, end) = (blk * BLOCK, ((blk + 1) * BLOCK).min(len_per_chan));
-        let mut acc = 0.0f32;
-        let mut pos = start;
-        while pos < end {
-            let (bi, off) = (pos / p, pos % p);
-            let take = (p - off).min(end - pos);
-            let base = (bi * c + ch) * p + off;
-            acc += segment_sum(&x[base..base + take]);
-            pos += take;
-        }
-        acc
-    };
-    let partials: Vec<f32> = if parallel {
-        (0..c * n_blocks).into_par_iter().map(fold).collect()
-    } else {
-        (0..c * n_blocks).map(fold).collect()
-    };
-    Array1::from_iter(
-        partials
-            .chunks(n_blocks)
-            .map(|parts| parts.iter().fold(0.0f32, |acc, &v| acc + v)),
-    )
-}
-
-/// The rank >= 3 BatchNorm statistics reduction on a `[B, C, P]` layout. Forced serial vs
-/// forced parallel of the same plane fold (the flag never changes the bits, so the gate is a
-/// pure performance knob). This gate is reserved. BatchNorm's forward and backward passes use
-/// `BN_COL_STATS_PARALLEL_MIN_ELEMS` for every rank >= 2 input instead. Spans conv-scale shapes
-/// plus narrow-channel and wide-channel extremes
-pub fn calibrate_bn_plane_stats() -> Section {
-    let mut rows = Vec::new();
-    for &(b, c, p) in &[
-        (4usize, 16usize, 256usize),
-        (8, 16, 512),
-        (8, 32, 1_024),
-        (16, 32, 2_048),
-        (32, 8, 4_096),
-        (8, 512, 256),
-        (16, 64, 4_096),
-        (32, 64, 4_096),
-    ] {
-        // random_matrix(b * c, p) flattens to the same standard-layout [B, C, P] slice
-        let x = random_matrix(b * c, p, 107);
-        let xs = x.as_slice().unwrap();
-        let s = time_per_call_ns(|| {
-            black_box(bench_plane_sum(xs, c, p, false));
-        });
-        let par = time_per_call_ns(|| {
-            black_box(bench_plane_sum(xs, c, p, true));
-        });
-        rows.push(Row {
-            label: format!("B={b} C={c} P={p}"),
-            work: b * c * p,
-            serial_ns: s,
-            parallel_ns: par,
-        });
-    }
-    Section {
-        title: "BatchNorm plane stats, native-layout fold (BN_PLANE_STATS_PARALLEL_MIN_ELEMS)",
-        work_unit: "elements (B x C x P)",
         pick_fastest: false,
         rows,
     }
