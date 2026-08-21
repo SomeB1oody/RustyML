@@ -1,7 +1,8 @@
 //! Normalization-layer statistics gates.
 //!
-//! It covers the BatchNorm column-stats row-block fold and the trailing-axis LayerNorm
-//! fused row pass.
+//! It covers the 2 kernel shapes the 3 normalization layers share: the per-channel column fold
+//! behind `COL_FOLD_PARALLEL_MIN_ELEMS`, measured on the BatchNorm statistics, and the row pass
+//! behind `ROW_PASS_PARALLEL_MIN_ELEMS`, measured on the trailing-axis LayerNorm sweep.
 
 use crate::harness::{Row, Section, random_matrix, time_per_call_ns};
 use ndarray::{Array1, Array2, Axis};
@@ -68,7 +69,8 @@ pub fn calibrate_bn_col_stats_rowblock() -> Section {
         });
     }
     Section {
-        title: "BatchNorm column stats, row-block fold (BN_COL_STATS_PARALLEL_MIN_ELEMS)",
+        title: "per-channel column fold, shared by all 3 normalization layers \
+                (COL_FOLD_PARALLEL_MIN_ELEMS)",
         work_unit: "elements (M x C)",
         pick_fastest: false,
         rows,
@@ -195,7 +197,8 @@ pub fn calibrate_ln_row_pass() -> Section {
         });
     }
     Section {
-        title: "LayerNorm fused row pass, trailing axis (LN_ROW_PARALLEL_MIN_ELEMS)",
+        title: "normalization row pass, shared by LayerNorm and GroupNorm \
+                (ROW_PASS_PARALLEL_MIN_ELEMS)",
         work_unit: "elements (R x N)",
         pick_fastest: false,
         rows,
