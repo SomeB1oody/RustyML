@@ -5,6 +5,7 @@ use super::folds::{
     par_col_dot, par_col_sum, rows_per_block, segment_dot, segment_dot3, segment_sq_dev,
     segment_sum,
 };
+use super::{col_fold_parallel_min_elems, row_pass_parallel_min_elems};
 use crate::error::{Context, Error};
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -21,25 +22,6 @@ use ndarray::{Array1, Axis, IxDyn};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
 use std::borrow::Cow;
-
-tunable_gate! {
-    /// Total-element count above which the trailing-axis row passes (per-row statistics plus
-    /// normalize, and the backward composition) run on rayon
-    ///
-    /// Each normalization group is 1 contiguous row. Each row runs entirely inside 1 task with
-    /// fixed-order kernels. This gate only changes performance. The result stays the same on
-    /// either side of the gate, and stays deterministic on a given machine.
-    ///
-    /// Overridable via [`crate::tuning`]
-    pub(crate) LN_ROW_PARALLEL_MIN_ELEMS => ln_row_parallel_min_elems / set_ln_row_parallel_min_elems = 262_144
-}
-
-tunable_gate! {
-    /// Element count above which the gamma/beta gradient column folds run on rayon
-    ///
-    /// Overridable via [`crate::tuning`]
-    pub(crate) LN_COL_STATS_PARALLEL_MIN_ELEMS => ln_col_stats_parallel_min_elems / set_ln_col_stats_parallel_min_elems = 262_144
-}
 
 /// Axis selection for layer normalization
 ///
@@ -582,7 +564,7 @@ impl LayerNormalization {
             }
         };
 
-        let parallel = total >= ln_row_parallel_min_elems();
+        let parallel = total >= row_pass_parallel_min_elems();
         let mut x_centered = Tensor::zeros(IxDyn(&shape));
         let mut x_normalized = Tensor::zeros(IxDyn(&shape));
         let mut output = Tensor::zeros(IxDyn(&shape));
@@ -625,7 +607,7 @@ impl LayerNormalization {
                 std_input.as_slice().unwrap()
             }
         };
-        let parallel = input.len() >= ln_row_parallel_min_elems();
+        let parallel = input.len() >= row_pass_parallel_min_elems();
         let mut output = Tensor::zeros(IxDyn(&shape));
         row_predict(
             x,
@@ -675,11 +657,11 @@ impl LayerNormalization {
         let std_s = std_dev.as_slice().unwrap();
 
         // Gradients for gamma and beta: fused column folds over [R, N] (no product temporary)
-        let col_parallel = total >= ln_col_stats_parallel_min_elems();
+        let col_parallel = total >= col_fold_parallel_min_elems();
         self.grad_gamma = Some(par_col_dot(g, xn_s, n, col_parallel, 1.0));
         self.grad_beta = Some(par_col_sum(g, n, col_parallel, 1.0));
 
-        let row_parallel = total >= ln_row_parallel_min_elems();
+        let row_parallel = total >= row_pass_parallel_min_elems();
         let mut grad_input = Tensor::zeros(IxDyn(&shape));
         row_backward(
             g,

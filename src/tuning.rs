@@ -246,12 +246,12 @@ pub mod upsampling {
     );
 }
 
-/// Normalization-layer parallelism gates (BatchNorm, LayerNorm, GroupNorm).
+/// Normalization-layer parallelism gates. The 3 layers share 2 kernel shapes, a per-channel
+/// column fold and a row pass, so 1 gate each covers all of them.
 #[cfg(feature = "neural_network")]
 pub mod norm {
-    use crate::neural_network::layers::regularization::normalization as gn;
+    use crate::neural_network::layers::regularization::normalization as n;
     use crate::neural_network::layers::regularization::normalization::batch_normalization as bn;
-    use crate::neural_network::layers::regularization::normalization::layer_normalization as ln;
 
     fwd!(
         set_batch_norm => bn::set_batch_norm_parallel_threshold,
@@ -259,29 +259,15 @@ pub mod norm {
         "the BatchNorm forward/backward total-element gate"
     );
     fwd!(
-        set_bn_col_stats => bn::set_bn_col_stats_parallel_min_elems,
-        get_bn_col_stats => bn::bn_col_stats_parallel_min_elems,
-        "the BatchNorm 2-D per-channel statistics reduction gate"
+        set_col_fold => n::set_col_fold_parallel_min_elems,
+        get_col_fold => n::col_fold_parallel_min_elems,
+        "the shared per-channel column-fold gate (BatchNorm statistics, LayerNorm and GroupNorm \
+         gamma/beta gradients)"
     );
     fwd!(
-        set_ln_row => ln::set_ln_row_parallel_min_elems,
-        get_ln_row => ln::ln_row_parallel_min_elems,
-        "the LayerNorm per-row fold gate"
-    );
-    fwd!(
-        set_ln_col_stats => ln::set_ln_col_stats_parallel_min_elems,
-        get_ln_col_stats => ln::ln_col_stats_parallel_min_elems,
-        "the LayerNorm gamma/beta gradient column-fold gate"
-    );
-    fwd!(
-        set_gn_row => gn::set_gn_row_parallel_min_elems,
-        get_gn_row => gn::gn_row_parallel_min_elems,
-        "the GroupNorm per-instance statistics fold gate"
-    );
-    fwd!(
-        set_gn_param_grad => gn::set_gn_param_grad_parallel_min_elems,
-        get_gn_param_grad => gn::gn_param_grad_parallel_min_elems,
-        "the GroupNorm per-channel gradient column-fold gate"
+        set_row_pass => n::set_row_pass_parallel_min_elems,
+        get_row_pass => n::row_pass_parallel_min_elems,
+        "the shared normalization row-pass gate (LayerNorm rows, GroupNorm per-item sweeps)"
     );
 }
 

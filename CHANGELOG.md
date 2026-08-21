@@ -14,6 +14,10 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - **`bench_internals::KdTree`**, whose only consumer was a deleted calibration section. `KdTree` itself is unchanged and still serves DBSCAN and KNN.
 - **The `matmul_kernels` benchmark target**, and 4 calibration sections that measured nothing the crate can act on: the channel-chunked BatchNorm fold and the reserved plane fold, which have no path in `src`; the f32 `DET_REDUCE_BLOCK` sweep, which repeats 1 serial timing across all its rows; and the kd-tree ladder, which ran rayon in both of its columns and therefore reported 2 parallel timings as a crossover.
 
+- **4 more normalization gates, merged rather than deleted.** `tuning::norm` had 7 gates for 3 layers, all shipping the same value. Below `set_/get_batch_norm` the 3 layers share only 2 kernel shapes, so 2 gates now cover them.
+  - `set_/get_col_fold` replaces `set_/get_bn_col_stats`, `set_/get_ln_col_stats`, and `set_/get_gn_param_grad`. All 3 fed the same 2 fold kernels with the same `[M, C]` view, in the same argument position.
+  - `set_/get_row_pass` replaces `set_/get_ln_row` and `set_/get_gn_row`. Both gated a row-block sweep of the same shape.
+  - No result bits move. The fold kernels take their block boundaries from the input shape alone, so the flag decides where the work runs and never what it computes. Both merged gates keep 262_144.
 ### Changed
 - **`cargo bench --bench parallel_gates` no longer writes into the source tree.** The report goes to `target/parallel_gates/RESULTS.md`. Set `RUSTYML_WRITE_RESULTS=1` to refresh the tracked copy at `benches/calibrations/RESULTS.md`. A write failure now prints a warning instead of a panic.
 - **The `nn_end_to_end` Dense benchmark times `predict`, not `forward`.** `forward` writes an input cache and an output cache, so the old loop held 2 extra tensors live per iteration and measured the allocator as much as the kernel.

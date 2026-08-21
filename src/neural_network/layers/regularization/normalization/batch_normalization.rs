@@ -9,6 +9,7 @@
 //! reinterpretation of the same bytes, not a reshape or a transpose. That is why 1 code path
 //! serves every rank >= 2
 
+use super::col_fold_parallel_min_elems;
 use super::folds::{par_col_dot, par_col_sum};
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -36,17 +37,6 @@ tunable_gate! {
     ///
     /// Overridable via [`crate::tuning`]
     pub(crate) BATCH_NORM_PARALLEL_THRESHOLD => batch_norm_parallel_threshold / set_batch_norm_parallel_threshold = 262_144
-}
-
-tunable_gate! {
-    /// Element count (`M x C`) above which the per-channel statistics reductions (mean,
-    /// variance, and the backward sums) run as row-block deterministic folds
-    ///
-    /// Applies to every input of rank >= 2. A `[batch, *spatial, channels]` input collapses to
-    /// the same `[M, C]` view as a 2-D input, with `M = batch * spatial`. So 1 gate covers both
-    ///
-    /// Overridable via [`crate::tuning`]
-    pub(crate) BN_COL_STATS_PARALLEL_MIN_ELEMS => bn_col_stats_parallel_min_elems / set_bn_col_stats_parallel_min_elems = 262_144
 }
 
 /// Batch Normalization layer for neural networks
@@ -234,7 +224,7 @@ impl Layer for BatchNormalization {
             } else {
                 input.shape()[0]
             };
-            let col_stats_parallel = total_elements >= bn_col_stats_parallel_min_elems();
+            let col_stats_parallel = total_elements >= col_fold_parallel_min_elems();
 
             // Mean across the batch dimension (axis 0): a row-block deterministic fold, on
             // rayon above the column-stats gate
@@ -394,7 +384,7 @@ impl Layer for BatchNormalization {
         } else {
             grad_output.shape()[0] as f32
         };
-        let col_stats_parallel = total_elements >= bn_col_stats_parallel_min_elems();
+        let col_stats_parallel = total_elements >= col_fold_parallel_min_elems();
 
         // Compute gradients for gamma and beta: fused row-block folds (no [M, C] product
         // temp), on rayon above the column-stats gate

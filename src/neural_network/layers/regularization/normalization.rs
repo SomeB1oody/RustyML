@@ -13,26 +13,40 @@ use ndarray::{Array1, IxDyn};
 use rayon::prelude::*;
 
 tunable_gate! {
-    /// Total-element count above which the group-normalization per-item row passes run on rayon
+    /// Element count (`M x C`) above which [`folds::par_col_sum`] and [`folds::par_col_dot`]
+    /// run their row-block fold on rayon
     ///
-    /// Gates the forward and backward per-item sweeps, and the per-item statistics fold when the
-    /// batch itself is too small to fill the pool. Every split uses the same fixed-order kernels,
-    /// so the gate only decides where the work runs, not the result.
+    /// All 3 normalization layers reach these 2 kernels with the same `[M, C]` view and the same
+    /// per-element cost, so 1 gate serves all of them. BatchNorm folds its per-channel mean,
+    /// variance, and backward sums. LayerNorm and GroupNorm fold their gamma and beta gradients.
+    /// A `[batch, *spatial, channels]` input collapses to the same view as a 2-D input, with
+    /// `M = batch * spatial`
+    ///
+    /// The block boundaries come from [`folds::rows_per_block`], which reads only the shape, so
+    /// the gate decides where the work runs and never what it computes
     ///
     /// Overridable via [`crate::tuning`]
-    pub(crate) GN_ROW_PARALLEL_MIN_ELEMS => gn_row_parallel_min_elems / set_gn_row_parallel_min_elems = 262_144
+    pub(crate) COL_FOLD_PARALLEL_MIN_ELEMS
+        => col_fold_parallel_min_elems / set_col_fold_parallel_min_elems = 262_144
 }
 
 tunable_gate! {
-    /// Total-element count above which group normalization's per-channel parameter-gradient
-    /// folds run on rayon
+    /// Total-element count above which a normalization row pass runs on rayon
     ///
-    /// `grad_gamma`/`grad_beta` are column folds over the `[M, C]` view of the gradient. This is
-    /// the same deterministic row-block kernel BatchNormalization uses, so the flag only decides
-    /// where the work runs.
+    /// LayerNorm and GroupNorm sweep the same shape: 1 contiguous row (or per-item slab) per
+    /// task, with fixed-order kernels inside it. The 2 layers therefore share 1 gate.
+    ///
+    /// For GroupNorm the flag also feeds a second decision. Once the batch alone fills the pool,
+    /// the items spread across rayon and each item folds its statistics serially. Below that, the
+    /// split moves inside 1 item at a time. This gate only opens that choice, and never picks
+    /// between its 2 arms.
+    ///
+    /// Every split uses the same fixed-order kernels, so the gate decides where the work runs
+    /// and never what it computes
     ///
     /// Overridable via [`crate::tuning`]
-    pub(crate) GN_PARAM_GRAD_PARALLEL_MIN_ELEMS => gn_param_grad_parallel_min_elems / set_gn_param_grad_parallel_min_elems = 262_144
+    pub(crate) ROW_PASS_PARALLEL_MIN_ELEMS
+        => row_pass_parallel_min_elems / set_row_pass_parallel_min_elems = 262_144
 }
 
 /// Positions per statistics block, sized from the channel count so 1 block holds about
@@ -228,7 +242,7 @@ pub(super) fn group_norm_forward_core(
 
     let input_std = input.as_standard_layout();
     let x = input_std.as_slice().unwrap();
-    let parallel = total >= gn_row_parallel_min_elems();
+    let parallel = total >= row_pass_parallel_min_elems();
     let (gamma_s, beta_s) = (gamma.as_slice().unwrap(), beta.as_slice().unwrap());
 
     let mut x_normalized = Tensor::zeros(IxDyn(&shape));
@@ -333,7 +347,7 @@ pub(super) fn group_norm_backward_core(
     let inv_std_s = inv_std.as_slice().unwrap();
     let gamma_s = gamma.as_slice().unwrap();
 
-    let col_parallel = total >= gn_param_grad_parallel_min_elems();
+    let col_parallel = total >= col_fold_parallel_min_elems();
     let grad_beta = par_col_sum(g, layout.channels, col_parallel, 1.0);
     let grad_gamma = par_col_dot(g, xn, layout.channels, col_parallel, 1.0);
 
@@ -388,7 +402,7 @@ pub(super) fn group_norm_backward_core(
     };
     {
         let dx_all = grad_input.as_slice_mut().unwrap();
-        if total >= gn_row_parallel_min_elems() {
+        if total >= row_pass_parallel_min_elems() {
             dx_all
                 .par_chunks_mut(item)
                 .zip(g.par_chunks(item).zip(xn.par_chunks(item)))
