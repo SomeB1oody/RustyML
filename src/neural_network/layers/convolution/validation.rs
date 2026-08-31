@@ -1,6 +1,9 @@
 //! Shared parameter and input-shape validators for the convolution layers
 
 use crate::error::Error;
+use crate::neural_network::layers::convolution::convolution_engine::{
+    ConvPadding, effective_kernel,
+};
 
 /// Validates the filters parameter
 ///
@@ -109,16 +112,18 @@ pub(super) fn validate_strides_3d(strides: (usize, usize, usize)) -> Result<(), 
 
 /// Validates input shape for 1D convolution
 ///
+/// # Notes
+///
+/// The kernel size is not part of this rule. A kernel longer than the input axis stays legal
+/// under `Same` and `Causal` padding. The padding mode is not yet final at construction. See
+/// [`validate_valid_kernel_fits`], which applies that rule at the forward pass
+///
 /// # Errors
 ///
 /// Returns `Error::InvalidInput` if:
 /// - Shape is not 3D
 /// - Input channels is 0
-/// - Input length is less than kernel size
-pub(super) fn validate_input_shape_1d(
-    input_shape: &[usize],
-    kernel_size: usize,
-) -> Result<(), Error> {
+pub(super) fn validate_input_shape_1d(input_shape: &[usize]) -> Result<(), Error> {
     if input_shape.len() != 3 {
         return Err(Error::invalid_input(
             "Input shape must be 3D: [batch_size, length, channels]",
@@ -129,26 +134,21 @@ pub(super) fn validate_input_shape_1d(
             "Number of input channels must be greater than 0",
         ));
     }
-    if input_shape[1] < kernel_size {
-        return Err(Error::invalid_input(
-            "Input length must be at least as large as the kernel size",
-        ));
-    }
     Ok(())
 }
 
 /// Validates input shape for 2D convolution
+///
+/// # Notes
+///
+/// The kernel size is not part of this rule. See [`validate_input_shape_1d`]
 ///
 /// # Errors
 ///
 /// Returns `Error::InvalidInput` if:
 /// - Shape is not 4D
 /// - Input channels is 0
-/// - Input dimensions are less than kernel size
-pub(super) fn validate_input_shape_2d(
-    input_shape: &[usize],
-    kernel_size: (usize, usize),
-) -> Result<(), Error> {
+pub(super) fn validate_input_shape_2d(input_shape: &[usize]) -> Result<(), Error> {
     if input_shape.len() != 4 {
         return Err(Error::invalid_input(
             "Input shape must be 4D: [batch_size, height, width, channels]",
@@ -159,26 +159,21 @@ pub(super) fn validate_input_shape_2d(
             "Number of input channels must be greater than 0",
         ));
     }
-    if input_shape[1] < kernel_size.0 || input_shape[2] < kernel_size.1 {
-        return Err(Error::invalid_input(
-            "Input dimensions must be at least as large as the kernel size",
-        ));
-    }
     Ok(())
 }
 
 /// Validates input shape for 3D convolution
+///
+/// # Notes
+///
+/// The kernel size is not part of this rule. See [`validate_input_shape_1d`]
 ///
 /// # Errors
 ///
 /// Returns `Error::InvalidInput` if:
 /// - Shape is not 5D
 /// - Any dimension is 0
-/// - Input spatial dimensions are less than the kernel size
-pub(super) fn validate_input_shape_3d(
-    input_shape: &[usize],
-    kernel_size: (usize, usize, usize),
-) -> Result<(), Error> {
+pub(super) fn validate_input_shape_3d(input_shape: &[usize]) -> Result<(), Error> {
     if input_shape.len() != 5 {
         return Err(Error::invalid_input(
             "Input shape must be 5-dimensional: [batch, depth, height, width, channels]",
@@ -189,22 +184,15 @@ pub(super) fn validate_input_shape_3d(
             "All input dimensions must be greater than 0",
         ));
     }
-    if input_shape[1] < kernel_size.0
-        || input_shape[2] < kernel_size.1
-        || input_shape[3] < kernel_size.2
-    {
-        return Err(Error::invalid_input(
-            "Input spatial dimensions must be at least as large as the kernel size",
-        ));
-    }
     Ok(())
 }
 
 /// Validates the input shape of a transposed convolution of the given spatial rank
 ///
 /// A transposed convolution grows its input, so it puts no lower bound on the input spatial
-/// size. A 1x1 input under a 3x3 kernel is a normal decoder step. That is the difference from
-/// [`validate_input_shape_2d`] and its siblings, which reject an input smaller than the kernel
+/// size. A 1x1 input under a 3x3 kernel is a normal decoder step. A plain convolution bounds the
+/// input only under `Valid` padding, and it applies that rule at the forward pass. See
+/// [`validate_valid_kernel_fits`]
 ///
 /// # Parameters
 ///
@@ -229,6 +217,125 @@ pub(super) fn validate_transpose_input_shape(
     if input_shape.contains(&0) {
         return Err(Error::invalid_input(
             "All input dimensions must be greater than 0",
+        ));
+    }
+    Ok(())
+}
+
+/// Validates a dilation rate
+///
+/// # Parameters
+///
+/// - `dilation` - Tap spacing of each spatial axis
+///
+/// # Errors
+///
+/// - `Error::InvalidParameter` - If any dilation is 0
+pub(super) fn validate_dilation(dilation: &[usize]) -> Result<(), Error> {
+    if dilation.contains(&0) {
+        return Err(Error::invalid_parameter(
+            "dilation_rate",
+            "Dilation rate must be greater than 0",
+        ));
+    }
+    Ok(())
+}
+
+/// Rejects an effective kernel longer than the input axis it runs on, under `Valid` padding only
+///
+/// The effective extent of `k` taps spaced `dilation` apart is `(k - 1) * dilation + 1`. Under
+/// `Valid` padding the layer reads only complete windows, so an extent longer than the input axis
+/// gives an output size of 0. That configuration is rejected. `Same` and `Causal` padding add the
+/// missing cells on the borders, so every extent stays legal and this rule does not apply. A
+/// transposed convolution grows its input and puts no such bound on it, so it does not call this
+///
+/// The padding mode is not final until the layer runs, because the builder methods can set it in
+/// any order. The rule therefore belongs to the forward pass and not to a constructor
+///
+/// # Parameters
+///
+/// - `padding` - Padding mode of the layer
+/// - `kernel` - Kernel size of each spatial axis
+/// - `dilation` - Tap spacing of each spatial axis
+/// - `input_sp` - Input size of each spatial axis
+///
+/// # Errors
+///
+/// - `Error::InvalidInput` - If the padding is `Valid` and an effective kernel is longer than the
+///   input axis it runs on
+pub(super) fn validate_valid_kernel_fits(
+    padding: ConvPadding,
+    kernel: &[usize],
+    dilation: &[usize],
+    input_sp: &[usize],
+) -> Result<(), Error> {
+    if padding != ConvPadding::Valid {
+        return Ok(());
+    }
+    for d in 0..kernel.len() {
+        let keff = effective_kernel(kernel[d], dilation[d]);
+        if input_sp[d] < keff {
+            return Err(Error::invalid_input(format!(
+                "Valid-padding convolution requires every input spatial dimension to be at least \
+                 the dilated kernel size: axis {d} has input size {} < dilated kernel size {keff}",
+                input_sp[d]
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Output size of 1 spatial axis under `Valid` padding
+///
+/// Returns 0 when the effective kernel is longer than the input axis, because no complete window
+/// fits. A layer in that state rejects the input at the forward pass (see
+/// [`validate_valid_kernel_fits`]). This keeps the shape it reports before then defined
+///
+/// # Parameters
+///
+/// - `input` - Input size of the axis
+/// - `keff` - Effective kernel extent of the axis
+/// - `stride` - Stride of the axis
+///
+/// # Returns
+///
+/// - `usize` - Number of output positions on the axis
+pub(super) fn valid_output_size(input: usize, keff: usize, stride: usize) -> usize {
+    input.checked_sub(keff).map_or(0, |rest| rest / stride + 1)
+}
+
+/// Rejects a stride above 1 together with a dilation above 1
+///
+/// The rule fires on the maximum across the axes, not axis by axis. A stride of 2 on 1 axis and
+/// a dilation of 2 on another is rejected as well
+///
+/// # Parameters
+///
+/// - `strides` - Stride of each spatial axis
+/// - `dilation` - Tap spacing of each spatial axis
+///
+/// # Notes
+///
+/// ONLY the plain and the transposed convolutions call this. The depthwise and the separable
+/// layers accept a stride and a dilation above 1 together, so this must stay out of any
+/// validator they share
+///
+/// # Errors
+///
+/// - `Error::InvalidParameter` - If any stride and any dilation are both above 1
+pub(super) fn validate_stride_dilation_exclusive(
+    strides: &[usize],
+    dilation: &[usize],
+) -> Result<(), Error> {
+    let max_stride = strides.iter().copied().max().unwrap_or(1);
+    let max_dilation = dilation.iter().copied().max().unwrap_or(1);
+    if max_stride > 1 && max_dilation > 1 {
+        return Err(Error::invalid_parameter(
+            "dilation_rate",
+            format!(
+                "A stride above 1 does not combine with a dilation above 1: strides {strides:?} \
+                 and dilation {dilation:?}"
+            ),
         ));
     }
     Ok(())

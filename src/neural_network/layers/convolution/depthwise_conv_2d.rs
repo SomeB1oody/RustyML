@@ -8,9 +8,10 @@ use crate::neural_network::layers::conv_op_helpers::{
     DepthwiseGeometry, depthwise_backward, depthwise_forward,
 };
 use crate::neural_network::layers::convolution::PaddingType;
+use crate::neural_network::layers::convolution::convolution_engine::effective_kernel;
 use crate::neural_network::layers::convolution::validation::{
-    validate_depth_multiplier, validate_input_shape_2d, validate_kernel_size_2d,
-    validate_strides_2d,
+    valid_output_size, validate_depth_multiplier, validate_dilation, validate_input_shape_2d,
+    validate_kernel_size_2d, validate_strides_2d, validate_valid_kernel_fits,
 };
 use crate::neural_network::layers::layer_weight::{DepthwiseConv2DLayerWeight, LayerWeight};
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_2d;
@@ -96,6 +97,8 @@ pub struct DepthwiseConv2D {
     kernel_size: (usize, usize),
     /// Stride of the convolution as (height_stride, width_stride)
     strides: (usize, usize),
+    /// Tap spacing of the kernel as (height, width). 1 gives a solid kernel on that axis
+    dilation_rate: (usize, usize),
     /// Padding strategy (Valid or Same)
     padding: PaddingType,
     /// 4D weight tensor with shape \[kernel_height, kernel_width, channels, depth_multiplier\]
@@ -137,8 +140,9 @@ impl DepthwiseConv2D {
     /// from the input, as `channels * depth_multiplier`. `depth_multiplier` defaults to 1. Set it
     /// with [`DepthwiseConv2D::with_depth_multiplier`]. Padding defaults to
     /// [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
-    /// [`DepthwiseConv2D::with_padding`]. The layer seeds weights from the global seed or entropy
-    /// by default. For reproducible initialization, set a seed with
+    /// [`DepthwiseConv2D::with_padding`]. The kernel is solid by default. Space its taps out
+    /// with [`DepthwiseConv2D::with_dilation_rate`]. The layer seeds weights from the global seed
+    /// or entropy by default. For reproducible initialization, set a seed with
     /// [`DepthwiseConv2D::with_random_state`]
     ///
     /// # Errors
@@ -146,8 +150,7 @@ impl DepthwiseConv2D {
     /// - `Error::InvalidParameter` - If any kernel dimension or stride is 0
     /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
-    /// - `Error::InvalidInput` - If `input_shape` is not 4D, has 0 channels, or is smaller
-    ///   than the kernel
+    /// - `Error::InvalidInput` - If `input_shape` is not 4D or has 0 channels
     pub fn new(
         kernel_size: (usize, usize),
         input_shape: Vec<usize>,
@@ -156,7 +159,7 @@ impl DepthwiseConv2D {
     ) -> Result<Self, Error> {
         validate_kernel_size_2d(kernel_size)?;
         validate_strides_2d(strides)?;
-        validate_input_shape_2d(&input_shape, kernel_size)?;
+        validate_input_shape_2d(&input_shape)?;
         let activation = activation.into();
         activation.validate()?;
 
@@ -169,6 +172,7 @@ impl DepthwiseConv2D {
             depth_multiplier: 1,
             kernel_size,
             strides,
+            dilation_rate: (1, 1),
             padding: PaddingType::Valid,
             weights,
             bias,
@@ -193,6 +197,38 @@ impl DepthwiseConv2D {
     pub fn with_padding(mut self, padding: PaddingType) -> Self {
         self.padding = padding;
         self
+    }
+
+    /// Sets the tap spacing of the kernel (defaults to `(1, 1)`)
+    ///
+    /// A dilation of `d` on an axis spaces the kernel taps `d` cells apart, so `k` taps span
+    /// `(k - 1) * d + 1` input cells of that axis. The window still advances by the stride. A
+    /// dilation of 1 on both axes gives a solid kernel and the same result as before
+    ///
+    /// # Parameters
+    ///
+    /// - `dilation_rate` - Tap spacing as (height, width)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated layer, or an error
+    ///
+    /// # Notes
+    ///
+    /// A depthwise convolution takes a stride above 1 and a dilation above 1 together. Only the
+    /// plain and the transposed convolutions reject that pair
+    ///
+    /// The effective kernel is not bounded by the input axis here. Only [`PaddingType::Valid`]
+    /// needs it to fit, and the forward pass applies that rule
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If either dilation is 0
+    pub fn with_dilation_rate(mut self, dilation_rate: (usize, usize)) -> Result<Self, Error> {
+        let dilation = [dilation_rate.0, dilation_rate.1];
+        validate_dilation(&dilation)?;
+        self.dilation_rate = dilation_rate;
+        Ok(self)
     }
 
     /// Sets how many kernels each input channel gets (defaults to 1)
@@ -281,10 +317,11 @@ impl DepthwiseConv2D {
         match self.padding {
             PaddingType::Valid => (0, 0),
             PaddingType::Same => {
-                let pad_h = ((output_height - 1) * self.strides.0 + self.kernel_size.0)
-                    .saturating_sub(input_height);
-                let pad_w = ((output_width - 1) * self.strides.1 + self.kernel_size.1)
-                    .saturating_sub(input_width);
+                let (keff_h, keff_w) = self.effective_kernel_size();
+                let pad_h =
+                    ((output_height - 1) * self.strides.0 + keff_h).saturating_sub(input_height);
+                let pad_w =
+                    ((output_width - 1) * self.strides.1 + keff_w).saturating_sub(input_width);
                 (pad_h, pad_w)
             }
         }
@@ -313,8 +350,12 @@ impl DepthwiseConv2D {
     /// The layer's geometry for a given input, as the shared kernel wants it
     fn geometry(&self, input_shape: &[usize]) -> DepthwiseGeometry {
         let (height, width) = (input_shape[1], input_shape[2]);
-        let output_shape =
-            calculate_output_shape_2d(input_shape, self.kernel_size, self.strides, &self.padding);
+        let output_shape = calculate_output_shape_2d(
+            input_shape,
+            self.effective_kernel_size(),
+            self.strides,
+            &self.padding,
+        );
         let (out_height, out_width) = (output_shape[1], output_shape[2]);
         let (pad_h, pad_w) = self.calculate_padding(height, width, out_height, out_width);
         DepthwiseGeometry {
@@ -324,8 +365,20 @@ impl DepthwiseConv2D {
             depth_multiplier: self.depth_multiplier,
             kernel: self.kernel_size,
             strides: self.strides,
+            dilation: self.dilation_rate,
             pad_before: (pad_h / 2, pad_w / 2),
         }
+    }
+
+    /// The extent the dilated taps span on each axis
+    ///
+    /// Every output-size and padding rule reads this rather than the kernel size. The 2 agree at
+    /// a dilation of 1
+    fn effective_kernel_size(&self) -> (usize, usize) {
+        (
+            effective_kernel(self.kernel_size.0, self.dilation_rate.0),
+            effective_kernel(self.kernel_size.1, self.dilation_rate.1),
+        )
     }
 
     /// Depthwise convolution over a channels-last tensor, followed by the activation
@@ -340,6 +393,12 @@ impl DepthwiseConv2D {
         if channels != self.channels {
             return Err(Error::dimension_mismatch(self.channels, channels));
         }
+        validate_valid_kernel_fits(
+            self.padding.into(),
+            &[self.kernel_size.0, self.kernel_size.1],
+            &[self.dilation_rate.0, self.dilation_rate.1],
+            &input.shape()[1..3],
+        )?;
 
         let g = self.geometry(input.shape());
         let batch_size = input.shape()[0];
@@ -425,25 +484,32 @@ impl Layer for DepthwiseConv2D {
     }
 
     fn output_shape(&self) -> String {
-        if !self.input_shape.is_empty() {
-            let output_shape = calculate_output_shape_2d(
-                &self.input_shape,
-                self.kernel_size,
-                self.strides,
-                &self.padding,
-            );
-            // `calculate_output_shape_2d` carries the input channel count. A depthwise convolution
-            // emits `channels * depth_multiplier`, so the last axis comes from the layer instead
-            format!(
-                "({}, {}, {}, {})",
-                output_shape[0],
-                output_shape[1],
-                output_shape[2],
-                self.channels * self.depth_multiplier
-            )
-        } else {
-            String::from("Unknown")
+        if self.input_shape.is_empty() {
+            return String::from("Unknown");
         }
+        let (height, width) = (self.input_shape[1], self.input_shape[2]);
+        let (keff_h, keff_w) = self.effective_kernel_size();
+        // A `Valid` layer whose effective kernel is longer than an input axis is legal until the
+        // forward pass rejects it. `valid_output_size` reports 0 positions there instead of
+        // subtracting past 0, which `calculate_output_shape_2d` would do
+        let (out_height, out_width) = match self.padding {
+            PaddingType::Valid => (
+                valid_output_size(height, keff_h, self.strides.0),
+                valid_output_size(width, keff_w, self.strides.1),
+            ),
+            PaddingType::Same => (
+                height.div_ceil(self.strides.0),
+                width.div_ceil(self.strides.1),
+            ),
+        };
+        // A depthwise convolution emits `channels * depth_multiplier` channels
+        format!(
+            "({}, {}, {}, {})",
+            self.input_shape[0],
+            out_height,
+            out_width,
+            self.channels * self.depth_multiplier
+        )
     }
 
     fn param_count(&self) -> TrainingParameters {

@@ -23,6 +23,8 @@
 //!   feature vector into a sequence
 //! - **Identity**: passes its input through unchanged, as a placeholder where a model needs a
 //!   layer that does nothing
+//! - **Rescaling**: applies the fixed affine map `y = x * scale + offset` to every element, to
+//!   condition an input in front of the first weight that a model trains
 //! - **Activation**: standalone activation layers (ReLU, LeakyReLU, ELU, SELU, Sigmoid, Tanh, ...)
 //! - **PReLU**: a ReLU whose negative-side slope is trainable, with a `shared_axes` rule that
 //!   sets how many slopes it holds

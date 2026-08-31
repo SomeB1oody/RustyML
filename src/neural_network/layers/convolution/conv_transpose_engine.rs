@@ -10,7 +10,8 @@
 //!
 //! # Conventions
 //!
-//! - `Valid` output: `in * stride + max(kernel - stride, 0)`
+//! - `Valid` output: `in * stride + max(keff - stride, 0)`, for the dilated extent
+//!   `keff = (kernel - 1) * dilation + 1`
 //! - `Same` output: `in * stride`
 //! - Weights are flat row-major `[k..., F, Cin]`. The filter axis comes before the input-channel
 //!   axis, which is the reverse of the plain convolution kernel. This is the layout a transposed
@@ -44,7 +45,8 @@
 use super::PaddingType;
 use super::convolution_engine::{
     ColContext, ConvGradients, build_col_range, build_padded, conv_geometry,
-    conv_parallel_min_flops, crop_padded, im2col_offsets, map_indexed, spatial_strides,
+    conv_parallel_min_flops, crop_padded, effective_kernel, im2col_offsets, map_indexed,
+    spatial_strides,
 };
 use crate::error::Error;
 use crate::math::matmul::dot_par;
@@ -59,6 +61,7 @@ use ndarray::{Array2, ArrayD, ArrayView2, Axis, IxDyn};
 /// - `input` - Input size of the axis
 /// - `kernel` - Kernel size of the axis
 /// - `stride` - Stride of the axis
+/// - `dilation` - Tap spacing of the axis
 /// - `padding` - Padding mode
 ///
 /// # Returns
@@ -68,12 +71,15 @@ pub(super) fn transpose_output_length(
     input: usize,
     kernel: usize,
     stride: usize,
+    dilation: usize,
     padding: PaddingType,
 ) -> usize {
+    // Dilation enters through the extent the taps span, exactly as it does in the plain pass
+    let keff = effective_kernel(kernel, dilation);
     match padding {
         // A kernel no wider than the stride reaches no further than the stride already does.
         // The `max` therefore holds the output at `input * stride` instead of shrinking it
-        PaddingType::Valid => input * stride + kernel.saturating_sub(stride),
+        PaddingType::Valid => input * stride + keff.saturating_sub(stride),
         PaddingType::Same => input * stride,
     }
 }
@@ -98,6 +104,7 @@ fn transpose_geometry(
     in_sp: &[usize],
     k_dims: &[usize],
     strides: &[usize],
+    dilation: &[usize],
     padding: PaddingType,
 ) -> Result<TransposeGeometry, Error> {
     if let Some(d) = in_sp.iter().position(|&n| n == 0) {
@@ -108,13 +115,14 @@ fn transpose_geometry(
     }
 
     let out_sp: Vec<usize> = (0..in_sp.len())
-        .map(|d| transpose_output_length(in_sp[d], k_dims[d], strides[d], padding))
+        .map(|d| transpose_output_length(in_sp[d], k_dims[d], strides[d], dilation[d], padding))
         .collect();
     // The plain convolution from `out_sp` back to `in_sp` is the one this pass transposes, so its
     // geometry is this pass's geometry. `conv_geometry` cannot fail here. Its `Valid` branch
     // rejects only an output axis smaller than the kernel. Both output rules above make every
     // axis at least the kernel size, for an input of 1 or more
-    let (check_sp, pad_before, padded_sp) = conv_geometry(&out_sp, k_dims, strides, padding)?;
+    let (check_sp, pad_before, padded_sp) =
+        conv_geometry(&out_sp, k_dims, strides, dilation, padding.into())?;
     debug_assert_eq!(
         check_sp, in_sp,
         "the transposed output size must convolve back to the input size"
@@ -174,6 +182,7 @@ pub(super) fn conv_transpose_forward(
     weight_shape: &[usize],
     bias: &[f32],
     strides: &[usize],
+    dilation: &[usize],
     padding: PaddingType,
 ) -> Result<Tensor, Error> {
     let (r, batch, in_sp, cin) = split_shape(input.shape());
@@ -182,7 +191,7 @@ pub(super) fn conv_transpose_forward(
     let k_dims = &weight_shape[..r];
     let k_plane: usize = k_dims.iter().product();
 
-    let geometry = transpose_geometry(in_sp, k_dims, strides, padding)?;
+    let geometry = transpose_geometry(in_sp, k_dims, strides, dilation, padding)?;
     let TransposeGeometry {
         out_sp,
         pad_before,
@@ -201,7 +210,7 @@ pub(super) fn conv_transpose_forward(
 
     // 1 column per (tap, filter) pair, which is the width of the scatter matrix below
     let k_total = k_plane * filters;
-    let offsets = im2col_offsets(in_sp, k_dims, strides, &padded_strides);
+    let offsets = im2col_offsets(in_sp, k_dims, strides, dilation, &padded_strides);
     let w_mat =
         ArrayView2::from_shape((k_total, cin), weights).expect("weights length matches [k*F, Cin]");
 
@@ -283,6 +292,7 @@ pub(super) fn conv_transpose_backward(
     weights: &[f32],
     weight_shape: &[usize],
     strides: &[usize],
+    dilation: &[usize],
     padding: PaddingType,
 ) -> Result<ConvGradients, Error> {
     let (r, batch, in_sp, cin) = split_shape(input.shape());
@@ -291,7 +301,7 @@ pub(super) fn conv_transpose_backward(
     let k_dims = &weight_shape[..r];
     let k_plane: usize = k_dims.iter().product();
 
-    let geometry = transpose_geometry(in_sp, k_dims, strides, padding)?;
+    let geometry = transpose_geometry(in_sp, k_dims, strides, dilation, padding)?;
     let TransposeGeometry {
         out_sp,
         pad_before,
@@ -334,7 +344,7 @@ pub(super) fn conv_transpose_backward(
     let padded: &[f32] = padded_storage.as_deref().unwrap_or(grad_flat);
 
     let k_total = k_plane * filters;
-    let offsets = im2col_offsets(in_sp, k_dims, strides, &padded_strides);
+    let offsets = im2col_offsets(in_sp, k_dims, strides, dilation, &padded_strides);
     let w_mat =
         ArrayView2::from_shape((k_total, cin), weights).expect("weights length matches [k*F, Cin]");
 
@@ -419,27 +429,35 @@ mod tests {
     /// removed
     #[test]
     fn test_transpose_output_length_valid_stride_one() {
-        assert_eq!(transpose_output_length(4, 3, 1, PaddingType::Valid), 6);
+        assert_eq!(transpose_output_length(4, 3, 1, 1, PaddingType::Valid), 6);
     }
 
     /// `Valid` at a stride below the kernel spaces the windows out and still overlaps them
     #[test]
     fn test_transpose_output_length_valid_strided() {
-        assert_eq!(transpose_output_length(4, 3, 2, PaddingType::Valid), 9);
+        assert_eq!(transpose_output_length(4, 3, 2, 1, PaddingType::Valid), 9);
     }
 
     /// A kernel no wider than the stride cannot reach past `input * stride`, so the `max` clamps
     #[test]
     fn test_transpose_output_length_valid_kernel_below_stride() {
-        assert_eq!(transpose_output_length(4, 2, 3, PaddingType::Valid), 12);
+        assert_eq!(transpose_output_length(4, 2, 3, 1, PaddingType::Valid), 12);
+    }
+
+    /// Dilation reaches the output length through the extent the taps span. 3 taps spaced 2
+    /// apart span 5 cells, so a `Valid` pass at stride 1 grows the axis by 4 rather than by 2
+    #[test]
+    fn test_transpose_output_length_dilated() {
+        assert_eq!(transpose_output_length(4, 3, 1, 2, PaddingType::Valid), 8);
+        assert_eq!(transpose_output_length(4, 3, 1, 2, PaddingType::Same), 4);
     }
 
     /// `Same` scales the axis by the stride, whatever the kernel size
     #[test]
     fn test_transpose_output_length_same() {
-        assert_eq!(transpose_output_length(4, 3, 2, PaddingType::Same), 8);
-        assert_eq!(transpose_output_length(4, 7, 2, PaddingType::Same), 8);
-        assert_eq!(transpose_output_length(5, 3, 1, PaddingType::Same), 5);
+        assert_eq!(transpose_output_length(4, 3, 2, 1, PaddingType::Same), 8);
+        assert_eq!(transpose_output_length(4, 7, 2, 1, PaddingType::Same), 8);
+        assert_eq!(transpose_output_length(5, 3, 1, 1, PaddingType::Same), 5);
     }
 
     // transpose_geometry
@@ -447,7 +465,7 @@ mod tests {
     /// `Valid` needs no crop: the scatter buffer is already the output
     #[test]
     fn test_transpose_geometry_valid_needs_no_crop() {
-        let g = transpose_geometry(&[4], &[3], &[2], PaddingType::Valid).unwrap();
+        let g = transpose_geometry(&[4], &[3], &[2], &[1], PaddingType::Valid).unwrap();
         assert_eq!(g.out_sp, vec![9]);
         assert_eq!(g.pad_before, vec![0]);
         assert_eq!(g.padded_sp, vec![9]);
@@ -456,7 +474,7 @@ mod tests {
     /// `Same` at stride 1 with an odd kernel crops half the kernel off each end
     #[test]
     fn test_transpose_geometry_same_stride_one() {
-        let g = transpose_geometry(&[4], &[3], &[1], PaddingType::Same).unwrap();
+        let g = transpose_geometry(&[4], &[3], &[1], &[1], PaddingType::Same).unwrap();
         assert_eq!(g.out_sp, vec![4]);
         assert_eq!(g.pad_before, vec![1]);
         assert_eq!(g.padded_sp, vec![6]);
@@ -465,7 +483,7 @@ mod tests {
     /// `Same` at stride 2 with an even kernel crops 1 leading cell
     #[test]
     fn test_transpose_geometry_same_even_kernel() {
-        let g = transpose_geometry(&[3], &[4], &[2], PaddingType::Same).unwrap();
+        let g = transpose_geometry(&[3], &[4], &[2], &[1], PaddingType::Same).unwrap();
         assert_eq!(g.out_sp, vec![6]);
         assert_eq!(g.pad_before, vec![1]);
         assert_eq!(g.padded_sp, vec![8]);
@@ -475,7 +493,7 @@ mod tests {
     /// underflow
     #[test]
     fn test_transpose_geometry_rejects_empty_axis() {
-        let result = transpose_geometry(&[0], &[3], &[1], PaddingType::Same);
+        let result = transpose_geometry(&[0], &[3], &[1], &[1], PaddingType::Same);
         assert!(
             matches!(result, Err(Error::InvalidInput(_))),
             "expected InvalidInput, got {result:?}"
@@ -505,6 +523,7 @@ mod tests {
             &[2, 1, 1],
             &bias,
             &[1],
+            &[1],
             PaddingType::Valid,
         )
         .unwrap();
@@ -531,6 +550,7 @@ mod tests {
             &[1, 1, 1],
             &bias,
             &[3],
+            &[1],
             PaddingType::Valid,
         )
         .unwrap();
@@ -557,6 +577,7 @@ mod tests {
             &[1, 2, 1],
             &bias,
             &[1],
+            &[1],
             PaddingType::Valid,
         )
         .unwrap();
@@ -573,17 +594,21 @@ mod tests {
     fn test_conv_transpose_forward_is_the_adjoint_of_conv_forward() {
         use super::super::convolution_engine::conv_forward;
 
-        for (k, stride, padding) in [
-            (3usize, 1usize, PaddingType::Valid),
-            (3, 2, PaddingType::Valid),
-            (2, 3, PaddingType::Valid),
-            (3, 1, PaddingType::Same),
-            (3, 2, PaddingType::Same),
-            (4, 2, PaddingType::Same),
-            (5, 3, PaddingType::Same),
+        for (k, stride, dilation, padding) in [
+            (3usize, 1usize, 1usize, PaddingType::Valid),
+            (3, 2, 1, PaddingType::Valid),
+            (2, 3, 1, PaddingType::Valid),
+            (3, 1, 1, PaddingType::Same),
+            (3, 2, 1, PaddingType::Same),
+            (4, 2, 1, PaddingType::Same),
+            (5, 3, 1, PaddingType::Same),
+            // Dilation is legal only at stride 1, on both sides of the identity
+            (3, 1, 2, PaddingType::Valid),
+            (3, 1, 3, PaddingType::Same),
+            (2, 1, 4, PaddingType::Same),
         ] {
             let (n, cin, filters) = (4usize, 2usize, 3usize);
-            let out_len = transpose_output_length(n, k, stride, padding);
+            let out_len = transpose_output_length(n, k, stride, dilation, padding);
 
             // 1 flat array serves both passes. The transposed kernel is `[k, F, Cin]`. The plain
             // convolution that runs the other way reads `filters` channels and writes `cin` of
@@ -607,6 +632,7 @@ mod tests {
                 &[k, filters, cin],
                 &no_transpose_bias,
                 &[stride],
+                &[dilation],
                 padding,
             )
             .unwrap();
@@ -616,7 +642,8 @@ mod tests {
                 &[k, filters, cin],
                 &no_conv_bias,
                 &[stride],
-                padding,
+                &[dilation],
+                padding.into(),
             )
             .unwrap();
 
@@ -624,8 +651,8 @@ mod tests {
             let right: f32 = x.iter().zip(cy.iter()).map(|(a, b)| a * b).sum();
             assert!(
                 (left - right).abs() <= 1e-3 * left.abs().max(right.abs()).max(1.0),
-                "adjoint identity failed at k={k}, stride={stride}, padding={padding:?}: \
-                 {left} against {right}"
+                "adjoint identity failed at k={k}, stride={stride}, dilation={dilation}, \
+                 padding={padding:?}: {left} against {right}"
             );
         }
     }

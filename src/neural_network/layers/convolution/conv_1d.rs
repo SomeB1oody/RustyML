@@ -4,10 +4,14 @@ use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
-use crate::neural_network::layers::convolution::PaddingType;
-use crate::neural_network::layers::convolution::convolution_engine::{conv_backward, conv_forward};
+#[doc(inline)]
+pub use crate::neural_network::layers::convolution::convolution_engine::ConvPadding;
+use crate::neural_network::layers::convolution::convolution_engine::{
+    conv_backward, conv_forward, effective_kernel,
+};
 use crate::neural_network::layers::convolution::validation::{
-    validate_filters, validate_input_shape_1d, validate_kernel_size_1d, validate_strides_1d,
+    valid_output_size, validate_dilation, validate_filters, validate_input_shape_1d,
+    validate_kernel_size_1d, validate_stride_dilation_exclusive, validate_strides_1d,
 };
 use crate::neural_network::layers::layer_weight::{Conv1DLayerWeight, LayerWeight};
 use crate::neural_network::layers::validation::validate_weight_shape;
@@ -76,8 +80,10 @@ pub struct Conv1D {
     kernel_size: usize,
     /// Stride value for the convolution operation
     stride: usize,
-    /// Type of padding to apply (`Valid` or `Same`)
-    padding: PaddingType,
+    /// Tap spacing of the kernel. 1 gives a solid kernel
+    dilation_rate: usize,
+    /// Type of padding to apply (`Valid`, `Same`, or `Causal`)
+    padding: ConvPadding,
     /// 3D array of filter weights with shape \[kernel_size, channels, filters\]
     weights: Array3<f32>,
     /// 1D array of bias values with shape \[filters\]
@@ -113,15 +119,20 @@ impl Conv1D {
     ///
     /// # Notes
     ///
-    /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
-    /// [`Conv1D::with_padding`]. By default, the layer seeds weights from the global seed or
-    /// entropy. For reproducible initialization, set a seed with [`Conv1D::with_random_state`].
+    /// Padding defaults to [`ConvPadding::Valid`]. Choose [`ConvPadding::Same`] or
+    /// [`ConvPadding::Causal`] with [`Conv1D::with_padding`]. The kernel is solid by default.
+    /// Space its taps out with [`Conv1D::with_dilation_rate`]. By default, the layer seeds
+    /// weights from the global seed or entropy. For reproducible initialization, set a seed with
+    /// [`Conv1D::with_random_state`].
+    ///
+    /// The kernel is not bounded by the input length here. Only [`ConvPadding::Valid`] needs the
+    /// effective kernel to fit. The padding mode is not final until the layer runs, so the
+    /// forward pass applies that rule.
     ///
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `filters`, `kernel_size`, or `stride` is 0
-    /// - `Error::InvalidInput` - If `input_shape` is not 3D, has 0 channels, or input length is
-    ///   less than kernel size
+    /// - `Error::InvalidInput` - If `input_shape` is not 3D or has 0 channels
     /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
     pub fn new(
@@ -134,7 +145,7 @@ impl Conv1D {
         validate_filters(filters)?;
         validate_kernel_size_1d(kernel_size)?;
         validate_strides_1d(stride)?;
-        validate_input_shape_1d(&input_shape, kernel_size)?;
+        validate_input_shape_1d(&input_shape)?;
         let activation = activation.into();
         activation.validate()?;
 
@@ -146,7 +157,8 @@ impl Conv1D {
             filters,
             kernel_size,
             stride,
-            padding: PaddingType::Valid,
+            dilation_rate: 1,
+            padding: ConvPadding::Valid,
             weights,
             bias,
             activation,
@@ -158,18 +170,53 @@ impl Conv1D {
         })
     }
 
-    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    /// Sets the padding mode (defaults to [`ConvPadding::Valid`])
+    ///
+    /// This takes a [`PaddingType`](super::PaddingType) as well, which converts to the matching
+    /// [`ConvPadding`]. [`ConvPadding::Causal`] is the 1 mode no other convolution accepts. It
+    /// puts every pad cell on the leading edge, so an output position reads no later input
+    /// position
     ///
     /// # Parameters
     ///
-    /// - `padding` - Padding type (`Valid` or `Same`)
+    /// - `padding` - Padding mode (`Valid`, `Same`, or `Causal`)
     ///
     /// # Returns
     ///
     /// - `Self` - The updated layer
-    pub fn with_padding(mut self, padding: PaddingType) -> Self {
-        self.padding = padding;
+    pub fn with_padding(mut self, padding: impl Into<ConvPadding>) -> Self {
+        self.padding = padding.into();
         self
+    }
+
+    /// Sets the tap spacing of the kernel (defaults to 1)
+    ///
+    /// A dilation of `d` spaces the kernel taps `d` cells apart, so `kernel_size` taps span
+    /// `(kernel_size - 1) * d + 1` input cells. The window still advances by the stride. A
+    /// dilation of 1 gives a solid kernel and the same result as before
+    ///
+    /// # Parameters
+    ///
+    /// - `dilation_rate` - Tap spacing along the length axis
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated layer, or an error
+    ///
+    /// # Notes
+    ///
+    /// The effective kernel is not bounded by the input length here. Only [`ConvPadding::Valid`]
+    /// needs it to fit, and the forward pass applies that rule
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If `dilation_rate` is 0
+    /// - `Error::InvalidParameter` - If `dilation_rate` is above 1 and the stride is also above 1
+    pub fn with_dilation_rate(mut self, dilation_rate: usize) -> Result<Self, Error> {
+        validate_dilation(&[dilation_rate])?;
+        validate_stride_dilation_exclusive(&[self.stride], &[dilation_rate])?;
+        self.dilation_rate = dilation_rate;
+        Ok(self)
     }
 
     /// Sets the seed used to initialize the filter weights and re-initializes them
@@ -218,10 +265,17 @@ impl Conv1D {
     }
 
     /// Calculates the output length after convolution
+    ///
+    /// The `Valid` rule reads the dilated extent of the kernel. `Causal` gives the same length
+    /// as `Same`, because both rules round the input length up by the stride
     fn calculate_output_length(&self, input_length: usize) -> usize {
         match self.padding {
-            PaddingType::Valid => (input_length - self.kernel_size) / self.stride + 1,
-            PaddingType::Same => input_length.div_ceil(self.stride),
+            ConvPadding::Valid => valid_output_size(
+                input_length,
+                effective_kernel(self.kernel_size, self.dilation_rate),
+                self.stride,
+            ),
+            ConvPadding::Same | ConvPadding::Causal => input_length.div_ceil(self.stride),
         }
     }
 
@@ -261,6 +315,7 @@ impl Layer for Conv1D {
             self.weights.shape(),
             self.bias.as_slice().expect("bias must be contiguous"),
             &[self.stride],
+            &[self.dilation_rate],
             self.padding,
         )?;
         let activated = self.activation.forward(&output)?;
@@ -281,6 +336,7 @@ impl Layer for Conv1D {
             self.weights.shape(),
             self.bias.as_slice().expect("bias must be contiguous"),
             &[self.stride],
+            &[self.dilation_rate],
             self.padding,
         )?;
         let activated = self.activation.forward(&output)?;
@@ -306,6 +362,7 @@ impl Layer for Conv1D {
             self.weights.as_slice().expect("weights must be contiguous"),
             self.weights.shape(),
             &[self.stride],
+            &[self.dilation_rate],
             self.padding,
         )?;
 

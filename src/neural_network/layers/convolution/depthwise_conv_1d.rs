@@ -8,9 +8,10 @@ use crate::neural_network::layers::conv_op_helpers::{
     DepthwiseGeometry, depthwise_backward, depthwise_forward,
 };
 use crate::neural_network::layers::convolution::PaddingType;
+use crate::neural_network::layers::convolution::convolution_engine::effective_kernel;
 use crate::neural_network::layers::convolution::validation::{
-    validate_depth_multiplier, validate_input_shape_1d, validate_kernel_size_1d,
-    validate_strides_1d,
+    valid_output_size, validate_depth_multiplier, validate_dilation, validate_input_shape_1d,
+    validate_kernel_size_1d, validate_strides_1d, validate_valid_kernel_fits,
 };
 use crate::neural_network::layers::layer_weight::{DepthwiseConv1DLayerWeight, LayerWeight};
 use crate::neural_network::layers::validation::validate_weight_shape;
@@ -76,6 +77,8 @@ pub struct DepthwiseConv1D {
     kernel_size: usize,
     /// Stride of the convolution along the length axis
     stride: usize,
+    /// Tap spacing of the kernel along the length axis. 1 gives a solid kernel
+    dilation_rate: usize,
     /// Padding strategy (Valid or Same)
     padding: PaddingType,
     /// 3D weight tensor with shape \[kernel_size, channels, depth_multiplier\]
@@ -118,7 +121,8 @@ impl DepthwiseConv1D {
     /// with [`DepthwiseConv1D::with_depth_multiplier`].
     ///
     /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
-    /// [`DepthwiseConv1D::with_padding`].
+    /// [`DepthwiseConv1D::with_padding`]. The kernel is solid by default. Space its taps out
+    /// with [`DepthwiseConv1D::with_dilation_rate`].
     ///
     /// The layer seeds weights from the global seed or entropy by default. For reproducible
     /// initialization, set a seed with [`DepthwiseConv1D::with_random_state`]
@@ -138,7 +142,7 @@ impl DepthwiseConv1D {
     ) -> Result<Self, Error> {
         validate_kernel_size_1d(kernel_size)?;
         validate_strides_1d(stride)?;
-        validate_input_shape_1d(&input_shape, kernel_size)?;
+        validate_input_shape_1d(&input_shape)?;
         let activation = activation.into();
         activation.validate()?;
 
@@ -151,6 +155,7 @@ impl DepthwiseConv1D {
             depth_multiplier: 1,
             kernel_size,
             stride,
+            dilation_rate: 1,
             padding: PaddingType::Valid,
             weights,
             bias,
@@ -175,6 +180,37 @@ impl DepthwiseConv1D {
     pub fn with_padding(mut self, padding: PaddingType) -> Self {
         self.padding = padding;
         self
+    }
+
+    /// Sets the tap spacing of the kernel (defaults to 1)
+    ///
+    /// A dilation of `d` spaces the kernel taps `d` cells apart, so `kernel_size` taps span
+    /// `(kernel_size - 1) * d + 1` input cells. The window still advances by the stride. A
+    /// dilation of 1 gives a solid kernel and the same result as before
+    ///
+    /// # Parameters
+    ///
+    /// - `dilation_rate` - Tap spacing along the length axis
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated layer, or an error
+    ///
+    /// # Notes
+    ///
+    /// A depthwise convolution takes a stride above 1 and a dilation above 1 together. Only the
+    /// plain and the transposed convolutions reject that pair
+    ///
+    /// The effective kernel is not bounded by the input length here. Only [`PaddingType::Valid`]
+    /// needs it to fit, and the forward pass applies that rule
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If `dilation_rate` is 0
+    pub fn with_dilation_rate(mut self, dilation_rate: usize) -> Result<Self, Error> {
+        validate_dilation(&[dilation_rate])?;
+        self.dilation_rate = dilation_rate;
+        Ok(self)
     }
 
     /// Sets how many kernels each input channel gets (defaults to 1)
@@ -253,9 +289,15 @@ impl DepthwiseConv1D {
     }
 
     /// Calculates the output length after convolution
+    ///
+    /// The `Valid` rule reads the extent the dilated taps span, not the tap count
     fn calculate_output_length(&self, input_length: usize) -> usize {
         match self.padding {
-            PaddingType::Valid => (input_length - self.kernel_size) / self.stride + 1,
+            PaddingType::Valid => valid_output_size(
+                input_length,
+                effective_kernel(self.kernel_size, self.dilation_rate),
+                self.stride,
+            ),
             PaddingType::Same => input_length.div_ceil(self.stride),
         }
     }
@@ -289,11 +331,10 @@ impl DepthwiseConv1D {
     fn geometry(&self, input_shape: &[usize]) -> DepthwiseGeometry {
         let length = input_shape[1];
         let out_length = self.calculate_output_length(length);
+        let keff = effective_kernel(self.kernel_size, self.dilation_rate);
         let pad = match self.padding {
             PaddingType::Valid => 0,
-            PaddingType::Same => {
-                ((out_length - 1) * self.stride + self.kernel_size).saturating_sub(length)
-            }
+            PaddingType::Same => ((out_length - 1) * self.stride + keff).saturating_sub(length),
         };
         DepthwiseGeometry {
             input: (1, length),
@@ -302,6 +343,8 @@ impl DepthwiseConv1D {
             depth_multiplier: self.depth_multiplier,
             kernel: (1, self.kernel_size),
             strides: (1, self.stride),
+            // The height axis is the placeholder axis, so it stays solid at 1
+            dilation: (1, self.dilation_rate),
             pad_before: (0, pad / 2),
         }
     }
@@ -318,6 +361,12 @@ impl DepthwiseConv1D {
         if channels != self.channels {
             return Err(Error::dimension_mismatch(self.channels, channels));
         }
+        validate_valid_kernel_fits(
+            self.padding.into(),
+            &[self.kernel_size],
+            &[self.dilation_rate],
+            &input.shape()[1..2],
+        )?;
 
         let g = self.geometry(input.shape());
         let batch_size = input.shape()[0];

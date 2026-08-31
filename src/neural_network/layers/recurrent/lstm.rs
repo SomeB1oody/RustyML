@@ -5,11 +5,11 @@ use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::layer_weight::{LSTMLayerWeight, LayerWeight};
-use crate::neural_network::layers::recurrent::apply_sigmoid;
 use crate::neural_network::layers::recurrent::gate::{FusedGates, project_input, take_cache};
 use crate::neural_network::layers::recurrent::validation::{
-    validate_input_3d, validate_recurrent_dimensions,
+    split_grad_output, validate_input_3d, validate_recurrent_dimensions,
 };
+use crate::neural_network::layers::recurrent::{apply_sigmoid, input_step};
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use gemmkit_ndarray::dot;
@@ -26,6 +26,10 @@ use std::borrow::Cow;
 /// All 4 gates are stored fused. The kernels are packed side by side into single matrices.
 /// Column blocks follow the order `[input | forget | cell | output]` (`[i | f | g | o]`),
 /// matching Keras. Each projection runs as 1 GEMM instead of 4.
+///
+/// [`LSTM::with_return_sequences`] makes the layer return every timestep's hidden state, with
+/// shape (batch_size, timesteps, units). [`LSTM::with_go_backwards`] processes the input
+/// timesteps from last to first.
 ///
 /// # Examples
 ///
@@ -71,6 +75,10 @@ pub struct LSTM {
 
     /// Activation applied to the candidate and to the cell state each timestep (Keras-style)
     activation: Activation,
+    /// Returns the full sequence of hidden states when true, or only the last one when false
+    return_sequences: bool,
+    /// Processes the input timesteps from last to first when true
+    go_backwards: bool,
 }
 
 /// Per-timestep forward values an [`LSTM`] records so its backward pass can recompute the gate
@@ -133,6 +141,8 @@ impl LSTM {
             input_cache: None,
             caches: None,
             activation,
+            return_sequences: false,
+            go_backwards: false,
         })
     }
 
@@ -153,6 +163,49 @@ impl LSTM {
         // Dimensions were validated in `new`, so re-initialization cannot fail
         self.gates = Self::init_gates(self.input_dim, self.units, Some(random_state))
             .expect("LSTM dimensions were validated in new()");
+        self
+    }
+
+    /// Sets whether the layer returns every timestep's hidden state
+    ///
+    /// The default is false, which returns only the last hidden state, with shape
+    /// (batch_size, units). With true, the layer returns all hidden states, with shape
+    /// (batch_size, timesteps, units). Slot `k` of the time axis holds the state after
+    /// processing step `k`. The backward pass then expects a gradient of the same rank-3 shape.
+    ///
+    /// # Parameters
+    ///
+    /// - `return_sequences` - True to return every timestep's hidden state
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    ///
+    /// # Notes
+    ///
+    /// The last slot of the returned sequence always equals the output of the same layer with
+    /// `return_sequences` set to false. The cell state stays internal in both cases.
+    pub fn with_return_sequences(mut self, return_sequences: bool) -> Self {
+        self.return_sequences = return_sequences;
+        self
+    }
+
+    /// Sets whether the layer processes the input timesteps from last to first
+    ///
+    /// The default is false. With true, processing step 0 consumes input timestep
+    /// `timesteps` - 1, and the output stays in processing order. The layer does not reverse the
+    /// output back to input order, so slot 0 of a returned sequence holds the state that came
+    /// from the last input timestep. This flag changes no shape.
+    ///
+    /// # Parameters
+    ///
+    /// - `go_backwards` - True to process the input timesteps from last to first
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_go_backwards(mut self, go_backwards: bool) -> Self {
+        self.go_backwards = go_backwards;
         self
     }
 
@@ -312,12 +365,16 @@ impl LSTM {
         self.set_weights(kernel, recurrent_kernel, bias)
     }
 
-    /// Runs the recurrence and returns the last hidden state. This is the shared numeric body of
+    /// Runs the recurrence and returns the layer output. This is the shared numeric body of
     /// [`Layer::forward`] and [`Layer::predict`].
+    ///
+    /// The output is the last hidden state, with shape (batch_size, units). With
+    /// `return_sequences` set, it is instead every hidden state in processing order, with shape
+    /// (batch_size, timesteps, units).
     ///
     /// When `caches` is `Some`, the pass records every per-timestep value the backward pass
     /// needs: the hidden and cell states, `activation(c_t)`, and the 4 gate activations.
-    /// `predict` passes `None` and skips the recording.
+    /// `predict` passes `None` and skips the recording. Every record stays in processing order.
     ///
     /// Each timestep computes all 4 gate pre-activations with 1 fused GEMM. The recurrent
     /// product accumulates onto the pre-projected `x_t @ kernel` slice, and the epilogue adds
@@ -329,7 +386,7 @@ impl LSTM {
         &self,
         x3: &ArrayView3<f32>,
         mut caches: Option<&mut LstmCaches>,
-    ) -> Result<Array2<f32>, Error> {
+    ) -> Result<Tensor, Error> {
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         let u = self.units;
         let act = self.activation;
@@ -338,6 +395,12 @@ impl LSTM {
             .bias
             .as_slice()
             .expect("fused bias must be contiguous");
+
+        let mut sequence = if self.return_sequences {
+            Some(Array3::<f32>::zeros((batch, timesteps, u)))
+        } else {
+            None
+        };
 
         let mut h_prev = Array2::<f32>::zeros((batch, u));
         let mut c_prev = Array2::<f32>::zeros((batch, u));
@@ -349,7 +412,8 @@ impl LSTM {
         // Batched fused input projection for all 4 gates
         let xw = project_input(&self.gates.kernel, x3);
 
-        for t in 0..timesteps {
+        for k in 0..timesteps {
+            let t = input_step(k, timesteps, self.go_backwards);
             // All 4 gate pre-activations in 1 fused recurrent GEMM, accumulated on top of the
             // pre-projected `x_t @ kernel` slice
             let mut z_all = xw.index_axis(Axis(1), t).to_owned(); // [batch, 4*units]
@@ -393,12 +457,18 @@ impl LSTM {
                 c.cs_activated.push(c_t_activated);
                 c.hs.push(h_t.clone());
             }
+            if let Some(seq) = sequence.as_mut() {
+                seq.index_axis_mut(Axis(1), k).assign(&h_t);
+            }
 
             h_prev = h_t;
             c_prev = c_t;
         }
 
-        Ok(h_prev)
+        Ok(match sequence {
+            Some(seq) => seq.into_dyn(),
+            None => h_prev.into_dyn(),
+        })
     }
 }
 
@@ -418,30 +488,19 @@ impl Layer for LSTM {
             g: Vec::with_capacity(timesteps),
             o: Vec::with_capacity(timesteps),
         };
-        let h_last = self.run(&x3, Some(&mut caches))?;
+        let output = self.run(&x3, Some(&mut caches))?;
         self.caches = Some(caches);
-        Ok(h_last.into_dyn())
+        Ok(output)
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_3d(input)?;
         let x3 = input.view().into_dimensionality::<Ix3>().unwrap();
-        Ok(self.run(&x3, None)?.into_dyn())
+        self.run(&x3, None)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // The upstream gradient is dL/dh_T directly (no extra output activation)
-        let grad_h_t = grad_output
-            .clone()
-            .into_dimensionality::<Ix2>()
-            .map_err(|_| {
-                Error::invalid_input(format!(
-                    "LSTM backward expects a 2D gradient [batch, units], got shape {:?}",
-                    grad_output.shape()
-                ))
-            })?;
-
         // Configurable activation, used for the candidate and cell-state derivatives
         let act = self.activation;
 
@@ -461,20 +520,37 @@ impl Layer for LSTM {
         let feat = x3.shape()[2];
         let u = self.units;
 
+        // With `return_sequences`, every step also takes a direct contribution from `grad_seq`.
+        // The cell state is reachable only through the hidden state, so `grad_c` takes none
+        let (mut grad_h, grad_seq) = split_grad_output(
+            grad_output,
+            "LSTM",
+            self.return_sequences,
+            batch,
+            timesteps,
+            u,
+        )?;
+
         // Fused pre-activation gradients for every timestep, gate blocks [i | f | g | o]
         let mut dz3 = Array3::<f32>::zeros((batch, timesteps, 4 * u));
 
-        let mut grad_h = grad_h_t;
         let mut grad_c = Array2::<f32>::zeros((batch, u));
 
         // Backpropagation through time
-        for t in (0..timesteps).rev() {
-            let c_prev = &cs[t];
-            let c_t_activated = &cs_activated[t];
-            let i_t = &i_vals[t];
-            let f_t = &f_vals[t];
-            let g_t = &g_vals[t];
-            let o_t = &o_vals[t];
+        for k in (0..timesteps).rev() {
+            // The direct contribution accumulates onto the carried gradient, before any gate
+            // backward reads it. `cs[k]` is the cell state that enters processing step `k`,
+            // while `cs_activated[k]` is the activated cell state that leaves it
+            if let Some(seq) = grad_seq.as_ref() {
+                grad_h += &seq.index_axis(Axis(1), k);
+            }
+
+            let c_prev = &cs[k];
+            let c_t_activated = &cs_activated[k];
+            let i_t = &i_vals[k];
+            let f_t = &f_vals[k];
+            let g_t = &g_vals[k];
+            let o_t = &o_vals[k];
 
             // Gradient through h_t = o_t * activation(c_t)
             let grad_o_t = &grad_h * c_t_activated;
@@ -513,7 +589,10 @@ impl Layer for LSTM {
             // Gradient with respect to the previous hidden state: 1 fused GEMM instead of 4
             grad_h = dot(&dz_t, &self.gates.recurrent_kernel.t());
 
-            dz3.index_axis_mut(Axis(1), t).assign(&dz_t);
+            // The reductions below pair `dz_t` with the input row it came from, so the scatter
+            // uses the input timestep, not the processing step
+            dz3.index_axis_mut(Axis(1), input_step(k, timesteps, self.go_backwards))
+                .assign(&dz_t);
 
             // Gradient with respect to previous cell state
             grad_c = grad_c_prev;
@@ -523,9 +602,13 @@ impl Layer for LSTM {
         let x_flat = x3
             .to_shape((batch * timesteps, feat))
             .expect("contiguous input reshape");
+        // `hs[k]` is the state that enters processing step `k`, and it pairs with the `dz_t` of
+        // that same step, which now sits at the step's input timestep
         let mut h_prev3 = Array3::<f32>::zeros((batch, timesteps, u));
-        for (mut dst, h) in h_prev3.axis_iter_mut(Axis(1)).zip(hs.iter()) {
-            dst.assign(h);
+        for (k, h) in hs.iter().take(timesteps).enumerate() {
+            h_prev3
+                .index_axis_mut(Axis(1), input_step(k, timesteps, self.go_backwards))
+                .assign(h);
         }
         let h_prev_flat = h_prev3
             .to_shape((batch * timesteps, u))
@@ -554,7 +637,13 @@ impl Layer for LSTM {
     }
 
     fn output_shape(&self) -> String {
-        format!("(None, {})", self.units)
+        // The layer keeps no input shape, so the time axis of a returned sequence prints as
+        // "None", the same as the batch axis
+        if self.return_sequences {
+            format!("(None, None, {})", self.units)
+        } else {
+            format!("(None, {})", self.units)
+        }
     }
 
     fn param_count(&self) -> TrainingParameters {

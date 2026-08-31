@@ -51,18 +51,14 @@ fn depthwise_conv1d_new_rejects_invalid_args() {
     }
     // (label, kernel_size, input_shape, stride, expected error)
     type Case = (&'static str, usize, Vec<usize>, usize, Want);
-    let cases: [Case; 5] = [
+    // An input shorter than the kernel is NOT a constructor error. `Same` padding makes that
+    // geometry legal, and the padding mode is chosen after construction, so the check belongs to
+    // the forward pass under `Valid`. This matches Keras, which accepts the same configuration
+    let cases: [Case; 4] = [
         ("kernel_size=0", 0, vec![1, 5, 2], 1, Want::Param),
         ("stride=0", 2, vec![1, 5, 2], 0, Want::Param),
         ("non-3D input_shape", 2, vec![1, 5, 2, 2], 1, Want::Input),
         ("zero channels", 2, vec![1, 5, 0], 1, Want::Input),
-        (
-            "input shorter than kernel",
-            6,
-            vec![1, 5, 2],
-            1,
-            Want::Input,
-        ),
     ];
     for (label, kernel_size, input_shape, stride, want) in cases {
         let err =
@@ -366,6 +362,9 @@ fn depthwise_conv1d_emits_c_order_tensors_from_a_strided_input() {
 /// Running the batch and then each sample alone therefore exercises both branches.
 #[test]
 fn depthwise_conv1d_parallel_path_matches_the_serial_path() {
+    // The gate values are process-global. This guard holds the shared side of the lock
+    // in `common`, so no test that moves a gate runs while this test reads one
+    let _gates = crate::common::read_gates();
     let (samples, length, channels, kernel) = (4usize, 2048usize, 16usize, 8usize);
     let out_length = length - kernel + 1;
     let gate = rustyml::tuning::conv::get_naive_parallel_min_flops();
@@ -431,21 +430,14 @@ fn separable_conv1d_new_rejects_invalid_args() {
     }
     // (label, filters, kernel_size, input_shape, stride, depth_multiplier, expected error)
     type Case = (&'static str, usize, usize, Vec<usize>, usize, usize, Want);
-    let cases: [Case; 6] = [
+    // See the note in `depthwise_conv1d_new_rejects_invalid_args`: an input shorter than the
+    // kernel is legal under `Same`, so it is not a constructor error
+    let cases: [Case; 5] = [
         ("filters=0", 0, 2, vec![1, 5, 2], 1, 1, Want::Param),
         ("kernel_size=0", 2, 0, vec![1, 5, 2], 1, 1, Want::Param),
         ("stride=0", 2, 2, vec![1, 5, 2], 0, 1, Want::Param),
         ("depth_multiplier=0", 2, 2, vec![1, 5, 2], 1, 0, Want::Param),
         ("non-3D input_shape", 2, 2, vec![1, 5], 1, 1, Want::Input),
-        (
-            "input shorter than kernel",
-            2,
-            6,
-            vec![1, 5, 2],
-            1,
-            1,
-            Want::Input,
-        ),
     ];
     for (label, filters, kernel_size, input_shape, stride, dm, want) in cases {
         let err =

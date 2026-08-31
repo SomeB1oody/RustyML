@@ -25,6 +25,7 @@
 
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::convolution::PaddingType;
+use crate::parallel_gates::split_cap;
 use ndarray::{ArrayD, IxDyn};
 use rayon::prelude::*;
 
@@ -123,10 +124,42 @@ const POOL_MIN_CHUNK_OUT: usize = 256;
 /// Minimum channels per backward task, so a slab is at least a few vector registers wide
 const POOL_MIN_CHUNK_CHANNELS: usize = 16;
 
+tunable_gate! {
+    /// Test-only cap on the output positions of 1 forward task. See
+    /// [`split_cap`](crate::parallel_gates::split_cap)
+    ///
+    /// The production value 0 keeps [`POOL_MIN_CHUNK_OUT`]. Every fixture input of the golden
+    /// test net holds fewer positions than that minimum, so the forward pass would build 1 task
+    /// per batch item and leave the position split unread. A cap of 1 or more splits it
+    ///
+    /// The same serial window loop folds every position, whatever the task boundaries are, so
+    /// the cap changes no value. Reachable outside the crate only through `bench_internals`
+    pub(crate) POOL_FORCED_CHUNK_OUT => pool_forced_chunk_out / set_pool_forced_chunk_out = 0
+}
+
+tunable_gate! {
+    /// Test-only cap on the channels of 1 backward slab. See
+    /// [`split_cap`](crate::parallel_gates::split_cap)
+    ///
+    /// The production value 0 keeps [`POOL_MIN_CHUNK_CHANNELS`]. Every fixture input of the
+    /// golden test net holds fewer channels than that minimum, so the backward pass would build
+    /// 1 slab per batch item and leave the channel split unread. A cap of 1 or more splits it
+    ///
+    /// A slab owns a disjoint set of channels, and it accumulates in output-position order at
+    /// every width, so the cap changes no value. Reachable outside the crate only through
+    /// `bench_internals`
+    pub(crate) POOL_FORCED_CHUNK_CHANNELS
+        => pool_forced_chunk_channels / set_pool_forced_chunk_channels = 0
+}
+
 /// Positions whose channels the accumulator visits per fold block in [`global_pool_forward`]
 ///
 /// The block size is a function of the channel count only. The fold grouping, and with it the
 /// summation order, depends on the input shape and never on the thread count
+///
+/// This block size takes no test-only cap, and it must never take one. The average reduction
+/// adds each block partial into the accumulator, so a different block size gives a different
+/// summation order and different result bits
 fn rows_per_block(channels: usize) -> usize {
     (16_384 / channels.max(1)).max(1)
 }
@@ -136,6 +169,11 @@ fn rows_per_block(channels: usize) -> usize {
 /// Once a NaN appears, it wins and stays. A later NaN does not replace it, so the index of the
 /// first NaN is kept. No finite value can displace it either, because `v > NaN` is false. A bare
 /// `v > max_val` would silently drop NaNs instead of propagating them
+///
+/// The fold assigns nothing when `v` is `f32::NEG_INFINITY` and `max_val` already holds that
+/// start value, because `-inf > -inf` is false. A caller must therefore seed `max_idx` with a
+/// position that the reduction covers, and never leave it at an arbitrary 0. See
+/// [`windowed_pool_forward_impl`] and [`global_pool_forward`]
 #[inline]
 fn fold_max(max_val: &mut f32, max_idx: &mut usize, v: f32, idx: usize) {
     if v.is_nan() {
@@ -158,7 +196,8 @@ fn fold_max(max_val: &mut f32, max_idx: &mut usize, v: f32, idx: usize) {
 /// - `Tensor` - the pooled output
 /// - `Option<Vec<usize>>` - for [`PoolKind::Max`], one arg-max per output element as a flat
 ///   element offset into the batch item. It already carries the channel, so
-///   [`windowed_pool_backward`] needs no further arithmetic. `None` for averaging
+///   [`windowed_pool_backward`] needs no further arithmetic. The offset is always a position
+///   that the window covers, on the channel of the output element. `None` for averaging
 pub(super) fn windowed_pool_forward(
     input: &Tensor,
     pool: &[usize],
@@ -203,6 +242,9 @@ pub fn windowed_pool_forward_impl(
     let process_range = |b: usize, c0: usize, len: usize| -> (Vec<f32>, Vec<usize>) {
         let item_base = b * item_in;
         let mut out_chunk = vec![0.0f32; len * channels];
+        // The window loop below seeds every entry from the first in-bounds element of its own
+        // window. Every window holds at least 1 in-bounds element, because `Valid` padding pads
+        // nothing and `Same` padding keeps the leading pad below the window width
         let mut arg_chunk = if track {
             vec![0usize; len * channels]
         } else {
@@ -227,6 +269,8 @@ pub fn windowed_pool_forward_impl(
             // every channel reuses it. That reuse is what pays for this layout
             w.iter_mut().for_each(|x| *x = 0);
             let mut count = 0usize;
+            // Whether the first in-bounds element of this window has seeded the arg-max
+            let mut seeded = false;
             loop {
                 let mut in_idx = 0usize;
                 let mut in_bounds = true;
@@ -244,6 +288,17 @@ pub fn windowed_pool_forward_impl(
                     let x = &in_flat[off..off + channels];
                     match kind {
                         PoolKind::Max => {
+                            // The first in-bounds element of the window seeds the arg-max, on
+                            // the channel of each output element. A window whose every element
+                            // loses to the negative-infinity start value keeps that seed, so
+                            // the gradient reaches a position that the window covers.
+                            // `fold_max` replaces the seed as soon as an element wins
+                            if !seeded {
+                                for (c, slot) in arg.iter_mut().enumerate() {
+                                    *slot = off - item_base + c;
+                                }
+                                seeded = true;
+                            }
                             for c in 0..channels {
                                 fold_max(&mut acc[c], &mut arg[c], x[c], off - item_base + c);
                             }
@@ -280,7 +335,10 @@ pub fn windowed_pool_forward_impl(
     // task overhead dominates
     let chunk_len = if parallel && batch > 0 && plane_out > 0 {
         let chunks_per_item = rayon::current_num_threads().div_ceil(batch);
-        plane_out.div_ceil(chunks_per_item).max(POOL_MIN_CHUNK_OUT)
+        split_cap(
+            plane_out.div_ceil(chunks_per_item).max(POOL_MIN_CHUNK_OUT),
+            pool_forced_chunk_out(),
+        )
     } else {
         plane_out.max(1)
     };
@@ -448,10 +506,13 @@ pub(super) fn windowed_pool_backward(
     let worth_parallel = total_ops >= pool_parallel_min_ops();
     let slab = if worth_parallel && batch > 0 && channels > 0 {
         let slabs_per_item = rayon::current_num_threads().div_ceil(batch);
-        channels
-            .div_ceil(slabs_per_item)
-            .max(POOL_MIN_CHUNK_CHANNELS)
-            .min(channels)
+        split_cap(
+            channels
+                .div_ceil(slabs_per_item)
+                .max(POOL_MIN_CHUNK_CHANNELS)
+                .min(channels),
+            pool_forced_chunk_channels(),
+        )
     } else {
         channels.max(1)
     };
@@ -497,7 +558,8 @@ pub(super) fn windowed_pool_backward(
 ///
 /// - `Tensor` - the pooled output, with shape `[batch, channels]`
 /// - `Option<Vec<usize>>` - for [`PoolKind::Max`], one arg-max per output element as a flat
-///   element offset into the batch item. `None` for averaging
+///   element offset into the batch item. The offset always lies on the channel of the output
+///   element. `None` for averaging
 pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Option<Vec<usize>>) {
     let shape = input.shape();
     let r = shape.len() - 2;
@@ -530,8 +592,11 @@ pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Op
             PoolKind::Max => vec![f32::NEG_INFINITY; channels],
             PoolKind::Average => vec![0.0f32; channels],
         };
+        // Position `p0` is the first position of the block. A block whose every element loses to
+        // the negative-infinity start value keeps this seed, so its partial arg-max stays on its
+        // own channel. `fold_max` replaces the seed as soon as an element wins
         let mut arg = if track {
-            vec![0usize; channels]
+            (0..channels).map(|c| p0 * channels + c).collect()
         } else {
             Vec::new()
         };
@@ -570,8 +635,11 @@ pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Op
         PoolKind::Max => vec![f32::NEG_INFINITY; batch * channels],
         PoolKind::Average => vec![0.0f32; batch * channels],
     };
+    // Position 0 of the batch item, on the channel of the output element. An item whose every
+    // element loses to the negative-infinity start value keeps this seed, because no block
+    // partial can then win the merge below
     let mut argmax = if track {
-        vec![0usize; batch * channels]
+        (0..batch * channels).map(|slot| slot % channels).collect()
     } else {
         Vec::new()
     };
@@ -837,6 +905,57 @@ mod tests {
         let flat: Vec<f32> = out.iter().copied().collect();
         assert_abs_diff_eq!(flat[0], 1.5, epsilon = 1e-6);
         assert_abs_diff_eq!(flat[1], 6.0, epsilon = 1e-6);
+    }
+
+    /// A window that no element wins keeps the first position of that window, per channel
+    ///
+    /// Every tap of window 1 holds the negative-infinity start value, and `-inf > -inf` is
+    /// false, so [`fold_max`] assigns nothing. The seed must therefore be a position inside
+    /// window 1, and it must carry the channel of the output element
+    #[test]
+    fn test_windowed_pool_forward_1d_max_all_negative_infinity_window() {
+        let data = ArrayD::from_shape_vec(
+            IxDyn(&[1, 4, 2]),
+            vec![
+                1.0f32,
+                5.0,
+                2.0,
+                6.0,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+            ],
+        )
+        .unwrap();
+        let (out, argmax) =
+            windowed_pool_forward(&data, &[2], &[2], PoolKind::Max, PaddingType::Valid);
+        assert_eq!(
+            out.iter().copied().collect::<Vec<f32>>(),
+            vec![2.0, 6.0, f32::NEG_INFINITY, f32::NEG_INFINITY]
+        );
+        // Window 0 peaks at position 1, and window 1 keeps its own first position, which is 2
+        assert_eq!(argmax.unwrap(), vec![2, 3, 4, 5]);
+    }
+
+    /// A global reduction that no element wins keeps position 0 of its own channel
+    #[test]
+    fn test_global_pool_forward_max_all_negative_infinity_channel() {
+        let negative = f32::NEG_INFINITY;
+        let data = ArrayD::from_shape_vec(
+            IxDyn(&[1, 4, 2]),
+            vec![
+                1.0f32, negative, 2.0, negative, 3.0, negative, 0.0, negative,
+            ],
+        )
+        .unwrap();
+        let (out, argmax) = global_pool_forward(&data, PoolKind::Max);
+        assert_eq!(
+            out.iter().copied().collect::<Vec<f32>>(),
+            vec![3.0, f32::NEG_INFINITY]
+        );
+        // Channel 0 peaks at position 2, and channel 1 keeps position 0 of channel 1
+        assert_eq!(argmax.unwrap(), vec![4, 1]);
     }
 
     /// Ties resolve to the first position scanned, on every channel

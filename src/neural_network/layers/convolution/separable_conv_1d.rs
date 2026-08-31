@@ -8,10 +8,13 @@ use crate::neural_network::layers::conv_op_helpers::{
     DepthwiseGeometry, depthwise_backward, depthwise_forward,
 };
 use crate::neural_network::layers::convolution::PaddingType;
-use crate::neural_network::layers::convolution::convolution_engine::{conv_backward, conv_forward};
+use crate::neural_network::layers::convolution::convolution_engine::{
+    ConvPadding, conv_backward, conv_forward, effective_kernel,
+};
 use crate::neural_network::layers::convolution::validation::{
-    validate_depth_multiplier, validate_filters, validate_input_shape_1d, validate_kernel_size_1d,
-    validate_strides_1d,
+    valid_output_size, validate_depth_multiplier, validate_dilation, validate_filters,
+    validate_input_shape_1d, validate_kernel_size_1d, validate_strides_1d,
+    validate_valid_kernel_fits,
 };
 use crate::neural_network::layers::layer_weight::{LayerWeight, SeparableConv1DLayerWeight};
 use crate::neural_network::layers::validation::validate_weight_shape;
@@ -79,6 +82,8 @@ pub struct SeparableConv1D {
     kernel_size: usize,
     /// Stride of the convolution along the length axis
     stride: usize,
+    /// Tap spacing of the depthwise kernel. 1 gives a solid kernel
+    dilation_rate: usize,
     /// Padding applied to the length axis (`Valid` or `Same`)
     padding: PaddingType,
     /// Number of depthwise filters per input channel
@@ -129,7 +134,8 @@ impl SeparableConv1D {
     /// # Notes
     ///
     /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
-    /// [`SeparableConv1D::with_padding`].
+    /// [`SeparableConv1D::with_padding`]. The depthwise kernel is solid by default. Space its
+    /// taps out with [`SeparableConv1D::with_dilation_rate`].
     ///
     /// The layer seeds weights from the global seed or entropy by default. For reproducible
     /// initialization, set a seed with [`SeparableConv1D::with_random_state`]
@@ -142,7 +148,6 @@ impl SeparableConv1D {
     /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
     /// - `Error::InvalidInput` - If `input_shape` is not 3D or has 0 channels
-    /// - `Error::InvalidInput` - If the input length is smaller than the kernel size
     pub fn new(
         filters: usize,
         kernel_size: usize,
@@ -155,7 +160,7 @@ impl SeparableConv1D {
         validate_kernel_size_1d(kernel_size)?;
         validate_strides_1d(stride)?;
         validate_depth_multiplier(depth_multiplier)?;
-        validate_input_shape_1d(&input_shape, kernel_size)?;
+        validate_input_shape_1d(&input_shape)?;
         let activation = activation.into();
         activation.validate()?;
 
@@ -169,6 +174,7 @@ impl SeparableConv1D {
             channels,
             kernel_size,
             stride,
+            dilation_rate: 1,
             padding: PaddingType::Valid,
             depth_multiplier,
             depthwise_weights,
@@ -197,6 +203,38 @@ impl SeparableConv1D {
     pub fn with_padding(mut self, padding: PaddingType) -> Self {
         self.padding = padding;
         self
+    }
+
+    /// Sets the tap spacing of the depthwise kernel (defaults to 1)
+    ///
+    /// A dilation of `d` spaces the depthwise taps `d` cells apart, so `kernel_size` taps span
+    /// `(kernel_size - 1) * d + 1` input cells. The window still advances by the stride. The
+    /// pointwise stage reads 1 tap, so no dilation can reach it. A dilation of 1 gives a solid
+    /// kernel and the same result as before
+    ///
+    /// # Parameters
+    ///
+    /// - `dilation_rate` - Tap spacing along the length axis
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated layer, or an error
+    ///
+    /// # Notes
+    ///
+    /// A separable convolution takes a stride above 1 and a dilation above 1 together. Only the
+    /// plain and the transposed convolutions reject that pair
+    ///
+    /// The effective kernel is not bounded by the input length here. Only [`PaddingType::Valid`]
+    /// needs it to fit, and the forward pass applies that rule
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If `dilation_rate` is 0
+    pub fn with_dilation_rate(mut self, dilation_rate: usize) -> Result<Self, Error> {
+        validate_dilation(&[dilation_rate])?;
+        self.dilation_rate = dilation_rate;
+        Ok(self)
     }
 
     /// Sets the seed for the depthwise and pointwise weights, and re-initializes them
@@ -272,7 +310,12 @@ impl SeparableConv1D {
     /// unchanged. The depthwise stage alone therefore sets the output length
     fn calculate_output_length(&self, input_length: usize) -> usize {
         match self.padding {
-            PaddingType::Valid => (input_length - self.kernel_size) / self.stride + 1,
+            // The `Valid` rule reads the extent the dilated taps span, not the tap count
+            PaddingType::Valid => valid_output_size(
+                input_length,
+                effective_kernel(self.kernel_size, self.dilation_rate),
+                self.stride,
+            ),
             PaddingType::Same => input_length.div_ceil(self.stride),
         }
     }
@@ -286,11 +329,10 @@ impl SeparableConv1D {
     fn depthwise_geometry(&self, input_shape: &[usize]) -> DepthwiseGeometry {
         let length = input_shape[1];
         let out_length = self.calculate_output_length(length);
+        let keff = effective_kernel(self.kernel_size, self.dilation_rate);
         let pad = match self.padding {
             PaddingType::Valid => 0,
-            PaddingType::Same => {
-                ((out_length - 1) * self.stride + self.kernel_size).saturating_sub(length)
-            }
+            PaddingType::Same => ((out_length - 1) * self.stride + keff).saturating_sub(length),
         };
         DepthwiseGeometry {
             input: (1, length),
@@ -299,15 +341,19 @@ impl SeparableConv1D {
             depth_multiplier: self.depth_multiplier,
             kernel: (1, self.kernel_size),
             strides: (1, self.stride),
+            // The height axis is the placeholder axis, so it stays solid at 1
+            dilation: (1, self.dilation_rate),
             pad_before: (0, pad / 2),
         }
     }
 
-    /// Checks a runtime input against the rank and the channel count the layer was built for
+    /// Checks a runtime input against the rank, the channel count, and the padding rule the
+    /// layer was built for
     ///
     /// The depthwise kernel is sized from the declared channel count, so an input carrying more
     /// channels would read past the end of it. This turns that into an error at the layer
-    /// boundary
+    /// boundary. It also applies the `Valid` fit rule, because a `Valid` window that is longer
+    /// than the input length gives no complete window
     fn validate_input(&self, input: &Tensor) -> Result<(), Error> {
         if input.ndim() != 3 {
             return Err(Error::invalid_input("input tensor is not 3D"));
@@ -316,6 +362,12 @@ impl SeparableConv1D {
         if channels != self.channels {
             return Err(Error::dimension_mismatch(self.channels, channels));
         }
+        validate_valid_kernel_fits(
+            self.padding.into(),
+            &[self.kernel_size],
+            &[self.dilation_rate],
+            &input.shape()[1..2],
+        )?;
         Ok(())
     }
 
@@ -365,7 +417,8 @@ impl SeparableConv1D {
             self.pointwise_weights.shape(),
             self.bias.as_slice().expect("bias must be contiguous"),
             &[1],
-            PaddingType::Valid,
+            &[1],
+            ConvPadding::Valid,
         )
         // A 1-tap kernel under Valid padding can never exceed the input (every length >= 1)
         .expect("1-tap pointwise convolution geometry is always valid")
@@ -465,7 +518,8 @@ impl Layer for SeparableConv1D {
                 .expect("pointwise weights must be contiguous"),
             self.pointwise_weights.shape(),
             &[1],
-            PaddingType::Valid,
+            &[1],
+            ConvPadding::Valid,
         )
         // 1-tap Valid geometry is always valid (see `pointwise_convolve`)
         .expect("1-tap pointwise convolution geometry is always valid");

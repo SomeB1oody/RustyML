@@ -8,9 +8,12 @@ use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::convolution::PaddingType;
-use crate::neural_network::layers::convolution::convolution_engine::{conv_backward, conv_forward};
+use crate::neural_network::layers::convolution::convolution_engine::{
+    conv_backward, conv_forward, effective_kernel,
+};
 use crate::neural_network::layers::convolution::validation::{
-    validate_filters, validate_input_shape_2d, validate_kernel_size_2d, validate_strides_2d,
+    valid_output_size, validate_dilation, validate_filters, validate_input_shape_2d,
+    validate_kernel_size_2d, validate_stride_dilation_exclusive, validate_strides_2d,
 };
 use crate::neural_network::layers::layer_weight::{Conv2DLayerWeight, LayerWeight};
 use crate::neural_network::layers::validation::validate_weight_shape;
@@ -79,6 +82,8 @@ pub struct Conv2D {
     kernel_size: (usize, usize),
     /// Stride values for the convolution operation as (vertical, horizontal)
     strides: (usize, usize),
+    /// Tap spacing of the kernel as (vertical, horizontal). 1 gives a solid kernel on that axis
+    dilation_rate: (usize, usize),
     /// Type of padding to apply (`Valid` or `Same`)
     padding: PaddingType,
     /// 4D array of filter weights with shape \[kernel_height, kernel_width, channels, filters\]
@@ -120,15 +125,16 @@ impl Conv2D {
     /// # Notes
     ///
     /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
-    /// [`Conv2D::with_padding`]. By default, the layer seeds weights from the global seed or
-    /// entropy. For reproducible initialization, set a seed with [`Conv2D::with_random_state`].
+    /// [`Conv2D::with_padding`]. The kernel is solid by default. Space its taps out with
+    /// [`Conv2D::with_dilation_rate`]. By default, the layer seeds weights from the global seed
+    /// or entropy. For reproducible initialization, set a seed with
+    /// [`Conv2D::with_random_state`].
     ///
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `filters` is 0
     /// - `Error::InvalidParameter` - If any kernel dimension or stride is 0
     /// - `Error::InvalidInput` - If `input_shape` is not 4D or has 0 channels
-    /// - `Error::InvalidInput` - If input dimensions are smaller than kernel size
     /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
     pub fn new(
@@ -141,7 +147,7 @@ impl Conv2D {
         validate_filters(filters)?;
         validate_kernel_size_2d(kernel_size)?;
         validate_strides_2d(strides)?;
-        validate_input_shape_2d(&input_shape, kernel_size)?;
+        validate_input_shape_2d(&input_shape)?;
         let activation = activation.into();
         activation.validate()?;
 
@@ -154,6 +160,7 @@ impl Conv2D {
             filters,
             kernel_size,
             strides,
+            dilation_rate: (1, 1),
             padding: PaddingType::Valid,
             weights,
             bias,
@@ -178,6 +185,37 @@ impl Conv2D {
     pub fn with_padding(mut self, padding: PaddingType) -> Self {
         self.padding = padding;
         self
+    }
+
+    /// Sets the tap spacing of the kernel (defaults to `(1, 1)`)
+    ///
+    /// A dilation of `d` on an axis spaces the kernel taps `d` cells apart, so `k` taps span
+    /// `(k - 1) * d + 1` input cells of that axis. The window still advances by the stride. A
+    /// dilation of 1 on both axes gives a solid kernel and the same result as before
+    ///
+    /// # Parameters
+    ///
+    /// - `dilation_rate` - Tap spacing as (vertical, horizontal)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated layer, or an error
+    ///
+    /// # Notes
+    ///
+    /// The effective kernel is not bounded by the input axis here. Only [`PaddingType::Valid`]
+    /// needs it to fit, and the forward pass applies that rule
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If either dilation is 0
+    /// - `Error::InvalidParameter` - If any dilation is above 1 and any stride is also above 1
+    pub fn with_dilation_rate(mut self, dilation_rate: (usize, usize)) -> Result<Self, Error> {
+        let dilation = [dilation_rate.0, dilation_rate.1];
+        validate_dilation(&dilation)?;
+        validate_stride_dilation_exclusive(&[self.strides.0, self.strides.1], &dilation)?;
+        self.dilation_rate = dilation_rate;
+        Ok(self)
     }
 
     /// Sets the seed used to initialize the filter weights and re-initializes them
@@ -230,8 +268,11 @@ impl Conv2D {
 
         let (output_height, output_width) = match self.padding {
             PaddingType::Valid => {
-                let out_height = (input_height - self.kernel_size.0) / self.strides.0 + 1;
-                let out_width = (input_width - self.kernel_size.1) / self.strides.1 + 1;
+                // The `Valid` rule reads the extent the dilated taps span, not the tap count
+                let keff_h = effective_kernel(self.kernel_size.0, self.dilation_rate.0);
+                let keff_w = effective_kernel(self.kernel_size.1, self.dilation_rate.1);
+                let out_height = valid_output_size(input_height, keff_h, self.strides.0);
+                let out_width = valid_output_size(input_width, keff_w, self.strides.1);
                 (out_height, out_width)
             }
             PaddingType::Same => {
@@ -281,7 +322,8 @@ impl Layer for Conv2D {
             self.weights.shape(),
             self.bias.as_slice().expect("bias must be contiguous"),
             &[self.strides.0, self.strides.1],
-            self.padding,
+            &[self.dilation_rate.0, self.dilation_rate.1],
+            self.padding.into(),
         )?;
         let activated = self.activation.forward(&output)?;
         self.output_cache = Some(activated.clone());
@@ -301,7 +343,8 @@ impl Layer for Conv2D {
             self.weights.shape(),
             self.bias.as_slice().expect("bias must be contiguous"),
             &[self.strides.0, self.strides.1],
-            self.padding,
+            &[self.dilation_rate.0, self.dilation_rate.1],
+            self.padding.into(),
         )?;
         let activated = self.activation.forward(&output)?;
         Ok(activated)
@@ -326,7 +369,8 @@ impl Layer for Conv2D {
             self.weights.as_slice().expect("weights must be contiguous"),
             self.weights.shape(),
             &[self.strides.0, self.strides.1],
-            self.padding,
+            &[self.dilation_rate.0, self.dilation_rate.1],
+            self.padding.into(),
         )?;
 
         self.weight_gradients = Some(

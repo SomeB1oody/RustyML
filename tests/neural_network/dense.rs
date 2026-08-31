@@ -14,7 +14,7 @@ use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
-use super::common::assert_allclose;
+use super::common::{GateGuard, assert_allclose};
 
 // helpers
 
@@ -165,10 +165,275 @@ fn dense_predict_equals_forward() {
     assert_allclose(&fwd, &pred, 1e-6_f32);
 }
 
+// Dense: input of rank 3 or more, where the last axis is the only contracted axis
+
+/// Dense(2 -> 3, Linear) with the fixed kernel [[1, 2, 3], [4, 5, 6]] and the bias
+/// [0.5, -0.5, 1.0]. Shared by the cases with an input of rank 3 or more
+fn dense_2_to_3_ramp() -> Dense {
+    let mut d = Dense::new(2, 3, Linear::new()).unwrap();
+    let w = Array2::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+    let b = Array2::from_shape_vec((1, 3), vec![0.5, -0.5, 1.0]).unwrap();
+    d.set_weights(w, b).unwrap();
+    d
+}
+
+/// The rank-3 forward pass gives every leading position the same kernel
+///
+/// The layer contracts the last axis only, so a Dense(3) over a [2, 3, 2] input keeps the
+/// [2, 3] kernel and returns [2, 3, 3]. A per-timestep kernel would need 3 times the weights
+#[test]
+fn dense_forward_rank_3_shares_1_kernel_over_the_leading_axes() {
+    let mut d = dense_2_to_3_ramp();
+    let x = t3(2, 3, 2, (1..=12).map(|v| v as f32).collect());
+
+    let out = d.forward(&x).unwrap();
+
+    // Row [a, b] gives [a + 4b + 0.5, 2a + 5b - 0.5, 3a + 6b + 1]
+    let expected = t3(
+        2,
+        3,
+        3,
+        vec![
+            9.5, 11.5, 16.0, 19.5, 25.5, 34.0, 29.5, 39.5, 52.0, 39.5, 53.5, 70.0, 49.5, 67.5,
+            88.0, 59.5, 81.5, 106.0,
+        ],
+    );
+    assert_allclose(&out, &expected, 1e-4_f32);
+}
+
+/// The rank-4 result equals the result of the same values given as rank 2
+///
+/// The leading axes fold into 1 row axis, so both calls run the very same matrix product.
+/// The values are therefore bit-identical, not merely close
+#[test]
+fn dense_forward_rank_4_equals_the_folded_rank_2_result() {
+    let data: Vec<f32> = (0..24).map(|v| v as f32 * 0.25 - 3.0).collect();
+    let x4 = t4(1, 2, 6, 2, data.clone());
+    let x2 = t2(12, 2, data);
+
+    let out4 = dense_2_to_3_ramp().forward(&x4).unwrap();
+    let out2 = dense_2_to_3_ramp().forward(&x2).unwrap();
+
+    assert_eq!(
+        out4.shape(),
+        &[1, 2, 6, 3],
+        "the rank must survive the fold"
+    );
+    let flat4: Vec<f32> = out4.iter().cloned().collect();
+    let flat2: Vec<f32> = out2.iter().cloned().collect();
+    assert_eq!(flat4, flat2, "1 fold, so 1 product, so the same bits");
+}
+
+/// The rank-3 backward pass gives the 3 gradients of the folded product
+///
+/// The bias gradient sums over every axis except the last one, so it stays [1, units]. The
+/// weight gradient folds both operands to 2D first, so it stays [input_dim, units]. Only the
+/// input gradient goes back to the rank of the input
+#[test]
+fn dense_backward_rank_3_produces_the_3_gradients_of_the_fold() {
+    let mut d = dense_2_to_3_ramp();
+    let x = t3(2, 3, 2, (1..=12).map(|v| v as f32).collect());
+    d.forward(&x).unwrap();
+
+    // A gradient that differs in every position pins the orientation of both products
+    let grad_output = t3(2, 3, 3, (1..=18).map(|v| v as f32).collect());
+    let grad_input = d.backward(&grad_output).unwrap();
+
+    // grad_input[r] = G[r] * W^T, back at the rank of the input
+    let expected_input = t3(
+        2,
+        3,
+        2,
+        vec![
+            14.0, 32.0, 32.0, 77.0, 50.0, 122.0, 68.0, 167.0, 86.0, 212.0, 104.0, 257.0,
+        ],
+    );
+    assert_eq!(grad_input.shape(), x.shape());
+    assert_allclose(&grad_input, &expected_input, 1e-3_f32);
+
+    let params = d.parameters();
+    // grad_weight = X2^T * G2, summed over all 6 folded rows
+    let expected_weight = [411.0_f32, 447.0, 483.0, 462.0, 504.0, 546.0];
+    // grad_bias sums the 6 folded rows, 1 sum for each unit
+    let expected_bias = [51.0_f32, 57.0, 63.0];
+    assert_eq!(params[0].grad.len(), expected_weight.len());
+    assert_eq!(params[1].grad.len(), expected_bias.len());
+    for (got, want) in params[0].grad.iter().zip(expected_weight.iter()) {
+        assert_abs_diff_eq!(*got, *want, epsilon = 1e-2);
+    }
+    for (got, want) in params[1].grad.iter().zip(expected_bias.iter()) {
+        assert_abs_diff_eq!(*got, *want, epsilon = 1e-3);
+    }
+}
+
+/// A rank-3 input that is not in C order gives the same values as its C-order copy
+///
+/// `permuted_axes` reorders the strides only, and `to_owned` keeps them. The fold must then
+/// copy the values in logical order instead of reading the buffer as it lies
+#[test]
+fn dense_forward_rank_3_accepts_an_input_that_is_not_in_c_order() {
+    use ndarray::IxDyn;
+
+    let base = t3(2, 3, 2, (1..=12).map(|v| v as f32).collect());
+    let permuted: Tensor = base.view().permuted_axes(IxDyn(&[1, 0, 2])).to_owned();
+    assert!(
+        !permuted.is_standard_layout(),
+        "the test input must not be in C order"
+    );
+    let c_order: Tensor = permuted.as_standard_layout().into_owned();
+
+    let out = dense_2_to_3_ramp().forward(&permuted).unwrap();
+    let want = dense_2_to_3_ramp().forward(&c_order).unwrap();
+
+    assert_eq!(out.shape(), &[3, 2, 3]);
+    assert_allclose(&out, &want, 1e-4_f32);
+}
+
+/// The rank-3 forward pass matches a reference that runs 1 slice at a time
+///
+/// 1 product over the folded rows sums the same terms as 1 product for each slice, but the
+/// backend blocks the folded product differently. The 2 results agree to about 1 part in a
+/// million, so this comparison needs a tolerance
+#[test]
+fn dense_forward_rank_3_matches_a_per_slice_reference() {
+    let (batch, steps, features, units) = (3, 5, 8, 6);
+    let mut d = Dense::new(features, units, Linear::new()).unwrap();
+    let w: Vec<f32> = (0..features * units)
+        .map(|i| (i % 7) as f32 * 0.37 - 1.1)
+        .collect();
+    let b: Vec<f32> = (0..units).map(|i| i as f32 * 0.11 - 0.3).collect();
+    d.set_weights(
+        Array2::from_shape_vec((features, units), w.clone()).unwrap(),
+        Array2::from_shape_vec((1, units), b.clone()).unwrap(),
+    )
+    .unwrap();
+
+    let data: Vec<f32> = (0..batch * steps * features)
+        .map(|i| (i % 11) as f32 * 0.29 - 1.6)
+        .collect();
+    let x = t3(batch, steps, features, data.clone());
+    let out = d.forward(&x).unwrap();
+    assert_eq!(out.shape(), &[batch, steps, units]);
+
+    let mut reference = Dense::new(features, units, Linear::new()).unwrap();
+    reference
+        .set_weights(
+            Array2::from_shape_vec((features, units), w).unwrap(),
+            Array2::from_shape_vec((1, units), b).unwrap(),
+        )
+        .unwrap();
+
+    for row in 0..batch * steps {
+        let slice = data[row * features..(row + 1) * features].to_vec();
+        let want = reference.predict(&t2(1, features, slice)).unwrap();
+        for unit in 0..units {
+            let got = out.as_slice().expect("C order")[row * units + unit];
+            let expected = want.as_slice().expect("C order")[unit];
+            assert_abs_diff_eq!(got, expected, epsilon = 1e-4);
+        }
+    }
+}
+
+/// `predict` gives the same rank-3 result as `forward`, and writes no cache
+#[test]
+fn dense_predict_equals_forward_rank_3() {
+    let mut d = dense_2_to_3_ramp();
+    let x = t3(2, 3, 2, (1..=12).map(|v| v as f32).collect());
+
+    let predicted = d.predict(&x).unwrap();
+    let forwarded = d.forward(&x).unwrap();
+
+    assert_eq!(predicted.shape(), &[2, 3, 3]);
+    assert_allclose(&predicted, &forwarded, 1e-6_f32);
+}
+
+/// A rank-3 Softmax output normalizes over the units, 1 lane at a time
+///
+/// The fold keeps each last-axis lane whole, so the softmax never mixes 2 timesteps. The
+/// rank-3 result is also bit-identical to the same values given as rank 2
+#[test]
+fn dense_rank_3_softmax_normalizes_each_last_axis_lane() {
+    use ndarray::Axis;
+    use rustyml::neural_network::layers::activation::softmax::Softmax;
+
+    let data: Vec<f32> = (0..12).map(|v| v as f32 * 0.5 - 2.0).collect();
+    let mut d = Dense::new(2, 3, Softmax::new()).unwrap();
+    let w = Array2::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+    let b = Array2::from_shape_vec((1, 3), vec![0.5, -0.5, 1.0]).unwrap();
+    d.set_weights(w.clone(), b.clone()).unwrap();
+
+    let out = d.forward(&t3(2, 3, 2, data.clone())).unwrap();
+    assert_eq!(out.shape(), &[2, 3, 3]);
+    for lane in out.lanes(Axis(2)) {
+        assert_abs_diff_eq!(lane.sum(), 1.0_f32, epsilon = 1e-6);
+    }
+
+    let mut flat = Dense::new(2, 3, Softmax::new()).unwrap();
+    flat.set_weights(w, b).unwrap();
+    let want = flat.forward(&t2(6, 2, data)).unwrap();
+    let got_values: Vec<f32> = out.iter().cloned().collect();
+    let want_values: Vec<f32> = want.iter().cloned().collect();
+    assert_eq!(got_values, want_values, "the fold keeps every lane whole");
+}
+
+/// `output_shape` reports the rank of the last input it saw
+///
+/// Dense(4) after an input of shape (batch, 5, 7) reports "(None, 5, 4)". Before the first
+/// forward pass only the unit count is known
+#[test]
+fn dense_output_shape_reports_the_real_rank() {
+    use ndarray::{ArrayD, IxDyn};
+
+    let mut d = Dense::new(7, 4, Linear::new()).unwrap();
+    assert_eq!(d.output_shape(), "(None, 4)");
+
+    d.forward(&ArrayD::zeros(IxDyn(&[2, 7]))).unwrap();
+    assert_eq!(d.output_shape(), "(None, 4)");
+
+    d.forward(&ArrayD::zeros(IxDyn(&[2, 5, 7]))).unwrap();
+    assert_eq!(d.output_shape(), "(None, 5, 4)");
+
+    d.forward(&ArrayD::zeros(IxDyn(&[3, 2, 5, 7]))).unwrap();
+    assert_eq!(d.output_shape(), "(None, 2, 5, 4)");
+}
+
+/// A rank-3 Dense gives the same values on both sides of every tuning gate
+///
+/// The fold changes the row count that the gated activation pass sees, and the parallel
+/// branch splits that row count into tasks. Both branches must write the same bits
+#[test]
+fn dense_rank_3_matches_across_the_tuning_gates() {
+    use rustyml::neural_network::layers::activation::softmax::Softmax;
+
+    let data: Vec<f32> = (0..24).map(|v| v as f32 * 0.375 - 4.0).collect();
+    let x = t3(4, 3, 2, data);
+    let w = Array2::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
+    let b = Array2::from_shape_vec((1, 3), vec![0.5, -0.5, 1.0]).unwrap();
+
+    let run = |value: usize| {
+        let _gates = GateGuard::set_all(value).with_split_cap(1);
+        let mut d = Dense::new(2, 3, Softmax::new()).unwrap();
+        d.set_weights(w.clone(), b.clone()).unwrap();
+        let out = d.forward(&x).unwrap();
+        let grad = d.backward(&Tensor::ones(out.raw_dim())).unwrap();
+        let params = d.parameters();
+        (
+            out.iter().cloned().collect::<Vec<f32>>(),
+            grad.iter().cloned().collect::<Vec<f32>>(),
+            params[0].grad.to_vec(),
+            params[1].grad.to_vec(),
+        )
+    };
+
+    let serial = run(usize::MAX);
+    let parallel = run(0);
+    assert_eq!(serial, parallel, "the branch must not move the values");
+}
+
 // Dense: error paths
 
 #[test]
-fn dense_forward_rejects_non_2d_input_1d() {
+fn dense_forward_rejects_rank_1_input() {
     let mut d = Dense::new(3, 2, Linear::new()).unwrap();
     let x = Array::from_vec(vec![1.0_f32, 2.0, 3.0]).into_dyn();
     let result = d.forward(&x);
@@ -179,14 +444,53 @@ fn dense_forward_rejects_non_2d_input_1d() {
     );
 }
 
+/// A last axis that differs from `input_dim` returns InvalidInput
+///
+/// The leading axes fold into the row axis, so a wrong last axis can still leave a valid
+/// element count. Without this check a 2-feature layer would fold [2, 4, 7] into [28, 2] and
+/// give a silently wrong result
 #[test]
-fn dense_forward_rejects_non_2d_input_3d() {
+fn dense_rejects_a_last_axis_that_is_not_the_input_dim() {
     let mut d = Dense::new(2, 2, Linear::new()).unwrap();
-    let x = t3(1, 2, 2, vec![1.0, 2.0, 3.0, 4.0]);
-    let result = d.forward(&x);
+
+    let rank_3 = t3(2, 4, 7, vec![0.5; 56]);
+    let result = d.forward(&rank_3);
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
-        "expected InvalidInput for 3D input, got {:?}",
+        "expected InvalidInput for a rank-3 last axis of 7, got {:?}",
+        result
+    );
+
+    let rank_2 = t2(2, 7, vec![0.5; 14]);
+    let result = d.forward(&rank_2);
+    assert!(
+        matches!(result, Err(Error::InvalidInput(_))),
+        "expected InvalidInput for a rank-2 last axis of 7, got {:?}",
+        result
+    );
+
+    let result = d.predict(&rank_3);
+    assert!(
+        matches!(result, Err(Error::InvalidInput(_))),
+        "expected InvalidInput from predict, got {:?}",
+        result
+    );
+}
+
+/// A gradient of the wrong rank returns ShapeMismatch, even where it folds to the right
+/// matrix
+#[test]
+fn dense_backward_rank_3_rejects_a_folded_gradient() {
+    let mut d = dense_2_to_3_ramp();
+    d.forward(&t3(2, 3, 2, (1..=12).map(|v| v as f32).collect()))
+        .unwrap();
+
+    // [6, 3] holds the same 18 values as the cached [2, 3, 3] output, but it is not that shape
+    let folded = t2(6, 3, (1..=18).map(|v| v as f32).collect());
+    let result = d.backward(&folded);
+    assert!(
+        matches!(result, Err(Error::ShapeMismatch { .. })),
+        "expected ShapeMismatch, got {:?}",
         result
     );
 }

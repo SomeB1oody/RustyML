@@ -163,3 +163,29 @@ tunable_gate! {
     pub(crate) SUM_F64_PARALLEL_MIN_ELEMS
         => sum_f64_parallel_min_elems / set_sum_f64_parallel_min_elems = 262_144
 }
+
+// The task-size caps of the golden-fixture test net
+
+/// Applies a test-only cap to a calibrated task size
+///
+/// A parallel driver first computes the task size that its calibrated rule gives, and then
+/// passes that size through this function. `natural` is the calibrated size, and it is 1 or
+/// more. `forced` is the cap that the matching `tunable_gate!` store holds.
+///
+/// The production value of every such store is 0, which keeps `natural` and adds 1 relaxed
+/// load. A value of 1 or more holds each task at that size or below, so an input far under the
+/// calibrated size still builds more than 1 task.
+///
+/// A task size decides only where the task boundaries fall. Each driver that reads a capped
+/// size runs the same serial kernel over each task and joins the results in task order, so the
+/// result is the same at every cap. See `crate::bench_internals` for the surface that installs
+/// a cap, and for the drivers that must never take one.
+#[cfg(feature = "neural_network")]
+#[inline]
+pub(crate) fn split_cap(natural: usize, forced: usize) -> usize {
+    if forced == 0 {
+        natural
+    } else {
+        natural.min(forced)
+    }
+}

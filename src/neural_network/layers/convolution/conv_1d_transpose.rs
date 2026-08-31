@@ -12,7 +12,8 @@ use crate::neural_network::layers::convolution::conv_transpose_engine::{
     conv_transpose_backward, conv_transpose_forward, transpose_output_length,
 };
 use crate::neural_network::layers::convolution::validation::{
-    validate_filters, validate_kernel_size_1d, validate_strides_1d, validate_transpose_input_shape,
+    validate_dilation, validate_filters, validate_kernel_size_1d,
+    validate_stride_dilation_exclusive, validate_strides_1d, validate_transpose_input_shape,
 };
 use crate::neural_network::layers::layer_weight::{Conv1DTransposeLayerWeight, LayerWeight};
 use crate::neural_network::layers::validation::validate_weight_shape;
@@ -105,6 +106,8 @@ pub struct Conv1DTranspose {
     kernel_size: usize,
     /// Stride value for the transposed convolution
     stride: usize,
+    /// Tap spacing of the kernel. 1 gives a solid kernel
+    dilation_rate: usize,
     /// Type of padding to apply (`Valid` or `Same`)
     padding: PaddingType,
     /// 3D array of filter weights with shape \[kernel_size, filters, channels\]
@@ -146,7 +149,9 @@ impl Conv1DTranspose {
     /// # Notes
     ///
     /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
-    /// [`Conv1DTranspose::with_padding`]. By default, the layer seeds weights from the global
+    /// [`Conv1DTranspose::with_padding`]. The kernel is solid by default. Space its taps out
+    /// with [`Conv1DTranspose::with_dilation_rate`]. By default, the layer seeds weights from the
+    /// global
     /// seed or entropy. For reproducible initialization, set a seed with
     /// [`Conv1DTranspose::with_random_state`].
     ///
@@ -178,6 +183,7 @@ impl Conv1DTranspose {
             filters,
             kernel_size,
             stride,
+            dilation_rate: 1,
             padding: PaddingType::Valid,
             weights,
             bias,
@@ -202,6 +208,31 @@ impl Conv1DTranspose {
     pub fn with_padding(mut self, padding: PaddingType) -> Self {
         self.padding = padding;
         self
+    }
+
+    /// Sets the tap spacing of the kernel (defaults to 1)
+    ///
+    /// A dilation of `d` on an axis spaces the kernel taps `d` cells apart, so `k` taps span
+    /// `(k - 1) * d + 1` output cells of that axis. The window still advances by the stride. A
+    /// dilation of 1 gives a solid kernel and the same result as before
+    ///
+    /// # Parameters
+    ///
+    /// - `dilation_rate` - Tap spacing along the length axis
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated layer, or an error
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If any dilation is 0
+    /// - `Error::InvalidParameter` - If any dilation is above 1 and any stride is also above 1
+    pub fn with_dilation_rate(mut self, dilation_rate: usize) -> Result<Self, Error> {
+        validate_dilation(&[dilation_rate])?;
+        validate_stride_dilation_exclusive(&[self.stride], &[dilation_rate])?;
+        self.dilation_rate = dilation_rate;
+        Ok(self)
     }
 
     /// Sets the seed used to initialize the filter weights and re-initializes them
@@ -252,7 +283,13 @@ impl Conv1DTranspose {
     fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
         vec![
             input_shape[0],
-            transpose_output_length(input_shape[1], self.kernel_size, self.stride, self.padding),
+            transpose_output_length(
+                input_shape[1],
+                self.kernel_size,
+                self.stride,
+                self.dilation_rate,
+                self.padding,
+            ),
             self.filters,
         ]
     }
@@ -291,6 +328,7 @@ impl Layer for Conv1DTranspose {
             self.weights.shape(),
             self.bias.as_slice().expect("bias must be contiguous"),
             &[self.stride],
+            &[self.dilation_rate],
             self.padding,
         )?;
         let activated = self.activation.forward(&output)?;
@@ -310,6 +348,7 @@ impl Layer for Conv1DTranspose {
             self.weights.shape(),
             self.bias.as_slice().expect("bias must be contiguous"),
             &[self.stride],
+            &[self.dilation_rate],
             self.padding,
         )?;
         let activated = self.activation.forward(&output)?;
@@ -334,6 +373,7 @@ impl Layer for Conv1DTranspose {
             self.weights.as_slice().expect("weights must be contiguous"),
             self.weights.shape(),
             &[self.stride],
+            &[self.dilation_rate],
             self.padding,
         )?;
 

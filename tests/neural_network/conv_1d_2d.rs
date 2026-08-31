@@ -7,14 +7,19 @@
 //!
 //! Expected values come from the cross-correlation definition with known weights,
 //! not from recorded implementation output. Gradient checks live in gradient_check.rs.
+//!
+//! The dilation and causal-padding cases at the end also cover DepthwiseConv1D and
+//! SeparableConv1D, because those 2 layers share the dilated kernel with the depthwise stage.
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array3, Array4, array};
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::activation::relu::ReLU;
 use rustyml::neural_network::layers::convolution::PaddingType;
-use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
+use rustyml::neural_network::layers::convolution::conv_1d::{Conv1D, ConvPadding};
 use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
+use rustyml::neural_network::layers::convolution::depthwise_conv_1d::DepthwiseConv1D;
+use rustyml::neural_network::layers::convolution::separable_conv_1d::SeparableConv1D;
 use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
@@ -370,16 +375,19 @@ fn conv1d_invalid_scalar_param_errors() {
     }
 }
 
-/// Each invalid input_shape (wrong ndim, zero channels, or length < kernel)
-/// independently makes the constructor return InvalidInput
+/// Each invalid input_shape (wrong ndim or zero channels) independently makes the constructor
+/// return InvalidInput
+///
+/// A length below the kernel size is not on this list. `Same` and `Causal` padding make that
+/// geometry legal. The padding mode is not final at construction, so the forward pass carries
+/// the rule instead.
 #[test]
 fn conv1d_invalid_input_shape_errors() {
     // (input_shape, label)
     let cases = [
-        (vec![1, 5], "2D input_shape"),           // input_shape must be 3D
-        (vec![1, 5, 5, 1], "4D input_shape"),     // input_shape must be 3D
-        (vec![1, 5, 0], "channels=0"),            // channels is the last axis
-        (vec![1, 2, 1], "input length < kernel"), // length=2 < kernel=3
+        (vec![1, 5], "2D input_shape"),       // input_shape must be 3D
+        (vec![1, 5, 5, 1], "4D input_shape"), // input_shape must be 3D
+        (vec![1, 5, 0], "channels=0"),        // channels is the last axis
     ];
     for (input_shape, label) in cases {
         let result = Conv1D::new(1, 3, input_shape, 1, Linear::new());
@@ -806,16 +814,18 @@ fn conv2d_invalid_scalar_param_errors() {
     }
 }
 
-/// Each invalid input_shape (wrong ndim, or a spatial dim < kernel)
-/// independently makes the constructor return InvalidInput
+/// Each invalid input_shape (wrong ndim or zero channels) independently makes the constructor
+/// return InvalidInput
+///
+/// A spatial axis below the kernel size is not on this list. `Same` padding makes that geometry
+/// legal, so the forward pass carries the rule instead.
 #[test]
 fn conv2d_invalid_input_shape_errors() {
     // (input_shape, label)
     let cases = [
         (vec![1, 5, 1], "3D input_shape"),       // input_shape must be 4D
         (vec![1, 5, 5, 5, 1], "5D input_shape"), // input_shape must be 4D
-        (vec![1, 2, 5, 1], "height < kernel"),   // height=2 < kernel_h=3
-        (vec![1, 5, 2, 1], "width < kernel"),    // width=2 < kernel_w=3
+        (vec![1, 5, 5, 0], "channels=0"),        // channels is the last axis
     ];
     for (input_shape, label) in cases {
         let result = Conv2D::new(1, (3, 3), input_shape, (1, 1), Linear::new());
@@ -1000,6 +1010,9 @@ fn conv2d_valid_output_shape_cases() {
 /// Parallel forward branch: windowed sums on a tensor whose estimated FLOPs clear the gate
 #[test]
 fn conv2d_parallel_forward_windowed_sums() {
+    // The gate values are process-global. This guard holds the shared side of the lock
+    // in `common`, so no test that moves a gate runs while this test reads one
+    let _gates = crate::common::read_gates();
     // 2 * batch(2) * filters(2) * out_plane(354*354) * Cin*k(1*2*2) = 4_010_112
     let gemm_flops = 2 * 2 * 2 * (354 * 354) * 4;
     assert!(
@@ -1048,6 +1061,9 @@ fn conv2d_parallel_forward_windowed_sums() {
 /// Parallel weight-gradient backward branch: every kernel tap accumulates the same count
 #[test]
 fn conv2d_parallel_weight_grad_constant_count() {
+    // The gate values are process-global. This guard holds the shared side of the lock
+    // in `common`, so no test that moves a gate runs while this test reads one
+    let _gates = crate::common::read_gates();
     // 4 * batch(4) * filters(1) * out_plane(118*118) * Cin*k(2*3*3) = 4_010_112
     let gemm_flops = 4 * 4 * (118 * 118) * 18;
     assert!(
@@ -1078,4 +1094,1021 @@ fn conv2d_parallel_weight_grad_constant_count() {
     for &g in weight_grad.iter() {
         assert_abs_diff_eq!(g, 55_696.0f32, epsilon = 1e-2f32);
     }
+}
+
+// Dilation
+
+/// A dilated kernel skips input positions between its taps
+///
+/// 3 taps spaced 2 apart span 5 cells, so a length of 9 holds 5 windows and output `o` sums
+/// `x[o]`, `x[o + 2]`, and `x[o + 4]`. An undilated kernel would sum 3 adjacent cells instead.
+#[test]
+fn conv1d_dilation_spaces_the_taps_out() {
+    let mut layer = Conv1D::new(1, 3, vec![1, 9, 1], 1, Linear::new())
+        .unwrap()
+        .with_dilation_rate(2)
+        .unwrap();
+    layer
+        .set_weights(Array3::from_elem((3, 1, 1), 1.0f32), Array1::zeros(1))
+        .unwrap();
+
+    let input = Array::from_shape_vec((1, 9, 1), (1..=9).map(|v| v as f32).collect::<Vec<f32>>())
+        .unwrap()
+        .into_dyn();
+    let output = layer.forward(&input).unwrap();
+
+    assert_eq!(output.shape(), &[1, 5, 1], "keff = 5 leaves 5 windows");
+    let expected = Array::from_shape_vec((1, 5, 1), vec![9.0f32, 12.0, 15.0, 18.0, 21.0])
+        .unwrap()
+        .into_dyn();
+    assert_allclose(&output, &expected, 1e-6f32);
+}
+
+/// `Same` padding keeps the input length at every dilation
+///
+/// The padding rule pads by the dilated extent, not by the kernel size, so the output length
+/// cannot change with the dilation. An implementation that pads by `(k - 1) / 2` shortens the
+/// output as soon as the dilation grows.
+#[test]
+fn conv1d_dilated_same_padding_keeps_the_length() {
+    for dilation in [1usize, 2, 3] {
+        let mut layer = Conv1D::new(1, 3, vec![1, 8, 1], 1, Linear::new())
+            .unwrap()
+            .with_padding(PaddingType::Same)
+            .with_dilation_rate(dilation)
+            .unwrap();
+        layer
+            .set_weights(Array3::from_elem((3, 1, 1), 1.0f32), Array1::zeros(1))
+            .unwrap();
+
+        let input = Array::ones((1, 8, 1)).into_dyn();
+        let output = layer.forward(&input).unwrap();
+        assert_eq!(
+            output.shape(),
+            &[1, 8, 1],
+            "dilation {dilation} must keep the length"
+        );
+    }
+}
+
+/// A dilated kernel longer than the input is rejected under `Valid` and accepted under the
+/// other 2 padding modes
+///
+/// A kernel of 3 fits a length of 6, but the 7 cells that same kernel spans at dilation 3 do
+/// not. Under `Valid` no complete window fits, so the forward pass rejects the input. `Same`
+/// and `Causal` supply the missing cells, and Keras 3.15.1 returns the input length there.
+#[test]
+fn a_dilated_kernel_longer_than_the_input_fails_only_under_valid() {
+    let build = |padding: ConvPadding| {
+        Conv1D::new(1, 3, vec![1, 6, 1], 1, Linear::new())
+            .unwrap()
+            .with_padding(padding)
+            .with_dilation_rate(3)
+            .unwrap()
+    };
+    let input = Array::ones((1, 6, 1)).into_dyn();
+
+    let err = build(ConvPadding::Valid).forward(&input).unwrap_err();
+    assert!(
+        matches!(err, Error::InvalidInput(_)),
+        "expected InvalidInput under Valid, got {err:?}"
+    );
+
+    for padding in [ConvPadding::Same, ConvPadding::Causal] {
+        let output = build(padding).forward(&input).unwrap();
+        assert_eq!(
+            output.shape(),
+            &[1, 6, 1],
+            "{padding:?} must return the input length"
+        );
+    }
+
+    // The same kernel at dilation 2 spans 5 cells, which fits under Valid as well
+    let mut fits = build_dilation_2();
+    assert_eq!(fits.forward(&input).unwrap().shape(), &[1, 2, 1]);
+}
+
+/// A Conv1D at a dilation of 2, used by the padding-mode case above
+fn build_dilation_2() -> Conv1D {
+    Conv1D::new(1, 3, vec![1, 6, 1], 1, Linear::new())
+        .unwrap()
+        .with_dilation_rate(2)
+        .unwrap()
+}
+
+/// A plain convolution rejects a stride above 1 together with a dilation above 1
+///
+/// The rule reads the maximum over the axes, not 1 axis at a time. A stride above 1 on 1 axis
+/// and a dilation above 1 on another axis is rejected as well.
+#[test]
+fn conv_rejects_a_stride_and_a_dilation_above_one_together() {
+    let strided = Conv1D::new(1, 3, vec![1, 9, 1], 2, Linear::new())
+        .unwrap()
+        .with_dilation_rate(2);
+    assert!(
+        matches!(strided, Err(Error::InvalidParameter { .. })),
+        "Conv1D must reject stride 2 with dilation 2"
+    );
+
+    // Different axes, so no single axis carries both. The rule still fires
+    let mixed = Conv2D::new(1, (2, 2), vec![1, 8, 8, 1], (2, 1), Linear::new())
+        .unwrap()
+        .with_dilation_rate((1, 2));
+    assert!(
+        matches!(mixed, Err(Error::InvalidParameter { .. })),
+        "Conv2D must reject a stride of 2 on 1 axis with a dilation of 2 on another"
+    );
+
+    // A depthwise convolution accepts the same pair, so the rule must not sit in a shared
+    // validator
+    assert!(
+        DepthwiseConv1D::new(2, vec![1, 8, 1], 2, Linear::new())
+            .unwrap()
+            .with_dilation_rate(3)
+            .is_ok(),
+        "DepthwiseConv1D must accept stride 2 with dilation 3"
+    );
+}
+
+/// Each spatial axis carries its own dilation
+///
+/// A `(1, 3)` dilation leaves the height taps adjacent and spreads the width taps 3 apart, so
+/// output `(oh, ow)` sums the 4 cells `(oh, ow)`, `(oh, ow + 3)`, `(oh + 1, ow)`, and
+/// `(oh + 1, ow + 3)`. Each input cell holds `h * 10 + w`, so a swapped axis is visible at once.
+#[test]
+fn conv2d_dilation_is_per_axis() {
+    let mut layer = Conv2D::new(1, (2, 2), vec![1, 4, 7, 1], (1, 1), Linear::new())
+        .unwrap()
+        .with_dilation_rate((1, 3))
+        .unwrap();
+    layer
+        .set_weights(Array4::from_elem((2, 2, 1, 1), 1.0f32), Array1::zeros(1))
+        .unwrap();
+
+    let values: Vec<f32> = (0..4)
+        .flat_map(|h| (0..7).map(move |w| (h * 10 + w) as f32))
+        .collect();
+    let input = Array::from_shape_vec((1, 4, 7, 1), values)
+        .unwrap()
+        .into_dyn();
+    let output = layer.forward(&input).unwrap();
+
+    assert_eq!(output.shape(), &[1, 3, 4, 1], "keff is 2 by 4");
+    let expected = Array::from_shape_vec(
+        (1, 3, 4, 1),
+        vec![
+            26.0f32, 30.0, 34.0, 38.0, 66.0, 70.0, 74.0, 78.0, 106.0, 110.0, 114.0, 118.0,
+        ],
+    )
+    .unwrap()
+    .into_dyn();
+    assert_allclose(&output, &expected, 1e-6f32);
+}
+
+/// The window advances by the stride and the taps sit `dilation` apart. The 2 factors are
+/// independent
+///
+/// Output `o` of a depthwise pass reads `o * stride + tap * dilation`. The wrong form
+/// `(o * stride + tap) * dilation` agrees only when the stride equals the dilation, which the
+/// depthwise layers do not forbid. A stride of 2 with a dilation of 3 tells the 2 apart: the
+/// windows here read `(0, 3)`, `(2, 5)`, and `(4, 7)`, and the wrong form would read `(0, 3)`,
+/// `(6, 9)`, and `(12, 15)`.
+#[test]
+fn depthwise_conv1d_keeps_the_stride_and_the_dilation_independent() {
+    let mut layer = DepthwiseConv1D::new(2, vec![1, 8, 1], 2, Linear::new())
+        .unwrap()
+        .with_dilation_rate(3)
+        .unwrap();
+    layer
+        .set_weights(
+            Array3::from_shape_vec((2, 1, 1), vec![1.0f32, 10.0]).unwrap(),
+            Array1::zeros(1),
+        )
+        .unwrap();
+
+    let input = Array::from_shape_vec((1, 8, 1), (1..=8).map(|v| v as f32).collect::<Vec<f32>>())
+        .unwrap()
+        .into_dyn();
+    let output = layer.forward(&input).unwrap();
+
+    assert_eq!(output.shape(), &[1, 3, 1]);
+    // x[0] + 10 * x[3], x[2] + 10 * x[5], x[4] + 10 * x[7]
+    let expected = Array::from_shape_vec((1, 3, 1), vec![41.0f32, 63.0, 85.0])
+        .unwrap()
+        .into_dyn();
+    assert_allclose(&output, &expected, 1e-6f32);
+}
+
+/// The dilation reaches the depthwise stage of a separable convolution
+///
+/// The layer runs the same stride 2 and dilation 3 as the depthwise test above, behind a 1-tap
+/// pointwise stage of weight 1. The values must therefore agree. The pointwise stage reads 1
+/// tap, so no dilation can change it.
+#[test]
+fn separable_conv1d_dilates_the_depthwise_stage() {
+    let mut layer = SeparableConv1D::new(1, 2, vec![1, 8, 1], 2, 1, Linear::new())
+        .unwrap()
+        .with_dilation_rate(3)
+        .unwrap();
+    layer
+        .set_weights(
+            Array3::from_shape_vec((2, 1, 1), vec![1.0f32, 10.0]).unwrap(),
+            Array3::from_elem((1, 1, 1), 1.0f32),
+            Array1::zeros(1),
+        )
+        .unwrap();
+
+    let input = Array::from_shape_vec((1, 8, 1), (1..=8).map(|v| v as f32).collect::<Vec<f32>>())
+        .unwrap()
+        .into_dyn();
+    let output = layer.forward(&input).unwrap();
+
+    assert_eq!(output.shape(), &[1, 3, 1]);
+    let expected = Array::from_shape_vec((1, 3, 1), vec![41.0f32, 63.0, 85.0])
+        .unwrap()
+        .into_dyn();
+    assert_allclose(&output, &expected, 1e-6f32);
+}
+
+// Causal padding
+
+/// Causal padding puts all `(k - 1) * dilation` pad cells on the leading edge
+///
+/// The kernel is `[10, 1]` at dilation 3, so the leading pad is 3 cells and output `o` is
+/// `10 * xpad[o] + 1 * xpad[o + 3]`. The first 3 outputs therefore hold only the second tap,
+/// which reads the current position. A leading pad of `k - 1` (1 cell) or of `keff` (4 cells)
+/// gives different values, and a split pad leaks a later input position into an earlier output.
+#[test]
+fn conv1d_causal_padding_is_all_on_the_leading_edge() {
+    let mut layer = Conv1D::new(1, 2, vec![1, 6, 1], 1, Linear::new())
+        .unwrap()
+        .with_padding(ConvPadding::Causal)
+        .with_dilation_rate(3)
+        .unwrap();
+    layer
+        .set_weights(
+            Array3::from_shape_vec((2, 1, 1), vec![10.0f32, 1.0]).unwrap(),
+            Array1::zeros(1),
+        )
+        .unwrap();
+
+    let input = Array::from_shape_vec((1, 6, 1), (1..=6).map(|v| v as f32).collect::<Vec<f32>>())
+        .unwrap()
+        .into_dyn();
+    let output = layer.forward(&input).unwrap();
+
+    assert_eq!(output.shape(), &[1, 6, 1], "causal keeps the length");
+    let expected = Array::from_shape_vec((1, 6, 1), vec![1.0f32, 2.0, 3.0, 14.0, 25.0, 36.0])
+        .unwrap()
+        .into_dyn();
+    assert_allclose(&output, &expected, 1e-6f32);
+}
+
+/// No causal output position depends on any later input position
+///
+/// This perturbs 1 input position at a time and compares the whole output against the
+/// unperturbed run. Every output before that position must stay bit-identical, which is the
+/// property a shape test cannot check. The output at the perturbed position must change, which
+/// proves the last tap reads the current position rather than an earlier one.
+#[test]
+fn conv1d_causal_output_never_reads_a_later_input() {
+    let (length, channels, filters, kernel, dilation) = (8usize, 2usize, 2usize, 3usize, 2usize);
+    let mut layer = Conv1D::new(filters, kernel, vec![1, length, channels], 1, Linear::new())
+        .unwrap()
+        .with_padding(ConvPadding::Causal)
+        .with_dilation_rate(dilation)
+        .unwrap();
+    let weights: Vec<f32> = (0..kernel * channels * filters)
+        .map(|i| (i as f32) * 0.25 - 1.0)
+        .collect();
+    layer
+        .set_weights(
+            Array3::from_shape_vec((kernel, channels, filters), weights).unwrap(),
+            Array1::from_vec(vec![0.5f32, -0.25]),
+        )
+        .unwrap();
+
+    let base_values: Vec<f32> = (0..length * channels)
+        .map(|i| (i as f32) * 0.5 - 2.0)
+        .collect();
+    let base_input = Array::from_shape_vec((1, length, channels), base_values.clone())
+        .unwrap()
+        .into_dyn();
+    let base_output = layer.predict(&base_input).unwrap();
+
+    for position in 0..length {
+        let mut values = base_values.clone();
+        for c in 0..channels {
+            values[position * channels + c] += 3.0;
+        }
+        let input = Array::from_shape_vec((1, length, channels), values)
+            .unwrap()
+            .into_dyn();
+        let output = layer.predict(&input).unwrap();
+
+        for earlier in 0..position {
+            for f in 0..filters {
+                assert_eq!(
+                    output[[0, earlier, f]],
+                    base_output[[0, earlier, f]],
+                    "output {earlier} moved when input {position} changed, so the pass reads \
+                     the future"
+                );
+            }
+        }
+        let changed =
+            (0..filters).any(|f| output[[0, position, f]] != base_output[[0, position, f]]);
+        assert!(
+            changed,
+            "output {position} ignored its own input position, so the last tap is misplaced"
+        );
+    }
+}
+
+/// Causal and `Same` padding give the same output length and different values
+///
+/// A shape-only test cannot tell the 2 apart. This pins both halves: the lengths agree, and the
+/// values do not.
+#[test]
+fn conv1d_causal_matches_same_in_length_only() {
+    let build = |padding: ConvPadding| {
+        let mut layer = Conv1D::new(1, 3, vec![1, 6, 1], 1, Linear::new())
+            .unwrap()
+            .with_padding(padding);
+        layer
+            .set_weights(
+                Array3::from_shape_vec((3, 1, 1), vec![1.0f32, 2.0, 4.0]).unwrap(),
+                Array1::zeros(1),
+            )
+            .unwrap();
+        layer
+    };
+    let input = Array::from_shape_vec((1, 6, 1), (1..=6).map(|v| v as f32).collect::<Vec<f32>>())
+        .unwrap()
+        .into_dyn();
+
+    let causal = build(ConvPadding::Causal).predict(&input).unwrap();
+    let same = build(ConvPadding::Same).predict(&input).unwrap();
+
+    assert_eq!(causal.shape(), same.shape(), "both keep the input length");
+    // Causal reads xpad = [0, 0, 1..6], so output 0 is 4 * 1 = 4. Same reads [0, 1..6, 0], so
+    // its output 0 is 2 * 1 + 4 * 2 = 10
+    assert_abs_diff_eq!(causal[[0, 0, 0]], 4.0f32, epsilon = 1e-6f32);
+    assert_abs_diff_eq!(same[[0, 0, 0]], 10.0f32, epsilon = 1e-6f32);
+}
+
+/// A strided causal pass keeps `ceil(length / stride)` positions
+#[test]
+fn conv1d_causal_strided_output_length() {
+    let layer = Conv1D::new(1, 3, vec![1, 7, 1], 2, Linear::new())
+        .unwrap()
+        .with_padding(ConvPadding::Causal);
+    let input = Array::ones((1, 7, 1)).into_dyn();
+    let output = layer.predict(&input).unwrap();
+    assert_eq!(output.shape(), &[1, 4, 1]);
+}
+
+/// The analytic gradients of a dilated causal pass match a central difference
+///
+/// The forward tests above fix the values. This checks that the backward pass transposes the
+/// same geometry, for the input, the kernel, and the bias.
+#[test]
+fn conv1d_causal_dilated_gradients_match_a_finite_difference() {
+    let (length, kernel, dilation) = (7usize, 3usize, 2usize);
+    let weights = Array3::from_shape_vec((kernel, 1, 1), vec![0.5f32, -1.25, 2.0]).unwrap();
+    let bias = Array1::from_vec(vec![0.25f32]);
+    let build = |weights: &Array3<f32>, bias: &Array1<f32>| {
+        let mut layer = Conv1D::new(1, kernel, vec![1, length, 1], 1, Linear::new())
+            .unwrap()
+            .with_padding(ConvPadding::Causal)
+            .with_dilation_rate(dilation)
+            .unwrap();
+        layer.set_weights(weights.clone(), bias.clone()).unwrap();
+        layer
+    };
+
+    let x_values: Vec<f32> = (0..length).map(|i| (i as f32) * 0.5 - 1.0).collect();
+    let input = Array::from_shape_vec((1, length, 1), x_values.clone())
+        .unwrap()
+        .into_dyn();
+    let upstream_values: Vec<f32> = (0..length).map(|i| 1.0 + (i as f32) * 0.25).collect();
+    let upstream = Array::from_shape_vec((1, length, 1), upstream_values.clone())
+        .unwrap()
+        .into_dyn();
+
+    let mut layer = build(&weights, &bias);
+    layer.forward(&input).unwrap();
+    let input_grad = layer.backward(&upstream).unwrap();
+    let params = layer.parameters();
+    let weight_grad = params[0].grad.to_vec();
+    let bias_grad = params[1].grad.to_vec();
+    drop(params);
+
+    // Loss is `sum(output * upstream)`, whose gradient of the output is `upstream`
+    let loss = |layer: &Conv1D, input: &ndarray::ArrayD<f32>| -> f32 {
+        layer
+            .predict(input)
+            .unwrap()
+            .iter()
+            .zip(upstream.iter())
+            .map(|(y, g)| y * g)
+            .sum()
+    };
+    let step = 1e-2f32;
+    let reference = build(&weights, &bias);
+
+    for position in 0..length {
+        let mut plus = input.clone();
+        plus[[0, position, 0]] += step;
+        let mut minus = input.clone();
+        minus[[0, position, 0]] -= step;
+        let numeric = (loss(&reference, &plus) - loss(&reference, &minus)) / (2.0 * step);
+        assert_abs_diff_eq!(input_grad[[0, position, 0]], numeric, epsilon = 1e-3f32);
+    }
+
+    for tap in 0..kernel {
+        let mut plus = weights.clone();
+        plus[[tap, 0, 0]] += step;
+        let mut minus = weights.clone();
+        minus[[tap, 0, 0]] -= step;
+        let numeric = (loss(&build(&plus, &bias), &input) - loss(&build(&minus, &bias), &input))
+            / (2.0 * step);
+        assert_abs_diff_eq!(weight_grad[tap], numeric, epsilon = 1e-3f32);
+    }
+
+    let mut plus = bias.clone();
+    plus[0] += step;
+    let mut minus = bias.clone();
+    minus[0] -= step;
+    let numeric = (loss(&build(&weights, &plus), &input) - loss(&build(&weights, &minus), &input))
+        / (2.0 * step);
+    assert_abs_diff_eq!(bias_grad[0], numeric, epsilon = 1e-3f32);
+}
+
+// ---------------------------------------------------------------------------------------
+// Effective kernels longer than the input, and dilated gradients, pinned to Keras 3.15.1
+// ---------------------------------------------------------------------------------------
+//
+// Keras 3.15.1 on the jax backend produced every expected value in this section. Each case
+// gives the layer the weights, the input, and the upstream gradient that the ramps below
+// build. A rerun of the probe therefore reproduces the numbers. Every ramp value is exact in
+// f32, so no rounding enters the comparison.
+//
+// A kernel whose effective extent is longer than the input axis is legal under `Same` and
+// `Causal` padding, and Keras accepts it. Only `Valid` rejects it, because no complete window
+// fits there.
+
+/// Kernel ramp: element `i` holds `((i % 7) - 3) * 0.25`
+fn ramp_kernel(count: usize) -> Vec<f32> {
+    (0..count).map(|i| ((i % 7) as f32 - 3.0) * 0.25).collect()
+}
+
+/// Pointwise-kernel ramp: element `i` holds `((i % 5) - 2) * 0.5`
+fn ramp_pointwise(count: usize) -> Vec<f32> {
+    (0..count).map(|i| ((i % 5) as f32 - 2.0) * 0.5).collect()
+}
+
+/// Bias ramp: filter `i` holds `i * 0.5 - 0.25`
+fn ramp_bias(count: usize) -> Vec<f32> {
+    (0..count).map(|i| i as f32 * 0.5 - 0.25).collect()
+}
+
+/// Input ramp: element `i` holds `((i % 9) - 4) * 0.5`
+fn ramp_input(count: usize) -> Vec<f32> {
+    (0..count).map(|i| ((i % 9) as f32 - 4.0) * 0.5).collect()
+}
+
+/// Upstream-gradient ramp: element `i` holds `((i % 5) - 2) * 0.25 + 0.125`
+fn ramp_upstream(count: usize) -> Vec<f32> {
+    (0..count)
+        .map(|i| ((i % 5) as f32 - 2.0) * 0.25 + 0.125)
+        .collect()
+}
+
+/// The elements of a tensor, in row-major order
+fn flat(tensor: &ndarray::ArrayD<f32>) -> Vec<f32> {
+    tensor.iter().copied().collect()
+}
+
+/// Asserts that 2 flat value lists agree to 1e-5, and names the first element that does not
+fn assert_flat_close(actual: &[f32], expected: &[f32], label: &str) {
+    assert_eq!(actual.len(), expected.len(), "{label}: length");
+    for (index, (got, want)) in actual.iter().zip(expected).enumerate() {
+        assert!(
+            (got - want).abs() <= 1e-5,
+            "{label}[{index}]: got {got}, want {want}"
+        );
+    }
+}
+
+/// A Conv1D whose dilated kernel is longer than the input matches Keras under `Same`
+///
+/// The 3 taps span 7 cells at a dilation of 3, and the input holds 5. Keras 3.15.1 pads the
+/// missing cells and returns the input length. The forward values and all 3 gradients follow.
+#[test]
+fn conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_same() {
+    let mut layer = Conv1D::new(2, 3, vec![1, 5, 1], 1, Linear::new())
+        .unwrap()
+        .with_padding(ConvPadding::Same)
+        .with_dilation_rate(3)
+        .unwrap();
+    layer
+        .set_weights(
+            Array3::from_shape_vec((3, 1, 2), ramp_kernel(6)).unwrap(),
+            Array1::from_vec(ramp_bias(2)),
+        )
+        .unwrap();
+
+    let input = Array::from_shape_vec((1, 5, 1), ramp_input(5))
+        .unwrap()
+        .into_dyn();
+    let output = layer.forward(&input).unwrap();
+    assert_eq!(output.shape(), &[1, 5, 2]);
+    assert_flat_close(
+        &flat(&output),
+        &[0.125, 0.0, 0.125, 0.25, 0.0, 0.25, 1.375, 1.25, 0.875, 1.0],
+        "output",
+    );
+
+    let upstream = Array::from_shape_vec((1, 5, 2), ramp_upstream(10))
+        .unwrap()
+        .into_dyn();
+    let grad_input = layer.backward(&upstream).unwrap();
+    assert_flat_close(
+        &flat(&grad_input),
+        &[0.125, -0.625, -0.15625, -0.125, 0.125],
+        "grad_input",
+    );
+    let params = layer.parameters();
+    assert_flat_close(
+        params[0].grad,
+        &[-0.3125, -1.1875, 0.0, 0.0, 0.1875, 0.0625],
+        "grad_weights",
+    );
+    assert_flat_close(params[1].grad, &[0.625, 0.625], "grad_bias");
+}
+
+/// A Conv1D whose dilated kernel is longer than the input matches Keras under `Causal`
+///
+/// Causal padding puts all 6 pad cells on the leading edge, so output position 0 reads only
+/// pad. Keras 3.15.1 accepts the same configuration and returns the same values.
+#[test]
+fn conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_causal() {
+    let mut layer = Conv1D::new(2, 3, vec![1, 5, 1], 1, Linear::new())
+        .unwrap()
+        .with_padding(ConvPadding::Causal)
+        .with_dilation_rate(3)
+        .unwrap();
+    layer
+        .set_weights(
+            Array3::from_shape_vec((3, 1, 2), ramp_kernel(6)).unwrap(),
+            Array1::from_vec(ramp_bias(2)),
+        )
+        .unwrap();
+
+    let input = Array::from_shape_vec((1, 5, 1), ramp_input(5))
+        .unwrap()
+        .into_dyn();
+    let output = layer.forward(&input).unwrap();
+    assert_eq!(output.shape(), &[1, 5, 2]);
+    assert_flat_close(
+        &flat(&output),
+        &[
+            -0.75, -0.75, -0.625, -0.5, -0.5, -0.25, 0.125, 0.0, 0.125, 0.25,
+        ],
+        "output",
+    );
+
+    let upstream = Array::from_shape_vec((1, 5, 2), ramp_upstream(10))
+        .unwrap()
+        .into_dyn();
+    let grad_input = layer.backward(&upstream).unwrap();
+    assert_flat_close(
+        &flat(&grad_input),
+        &[-0.125, 0.125, -0.03125, 0.03125, 0.40625],
+        "grad_input",
+    );
+    let params = layer.parameters();
+    assert_flat_close(
+        params[0].grad,
+        &[0.0, 0.0, -0.3125, -1.1875, 0.0, 0.0],
+        "grad_weights",
+    );
+    assert_flat_close(params[1].grad, &[0.625, 0.625], "grad_bias");
+}
+
+/// A Conv1D whose solid kernel is longer than the input matches Keras under `Same`
+///
+/// This is the rule that comes before dilation. A kernel of 7 on an input of 5 needs no
+/// dilation to overrun the axis. Keras 3.15.1 accepts it under `Same` in the same way.
+#[test]
+fn conv1d_plain_kernel_longer_than_the_input_matches_keras_under_same() {
+    let mut layer = Conv1D::new(2, 7, vec![1, 5, 1], 1, Linear::new())
+        .unwrap()
+        .with_padding(ConvPadding::Same);
+    layer
+        .set_weights(
+            Array3::from_shape_vec((7, 1, 2), ramp_kernel(14)).unwrap(),
+            Array1::from_vec(ramp_bias(2)),
+        )
+        .unwrap();
+
+    let input = Array::from_shape_vec((1, 5, 1), ramp_input(5))
+        .unwrap()
+        .into_dyn();
+    let output = layer.forward(&input).unwrap();
+    assert_eq!(output.shape(), &[1, 5, 2]);
+    assert_flat_close(
+        &flat(&output),
+        &[
+            -1.25, 1.5, -1.375, 0.5, -0.625, 0.375, 1.0, 1.125, 1.0, 0.75,
+        ],
+        "output",
+    );
+
+    let upstream = Array::from_shape_vec((1, 5, 2), ramp_upstream(10))
+        .unwrap()
+        .into_dyn();
+    let grad_input = layer.backward(&upstream).unwrap();
+    assert_flat_close(
+        &flat(&grad_input),
+        &[-0.09375, -0.5625, 0.5, -0.1875, 0.09375],
+        "grad_input",
+    );
+    let params = layer.parameters();
+    assert_flat_close(
+        params[0].grad,
+        &[
+            -0.3125, -1.1875, -1.4375, -0.0625, -1.25, -0.625, 0.0, 0.0, 0.125, 0.0, 0.3125,
+            -0.0625, 0.1875, 0.0625,
+        ],
+        "grad_weights",
+    );
+    assert_flat_close(params[1].grad, &[0.625, 0.625], "grad_bias");
+}
+
+/// A Conv2D whose dilated kernel is longer than both input axes matches Keras under `Same`
+#[test]
+fn conv2d_dilated_kernel_longer_than_the_input_matches_keras_under_same() {
+    let mut layer = Conv2D::new(1, (2, 2), vec![1, 3, 3, 1], (1, 1), Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same)
+        .with_dilation_rate((3, 3))
+        .unwrap();
+    layer
+        .set_weights(
+            Array4::from_shape_vec((2, 2, 1, 1), ramp_kernel(4)).unwrap(),
+            Array1::from_vec(ramp_bias(1)),
+        )
+        .unwrap();
+
+    let input = Array::from_shape_vec((1, 3, 3, 1), ramp_input(9))
+        .unwrap()
+        .into_dyn();
+    let output = layer.forward(&input).unwrap();
+    assert_eq!(output.shape(), &[1, 3, 3, 1]);
+    assert_flat_close(
+        &flat(&output),
+        &[-0.25, -0.5, -0.625, 0.25, 1.25, 0.875, -0.5, 0.125, -0.25],
+        "output",
+    );
+
+    let upstream = Array::from_shape_vec((1, 3, 3, 1), ramp_upstream(9))
+        .unwrap()
+        .into_dyn();
+    let grad_input = layer.backward(&upstream).unwrap();
+    assert_flat_close(
+        &flat(&grad_input),
+        &[
+            -0.46875, 0.28125, -0.1875, -0.09375, -0.28125, 0.0625, 0.03125, -0.03125, 0.0,
+        ],
+        "grad_input",
+    );
+    let params = layer.parameters();
+    assert_flat_close(
+        params[0].grad,
+        &[-0.75, -0.4375, 0.0625, -0.75],
+        "grad_weights",
+    );
+    assert_flat_close(params[1].grad, &[0.625], "grad_bias");
+}
+
+/// A DepthwiseConv1D whose dilated kernel is longer than the input matches Keras under `Same`
+#[test]
+fn depthwise_conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_same() {
+    let mut layer = DepthwiseConv1D::new(3, vec![1, 5, 2], 1, Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same)
+        .with_dilation_rate(3)
+        .unwrap();
+    layer
+        .set_weights(
+            Array3::from_shape_vec((3, 2, 1), ramp_kernel(6)).unwrap(),
+            Array1::from_vec(ramp_bias(2)),
+        )
+        .unwrap();
+
+    let input = Array::from_shape_vec((1, 5, 2), ramp_input(10))
+        .unwrap()
+        .into_dyn();
+    let output = layer.forward(&input).unwrap();
+    assert_eq!(output.shape(), &[1, 5, 2]);
+    assert_flat_close(
+        &flat(&output),
+        &[0.5, 1.0, 0.5, -0.75, -0.25, 0.25, 1.0, 1.0, 0.0, 0.5],
+        "output",
+    );
+
+    let upstream = Array::from_shape_vec((1, 5, 2), ramp_upstream(10))
+        .unwrap()
+        .into_dyn();
+    let grad_input = layer.backward(&upstream).unwrap();
+    assert_flat_close(
+        &flat(&grad_input),
+        &[
+            0.1875, -0.0625, -0.3125, -0.3125, -0.15625, 0.0, -0.0625, -0.0625, -0.0625, 0.1875,
+        ],
+        "grad_input",
+    );
+    let params = layer.parameters();
+    assert_flat_close(
+        params[0].grad,
+        &[-0.125, -0.5, 1.25, -1.25, -0.125, -0.9375],
+        "grad_weights",
+    );
+    assert_flat_close(params[1].grad, &[0.625, 0.625], "grad_bias");
+}
+
+/// A SeparableConv1D whose dilated depthwise kernel is longer than the input matches Keras
+/// under `Same`
+#[test]
+fn separable_conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_same() {
+    let mut layer = SeparableConv1D::new(2, 3, vec![1, 5, 2], 1, 1, Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same)
+        .with_dilation_rate(3)
+        .unwrap();
+    layer
+        .set_weights(
+            Array3::from_shape_vec((3, 2, 1), ramp_kernel(6)).unwrap(),
+            Array3::from_shape_vec((1, 2, 2), ramp_pointwise(4)).unwrap(),
+            Array1::from_vec(ramp_bias(2)),
+        )
+        .unwrap();
+
+    let input = Array::from_shape_vec((1, 5, 2), ramp_input(10))
+        .unwrap()
+        .into_dyn();
+    let output = layer.forward(&input).unwrap();
+    assert_eq!(output.shape(), &[1, 5, 2]);
+    assert_flat_close(
+        &flat(&output),
+        &[-1.0, 0.25, -1.0, -0.625, -0.25, 0.25, -1.5, 0.0, -0.5, 0.25],
+        "output",
+    );
+
+    let upstream = Array::from_shape_vec((1, 5, 2), ramp_upstream(10))
+        .unwrap()
+        .into_dyn();
+    let grad_input = layer.backward(&upstream).unwrap();
+    assert_flat_close(
+        &flat(&grad_input),
+        &[
+            -0.15625, -0.03125, 0.59375, -0.15625, 0.109375, 0.0, 0.09375, -0.03125, 0.09375,
+            0.09375,
+        ],
+        "grad_input",
+    );
+    let params = layer.parameters();
+    assert_flat_close(
+        params[0].grad,
+        &[0.5625, -0.25, -1.875, -0.625, -0.1875, -0.46875],
+        "grad_depthwise_weights",
+    );
+    assert_flat_close(
+        params[1].grad,
+        &[-0.25, 0.5, -0.40625, -0.21875],
+        "grad_pointwise_weights",
+    );
+    assert_flat_close(params[2].grad, &[0.625, 0.625], "grad_bias");
+}
+
+/// Conv2D dilated gradients under `Valid` match Keras 3.15.1
+///
+/// The dilation is (2, 3) and the stride is 1, so a backward pass that drops the dilation lands
+/// on the wrong input cells. The 2 rates differ from each other and from the stride, so no
+/// single wrong constant reproduces this result.
+#[test]
+fn conv2d_dilated_gradients_match_keras_under_valid() {
+    let mut layer = Conv2D::new(2, (2, 2), vec![1, 5, 6, 1], (1, 1), Linear::new())
+        .unwrap()
+        .with_dilation_rate((2, 3))
+        .unwrap();
+    layer
+        .set_weights(
+            Array4::from_shape_vec((2, 2, 1, 2), ramp_kernel(8)).unwrap(),
+            Array1::from_vec(ramp_bias(2)),
+        )
+        .unwrap();
+
+    let input = Array::from_shape_vec((1, 5, 6, 1), ramp_input(30))
+        .unwrap()
+        .into_dyn();
+    let output = layer.forward(&input).unwrap();
+    assert_eq!(output.shape(), &[1, 3, 3, 2]);
+    assert_flat_close(
+        &flat(&output),
+        &[
+            2.0, 0.25, 2.0, -0.125, 2.0, -0.5, -1.375, -0.875, -1.375, -1.25, -1.375, -1.625,
+            -1.375, 2.5, -1.375, 2.125, -1.375, 1.75,
+        ],
+        "output",
+    );
+
+    let upstream = Array::from_shape_vec((1, 3, 3, 2), ramp_upstream(18))
+        .unwrap()
+        .into_dyn();
+    let grad_input = layer.backward(&upstream).unwrap();
+    assert_flat_close(
+        &flat(&grad_input),
+        &[
+            0.34375, -0.28125, -0.28125, 0.09375, -0.03125, -0.15625, 0.03125, -0.59375, 0.34375,
+            0.03125, -0.09375, 0.09375, -0.4375, -0.0625, 0.0, -0.21875, -0.34375, 0.78125,
+            0.03125, 0.40625, -0.15625, -0.1875, -0.1875, -0.1875, 0.21875, -0.03125, 0.03125,
+            -0.1875, 0.75, -0.1875,
+        ],
+        "grad_input",
+    );
+    let params = layer.parameters();
+    assert_flat_close(
+        params[0].grad,
+        &[-0.5, 0.75, 1.375, -1.125, 1.375, -1.125, -0.125, -0.75],
+        "grad_weights",
+    );
+    assert_flat_close(params[1].grad, &[0.875, 0.625], "grad_bias");
+}
+
+/// Conv2D dilated gradients under `Same` match Keras 3.15.1
+///
+/// `Same` padding and dilation both shift the cell a tap reads, so the backward pass must apply
+/// the 2 together.
+#[test]
+fn conv2d_dilated_gradients_match_keras_under_same() {
+    let mut layer = Conv2D::new(2, (2, 2), vec![1, 5, 6, 1], (1, 1), Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same)
+        .with_dilation_rate((2, 3))
+        .unwrap();
+    layer
+        .set_weights(
+            Array4::from_shape_vec((2, 2, 1, 2), ramp_kernel(8)).unwrap(),
+            Array1::from_vec(ramp_bias(2)),
+        )
+        .unwrap();
+
+    let input = Array::from_shape_vec((1, 5, 6, 1), ramp_input(30))
+        .unwrap()
+        .into_dyn();
+    let output = layer.forward(&input).unwrap();
+    assert_eq!(output.shape(), &[1, 5, 6, 2]);
+    assert_flat_close(
+        &flat(&output),
+        &[
+            1.25, -1.25, -1.5, 2.25, -1.0, 2.125, -0.5, 2.0, -0.75, -0.75, -0.625, -0.5, 0.375,
+            -0.125, 2.0, 0.25, 2.0, -0.125, 2.0, -0.5, 0.375, 1.0, 0.125, 1.0, -1.5, 1.0, -1.375,
+            -0.875, -1.375, -1.25, -1.375, -1.625, 1.125, 1.0, 0.875, 1.0, 1.125, -1.25, -1.375,
+            2.5, -1.375, 2.125, -1.375, 1.75, -1.5, -1.25, -1.75, -1.25, 0.0, 0.25, 1.375, 1.25,
+            0.875, 1.0, 0.375, 0.75, 0.125, 0.5, -0.25, 0.25,
+        ],
+        "output",
+    );
+
+    let upstream = Array::from_shape_vec((1, 5, 6, 2), ramp_upstream(60))
+        .unwrap()
+        .into_dyn();
+    let grad_input = layer.backward(&upstream).unwrap();
+    assert_flat_close(
+        &flat(&grad_input),
+        &[
+            -0.28125, 0.03125, -0.625, 0.1875, -0.25, -0.09375, 0.25, -0.625, 0.03125, -0.03125,
+            0.21875, -0.09375, -0.625, 0.375, -0.03125, 0.21875, 0.15625, -0.21875, 0.375, 0.125,
+            0.21875, 0.15625, -0.84375, -0.34375, 0.40625, -0.15625, 0.03125, -0.21875, -0.15625,
+            -0.1875,
+        ],
+        "grad_input",
+    );
+    let params = layer.parameters();
+    assert_flat_close(
+        params[0].grad,
+        &[
+            -2.4375, 0.3125, 1.1875, -1.1875, -0.6875, 0.4375, -1.875, -0.25,
+        ],
+        "grad_weights",
+    );
+    assert_flat_close(params[1].grad, &[3.75, 3.75], "grad_bias");
+}
+
+/// DepthwiseConv1D gradients at a stride of 2 and a dilation of 3 match Keras 3.15.1
+///
+/// The stride and the dilation differ, and the depth multiplier is 2, so a backward pass that
+/// confuses the 2 rates or the output channel order fails here.
+#[test]
+fn depthwise_conv1d_stride_and_dilation_gradients_match_keras() {
+    let mut layer = DepthwiseConv1D::new(2, vec![1, 9, 2], 2, Linear::new())
+        .unwrap()
+        .with_depth_multiplier(2)
+        .unwrap()
+        .with_dilation_rate(3)
+        .unwrap();
+    layer
+        .set_weights(
+            Array3::from_shape_vec((2, 2, 2), ramp_kernel(8)).unwrap(),
+            Array1::from_vec(ramp_bias(4)),
+        )
+        .unwrap();
+
+    let input = Array::from_shape_vec((1, 9, 2), ramp_input(18))
+        .unwrap()
+        .into_dyn();
+    let output = layer.forward(&input).unwrap();
+    assert_eq!(output.shape(), &[1, 3, 4]);
+    assert_flat_close(
+        &flat(&output),
+        &[
+            1.5, 1.75, 2.25, 0.125, -0.625, -0.5, -0.125, 2.0, -1.625, -0.5, 2.0, 0.5,
+        ],
+        "output",
+    );
+
+    let upstream = Array::from_shape_vec((1, 3, 4), ramp_upstream(12))
+        .unwrap()
+        .into_dyn();
+    let grad_input = layer.backward(&upstream).unwrap();
+    assert_flat_close(
+        &flat(&grad_input),
+        &[
+            0.34375, -0.03125, 0.0, 0.0, -0.28125, 0.03125, -0.15625, -0.1875, -0.59375, 0.09375,
+            -0.03125, -0.1875, 0.0, 0.0, 0.40625, -0.1875, 0.0, 0.0,
+        ],
+        "grad_input",
+    );
+    let params = layer.parameters();
+    assert_flat_close(
+        params[0].grad,
+        &[1.5, 1.5, 0.5, -0.25, -1.125, 0.75, -0.0625, 0.3125],
+        "grad_weights",
+    );
+    assert_flat_close(params[1].grad, &[0.625, 0.125, -0.375, 0.375], "grad_bias");
+}
+
+/// SeparableConv1D gradients at a stride of 2 and a dilation of 3 match Keras 3.15.1
+#[test]
+fn separable_conv1d_stride_and_dilation_gradients_match_keras() {
+    let mut layer = SeparableConv1D::new(2, 2, vec![1, 9, 2], 2, 1, Linear::new())
+        .unwrap()
+        .with_dilation_rate(3)
+        .unwrap();
+    layer
+        .set_weights(
+            Array3::from_shape_vec((2, 2, 1), ramp_kernel(4)).unwrap(),
+            Array3::from_shape_vec((1, 2, 2), ramp_pointwise(4)).unwrap(),
+            Array1::from_vec(ramp_bias(2)),
+        )
+        .unwrap();
+
+    let input = Array::from_shape_vec((1, 9, 2), ramp_input(18))
+        .unwrap()
+        .into_dyn();
+    let output = layer.forward(&input).unwrap();
+    assert_eq!(output.shape(), &[1, 3, 2]);
+    assert_flat_close(
+        &flat(&output),
+        &[-1.5, 0.0, -0.625, -0.0625, 1.375, 1.5625],
+        "output",
+    );
+
+    let upstream = Array::from_shape_vec((1, 3, 2), ramp_upstream(6))
+        .unwrap()
+        .into_dyn();
+    let grad_input = layer.backward(&upstream).unwrap();
+    assert_flat_close(
+        &flat(&grad_input),
+        &[
+            -0.328125, 0.03125, 0.0, 0.0, 0.234375, -0.09375, -0.109375, 0.0, 0.328125, 0.09375,
+            0.078125, 0.0, 0.0, 0.0, 0.109375, 0.0, 0.0, 0.0,
+        ],
+        "grad_input",
+    );
+    let params = layer.parameters();
+    assert_flat_close(
+        params[0].grad,
+        &[-1.75, 0.5625, 0.6875, -0.46875],
+        "grad_depthwise_weights",
+    );
+    assert_flat_close(
+        params[1].grad,
+        &[-1.4375, 0.59375, 0.3125, -0.5625],
+        "grad_pointwise_weights",
+    );
+    assert_flat_close(params[2].grad, &[0.375, -0.125], "grad_bias");
 }

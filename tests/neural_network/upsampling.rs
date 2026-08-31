@@ -366,6 +366,9 @@ fn up_sampling_layers_emit_gradients_in_c_order() {
 /// on the forward pass and on the backward pass, and each single sample stays under it
 #[test]
 fn up_sampling_repeat_parallel_path_matches_the_serial_path() {
+    // The gate values are process-global. This guard holds the shared side of the lock
+    // in `common`, so no test that moves a gate runs while this test reads one
+    let _gates = crate::common::read_gates();
     let gate = rustyml::tuning::upsampling::get_parallel_min_ops();
     let (samples, steps, channels, factor) = (2usize, 64usize, 2048usize, 8usize);
     // Forward reads 1 position per output element, and backward reads `factor` per input
@@ -408,6 +411,9 @@ fn up_sampling_repeat_parallel_path_matches_the_serial_path() {
 /// The weighted path above the parallel gate gives the same bits as the same work below it
 #[test]
 fn up_sampling_weighted_parallel_path_matches_the_serial_path() {
+    // The gate values are process-global. This guard holds the shared side of the lock
+    // in `common`, so no test that moves a gate runs while this test reads one
+    let _gates = crate::common::read_gates();
     let gate = rustyml::tuning::upsampling::get_parallel_min_ops();
     let (samples, side, channels) = (8usize, 91usize, 3usize);
     // The first pass doubles 1 axis, and `Lanczos5` reads 11 positions per output position

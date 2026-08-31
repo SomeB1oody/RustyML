@@ -6,7 +6,7 @@ use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::{EmbeddingLayerWeight, LayerWeight};
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::parallel_gates::cheap_map_parallel_threshold;
+use crate::parallel_gates::{cheap_map_parallel_threshold, split_cap};
 use ndarray::{Array, Array2, IxDyn};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rayon::prelude::*;
@@ -25,6 +25,21 @@ const INIT_LIMIT: f32 = 0.05;
 /// The gather copies whole rows, so a task holds `max(1, TASK_ELEMENTS / output_dim)` rows. This
 /// keeps each task large enough to cover the scheduling cost at any vector width
 const TASK_ELEMENTS: usize = 16_384;
+
+tunable_gate! {
+    /// Test-only cap on the table rows of 1 gather task. See
+    /// [`split_cap`](crate::parallel_gates::split_cap)
+    ///
+    /// The production value 0 keeps the row count that [`TASK_ELEMENTS`] gives. Every fixture
+    /// input of the golden test net asks for fewer elements than that budget, so the gather
+    /// would build exactly 1 task, and its first row would be row 0 every time. A cap of 1 or
+    /// more splits it, and each task then reads its own first-row arithmetic
+    ///
+    /// A gather is a copy, so the cap changes no value. Reachable outside the crate only
+    /// through `bench_internals`
+    pub(crate) EMBEDDING_FORCED_TASK_ROWS
+        => embedding_forced_task_rows / set_embedding_forced_task_rows = 0
+}
 
 /// Trainable lookup table that maps whole-number indices to dense vectors
 ///
@@ -264,7 +279,8 @@ impl Embedding {
             // written twice. Each worker then faults in the pages of its own block, and that
             // parallel first touch is most of what the gate buys
             let mut data = vec![0.0f32; elements];
-            let rows_per_task = (TASK_ELEMENTS / width).max(1);
+            let rows_per_task =
+                split_cap((TASK_ELEMENTS / width).max(1), embedding_forced_task_rows());
             data.par_chunks_mut(rows_per_task * width)
                 .enumerate()
                 .for_each(|(task, block)| {

@@ -956,42 +956,16 @@ fn bn_spatial_4d_backward_shape() {
 
 // Gate contract: moving a threshold must not change a single bit
 
-/// RAII guard for the 2 process-global gates BatchNormalization reads
-///
-/// The gates are process-global atomics and the test harness runs tests in parallel, so a test
-/// that moves one must put it back, even on a panic. A sibling test that runs on the other path
-/// meanwhile still gets the same values, which is exactly the property under test here
-#[must_use = "bind the guard to a variable; an unbound guard restores the gates immediately"]
-struct BatchNormGateGuard {
-    batch_norm: usize,
-    col_fold: usize,
-}
-
-impl BatchNormGateGuard {
-    /// Puts both gates at `value` and remembers what they were
-    fn set(value: usize) -> Self {
-        let guard = BatchNormGateGuard {
-            batch_norm: rustyml::tuning::norm::get_batch_norm(),
-            col_fold: rustyml::tuning::norm::get_col_fold(),
-        };
-        rustyml::tuning::norm::set_batch_norm(value);
-        rustyml::tuning::norm::set_col_fold(value);
-        guard
-    }
-}
-
-impl Drop for BatchNormGateGuard {
-    fn drop(&mut self) {
-        rustyml::tuning::norm::set_batch_norm(self.batch_norm);
-        rustyml::tuning::norm::set_col_fold(self.col_fold);
-    }
-}
-
 /// 1 training forward and 1 backward, with both gates forced to the given side
 ///
 /// Returns the output, the input gradient, and the flat gamma and beta gradients
 fn bn_run(shape: &[usize], gate: usize) -> (ArrayD<f32>, ArrayD<f32>, Vec<f32>) {
-    let _guard = BatchNormGateGuard::set(gate);
+    // `common::GateGuard` takes the exclusive side of the gate lock, moves every gate, and
+    // puts every one of them back on drop, which includes the path where this run panics. The
+    // lock keeps a sibling test from reading a moved gate
+    let _guard = crate::common::GateGuard::acquire();
+    rustyml::tuning::norm::set_batch_norm(gate);
+    rustyml::tuning::norm::set_col_fold(gate);
 
     let x: ArrayD<f32> = ArrayD::from_shape_fn(shape.to_vec(), |idx| {
         let k: usize = idx
@@ -1044,10 +1018,15 @@ fn bn_gate_move_does_not_change_any_bit() {
     let rows: usize = shape[..shape.len() - 1].iter().product();
     assert!(!rows.is_power_of_two(), "M must not be a power of 2");
     let work: usize = shape.iter().product();
-    assert!(
-        work >= rustyml::tuning::norm::get_batch_norm(),
-        "the shape must clear the shipped gate"
-    );
+    {
+        // The shared side of the gate lock only covers the read. `bn_run` below takes the
+        // exclusive side, and the lock takes no upgrade
+        let _gates = crate::common::read_gates();
+        assert!(
+            work >= rustyml::tuning::norm::get_batch_norm(),
+            "the shape must clear the shipped gate"
+        );
+    }
 
     let (s_out, s_grad, s_par) = bn_run(&shape, usize::MAX);
     let (p_out, p_grad, p_par) = bn_run(&shape, 0);

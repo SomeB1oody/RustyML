@@ -12,7 +12,8 @@ use crate::neural_network::layers::convolution::conv_transpose_engine::{
     conv_transpose_backward, conv_transpose_forward, transpose_output_length,
 };
 use crate::neural_network::layers::convolution::validation::{
-    validate_filters, validate_kernel_size_2d, validate_strides_2d, validate_transpose_input_shape,
+    validate_dilation, validate_filters, validate_kernel_size_2d,
+    validate_stride_dilation_exclusive, validate_strides_2d, validate_transpose_input_shape,
 };
 use crate::neural_network::layers::layer_weight::{Conv2DTransposeLayerWeight, LayerWeight};
 use crate::neural_network::layers::validation::validate_weight_shape;
@@ -110,6 +111,8 @@ pub struct Conv2DTranspose {
     kernel_size: (usize, usize),
     /// Stride values for the transposed convolution as (vertical, horizontal)
     strides: (usize, usize),
+    /// Tap spacing of the kernel as (vertical, horizontal). 1 gives a solid axis
+    dilation_rate: (usize, usize),
     /// Type of padding to apply (`Valid` or `Same`)
     padding: PaddingType,
     /// 4D array of filter weights with shape \[kernel_height, kernel_width, filters, channels\]
@@ -185,6 +188,7 @@ impl Conv2DTranspose {
             filters,
             kernel_size,
             strides,
+            dilation_rate: (1, 1),
             padding: PaddingType::Valid,
             weights,
             bias,
@@ -209,6 +213,32 @@ impl Conv2DTranspose {
     pub fn with_padding(mut self, padding: PaddingType) -> Self {
         self.padding = padding;
         self
+    }
+
+    /// Sets the tap spacing of the kernel (defaults to `(1, 1)`)
+    ///
+    /// A dilation of `d` on an axis spaces the kernel taps `d` cells apart, so `k` taps span
+    /// `(k - 1) * d + 1` output cells of that axis. The window still advances by the stride. A
+    /// dilation of 1 gives a solid kernel and the same result as before
+    ///
+    /// # Parameters
+    ///
+    /// - `dilation_rate` - Tap spacing as (vertical, horizontal)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated layer, or an error
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If any dilation is 0
+    /// - `Error::InvalidParameter` - If any dilation is above 1 and any stride is also above 1
+    pub fn with_dilation_rate(mut self, dilation_rate: (usize, usize)) -> Result<Self, Error> {
+        let dilation = [dilation_rate.0, dilation_rate.1];
+        validate_dilation(&dilation)?;
+        validate_stride_dilation_exclusive(&[self.strides.0, self.strides.1], &dilation)?;
+        self.dilation_rate = dilation_rate;
+        Ok(self)
     }
 
     /// Sets the seed used to initialize the filter weights and re-initializes them
@@ -262,12 +292,14 @@ impl Conv2DTranspose {
                 input_shape[1],
                 self.kernel_size.0,
                 self.strides.0,
+                self.dilation_rate.0,
                 self.padding,
             ),
             transpose_output_length(
                 input_shape[2],
                 self.kernel_size.1,
                 self.strides.1,
+                self.dilation_rate.1,
                 self.padding,
             ),
             self.filters,
@@ -309,6 +341,7 @@ impl Layer for Conv2DTranspose {
             self.weights.shape(),
             self.bias.as_slice().expect("bias must be contiguous"),
             &[self.strides.0, self.strides.1],
+            &[self.dilation_rate.0, self.dilation_rate.1],
             self.padding,
         )?;
         let activated = self.activation.forward(&output)?;
@@ -328,6 +361,7 @@ impl Layer for Conv2DTranspose {
             self.weights.shape(),
             self.bias.as_slice().expect("bias must be contiguous"),
             &[self.strides.0, self.strides.1],
+            &[self.dilation_rate.0, self.dilation_rate.1],
             self.padding,
         )?;
         let activated = self.activation.forward(&output)?;
@@ -352,6 +386,7 @@ impl Layer for Conv2DTranspose {
             self.weights.as_slice().expect("weights must be contiguous"),
             self.weights.shape(),
             &[self.strides.0, self.strides.1],
+            &[self.dilation_rate.0, self.dilation_rate.1],
             self.padding,
         )?;
 

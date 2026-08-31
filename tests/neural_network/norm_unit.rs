@@ -555,6 +555,9 @@ fn unit_normalization_accepts_input_that_is_not_in_c_order() {
 /// gated, so the forward and the backward run of each path is compared
 #[test]
 fn unit_normalization_parallel_path_matches_the_serial_path() {
+    // The gate values are process-global. This guard holds the shared side of the lock
+    // in `common`, so no test that moves a gate runs while this test reads one
+    let _gates = crate::common::read_gates();
     let (rows, features) = (3000usize, 1400usize);
     assert!(
         rows * features >= rustyml::tuning::elementwise::get_cheap_map_f32(),

@@ -300,6 +300,9 @@ fn embedding_backward_returns_a_zero_input_gradient() {
 /// the serial path. A gather copies rather than accumulates, so the 2 paths must agree exactly
 #[test]
 fn embedding_parallel_gather_matches_the_serial_gather() {
+    // The gate values are process-global. This guard holds the shared side of the lock
+    // in `common`, so no test that moves a gate runs while this test reads one
+    let _gates = crate::common::read_gates();
     let (samples, steps, output_dim) = (4usize, 1024usize, 1024usize);
     let work = samples * steps * output_dim;
     let gate = rustyml::tuning::elementwise::get_cheap_map_f32();

@@ -10,7 +10,8 @@
 //! plane views. A channels-first plane would need a strided gather, which this layout avoids
 //!
 //! The kernels skip out-of-range taps instead of materializing a padded copy, so `Same` padding
-//! costs no extra buffer.
+//! costs no extra buffer. The geometry also carries a per-axis tap spacing, so a dilated kernel
+//! needs no separate loop nest either.
 //!
 //! The geometry below names 2 spatial axes, but the 1D layers use it too. A
 //! `[batch, length, channels]` tensor holds the same values in the same row-major order as
@@ -36,6 +37,8 @@ pub(super) struct DepthwiseGeometry {
     pub kernel: (usize, usize),
     /// Stride as (height, width)
     pub strides: (usize, usize),
+    /// Tap spacing as (height, width). 1 on an axis gives a solid kernel on that axis
+    pub dilation: (usize, usize),
     /// Leading zero-padding as (top, left)
     pub pad_before: (usize, usize),
 }
@@ -58,10 +61,14 @@ impl DepthwiseGeometry {
 
     /// Flat offset of the input position a window at `(oh, ow)` reads for tap `(kh, kw)`, or
     /// `None` when that tap falls in the zero padding
+    ///
+    /// The window advances by the stride and the taps sit `dilation` apart, so the position of
+    /// tap `kh` is `oh * stride + kh * dilation`. The 2 factors stay independent. They agree only
+    /// when the stride equals the dilation, which these layers do not forbid
     #[inline]
     fn tap_offset(&self, oh: usize, ow: usize, kh: usize, kw: usize) -> Option<usize> {
-        let ih = (oh * self.strides.0 + kh).checked_sub(self.pad_before.0)?;
-        let iw = (ow * self.strides.1 + kw).checked_sub(self.pad_before.1)?;
+        let ih = (oh * self.strides.0 + kh * self.dilation.0).checked_sub(self.pad_before.0)?;
+        let iw = (ow * self.strides.1 + kw * self.dilation.1).checked_sub(self.pad_before.1)?;
         if ih >= self.input.0 || iw >= self.input.1 {
             return None;
         }
@@ -304,6 +311,7 @@ mod tests {
             depth_multiplier: 1,
             kernel: (3, 3),
             strides: (1, 1),
+            dilation: (1, 1),
             pad_before: (1, 1),
         };
 
@@ -315,5 +323,30 @@ mod tests {
         assert_eq!(g.tap_offset(2, 2, 2, 2), None);
         // Its tap (1, 1) is input (2, 2), the last position: (2 * 3 + 2) * 2 channels
         assert_eq!(g.tap_offset(2, 2, 1, 1), Some(16));
+    }
+
+    /// The stride advances the window and the dilation spaces the taps. The offset is
+    /// `o * stride + k * dilation` on each axis, never `(o * stride + k) * dilation`
+    ///
+    /// A stride of 2 with a dilation of 3 tells the 2 forms apart. The 2 agree only when the
+    /// stride equals the dilation, and a depthwise layer accepts any pair
+    #[test]
+    fn tap_offset_keeps_the_stride_and_the_dilation_independent() {
+        let g = DepthwiseGeometry {
+            input: (1, 8),
+            output: (1, 2),
+            channels: 1,
+            depth_multiplier: 1,
+            kernel: (1, 2),
+            strides: (1, 2),
+            dilation: (1, 3),
+            pad_before: (0, 0),
+        };
+
+        // Window 0 reads columns 0 and 3, window 1 reads columns 2 and 5
+        assert_eq!(g.tap_offset(0, 0, 0, 0), Some(0));
+        assert_eq!(g.tap_offset(0, 0, 0, 1), Some(3));
+        assert_eq!(g.tap_offset(0, 1, 0, 0), Some(2));
+        assert_eq!(g.tap_offset(0, 1, 0, 1), Some(5));
     }
 }

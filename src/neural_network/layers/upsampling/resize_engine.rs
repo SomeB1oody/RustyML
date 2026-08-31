@@ -14,6 +14,7 @@
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::upsampling::Interpolation;
+use crate::parallel_gates::split_cap;
 use ndarray::IxDyn;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
@@ -255,13 +256,29 @@ fn axis_band(
 /// this size keeps that setup under 1 percent of the work, for any `inner` value the layers see
 const TASK_ELEMENTS: usize = 16_384;
 
+tunable_gate! {
+    /// Test-only cap on the destination rows of 1 axis-pass task. See
+    /// [`split_cap`](crate::parallel_gates::split_cap)
+    ///
+    /// The production value 0 keeps the row count that [`TASK_ELEMENTS`] gives. Every fixture
+    /// tensor of the golden test net holds fewer destination elements than that budget, so an
+    /// axis pass would build exactly 1 task, and the row walk of [`apply_band`] would start at
+    /// row 0 of lane 0 every time. A cap of 1 or more splits it, and the task that crosses a
+    /// lane boundary then reads the lane arithmetic
+    ///
+    /// Each destination row reads the source alone and adds its taps in a fixed order, so the
+    /// cap changes no value. Reachable outside the crate only through `bench_internals`
+    pub(crate) UPSAMPLE_FORCED_TASK_ROWS
+        => upsample_forced_task_rows / set_upsample_forced_task_rows = 0
+}
+
 /// Runs 1 band over a C-order buffer seen as `[outer, src_len, inner]`
 ///
 /// Each destination position owns 1 run of `inner` elements and reads only from the source, so
 /// the tasks write no shared element. The pass adds the taps in a fixed order, so the result
 /// matches between the serial path and the parallel path
 fn apply_band(src: &[f32], src_len: usize, inner: usize, band: &Band, dst: &mut [f32]) {
-    let rows_per_task = (TASK_ELEMENTS / inner).max(1);
+    let rows_per_task = split_cap((TASK_ELEMENTS / inner).max(1), upsample_forced_task_rows());
     let task = |(index, dst_task): (usize, &mut [f32])| {
         // Every task but the last is full, so the first row of a task is exact. Counting the
         // rest by hand keeps the walk free of the 2 divisions a flat row index would need

@@ -8,6 +8,8 @@
 //! - backward before forward -> Err(ForwardPassNotRun)
 //! - backward() in eval mode passes gradient through unchanged
 //! - Shape / ndim validation error paths
+//! - Dropout noise_shape: the small draw, the shared axis, the right-aligned short form, and
+//!   the entry validation. The recorded semantics come from Keras 3.15.1 on the jax backend
 
 use ndarray::Array;
 use rustyml::neural_network::Tensor;
@@ -860,5 +862,499 @@ fn dropout_predict_does_not_overwrite_mask_from_forward() {
         } else {
             approx::assert_abs_diff_eq!(*g, 2.0_f32, epsilon = 1e-5);
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Dropout noise_shape
+//
+// `noise_shape` sets the shape of the random mask, which then broadcasts up to the input. An
+// entry of 1 gives that axis 1 SHARED draw, so the same units drop at every position of the
+// axis. The point is a correlated draw, not independent draws whose average happens to agree.
+//
+// Every expectation below comes from a Keras 3.15.1 probe on the jax backend. The probe
+// recovered the mask over 40 seeds per case and derived the resolved mask shape from the axes
+// that stay constant in every seed:
+//
+//   input (2,3,4)  noise_shape None        -> mask (2,3,4)
+//   input (2,3,4)  noise_shape (2,1,4)     -> mask (2,1,4)
+//   input (2,3,4)  noise_shape (2,3,1)     -> mask (2,3,1)
+//   input (2,3,4)  noise_shape (1,4)       -> mask (1,1,4)
+//   input (2,3,4)  noise_shape (3,4)       -> mask (1,3,4)
+//   input (2,3,4)  noise_shape (4,)        -> mask (1,1,4)
+//   input (2,3,4)  noise_shape (1,)        -> mask (1,1,1)
+//   input (2,3,4)  noise_shape (None,1,4)  -> mask (2,1,4)
+//   input (2,4,3,5) noise_shape (1,3,1)    -> mask (1,1,3,1)
+// ---------------------------------------------------------------------------------------
+
+/// The dropout rate every noise_shape test uses, and the kept-element scale that goes with it
+const NS_RATE: f32 = 0.5;
+/// The kept-element scale of `NS_RATE`, which is `1 / (1 - rate)`
+const NS_SCALE: f32 = 2.0;
+
+/// Recovers the binary keep mask from the output of an all-ones input
+fn keep_mask(output: &Tensor) -> Vec<u8> {
+    output
+        .iter()
+        .map(|&v| {
+            if v == 0.0 {
+                0
+            } else {
+                assert_eq!(v, NS_SCALE, "an all-ones input gives 0 or the kept scale");
+                1
+            }
+        })
+        .collect()
+}
+
+/// Runs 1 training forward over an all-ones input and returns the recovered keep mask
+fn masked_ones(shape: &[usize], noise_shape: Option<Vec<Option<usize>>>, seed: u64) -> Vec<u8> {
+    let mut layer = Dropout::new(NS_RATE, shape.to_vec()).unwrap();
+    if let Some(noise_shape) = noise_shape {
+        layer = layer.with_noise_shape(noise_shape).unwrap();
+    }
+    let mut layer = layer.with_random_state(seed);
+    layer.set_training_if_mode_dependent(true);
+    keep_mask(&layer.forward(&ones(shape)).unwrap())
+}
+
+/// An all-None noise_shape reproduces the default per-element draw exactly
+///
+/// This is the base case of the resolution rule: with no entry of 1, the mask shape equals the
+/// input shape, and the sampler consumes the same values in the same order
+#[test]
+fn dropout_noise_shape_of_all_none_matches_the_default() {
+    for seed in [1_u64, 2, 3] {
+        assert_eq!(
+            masked_ones(&[2, 8], None, seed),
+            masked_ones(&[2, 8], Some(vec![None, None]), seed),
+            "an all-None noise_shape changed the mask at seed {seed}"
+        );
+        // The explicit extents are the same statement
+        assert_eq!(
+            masked_ones(&[2, 8], None, seed),
+            masked_ones(&[2, 8], Some(vec![Some(2), Some(8)]), seed),
+            "an explicit full noise_shape changed the mask at seed {seed}"
+        );
+    }
+}
+
+/// TRAP (a): the layer samples at the small shape, and never at the full shape
+///
+/// A `noise_shape` of `[2, 1, 4]` over a `[2, 3, 4]` input must draw exactly 8 values. An
+/// implementation that samples 24 values at the full shape and then zeroes axis 1 reproduces
+/// 1 sample by coincidence and is statistically wrong.
+///
+/// The check pins the draw count and the draw order together. A second layer whose input shape
+/// IS `[2, 1, 4]`, at the same seed and with no noise_shape, must produce the identical mask.
+/// A full-shape sampler consumes 24 values from the same stream, so its first 8 land in
+/// different places and the 2 masks disagree
+#[test]
+fn dropout_noise_shape_draws_only_at_the_resolved_small_shape() {
+    for seed in [11_u64, 12, 13, 14] {
+        let broadcast = masked_ones(&[2, 3, 4], Some(vec![Some(2), Some(1), Some(4)]), seed);
+        let small = masked_ones(&[2, 1, 4], None, seed);
+
+        // The 8 distinct draws of the broadcast mask, read at position 0 of the shared axis
+        let distinct: Vec<u8> = (0..2)
+            .flat_map(|b| (0..4).map(move |c| (b, c)))
+            .map(|(b, c)| broadcast[b * 12 + c])
+            .collect();
+
+        assert_eq!(
+            distinct, small,
+            "the draws at seed {seed} do not match a sampler running at [2, 1, 4]"
+        );
+    }
+}
+
+/// TRAP (a), statistically: the draw is correlated, not an average of independent draws
+///
+/// With a `[4, 1, 3]` noise_shape over a `[4, 200, 3]` input, the mask holds 12 draws. The mean
+/// keep rate over many seeds therefore varies with the spread of 12 coin flips, about
+/// `0.25 / 12 = 0.0208`. A sampler that drew 2400 independent values and then zeroed axis 1
+/// would still average 0.5, but its spread would be about `0.25 / 2400 = 0.000104`, which is
+/// 200 times smaller. Keras measures 0.0209 here
+#[test]
+fn dropout_noise_shape_gives_a_correlated_draw_not_an_average() {
+    let shape = [4_usize, 200, 3];
+    let seeds = 200_u64;
+
+    let rates: Vec<f64> = (0..seeds)
+        .map(|seed| {
+            let mask = masked_ones(&shape, Some(vec![Some(4), Some(1), Some(3)]), seed);
+            // Every timestep of a batch item and channel must carry the same draw
+            for b in 0..4 {
+                for t in 0..200 {
+                    for c in 0..3 {
+                        assert_eq!(
+                            mask[(b * 200 + t) * 3 + c],
+                            mask[b * 600 + c],
+                            "axis 1 was not shared at seed {seed}"
+                        );
+                    }
+                }
+            }
+            f64::from(mask.iter().map(|&m| u32::from(m)).sum::<u32>()) / 2400.0
+        })
+        .collect();
+
+    let mean = rates.iter().sum::<f64>() / f64::from(seeds as u32);
+    let variance = rates.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / f64::from(seeds as u32);
+
+    assert!(
+        (0.35..0.65).contains(&mean),
+        "the mean keep rate {mean} is far from 0.5"
+    );
+    // 0.25 / 12 = 0.0208. A full-shape sampler would land near 0.25 / 2400 = 0.000104
+    assert!(
+        (0.008..0.045).contains(&variance),
+        "the keep-rate variance {variance} does not match 12 correlated draws"
+    );
+}
+
+/// An entry of 1 makes the whole axis share 1 draw
+///
+/// Keras: input (2,3,4) with noise_shape (2,1,4) keeps axis 1 constant in every seed
+#[test]
+fn dropout_noise_shape_shares_one_draw_along_an_axis() {
+    for seed in [21_u64, 22, 23] {
+        let mask = masked_ones(&[2, 3, 4], Some(vec![Some(2), Some(1), Some(4)]), seed);
+        for b in 0..2 {
+            for t in 0..3 {
+                for c in 0..4 {
+                    assert_eq!(
+                        mask[(b * 3 + t) * 4 + c],
+                        mask[b * 12 + c],
+                        "seed {seed}: axis 1 is not shared at ({b}, {t}, {c})"
+                    );
+                }
+            }
+        }
+    }
+
+    // The trailing axis shares instead, with noise_shape (2,3,1)
+    for seed in [24_u64, 25] {
+        let mask = masked_ones(&[2, 3, 4], Some(vec![Some(2), Some(3), Some(1)]), seed);
+        for b in 0..2 {
+            for t in 0..3 {
+                for c in 0..4 {
+                    assert_eq!(
+                        mask[(b * 3 + t) * 4 + c],
+                        mask[(b * 3 + t) * 4],
+                        "seed {seed}: axis 2 is not shared at ({b}, {t}, {c})"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// TRAP (b): a shorter noise_shape lines up against the LAST axes of the input
+///
+/// The omitted leading axes therefore become SHARED, not independent. A caller who writes the
+/// per-sample shape and omits the batch axis gets 1 mask for the whole batch.
+///
+/// Keras: (1,4) resolves to (1,1,4), and (3,4) resolves to (1,3,4), over a (2,3,4) input
+#[test]
+fn dropout_noise_shape_shorter_than_the_input_is_right_aligned() {
+    for seed in [31_u64, 32, 33] {
+        // (1, 4) is the same mask as (1, 1, 4)
+        assert_eq!(
+            masked_ones(&[2, 3, 4], Some(vec![Some(1), Some(4)]), seed),
+            masked_ones(&[2, 3, 4], Some(vec![Some(1), Some(1), Some(4)]), seed),
+            "seed {seed}: (1, 4) is not (1, 1, 4)"
+        );
+        // (3, 4) is the same mask as (1, 3, 4)
+        assert_eq!(
+            masked_ones(&[2, 3, 4], Some(vec![Some(3), Some(4)]), seed),
+            masked_ones(&[2, 3, 4], Some(vec![Some(1), Some(3), Some(4)]), seed),
+            "seed {seed}: (3, 4) is not (1, 3, 4)"
+        );
+        // (4,) is the same mask as (1, 1, 4)
+        assert_eq!(
+            masked_ones(&[2, 3, 4], Some(vec![Some(4)]), seed),
+            masked_ones(&[2, 3, 4], Some(vec![Some(1), Some(1), Some(4)]), seed),
+            "seed {seed}: (4,) is not (1, 1, 4)"
+        );
+        // A left-aligned reading of (3, 4) would demand 3 on the batch axis of extent 2 and
+        // reject the call. The short form must instead succeed and share the batch axis
+        let batch_shared = masked_ones(&[2, 3, 4], Some(vec![Some(3), Some(4)]), seed);
+        assert_eq!(
+            batch_shared[..12],
+            batch_shared[12..],
+            "seed {seed}: the omitted batch axis was not shared"
+        );
+    }
+}
+
+/// A rank-1 noise_shape of 1 shares 1 draw over the whole tensor
+///
+/// Keras: input (2,3,4) with noise_shape (1,) resolves to a mask of (1,1,1)
+#[test]
+fn dropout_noise_shape_of_one_shares_the_whole_tensor() {
+    let mut all_kept = 0;
+    let mut all_dropped = 0;
+    for seed in 0..30_u64 {
+        let mask = masked_ones(&[2, 3, 4], Some(vec![Some(1)]), seed);
+        assert!(
+            mask.iter().all(|&m| m == mask[0]),
+            "seed {seed}: 1 draw did not cover the whole tensor"
+        );
+        if mask[0] == 1 {
+            all_kept += 1;
+        } else {
+            all_dropped += 1;
+        }
+    }
+    // Both outcomes appear, so the single draw is a real draw and not a constant
+    assert!(
+        all_kept > 0 && all_dropped > 0,
+        "the single draw never moved"
+    );
+}
+
+/// A `None` entry takes the extent of the input on its axis, so that axis stays independent
+///
+/// Keras: (None,1,4) and (None,1,None) both resolve to (2,1,4) over a (2,3,4) input
+#[test]
+fn dropout_noise_shape_none_entry_takes_the_input_extent() {
+    let mut batch_rows_differ = false;
+    for seed in 0..20_u64 {
+        let explicit = masked_ones(&[2, 3, 4], Some(vec![Some(2), Some(1), Some(4)]), seed);
+        assert_eq!(
+            masked_ones(&[2, 3, 4], Some(vec![None, Some(1), Some(4)]), seed),
+            explicit,
+            "seed {seed}: (None, 1, 4) is not (2, 1, 4)"
+        );
+        assert_eq!(
+            masked_ones(&[2, 3, 4], Some(vec![None, Some(1), None]), seed),
+            explicit,
+            "seed {seed}: (None, 1, None) is not (2, 1, 4)"
+        );
+        if explicit[..12] != explicit[12..] {
+            batch_rows_differ = true;
+        }
+    }
+    assert!(
+        batch_rows_differ,
+        "the batch axis never drew independently, so None did not take the input extent"
+    );
+}
+
+/// TRAP (c): a rate of 1 with a noise_shape is legal and gives all zeros
+#[test]
+fn dropout_noise_shape_at_rate_one_gives_zeros() {
+    let mut layer = Dropout::new(1.0, vec![2, 3, 4])
+        .unwrap()
+        .with_noise_shape(vec![Some(2), Some(1), Some(4)])
+        .unwrap()
+        .with_random_state(41);
+    layer.set_training_if_mode_dependent(true);
+
+    let input = ones(&[2, 3, 4]);
+    let output = layer.forward(&input).unwrap();
+    assert!(output.iter().all(|&v| v == 0.0), "rate 1 kept a unit");
+
+    let grad = layer.backward(&ones(&[2, 3, 4])).unwrap();
+    assert!(grad.iter().all(|&v| v == 0.0), "rate 1 kept a gradient");
+
+    // A rate of 0 stays the identity with a noise_shape as well
+    let mut layer = Dropout::new(0.0, vec![2, 3, 4])
+        .unwrap()
+        .with_noise_shape(vec![Some(2), Some(1), Some(4)])
+        .unwrap();
+    layer.set_training_if_mode_dependent(true);
+    assert_allclose(&layer.forward(&input).unwrap(), &input, 1e-6_f32);
+}
+
+/// The backward pass reuses the small mask and broadcasts it the same way
+///
+/// The gradient of an all-ones upstream must equal the forward output of an all-ones input:
+/// both are `mask * scale`. The gradient must also stay constant along the shared axis
+#[test]
+fn dropout_noise_shape_backward_broadcasts_the_small_mask() {
+    let mut layer = Dropout::new(NS_RATE, vec![2, 3, 4])
+        .unwrap()
+        .with_noise_shape(vec![Some(2), Some(1), Some(4)])
+        .unwrap()
+        .with_random_state(51);
+    layer.set_training_if_mode_dependent(true);
+
+    let output = layer.forward(&ones(&[2, 3, 4])).unwrap();
+    let grad_in = layer.backward(&ones(&[2, 3, 4])).unwrap();
+
+    for (o, g) in output.iter().zip(grad_in.iter()) {
+        assert_eq!(o.to_bits(), g.to_bits(), "the gradient lost the mask");
+    }
+    for b in 0..2 {
+        for t in 0..3 {
+            for c in 0..4 {
+                assert_eq!(
+                    grad_in[[b, t, c]],
+                    grad_in[[b, 0, c]],
+                    "the gradient is not shared along axis 1"
+                );
+            }
+        }
+    }
+
+    // A scaled upstream carries through with the same mask
+    let upstream = filled(&[2, 3, 4], 3.0);
+    let scaled = layer.backward(&upstream).unwrap();
+    for (g, s) in grad_in.iter().zip(scaled.iter()) {
+        assert_eq!(
+            s.to_bits(),
+            (g * 3.0).to_bits(),
+            "the upstream did not scale"
+        );
+    }
+}
+
+/// Inference passes the input through unchanged, whatever the noise_shape says
+#[test]
+fn dropout_noise_shape_passes_through_in_inference_mode() {
+    let mut layer = Dropout::new(NS_RATE, vec![2, 3, 4])
+        .unwrap()
+        .with_noise_shape(vec![Some(2), Some(1), Some(4)])
+        .unwrap()
+        .with_random_state(61);
+    layer.set_training_if_mode_dependent(false);
+
+    let input = filled(&[2, 3, 4], 1.5);
+    assert_allclose(&layer.forward(&input).unwrap(), &input, 1e-6_f32);
+    assert_allclose(&layer.predict(&input).unwrap(), &input, 1e-6_f32);
+}
+
+/// The same seed gives the same mask, in this process and in any other
+///
+/// The recorded pattern is the seeded answer for this configuration. Running the test binary a
+/// second time reproduces it, which is what pins the RNG through the builder
+#[test]
+fn dropout_noise_shape_seed_pins_the_mask() {
+    let mask = masked_ones(&[2, 3, 4], Some(vec![Some(2), Some(1), Some(4)]), 27);
+    // 8 draws, each repeated at all 3 positions of axis 1
+    let expected: Vec<u8> = vec![
+        1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, // batch item 0 draws [1, 0, 0, 1]
+        0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, // batch item 1 draws [0, 1, 1, 0]
+    ];
+    println!("noise_shape mask fingerprint: {mask:?}");
+    assert_eq!(mask, expected, "the seeded mask moved");
+
+    // 2 layers built the same way agree
+    assert_eq!(
+        mask,
+        masked_ones(&[2, 3, 4], Some(vec![Some(2), Some(1), Some(4)]), 27)
+    );
+}
+
+/// An entry that is neither 1 nor the input extent on its axis is rejected
+#[test]
+fn dropout_noise_shape_rejects_an_entry_that_is_not_the_input_extent() {
+    let mut layer = Dropout::new(NS_RATE, vec![2, 3, 4])
+        .unwrap()
+        .with_noise_shape(vec![Some(2), Some(2), Some(4)])
+        .unwrap();
+    layer.set_training_if_mode_dependent(true);
+
+    let err = layer.forward(&ones(&[2, 3, 4])).unwrap_err();
+    assert!(
+        matches!(err, Error::InvalidParameter { .. }),
+        "expected InvalidParameter, got {err:?}"
+    );
+
+    // The right-aligned reading applies to the rejection as well: 3 is the extent of axis 1,
+    // but the short form lines it up against axis 2, whose extent is 4
+    let mut layer = Dropout::new(NS_RATE, vec![2, 3, 4])
+        .unwrap()
+        .with_noise_shape(vec![Some(1), Some(3)])
+        .unwrap();
+    layer.set_training_if_mode_dependent(true);
+    assert!(matches!(
+        layer.forward(&ones(&[2, 3, 4])).unwrap_err(),
+        Error::InvalidParameter { .. }
+    ));
+}
+
+/// A noise_shape of a higher rank than the input is rejected
+#[test]
+fn dropout_noise_shape_rejects_a_higher_rank_than_the_input() {
+    let mut layer = Dropout::new(NS_RATE, vec![2, 3, 4])
+        .unwrap()
+        .with_noise_shape(vec![Some(1), Some(2), Some(3), Some(4)])
+        .unwrap();
+    layer.set_training_if_mode_dependent(true);
+
+    assert!(matches!(
+        layer.forward(&ones(&[2, 3, 4])).unwrap_err(),
+        Error::InvalidParameter { .. }
+    ));
+}
+
+/// The builder rejects an empty noise_shape and an entry of 0
+#[test]
+fn dropout_noise_shape_builder_rejects_an_empty_vector_and_a_zero_entry() {
+    let layer = Dropout::new(NS_RATE, vec![2, 3, 4]).unwrap();
+    assert!(matches!(
+        layer.with_noise_shape(vec![]).unwrap_err(),
+        Error::EmptyInput(_)
+    ));
+
+    let layer = Dropout::new(NS_RATE, vec![2, 3, 4]).unwrap();
+    assert!(matches!(
+        layer
+            .with_noise_shape(vec![Some(2), Some(0), Some(4)])
+            .unwrap_err(),
+        Error::InvalidParameter { .. }
+    ));
+}
+
+/// A rank-4 input takes the same rule, with 2 shared axes at once
+///
+/// Keras: input (2,4,3,5) with noise_shape (1,3,1) resolves to a mask of (1,1,3,1)
+#[test]
+fn dropout_noise_shape_shares_two_axes_of_a_rank_four_input() {
+    for seed in [71_u64, 72] {
+        assert_eq!(
+            masked_ones(&[2, 4, 3, 5], Some(vec![Some(1), Some(3), Some(1)]), seed),
+            masked_ones(
+                &[2, 4, 3, 5],
+                Some(vec![Some(1), Some(1), Some(3), Some(1)]),
+                seed
+            ),
+            "seed {seed}: (1, 3, 1) is not (1, 1, 3, 1)"
+        );
+
+        let mask = masked_ones(&[2, 4, 3, 5], Some(vec![Some(1), Some(3), Some(1)]), seed);
+        // Only axis 2 varies: 3 draws cover the whole tensor
+        for b in 0..2 {
+            for t in 0..4 {
+                for h in 0..3 {
+                    for c in 0..5 {
+                        let flat = ((b * 4 + t) * 3 + h) * 5 + c;
+                        assert_eq!(mask[flat], mask[h * 5], "seed {seed}: axis {h} moved");
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The layer keeps its mask at the small shape, so a whole batch of shared draws stays cheap
+///
+/// The check reads the mask through the observable behavior: a `[1, 1, 4]` mask over a large
+/// input has exactly 4 distinct draws, whatever the input size
+#[test]
+fn dropout_noise_shape_keeps_the_mask_at_its_own_shape() {
+    let mut layer = Dropout::new(NS_RATE, vec![8, 64, 4])
+        .unwrap()
+        .with_noise_shape(vec![Some(1), Some(1), Some(4)])
+        .unwrap()
+        .with_random_state(81);
+    layer.set_training_if_mode_dependent(true);
+
+    let mask = keep_mask(&layer.forward(&ones(&[8, 64, 4])).unwrap());
+    for (flat, &m) in mask.iter().enumerate() {
+        assert_eq!(m, mask[flat % 4], "the 4 draws did not tile the tensor");
     }
 }

@@ -1,8 +1,8 @@
 //! Recurrent layers (SimpleRNN, GRU, LSTM) and their shared helpers
 //!
-//! Re-exports the 3 layer types and provides 2 shared helpers. A numerically stable sigmoid
-//! serves the GRU and LSTM gates, and Gram-Schmidt orthogonal initialization serves all 3 layers'
-//! recurrent kernels.
+//! Re-exports the 3 layer types and provides 3 shared helpers. A numerically stable sigmoid
+//! serves the GRU and LSTM gates, Gram-Schmidt orthogonal initialization serves all 3 layers'
+//! recurrent kernels, and 1 index map serves the `go_backwards` option of all 3 layers.
 
 use ndarray::{Array, Array2};
 use ndarray_rand::rand::rngs::StdRng;
@@ -20,6 +20,32 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 #[inline]
 fn apply_sigmoid(arr: Array2<f32>) -> Array2<f32> {
     arr.mapv(|x| 1.0 / (1.0 + (-x).exp()))
+}
+
+/// Maps a processing step to the input timestep that the step consumes
+///
+/// All 3 recurrent layers process the timesteps in order when `go_backwards` is false, and from
+/// last to first when it is true. The forward pass reads the input at this index, and the
+/// backward pass writes the per-step gate gradient back to this index. The backward scatter must
+/// use this index because the batched reductions multiply the gate gradients against the input
+/// rows, which stay in input order.
+///
+/// # Parameters
+///
+/// - `step` - Processing step, from 0 to `timesteps` - 1
+/// - `timesteps` - Length of the time axis
+/// - `go_backwards` - Reverses the processing order when true
+///
+/// # Returns
+///
+/// - `usize` - The input timestep that `step` consumes
+#[inline]
+fn input_step(step: usize, timesteps: usize, go_backwards: bool) -> usize {
+    if go_backwards {
+        timesteps - 1 - step
+    } else {
+        step
+    }
 }
 
 /// Generates a square orthogonal matrix via Gram-Schmidt orthonormalization of a random matrix
@@ -114,6 +140,23 @@ mod tests {
         let m = orthogonal_init(1, &mut StdRng::seed_from_u64(0));
         assert_eq!(m.shape(), &[1, 1]);
         assert_abs_diff_eq!(m[[0, 0]].abs(), 1.0_f32, epsilon = 1e-6);
+    }
+
+    // input_step
+
+    /// Without `go_backwards`, a processing step consumes the input timestep of the same index
+    #[test]
+    fn input_step_forward_is_the_identity() {
+        for step in 0..5 {
+            assert_eq!(input_step(step, 5, false), step);
+        }
+    }
+
+    /// With `go_backwards`, processing step 0 consumes the last input timestep
+    #[test]
+    fn input_step_backward_reverses_the_time_axis() {
+        let got: Vec<usize> = (0..5).map(|step| input_step(step, 5, true)).collect();
+        assert_eq!(got, vec![4, 3, 2, 1, 0]);
     }
 
     // apply_sigmoid

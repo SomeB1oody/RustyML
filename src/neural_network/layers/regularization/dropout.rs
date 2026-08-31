@@ -15,6 +15,8 @@
 //! - `dropout_backward` - the common inverted-dropout backward pass for the plain layer
 //!   (pass-through at inference or `rate == 0`, zeros at `rate == 1`, otherwise scales by the
 //!   stored mask)
+//! - `broadcast_dropout_scale` - applies the inverted-dropout scale of a mask that broadcasts
+//!   up to the tensor, so a `noise_shape` mask stays at its own small shape
 //! - `dropout_output_shape` - formats the (unchanged) output shape, since dropout preserves the
 //!   input shape
 //! - `spatial_dropout_scale` and `spatial_dropout_backward` - apply the per-channel
@@ -23,6 +25,7 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
+use ndarray::Zip;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
 
@@ -31,7 +34,8 @@ use rayon::slice::{ParallelSlice, ParallelSliceMut};
 /// # Parameters
 ///
 /// - `grad_output` - Gradient from the next layer
-/// - `mask` - The dropout mask applied during the forward pass
+/// - `mask` - The dropout mask applied during the forward pass. The mask holds 1 value per
+///   draw, so with a `noise_shape` it is smaller than the gradient and broadcasts up to it
 /// - `training` - Whether the layer is in training mode
 /// - `rate` - The dropout rate
 /// - `layer_name` - Concrete layer name, used in the "forward pass not run" error message so the
@@ -43,7 +47,8 @@ use rayon::slice::{ParallelSlice, ParallelSliceMut};
 ///
 /// # Errors
 ///
-/// Returns an error when the forward pass has not been run and no mask is available
+/// Returns an error when the forward pass has not been run and no mask is available, or when
+/// the stored mask does not broadcast up to the shape of `grad_output`
 fn dropout_backward(
     grad_output: &Tensor,
     mask: &Option<Tensor>,
@@ -62,12 +67,52 @@ fn dropout_backward(
     }
 
     if let Some(mask) = mask {
-        let scale = 1.0 / (1.0 - rate);
-        let grad_input = grad_output * mask * scale;
-        Ok(grad_input)
+        broadcast_dropout_scale(grad_output, mask, rate)
     } else {
         Err(Error::forward_pass_not_run(layer_name))
     }
+}
+
+/// Applies the inverted-dropout scale of `mask` to `t`, broadcasting the mask up to `t`
+///
+/// The mask carries 1 binary keep/drop value per draw. Its shape is the input shape when the
+/// layer samples 1 draw per element. With a `noise_shape`, the mask stays at that smaller
+/// shape, and the layer never builds a full-size copy of it. The broadcast follows the usual
+/// right-aligned rule: a shorter mask lines up against the last axes of `t`, and an axis with
+/// an extent of 1 repeats along the matching axis of `t`
+///
+/// Callers use this for both the forward output (`t = input`) and the backward input gradient
+/// (`t = grad_output`), because both apply the same elementwise scale
+///
+/// The result is in C order at every input layout, and it holds `(x * m) * scale` at each
+/// element, the same 2 multiplications in the same order as the explicit
+/// `t * broadcast(mask) * scale` form
+///
+/// # Parameters
+///
+/// - `t` - Tensor that the scale applies to
+/// - `mask` - Binary keep/drop mask, at a shape that broadcasts up to the shape of `t`
+/// - `rate` - Dropout rate, which sets the kept-element scale of `1 / (1 - rate)`
+///
+/// # Returns
+///
+/// - `Result<Tensor, Error>` - The scaled tensor, at the shape of `t`
+///
+/// # Errors
+///
+/// - `Error::ShapeMismatch` - If the mask shape does not broadcast up to the shape of `t`
+fn broadcast_dropout_scale(t: &Tensor, mask: &Tensor, rate: f32) -> Result<Tensor, Error> {
+    let broadcast = mask
+        .broadcast(t.raw_dim())
+        .ok_or_else(|| Error::shape_mismatch(t.shape(), mask.shape()))?;
+
+    let scale = 1.0 / (1.0 - rate);
+    let mut out = Tensor::zeros(t.raw_dim());
+    Zip::from(&mut out)
+        .and(t)
+        .and(&broadcast)
+        .for_each(|o, &x, &m| *o = (x * m) * scale);
+    Ok(out)
 }
 
 /// Common output-shape formatting shared by all dropout layers

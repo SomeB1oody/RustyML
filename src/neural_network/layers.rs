@@ -22,6 +22,7 @@
 //!   - [`recurrent`](crate::neural_network::layers::recurrent)
 //!   - [`regularization`](crate::neural_network::layers::regularization)
 //!   - [`repeat_vector`](crate::neural_network::layers::repeat_vector)
+//!   - [`rescaling`](crate::neural_network::layers::rescaling)
 //!   - [`reshape`](crate::neural_network::layers::reshape)
 //!   - [`upsampling`](crate::neural_network::layers::upsampling)
 //! - Weight containers: [`layer_weight`](crate::neural_network::layers::layer_weight)
@@ -78,6 +79,8 @@ pub mod recurrent;
 pub mod regularization;
 /// A layer that repeats a feature vector into a sequence
 pub mod repeat_vector;
+/// A layer that applies a fixed affine map to every element
+pub mod rescaling;
 /// A layer that rewrites the axes after the batch axis into a target shape
 pub mod reshape;
 /// Model-level serialization scaffolding (whole-model snapshot and load-time weight application)
@@ -101,6 +104,7 @@ pub use pooling::*;
 pub use recurrent::*;
 pub use regularization::*;
 pub use repeat_vector::*;
+pub use rescaling::*;
 pub use reshape::*;
 pub use upsampling::*;
 

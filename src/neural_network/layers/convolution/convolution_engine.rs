@@ -14,12 +14,22 @@
 //!
 //! # Conventions
 //!
-//! - `Valid` output: `(in - k) / stride + 1`
+//! - Every size rule reads the dilated kernel extent `keff = (k - 1) * dilation + 1`, not `k`
+//! - `Valid` output: `(in - keff) / stride + 1`
 //! - `Same` output: `ceil(in / stride)`
 //! - `Same` padding splits the total padding evenly, and the extra cell (if any) goes on the
 //!   trailing edge (`pad_before = pad_total / 2`)
+//! - `Causal` output: `ceil(in / stride)`, with all `keff - 1` pad cells on the leading edge
 //! - The engine computes a cross-correlation, so it does not flip the kernel
 //! - The bias is added last, after the matrix product
+//!
+//! # Dilation
+//!
+//! Dilation spaces the kernel taps out. It appears in exactly 2 places. The dilated extent
+//! `keff` drives every size rule above, and the position map of tap `kk` at output position `o`
+//! becomes `o * stride + kk * dilation`. The tap spacing is the dilation and the window advance
+//! is the stride, so the 2 factors never multiply together. A dilation of 1 on every axis gives
+//! back the undilated pass, value for value
 //!
 //! # Layout
 //!
@@ -44,9 +54,11 @@
 //! fills the pool, so a batch task does not fork rayon again inside its own GEMM
 
 use super::PaddingType;
+use super::validation::validate_valid_kernel_fits;
 use crate::error::Error;
 use crate::math::matmul::dot_par;
 use crate::neural_network::Tensor;
+use crate::parallel_gates::split_cap;
 use gemmkit_ndarray::{Bias, Parallelism};
 use ndarray::{Array2, Array3, ArrayD, ArrayView2, ArrayViewMut2, Axis, IxDyn};
 use rayon::prelude::*;
@@ -67,6 +79,75 @@ tunable_gate! {
 ///
 /// Each task's GEMM re-packs the weight matrix, so blocks need enough positions to amortize that
 const CONV_MIN_CHUNK_POSITIONS: usize = 64;
+
+tunable_gate! {
+    /// Test-only cap on the output positions of 1 forward task. See
+    /// [`split_cap`](crate::parallel_gates::split_cap)
+    ///
+    /// The production value 0 keeps [`CONV_MIN_CHUNK_POSITIONS`]. Every fixture input of the
+    /// golden test net holds fewer positions than that minimum, so the forward pass builds 1
+    /// task per batch item and leaves the position split unread. A cap of 1 or more splits it
+    ///
+    /// # This pass is NOT invariant to the row block today
+    ///
+    /// Each task runs 1 serial GEMM into its own disjoint row block of the output. A row of that
+    /// product is 1 dot product per filter over the whole `k*Cin` axis, and the row block
+    /// selects no part of that axis, so the block should decide no value. That is not what the
+    /// pass does. The backend picks its accumulation order from the row count of the block, so
+    /// the same rows give different result bits in a short block than in a long one. The
+    /// trailing partial block is where the difference appears most.
+    ///
+    /// The gate above therefore already changes result bits on its own, for any input whose
+    /// output plane passes [`CONV_MIN_CHUNK_POSITIONS`], with no cap installed at all. That
+    /// contradicts what [`crate::tuning`] states about a gate. The golden test net leaves this
+    /// cap at 0 until the pass is invariant. See `tests/neural_network/golden/mod.rs`.
+    ///
+    /// Reachable outside the crate only through `bench_internals`
+    pub(crate) CONV_FORCED_CHUNK_POSITIONS
+        => conv_forced_chunk_positions / set_conv_forced_chunk_positions = 0
+}
+
+/// Padding rule of a plain convolution
+///
+/// [`PaddingType`] holds the 2 rules every convolutional and pooling layer shares. This enum adds
+/// the causal rule, which only `Conv1D` accepts. Layers that must not take a causal input keep a
+/// [`PaddingType`] field and convert at the engine boundary, so a causal pass cannot reach them
+///
+/// # Notes
+///
+/// The engine is rank-generic, so `Causal` pads the leading edge of every spatial axis. Only
+/// `Conv1D` can build it, and it has 1 spatial axis
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ConvPadding {
+    /// Applies no padding. The convolution runs only where the dilated kernel fully overlaps the
+    /// input, so the output is smaller than the input
+    #[default]
+    Valid,
+
+    /// Adds zeros on both borders so the output keeps the input size, when the stride is 1. The
+    /// extra cell of an odd total goes on the trailing edge
+    Same,
+
+    /// Adds all `(k - 1) * dilation` zeros on the leading edge and none on the trailing edge, so
+    /// an output position never reads a later input position. The output size is the `Same` one
+    Causal,
+}
+
+impl From<PaddingType> for ConvPadding {
+    fn from(padding: PaddingType) -> Self {
+        match padding {
+            PaddingType::Valid => ConvPadding::Valid,
+            PaddingType::Same => ConvPadding::Same,
+        }
+    }
+}
+
+/// Dilated extent of 1 kernel axis: the input span of `k` taps spaced `dilation` apart
+///
+/// A dilation of 1 returns the kernel size unchanged
+pub(super) fn effective_kernel(k: usize, dilation: usize) -> usize {
+    (k - 1) * dilation + 1
+}
 
 /// Analytic gradients returned by [`conv_backward`], and by the transposed-convolution backward
 /// pass
@@ -129,31 +210,41 @@ pub(super) fn conv_geometry(
     sp: &[usize],
     k_dims: &[usize],
     strides: &[usize],
-    padding: PaddingType,
+    dilation: &[usize],
+    padding: ConvPadding,
 ) -> Result<ConvGeometry, Error> {
     let r = sp.len();
+    // Every rule below reads the dilated extent. The padded buffer must hold it too, because the
+    // last tap of the last window sits at `(out - 1) * stride + keff - 1`
+    let keff: Vec<usize> = (0..r)
+        .map(|d| effective_kernel(k_dims[d], dilation[d]))
+        .collect();
+    // Only `Valid` bounds the kernel by the input. `Same` and `Causal` pad the missing cells, so
+    // they accept an effective kernel longer than the input axis
+    validate_valid_kernel_fits(padding, k_dims, dilation, sp)?;
     match padding {
-        PaddingType::Valid => {
-            if let Some(d) = (0..r).find(|&d| sp[d] < k_dims[d]) {
-                return Err(Error::invalid_input(format!(
-                    "Valid-padding convolution requires every input spatial dimension to be at \
-                     least the kernel size: axis {d} has input size {} < kernel size {}",
-                    sp[d], k_dims[d]
-                )));
-            }
-            let out_sp: Vec<usize> = (0..r)
-                .map(|d| (sp[d] - k_dims[d]) / strides[d] + 1)
-                .collect();
+        ConvPadding::Valid => {
+            let out_sp: Vec<usize> = (0..r).map(|d| (sp[d] - keff[d]) / strides[d] + 1).collect();
             Ok((out_sp, vec![0; r], sp.to_vec()))
         }
-        PaddingType::Same => {
+        ConvPadding::Same => {
             let out_sp: Vec<usize> = (0..r).map(|d| sp[d].div_ceil(strides[d])).collect();
             let pad_before: Vec<usize> = (0..r)
-                .map(|d| (((out_sp[d] - 1) * strides[d] + k_dims[d]).saturating_sub(sp[d])) / 2)
+                .map(|d| (((out_sp[d] - 1) * strides[d] + keff[d]).saturating_sub(sp[d])) / 2)
                 .collect();
             let padded_sp: Vec<usize> = (0..r)
-                .map(|d| ((out_sp[d] - 1) * strides[d] + k_dims[d]).max(sp[d]))
+                .map(|d| ((out_sp[d] - 1) * strides[d] + keff[d]).max(sp[d]))
                 .collect();
+            Ok((out_sp, pad_before, padded_sp))
+        }
+        ConvPadding::Causal => {
+            // A pad of `keff - 1` cells on the leading edge, then a Valid convolution. The output
+            // is then `((sp + keff - 1) - keff) / stride + 1`, which is `ceil(sp / stride)`, the
+            // same length `Same` gives. The last window ends at `(out - 1) * stride + keff - 1`,
+            // which is at most `sp + keff - 2`, so the padded buffer needs no trailing cell
+            let out_sp: Vec<usize> = (0..r).map(|d| sp[d].div_ceil(strides[d])).collect();
+            let pad_before: Vec<usize> = (0..r).map(|d| keff[d] - 1).collect();
+            let padded_sp: Vec<usize> = (0..r).map(|d| sp[d] + pad_before[d]).collect();
             Ok((out_sp, pad_before, padded_sp))
         }
     }
@@ -244,10 +335,14 @@ pub(super) fn crop_padded(
 /// `cin - 1` channels follow it contiguously. `padded_strides` carries the `cin` scaling (see
 /// [`spatial_strides`]), so the table does not depend on batch. The engine computes it once and
 /// reuses it for every im2col copy and every col2im accumulate
+///
+/// The position map is `o * stride + kk * dilation` per axis. The window advances by the stride
+/// and the taps sit `dilation` apart, so the 2 factors stay independent
 pub(super) fn im2col_offsets(
     out_sp: &[usize],
     k_dims: &[usize],
     strides: &[usize],
+    dilation: &[usize],
     padded_strides: &[usize],
 ) -> Vec<usize> {
     let r = out_sp.len();
@@ -263,7 +358,7 @@ pub(super) fn im2col_offsets(
         loop {
             let mut pidx = 0usize;
             for d in 0..r {
-                pidx += (o[d] * strides[d] + kk[d]) * padded_strides[d];
+                pidx += (o[d] * strides[d] + kk[d] * dilation[d]) * padded_strides[d];
             }
             offsets[kk_flat * out_plane + o_flat] = pidx;
             kk_flat += 1;
@@ -328,20 +423,30 @@ pub(super) fn build_col_range(ctx: &ColContext, b: usize, c0: usize, c1: usize) 
 }
 
 /// Runs the forward convolution. `weight_shape` is `[k..., Cin, F]`, `bias` is `[F]`, and
-/// `strides` has one entry per spatial axis
+/// `strides` and `dilation` have one entry per spatial axis
 pub(super) fn conv_forward(
     input: &Tensor,
     weights: &[f32],
     weight_shape: &[usize],
     bias: &[f32],
     strides: &[usize],
-    padding: PaddingType,
+    dilation: &[usize],
+    padding: ConvPadding,
 ) -> Result<Tensor, Error> {
-    conv_forward_impl(input, weights, weight_shape, bias, strides, padding, None)
+    conv_forward_gated(
+        input,
+        weights,
+        weight_shape,
+        bias,
+        strides,
+        dilation,
+        padding,
+        None,
+    )
 }
 
-/// `conv_forward` with an optional override of the parallel-or-serial gate decision, so a bench
-/// can measure both paths on either side of the gate
+/// `conv_forward` at dilation 1, with an optional override of the parallel-or-serial gate
+/// decision, so a bench can measure both paths on either side of the gate
 ///
 /// Reachable outside the crate only through `bench_internals`
 pub fn conv_forward_impl(
@@ -353,6 +458,30 @@ pub fn conv_forward_impl(
     padding: PaddingType,
     force_parallel: Option<bool>,
 ) -> Result<Tensor, Error> {
+    conv_forward_gated(
+        input,
+        weights,
+        weight_shape,
+        bias,
+        strides,
+        &vec![1; strides.len()],
+        padding.into(),
+        force_parallel,
+    )
+}
+
+/// Body of [`conv_forward`], with the gate override the bench entry point needs
+#[allow(clippy::too_many_arguments)]
+fn conv_forward_gated(
+    input: &Tensor,
+    weights: &[f32],
+    weight_shape: &[usize],
+    bias: &[f32],
+    strides: &[usize],
+    dilation: &[usize],
+    padding: ConvPadding,
+    force_parallel: Option<bool>,
+) -> Result<Tensor, Error> {
     let in_shape = input.shape();
     let r = in_shape.len() - 2;
     let batch = in_shape[0];
@@ -362,7 +491,7 @@ pub fn conv_forward_impl(
     let k_dims = &weight_shape[..r];
     let k_plane: usize = k_dims.iter().product();
 
-    let (out_sp, pad_before, padded_sp) = conv_geometry(sp, k_dims, strides, padding)?;
+    let (out_sp, pad_before, padded_sp) = conv_geometry(sp, k_dims, strides, dilation, padding)?;
     let out_plane: usize = out_sp.iter().product();
     let padded_item: usize = padded_sp.iter().product::<usize>() * cin;
     let padded_strides = spatial_strides(&padded_sp, cin);
@@ -387,7 +516,7 @@ pub fn conv_forward_impl(
 
     // im2col + gemm
     let k_total = k_plane * cin;
-    let offsets = im2col_offsets(&out_sp, k_dims, strides, &padded_strides);
+    let offsets = im2col_offsets(&out_sp, k_dims, strides, dilation, &padded_strides);
     let w_mat = ArrayView2::from_shape((k_total, filters), weights)
         .expect("weights length matches [k*Cin, F]");
 
@@ -437,9 +566,12 @@ pub fn conv_forward_impl(
     if parallel {
         // Enough blocks to feed every thread once the batch alone cannot
         let chunks_per_item = rayon::current_num_threads().div_ceil(batch);
-        let chunk_rows = out_plane
-            .div_ceil(chunks_per_item)
-            .max(CONV_MIN_CHUNK_POSITIONS);
+        let chunk_rows = split_cap(
+            out_plane
+                .div_ceil(chunks_per_item)
+                .max(CONV_MIN_CHUNK_POSITIONS),
+            conv_forced_chunk_positions(),
+        );
         out3.axis_iter_mut(Axis(0))
             .into_par_iter()
             .enumerate()
@@ -473,7 +605,8 @@ pub(super) fn conv_backward(
     weights: &[f32],
     weight_shape: &[usize],
     strides: &[usize],
-    padding: PaddingType,
+    dilation: &[usize],
+    padding: ConvPadding,
 ) -> Result<ConvGradients, Error> {
     let in_shape = input.shape();
     let r = in_shape.len() - 2;
@@ -484,7 +617,7 @@ pub(super) fn conv_backward(
     let k_dims = &weight_shape[..r];
     let k_plane: usize = k_dims.iter().product();
 
-    let (out_sp, pad_before, padded_sp) = conv_geometry(sp, k_dims, strides, padding)?;
+    let (out_sp, pad_before, padded_sp) = conv_geometry(sp, k_dims, strides, dilation, padding)?;
     let out_plane: usize = out_sp.iter().product();
     let in_item: usize = sp.iter().product::<usize>() * cin;
     let padded_item: usize = padded_sp.iter().product::<usize>() * cin;
@@ -515,7 +648,7 @@ pub(super) fn conv_backward(
 
     // im2col + gemm
     let k_total = k_plane * cin;
-    let offsets = im2col_offsets(&out_sp, k_dims, strides, &padded_strides);
+    let offsets = im2col_offsets(&out_sp, k_dims, strides, dilation, &padded_strides);
     let w_mat = ArrayView2::from_shape((k_total, filters), weights)
         .expect("weights length matches [k*Cin, F]");
 
@@ -704,7 +837,7 @@ mod tests {
     #[test]
     fn test_conv_geometry_valid_1d() {
         let (out_sp, pad_before, padded_sp) =
-            conv_geometry(&[5], &[3], &[1], PaddingType::Valid).unwrap();
+            conv_geometry(&[5], &[3], &[1], &[1], ConvPadding::Valid).unwrap();
         assert_eq!(out_sp, vec![3]);
         assert_eq!(pad_before, vec![0]);
         assert_eq!(padded_sp, vec![5]);
@@ -713,7 +846,7 @@ mod tests {
     /// Valid padding errors (no panic) when an input axis is smaller than the kernel
     #[test]
     fn test_conv_geometry_valid_input_smaller_than_kernel_errors() {
-        let result = conv_geometry(&[2], &[3], &[1], PaddingType::Valid);
+        let result = conv_geometry(&[2], &[3], &[1], &[1], ConvPadding::Valid);
         assert!(
             matches!(result, Err(Error::InvalidInput(_))),
             "expected InvalidInput, got {:?}",
@@ -727,7 +860,7 @@ mod tests {
     #[test]
     fn test_conv_geometry_same_1d() {
         let (out_sp, pad_before, padded_sp) =
-            conv_geometry(&[7], &[3], &[2], PaddingType::Same).unwrap();
+            conv_geometry(&[7], &[3], &[2], &[1], ConvPadding::Same).unwrap();
         assert_eq!(out_sp, vec![4]);
         assert_eq!(pad_before, vec![1]);
         assert_eq!(padded_sp, vec![9]);
@@ -739,10 +872,72 @@ mod tests {
     #[test]
     fn test_conv_geometry_same_2d() {
         let (out_sp, pad_before, padded_sp) =
-            conv_geometry(&[4, 4], &[3, 3], &[1, 1], PaddingType::Same).unwrap();
+            conv_geometry(&[4, 4], &[3, 3], &[1, 1], &[1, 1], ConvPadding::Same).unwrap();
         assert_eq!(out_sp, vec![4, 4]);
         assert_eq!(pad_before, vec![1, 1]);
         assert_eq!(padded_sp, vec![6, 6]);
+    }
+
+    // conv_geometry: dilation
+
+    /// A dilated `Valid` pass reads the dilated extent, not the kernel size. 3 taps spaced 3
+    /// apart span 7 cells, so a length of 9 holds 3 windows
+    #[test]
+    fn test_conv_geometry_valid_dilated_uses_the_effective_kernel() {
+        let (out_sp, pad_before, padded_sp) =
+            conv_geometry(&[9], &[3], &[1], &[3], ConvPadding::Valid).unwrap();
+        assert_eq!(out_sp, vec![3]);
+        assert_eq!(pad_before, vec![0]);
+        assert_eq!(padded_sp, vec![9]);
+    }
+
+    /// The `Valid` bound is the dilated extent. A length of 6 holds a kernel of 3, but not the
+    /// 7 cells that same kernel spans at dilation 3
+    #[test]
+    fn test_conv_geometry_valid_rejects_a_dilated_kernel_longer_than_the_input() {
+        let result = conv_geometry(&[6], &[3], &[1], &[3], ConvPadding::Valid);
+        assert!(
+            matches!(result, Err(Error::InvalidInput(_))),
+            "expected InvalidInput, got {result:?}"
+        );
+    }
+
+    /// A dilated `Same` pass at stride 1 keeps the length whatever the dilation, and pads by
+    /// `keff - 1` in total rather than `k - 1`
+    #[test]
+    fn test_conv_geometry_same_dilated_keeps_the_length() {
+        for (dilation, want_pad_before, want_padded) in [(1usize, 1usize, 10usize), (2, 2, 12)] {
+            let (out_sp, pad_before, padded_sp) =
+                conv_geometry(&[8], &[3], &[1], &[dilation], ConvPadding::Same).unwrap();
+            assert_eq!(out_sp, vec![8], "dilation {dilation} must keep the length");
+            assert_eq!(pad_before, vec![want_pad_before]);
+            assert_eq!(padded_sp, vec![want_padded]);
+        }
+    }
+
+    // conv_geometry: Causal padding
+
+    /// `Causal` puts every pad cell on the leading edge. Its output length is the `Same` one, but
+    /// its leading pad is twice as large, because `Same` splits the same total across both edges
+    #[test]
+    fn test_conv_geometry_causal_pads_only_the_leading_edge() {
+        let (out_sp, pad_before, padded_sp) =
+            conv_geometry(&[8], &[3], &[1], &[2], ConvPadding::Causal).unwrap();
+        assert_eq!(out_sp, vec![8]);
+        // (3 - 1) * 2 = 4 cells in front, and none behind
+        assert_eq!(pad_before, vec![4]);
+        assert_eq!(padded_sp, vec![12]);
+    }
+
+    /// A strided causal pass keeps `ceil(in / stride)` positions, and its leading pad still
+    /// depends on the kernel alone
+    #[test]
+    fn test_conv_geometry_causal_strided() {
+        let (out_sp, pad_before, padded_sp) =
+            conv_geometry(&[7], &[3], &[2], &[1], ConvPadding::Causal).unwrap();
+        assert_eq!(out_sp, vec![4]);
+        assert_eq!(pad_before, vec![2]);
+        assert_eq!(padded_sp, vec![9]);
     }
 
     // build_padded
@@ -872,7 +1067,7 @@ mod tests {
     #[test]
     fn test_im2col_offsets_1d() {
         // out_sp = (5 - 3)/1 + 1 = 3. The padded plane length is 5, at stride 1
-        let offsets = im2col_offsets(&[3], &[3], &[1], &spatial_strides(&[5], 1));
+        let offsets = im2col_offsets(&[3], &[3], &[1], &[1], &spatial_strides(&[5], 1));
         // rows = kk (0..3), cols = o (0..3). offset = o*1 + kk*1
         assert_eq!(
             offsets,
@@ -886,7 +1081,7 @@ mod tests {
     /// position's first channel and the rest follow contiguously
     #[test]
     fn test_im2col_offsets_1d_multichannel() {
-        let offsets = im2col_offsets(&[3], &[3], &[1], &spatial_strides(&[5], 2));
+        let offsets = im2col_offsets(&[3], &[3], &[1], &[1], &spatial_strides(&[5], 2));
         // Same table as the 1-channel case, doubled
         assert_eq!(
             offsets,
@@ -894,6 +1089,29 @@ mod tests {
                 0, 2, 4, /*kk0*/ 2, 4, 6, /*kk1*/ 4, 6, 8 /*kk2*/
             ]
         );
+    }
+
+    /// A dilated tap steps by the dilation. Tap `kk` at output `o` reads `o + kk * 2`
+    #[test]
+    fn test_im2col_offsets_1d_dilated() {
+        // 3 taps spaced 2 apart span 5 cells, so a padded plane of 7 holds 3 windows
+        let offsets = im2col_offsets(&[3], &[3], &[1], &[2], &spatial_strides(&[7], 1));
+        assert_eq!(
+            offsets,
+            vec![
+                0, 1, 2, /*kk0*/ 2, 3, 4, /*kk1*/ 4, 5, 6 /*kk2*/
+            ]
+        );
+    }
+
+    /// The stride advances the window and the dilation spaces the taps. The 2 factors are
+    /// independent, so the map is `o * stride + kk * dilation` and never `(o * stride + kk) *
+    /// dilation`. Stride 2 with dilation 3 tells the 2 forms apart
+    #[test]
+    fn test_im2col_offsets_stride_and_dilation_do_not_multiply() {
+        let offsets = im2col_offsets(&[2], &[2], &[2], &[3], &spatial_strides(&[6], 1));
+        // o * 2 + kk * 3: tap 0 reads 0 and 2, tap 1 reads 3 and 5
+        assert_eq!(offsets, vec![0, 2, /*kk0*/ 3, 5 /*kk1*/]);
     }
 
     // conv_forward: hand-derived values
@@ -931,7 +1149,8 @@ mod tests {
             &w_shape,
             &bias,
             &[1, 1],
-            PaddingType::Valid,
+            &[1, 1],
+            ConvPadding::Valid,
         )
         .unwrap();
 
@@ -956,7 +1175,8 @@ mod tests {
             &[2, 2, 1, 2],
             &bias,
             &[1, 1],
-            PaddingType::Valid,
+            &[1, 1],
+            ConvPadding::Valid,
         )
         .unwrap();
 
@@ -974,8 +1194,16 @@ mod tests {
         let weights = vec![1.0f32; 3];
         let bias = [0.0f32];
 
-        let out =
-            conv_forward(&input, &weights, &[3, 1, 1], &bias, &[1], PaddingType::Same).unwrap();
+        let out = conv_forward(
+            &input,
+            &weights,
+            &[3, 1, 1],
+            &bias,
+            &[1],
+            &[1],
+            ConvPadding::Same,
+        )
+        .unwrap();
 
         // pad_before = 1, so the windows are [0,1,2], [1,2,3], [2,3,4], [3,4,0]
         assert_eq!(out.shape(), &[1, 4, 1]);

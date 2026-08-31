@@ -6,9 +6,12 @@ use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::convolution::PaddingType;
-use crate::neural_network::layers::convolution::convolution_engine::{conv_backward, conv_forward};
+use crate::neural_network::layers::convolution::convolution_engine::{
+    conv_backward, conv_forward, effective_kernel,
+};
 use crate::neural_network::layers::convolution::validation::{
-    validate_filters, validate_input_shape_3d, validate_kernel_size_3d, validate_strides_3d,
+    valid_output_size, validate_dilation, validate_filters, validate_input_shape_3d,
+    validate_kernel_size_3d, validate_stride_dilation_exclusive, validate_strides_3d,
 };
 use crate::neural_network::layers::layer_weight::{Conv3DLayerWeight, LayerWeight};
 use crate::neural_network::layers::validation::validate_weight_shape;
@@ -77,6 +80,8 @@ pub struct Conv3D {
     kernel_size: (usize, usize, usize),
     /// Stride values as (depth_stride, height_stride, width_stride)
     strides: (usize, usize, usize),
+    /// Tap spacing of the kernel as (depth, height, width). 1 gives a solid kernel on that axis
+    dilation_rate: (usize, usize, usize),
     /// Type of padding to apply (`Valid` or `Same`)
     padding: PaddingType,
     /// 5D filter weights with shape
@@ -116,15 +121,16 @@ impl Conv3D {
     /// # Notes
     ///
     /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
-    /// [`Conv3D::with_padding`]. By default, the layer seeds weights from the global seed or
-    /// entropy. For reproducible initialization, set a seed with [`Conv3D::with_random_state`].
+    /// [`Conv3D::with_padding`]. The kernel is solid by default. Space its taps out with
+    /// [`Conv3D::with_dilation_rate`]. By default, the layer seeds weights from the global seed
+    /// or entropy. For reproducible initialization, set a seed with
+    /// [`Conv3D::with_random_state`].
     ///
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `filters` is 0
     /// - `Error::InvalidParameter` - If any kernel dimension or stride is 0
     /// - `Error::InvalidInput` - If `input_shape` is not 5D or has a dimension equal to 0
-    /// - `Error::InvalidInput` - If input spatial dimensions are smaller than kernel size
     /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
     pub fn new(
@@ -137,7 +143,7 @@ impl Conv3D {
         validate_filters(filters)?;
         validate_kernel_size_3d(kernel_size)?;
         validate_strides_3d(strides)?;
-        validate_input_shape_3d(&input_shape, kernel_size)?;
+        validate_input_shape_3d(&input_shape)?;
         let activation = activation.into();
         activation.validate()?;
 
@@ -149,6 +155,7 @@ impl Conv3D {
             filters,
             kernel_size,
             strides,
+            dilation_rate: (1, 1, 1),
             padding: PaddingType::Valid,
             weights,
             bias,
@@ -173,6 +180,43 @@ impl Conv3D {
     pub fn with_padding(mut self, padding: PaddingType) -> Self {
         self.padding = padding;
         self
+    }
+
+    /// Sets the tap spacing of the kernel (defaults to `(1, 1, 1)`)
+    ///
+    /// A dilation of `d` on an axis spaces the kernel taps `d` cells apart, so `k` taps span
+    /// `(k - 1) * d + 1` input cells of that axis. The window still advances by the stride. A
+    /// dilation of 1 on every axis gives a solid kernel and the same result as before
+    ///
+    /// # Parameters
+    ///
+    /// - `dilation_rate` - Tap spacing as (depth, height, width)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated layer, or an error
+    ///
+    /// # Notes
+    ///
+    /// The effective kernel is not bounded by the input axis here. Only [`PaddingType::Valid`]
+    /// needs it to fit, and the forward pass applies that rule
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If any dilation is 0
+    /// - `Error::InvalidParameter` - If any dilation is above 1 and any stride is also above 1
+    pub fn with_dilation_rate(
+        mut self,
+        dilation_rate: (usize, usize, usize),
+    ) -> Result<Self, Error> {
+        let dilation = [dilation_rate.0, dilation_rate.1, dilation_rate.2];
+        validate_dilation(&dilation)?;
+        validate_stride_dilation_exclusive(
+            &[self.strides.0, self.strides.1, self.strides.2],
+            &dilation,
+        )?;
+        self.dilation_rate = dilation_rate;
+        Ok(self)
     }
 
     /// Sets the seed used to initialize the filter weights and re-initializes them
@@ -228,11 +272,13 @@ impl Conv3D {
         let (kd, kh, kw) = self.kernel_size;
         let (sd, sh, sw) = self.strides;
 
+        let (dd, dh, dw) = self.dilation_rate;
         let (output_depth, output_height, output_width) = match self.padding {
+            // The `Valid` rule reads the extent the dilated taps span, not the tap count
             PaddingType::Valid => (
-                (depth - kd) / sd + 1,
-                (height - kh) / sh + 1,
-                (width - kw) / sw + 1,
+                valid_output_size(depth, effective_kernel(kd, dd), sd),
+                valid_output_size(height, effective_kernel(kh, dh), sh),
+                valid_output_size(width, effective_kernel(kw, dw), sw),
             ),
             PaddingType::Same => (depth.div_ceil(sd), height.div_ceil(sh), width.div_ceil(sw)),
         };
@@ -283,7 +329,12 @@ impl Layer for Conv3D {
             self.weights.shape(),
             self.bias.as_slice().expect("bias must be contiguous"),
             &[self.strides.0, self.strides.1, self.strides.2],
-            self.padding,
+            &[
+                self.dilation_rate.0,
+                self.dilation_rate.1,
+                self.dilation_rate.2,
+            ],
+            self.padding.into(),
         )?;
         let activated = self.activation.forward(&output)?;
         self.output_cache = Some(activated.clone());
@@ -303,7 +354,12 @@ impl Layer for Conv3D {
             self.weights.shape(),
             self.bias.as_slice().expect("bias must be contiguous"),
             &[self.strides.0, self.strides.1, self.strides.2],
-            self.padding,
+            &[
+                self.dilation_rate.0,
+                self.dilation_rate.1,
+                self.dilation_rate.2,
+            ],
+            self.padding.into(),
         )?;
         let activated = self.activation.forward(&output)?;
         Ok(activated)
@@ -327,7 +383,12 @@ impl Layer for Conv3D {
             self.weights.as_slice().expect("weights must be contiguous"),
             self.weights.shape(),
             &[self.strides.0, self.strides.1, self.strides.2],
-            self.padding,
+            &[
+                self.dilation_rate.0,
+                self.dilation_rate.1,
+                self.dilation_rate.2,
+            ],
+            self.padding.into(),
         )?;
 
         self.weight_gradients = Some(

@@ -2,7 +2,8 @@
 //!
 //! Re-exports the 1D, 2D, and 3D convolution layers, their transposed counterparts, and the
 //! depthwise and separable convolution layers in 1D and 2D. Defines [`PaddingType`], which
-//! controls spatial padding
+//! controls spatial padding, and re-exports [`ConvPadding`], which adds the causal rule that
+//! only [`Conv1D`] accepts
 
 /// Padding method used by convolutional and pooling layers
 ///
@@ -55,6 +56,7 @@ pub use conv_2d::Conv2D;
 pub use conv_2d_transpose::Conv2DTranspose;
 pub use conv_3d::Conv3D;
 pub use conv_3d_transpose::Conv3DTranspose;
+pub use convolution_engine::ConvPadding;
 pub use depthwise_conv_1d::DepthwiseConv1D;
 pub use depthwise_conv_2d::DepthwiseConv2D;
 pub use separable_conv_1d::SeparableConv1D;

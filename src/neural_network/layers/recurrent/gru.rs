@@ -5,11 +5,11 @@ use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::layer_weight::{GRULayerWeight, LayerWeight};
-use crate::neural_network::layers::recurrent::apply_sigmoid;
 use crate::neural_network::layers::recurrent::gate::{FusedGates, project_input, take_cache};
 use crate::neural_network::layers::recurrent::validation::{
-    validate_input_3d, validate_recurrent_dimensions,
+    split_grad_output, validate_input_3d, validate_recurrent_dimensions,
 };
+use crate::neural_network::layers::recurrent::{apply_sigmoid, input_step};
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use gemmkit_ndarray::dot;
@@ -30,6 +30,10 @@ use std::borrow::Cow;
 /// Per timestep, the reset and update recurrent projections fuse into 1 GEMM. Only the
 /// candidate's recurrent projection stays separate, because its input `r_t .* h_{t-1}`
 /// depends on the freshly computed reset gate.
+///
+/// [`GRU::with_return_sequences`] makes the layer return every timestep's hidden state, with
+/// shape (batch_size, timesteps, units). [`GRU::with_go_backwards`] processes the input
+/// timesteps from last to first.
 ///
 /// # Examples
 ///
@@ -75,6 +79,10 @@ pub struct GRU {
 
     /// Activation applied to the candidate hidden state each timestep (Keras-style)
     activation: Activation,
+    /// Returns the full sequence of hidden states when true, or only the last one when false
+    return_sequences: bool,
+    /// Processes the input timesteps from last to first when true
+    go_backwards: bool,
 }
 
 /// Per-timestep forward values a [`GRU`] records so the backward pass can recompute the gate
@@ -133,6 +141,8 @@ impl GRU {
             input_cache: None,
             caches: None,
             activation,
+            return_sequences: false,
+            go_backwards: false,
         })
     }
 
@@ -153,6 +163,49 @@ impl GRU {
         // Dimensions were validated in `new`, so re-initialization cannot fail
         self.gates = Self::init_gates(self.input_dim, self.units, Some(random_state))
             .expect("GRU dimensions were validated in new()");
+        self
+    }
+
+    /// Sets whether the layer returns every timestep's hidden state
+    ///
+    /// The default is false, which returns only the last hidden state, with shape
+    /// (batch_size, units). With true, the layer returns all hidden states, with shape
+    /// (batch_size, timesteps, units). Slot `k` of the time axis holds the state after
+    /// processing step `k`. The backward pass then expects a gradient of the same rank-3 shape.
+    ///
+    /// # Parameters
+    ///
+    /// - `return_sequences` - True to return every timestep's hidden state
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    ///
+    /// # Notes
+    ///
+    /// The last slot of the returned sequence always equals the output of the same layer with
+    /// `return_sequences` set to false.
+    pub fn with_return_sequences(mut self, return_sequences: bool) -> Self {
+        self.return_sequences = return_sequences;
+        self
+    }
+
+    /// Sets whether the layer processes the input timesteps from last to first
+    ///
+    /// The default is false. With true, processing step 0 consumes input timestep
+    /// `timesteps` - 1, and the output stays in processing order. The layer does not reverse the
+    /// output back to input order, so slot 0 of a returned sequence holds the state that came
+    /// from the last input timestep. This flag changes no shape.
+    ///
+    /// # Parameters
+    ///
+    /// - `go_backwards` - True to process the input timesteps from last to first
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_go_backwards(mut self, go_backwards: bool) -> Self {
+        self.go_backwards = go_backwards;
         self
     }
 
@@ -303,12 +356,17 @@ impl GRU {
         self.set_weights(kernel, recurrent_kernel, bias)
     }
 
-    /// Runs the recurrence and returns the last hidden state. This is the shared numeric body of
+    /// Runs the recurrence and returns the layer output. This is the shared numeric body of
     /// [`Layer::forward`] and [`Layer::predict`].
+    ///
+    /// The output is the last hidden state, with shape (batch_size, units). With
+    /// `return_sequences` set, it is instead every hidden state in processing order, with shape
+    /// (batch_size, timesteps, units).
     ///
     /// When `caches` is `Some`, the pass records every per-timestep value the backward pass
     /// needs. This includes the hidden states, the reset and update gate activations, the
-    /// candidate, and `r_t .* h_{t-1}`. `predict` passes `None` and skips the recording.
+    /// candidate, and `r_t .* h_{t-1}`. `predict` passes `None` and skips the recording. Every
+    /// record stays in processing order.
     ///
     /// Each timestep computes the reset and update gates with 1 fused GEMM, then the candidate
     /// with a second GEMM whose input is `r_t .* h_{t-1}`.
@@ -319,7 +377,7 @@ impl GRU {
         &self,
         x3: &ArrayView3<f32>,
         mut caches: Option<&mut GruCaches>,
-    ) -> Result<Array2<f32>, Error> {
+    ) -> Result<Tensor, Error> {
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         let u = self.units;
         let act = self.activation;
@@ -331,6 +389,12 @@ impl GRU {
             .expect("fused bias must be contiguous")
             .split_at(2 * u);
 
+        let mut sequence = if self.return_sequences {
+            Some(Array3::<f32>::zeros((batch, timesteps, u)))
+        } else {
+            None
+        };
+
         let mut h_prev = Array2::<f32>::zeros((batch, u));
         if let Some(c) = caches.as_deref_mut() {
             c.hs.push(h_prev.clone());
@@ -339,7 +403,8 @@ impl GRU {
         // Batched fused input projection for all 3 gates
         let xw = project_input(&self.gates.kernel, x3);
 
-        for t in 0..timesteps {
+        for k in 0..timesteps {
+            let t = input_step(k, timesteps, self.go_backwards);
             let xw_t = xw.index_axis(Axis(1), t); // [batch, 3*units]
 
             // Reset and update share h_prev, so their recurrent projections fuse into 1 GEMM
@@ -387,11 +452,17 @@ impl GRU {
                 c.rh.push(r_h);
                 c.hs.push(h_t.clone());
             }
+            if let Some(seq) = sequence.as_mut() {
+                seq.index_axis_mut(Axis(1), k).assign(&h_t);
+            }
 
             h_prev = h_t;
         }
 
-        Ok(h_prev)
+        Ok(match sequence {
+            Some(seq) => seq.into_dyn(),
+            None => h_prev.into_dyn(),
+        })
     }
 }
 
@@ -409,30 +480,19 @@ impl Layer for GRU {
             h_candidate: Vec::with_capacity(timesteps),
             rh: Vec::with_capacity(timesteps),
         };
-        let h_last = self.run(&x3, Some(&mut caches))?;
+        let output = self.run(&x3, Some(&mut caches))?;
         self.caches = Some(caches);
-        Ok(h_last.into_dyn())
+        Ok(output)
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_3d(input)?;
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
-        Ok(self.run(&x3, None)?.into_dyn())
+        self.run(&x3, None)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // The upstream gradient is dL/dh_T directly (no extra output activation)
-        let grad_h_t = grad_output
-            .clone()
-            .into_dimensionality::<ndarray::Ix2>()
-            .map_err(|_| {
-                Error::invalid_input(format!(
-                    "GRU backward expects a 2D gradient [batch, units], got shape {:?}",
-                    grad_output.shape()
-                ))
-            })?;
-
         // Configurable activation (Copy) used for the candidate derivative
         let act = self.activation;
 
@@ -450,17 +510,31 @@ impl Layer for GRU {
         let feat = x3.shape()[2];
         let u = self.units;
 
+        // With `return_sequences`, every step also takes a direct contribution from `grad_seq`
+        let (mut grad_h, grad_seq) = split_grad_output(
+            grad_output,
+            "GRU",
+            self.return_sequences,
+            batch,
+            timesteps,
+            u,
+        )?;
+
         // Fused pre-activation gradients for every timestep, gate blocks [z | r | h]
         let mut dz3 = Array3::<f32>::zeros((batch, timesteps, 3 * u));
 
-        let mut grad_h = grad_h_t;
-
         // Backpropagation through time
-        for t in (0..timesteps).rev() {
-            let h_prev = &hs[t];
-            let r_t = &r_vals[t];
-            let z_t = &z_vals[t];
-            let h_candidate = &h_candidate_vals[t];
+        for k in (0..timesteps).rev() {
+            // The direct contribution accumulates onto the carried gradient. It must land before
+            // the update-gate gradient below, which consumes the total gradient of this step
+            if let Some(seq) = grad_seq.as_ref() {
+                grad_h += &seq.index_axis(Axis(1), k);
+            }
+
+            let h_prev = &hs[k];
+            let r_t = &r_vals[k];
+            let z_t = &z_vals[k];
+            let h_candidate = &h_candidate_vals[k];
 
             // Gradient through h_t = z_t .* h_{t-1} + (1 - z_t) .* h_candidate
             let grad_z_t = &grad_h * (h_prev - h_candidate);
@@ -500,7 +574,10 @@ impl Layer for GRU {
             ) + &grad_h_prev_from_reset
                 + &grad_h_prev_from_update;
 
-            let mut dz_t3 = dz3.index_axis_mut(Axis(1), t);
+            // The reductions below pair this step's gate gradients with the input row they came
+            // from, so the scatter uses the input timestep, not the processing step
+            let mut dz_t3 =
+                dz3.index_axis_mut(Axis(1), input_step(k, timesteps, self.go_backwards));
             dz_t3.slice_mut(s![.., 0..2 * u]).assign(&dz_rz_t);
             dz_t3
                 .slice_mut(s![.., 2 * u..])
@@ -511,11 +588,14 @@ impl Layer for GRU {
         let x_flat = x3
             .to_shape((batch * timesteps, feat))
             .expect("contiguous input reshape");
+        // `hs[k]` and `rh_vals[k]` belong to processing step `k`, and they pair with that step's
+        // gate gradients, which now sit at the step's input timestep
         let mut h_prev3 = Array3::<f32>::zeros((batch, timesteps, u));
         let mut rh3 = Array3::<f32>::zeros((batch, timesteps, u));
-        for t in 0..timesteps {
-            h_prev3.index_axis_mut(Axis(1), t).assign(&hs[t]);
-            rh3.index_axis_mut(Axis(1), t).assign(&rh_vals[t]);
+        for k in 0..timesteps {
+            let t = input_step(k, timesteps, self.go_backwards);
+            h_prev3.index_axis_mut(Axis(1), t).assign(&hs[k]);
+            rh3.index_axis_mut(Axis(1), t).assign(&rh_vals[k]);
         }
         let h_prev_flat = h_prev3
             .to_shape((batch * timesteps, u))
@@ -568,7 +648,13 @@ impl Layer for GRU {
     }
 
     fn output_shape(&self) -> String {
-        format!("(None, {})", self.units)
+        // The layer keeps no input shape, so the time axis of a returned sequence prints as
+        // "None", the same as the batch axis
+        if self.return_sequences {
+            format!("(None, None, {})", self.units)
+        } else {
+            format!("(None, {})", self.units)
+        }
     }
 
     fn param_count(&self) -> TrainingParameters {

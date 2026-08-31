@@ -1,10 +1,15 @@
 //! Integration tests for the recurrent layers: SimpleRNN, LSTM, GRU
 //!
 //! Expected values are hand-computed from the mathematical definitions. Backward/gradient values
-//! are covered by tests/neural_network/gradient_check.rs and are not duplicated here
+//! are covered by tests/neural_network/gradient_check.rs and are not duplicated here, except for
+//! the `return_sequences` and `go_backwards` gradients at the end of this file. Those 2 flags
+//! change the backward pass itself, and the finite-difference harness of `gradient_check.rs`
+//! drives every layer with a constant upstream gradient, which hides 2 of their failure modes
 
 use crate::common::assert_allclose;
+use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2};
+use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::Activation;
 use rustyml::neural_network::layers::activation::relu::ReLU;
 use rustyml::neural_network::layers::activation::tanh::Tanh;
@@ -928,4 +933,1065 @@ fn lstm_param_count_formula() {
     let lstm = LSTM::new(3, 2, Tanh::new()).unwrap();
     // 4 * (3*2 + 2*2 + 2) = 4 * 12 = 48
     assert_eq!(lstm.param_count(), TrainingParameters::Trainable(48));
+}
+
+// return_sequences and go_backwards
+//
+// The 3 layers share 1 set of fixed weights and 1 fixed input here, so the same numbers pin all
+// 4 combinations of the 2 flags. The weights and the input are exact multiples of 1/8, which f32
+// holds without rounding.
+
+/// The fixed rank-3 input of the flag tests, with shape (batch 2, timesteps 3, features 2)
+///
+/// Every timestep differs, and the 2 batch rows differ, so a wrong time index or a wrong batch
+/// row cannot cancel out.
+fn flag_input() -> Tensor {
+    Array::from_shape_vec(
+        (2, 3, 2),
+        vec![
+            1.0_f32, 0.5, -2.0, 0.25, 3.0, -1.5, 0.25, -1.0, 1.5, -0.5, -0.75, 2.0,
+        ],
+    )
+    .unwrap()
+    .into_dyn()
+}
+
+/// The fixed weights of a `units = 2` layer with `n_gates` gate blocks, as
+/// (kernel, recurrent kernel, bias)
+fn flag_weights(n_gates: usize) -> (Array2<f32>, Array2<f32>, Array2<f32>) {
+    // Multiples of 1/8, cycling with a different phase per matrix
+    let value = |index: usize, seed: usize| ((((index * 5 + seed * 3) % 9) as f32) - 4.0) / 8.0;
+    let width = 2 * n_gates;
+    let kernel = Array2::from_shape_fn((2, width), |(r, c)| value(r * width + c, 1));
+    let recurrent = Array2::from_shape_fn((2, width), |(r, c)| value(r * width + c, 2));
+    let bias = Array2::from_shape_fn((1, width), |(_, c)| value(c, 3));
+    (kernel, recurrent, bias)
+}
+
+/// Builds the flag-test SimpleRNN with fixed weights
+fn flag_simple_rnn(return_sequences: bool, go_backwards: bool) -> SimpleRNN {
+    let mut layer = SimpleRNN::new(2, 2, Tanh::new())
+        .unwrap()
+        .with_return_sequences(return_sequences)
+        .with_go_backwards(go_backwards);
+    let (kernel, recurrent, bias) = flag_weights(1);
+    layer.set_weights(kernel, recurrent, bias).unwrap();
+    layer
+}
+
+/// Builds the flag-test LSTM with fixed weights
+fn flag_lstm(return_sequences: bool, go_backwards: bool) -> LSTM {
+    let mut layer = LSTM::new(2, 2, Tanh::new())
+        .unwrap()
+        .with_return_sequences(return_sequences)
+        .with_go_backwards(go_backwards);
+    let (kernel, recurrent, bias) = flag_weights(4);
+    layer.set_weights(kernel, recurrent, bias).unwrap();
+    layer
+}
+
+/// Builds the flag-test GRU with fixed weights
+fn flag_gru(return_sequences: bool, go_backwards: bool) -> GRU {
+    let mut layer = GRU::new(2, 2, Tanh::new())
+        .unwrap()
+        .with_return_sequences(return_sequences)
+        .with_go_backwards(go_backwards);
+    let (kernel, recurrent, bias) = flag_weights(3);
+    layer.set_weights(kernel, recurrent, bias).unwrap();
+    layer
+}
+
+/// The upstream gradient of the flag tests, shaped like `output`
+///
+/// No 2 entries are equal, and the values change along the time axis. A constant upstream
+/// gradient hides a backward pass that reads the time axis in the wrong direction, because
+/// every slice is then the same. The Keras runs that produced the pinned values below used
+/// exactly these numbers.
+fn flag_upstream(output: &Tensor) -> Tensor {
+    let shape = output.shape().to_vec();
+    if shape.len() == 3 {
+        Tensor::from_shape_fn(shape, |index| {
+            0.5 * (1 + index[1]) as f32 + 0.25 * index[0] as f32 - 0.125 * index[2] as f32
+        })
+    } else {
+        Tensor::from_shape_fn(shape, |index| {
+            1.0 + 0.25 * index[0] as f32 - 0.125 * index[1] as f32
+        })
+    }
+}
+
+/// Compares a flat gradient slice against pinned values, 1 element at a time
+fn assert_close_flat(actual: &[f32], expected: &[f32], tol: f32, what: &str) {
+    assert_eq!(actual.len(), expected.len(), "{what}: length mismatch");
+    for (index, (got, want)) in actual.iter().zip(expected.iter()).enumerate() {
+        assert!(
+            (got - want).abs() <= tol,
+            "{what}[{index}]: got {got}, expected {want}"
+        );
+    }
+}
+
+/// Compares the analytic input gradient against a central finite difference of
+/// L = sum(upstream * output), with a time-varying upstream gradient
+fn check_flag_input_gradient(layer: &mut dyn Layer, x: &Tensor, tol: f32) {
+    const EPS: f32 = 1e-3;
+    let output = layer.forward(x).unwrap();
+    let upstream = flag_upstream(&output);
+    let analytic = layer.backward(&upstream).unwrap();
+    assert_eq!(
+        analytic.shape(),
+        x.shape(),
+        "input-gradient shape must match the input shape"
+    );
+
+    let analytic_flat: Vec<f32> = analytic.iter().cloned().collect();
+    let mut x_flat: Vec<f32> = x.iter().cloned().collect();
+    for i in 0..x_flat.len() {
+        let original = x_flat[i];
+
+        x_flat[i] = original + EPS;
+        let plus = Tensor::from_shape_vec(x.raw_dim(), x_flat.clone()).unwrap();
+        let l_plus: f32 = (&layer.forward(&plus).unwrap() * &upstream).sum();
+
+        x_flat[i] = original - EPS;
+        let minus = Tensor::from_shape_vec(x.raw_dim(), x_flat.clone()).unwrap();
+        let l_minus: f32 = (&layer.forward(&minus).unwrap() * &upstream).sum();
+
+        x_flat[i] = original;
+
+        let numeric = (l_plus - l_minus) / (2.0 * EPS);
+        assert_abs_diff_eq!(analytic_flat[i], numeric, epsilon = tol);
+    }
+}
+
+/// Compares every analytic weight gradient against a central finite difference of
+/// L = sum(upstream * output), with a time-varying upstream gradient
+fn check_flag_weight_gradients(layer: &mut dyn Layer, x: &Tensor, tol: f32) {
+    const EPS: f32 = 1e-3;
+    let output = layer.forward(x).unwrap();
+    let upstream = flag_upstream(&output);
+    layer.backward(&upstream).unwrap();
+
+    let params: Vec<(Vec<f32>, Vec<f32>)> = layer
+        .parameters()
+        .into_iter()
+        .map(|pg| (pg.value.to_vec(), pg.grad.to_vec()))
+        .collect();
+    assert_eq!(
+        params.len(),
+        3,
+        "expected kernel, recurrent kernel, and bias"
+    );
+
+    for (p_idx, (values, grads)) in params.iter().enumerate() {
+        for i in 0..values.len() {
+            let original = values[i];
+
+            layer.parameters()[p_idx].value[i] = original + EPS;
+            let l_plus: f32 = (&layer.forward(x).unwrap() * &upstream).sum();
+
+            layer.parameters()[p_idx].value[i] = original - EPS;
+            let l_minus: f32 = (&layer.forward(x).unwrap() * &upstream).sum();
+
+            layer.parameters()[p_idx].value[i] = original;
+
+            let numeric = (l_plus - l_minus) / (2.0 * EPS);
+            assert_abs_diff_eq!(grads[i], numeric, epsilon = tol);
+        }
+    }
+}
+
+/// return_sequences turns the SimpleRNN output into (batch, timesteps, units), in both the
+/// training forward pass and the inference pass
+#[test]
+fn simple_rnn_return_sequences_output_is_rank_3() {
+    let x = flag_input();
+    let mut layer = flag_simple_rnn(true, false);
+    assert_eq!(layer.forward(&x).unwrap().shape(), &[2, 3, 2]);
+    assert_eq!(layer.predict(&x).unwrap().shape(), &[2, 3, 2]);
+
+    let mut last_only = flag_simple_rnn(false, false);
+    assert_eq!(last_only.forward(&x).unwrap().shape(), &[2, 2]);
+    assert_eq!(last_only.predict(&x).unwrap().shape(), &[2, 2]);
+}
+
+/// return_sequences turns the LSTM output into (batch, timesteps, units)
+#[test]
+fn lstm_return_sequences_output_is_rank_3() {
+    let x = flag_input();
+    let mut layer = flag_lstm(true, false);
+    assert_eq!(layer.forward(&x).unwrap().shape(), &[2, 3, 2]);
+    assert_eq!(layer.predict(&x).unwrap().shape(), &[2, 3, 2]);
+
+    let mut last_only = flag_lstm(false, false);
+    assert_eq!(last_only.forward(&x).unwrap().shape(), &[2, 2]);
+}
+
+/// return_sequences turns the GRU output into (batch, timesteps, units)
+#[test]
+fn gru_return_sequences_output_is_rank_3() {
+    let x = flag_input();
+    let mut layer = flag_gru(true, false);
+    assert_eq!(layer.forward(&x).unwrap().shape(), &[2, 3, 2]);
+    assert_eq!(layer.predict(&x).unwrap().shape(), &[2, 3, 2]);
+
+    let mut last_only = flag_gru(false, false);
+    assert_eq!(last_only.forward(&x).unwrap().shape(), &[2, 2]);
+}
+
+/// go_backwards changes no output shape, with or without return_sequences
+#[test]
+fn go_backwards_keeps_the_output_shape() {
+    let x = flag_input();
+    for return_sequences in [false, true] {
+        let expected: &[usize] = if return_sequences {
+            &[2, 3, 2]
+        } else {
+            &[2, 2]
+        };
+        assert_eq!(
+            flag_simple_rnn(return_sequences, true)
+                .forward(&x)
+                .unwrap()
+                .shape(),
+            expected
+        );
+        assert_eq!(
+            flag_lstm(return_sequences, true)
+                .forward(&x)
+                .unwrap()
+                .shape(),
+            expected
+        );
+        assert_eq!(
+            flag_gru(return_sequences, true)
+                .forward(&x)
+                .unwrap()
+                .shape(),
+            expected
+        );
+    }
+}
+
+/// go_backwards emits the states in processing order and never flips them back to input order
+///
+/// The weights make the cell an identity, h_t = x_t, so the returned sequence is the input
+/// sequence in processing order. With go_backwards the input [1, 2, 3, 4, 5] must come back as
+/// [5, 4, 3, 2, 1]. Any re-reversal of the output belongs to a later bidirectional wrapper, not
+/// to this flag.
+#[test]
+fn simple_rnn_go_backwards_emits_states_in_processing_order() {
+    let x = Array::from_shape_vec((1, 5, 1), vec![1.0_f32, 2.0, 3.0, 4.0, 5.0])
+        .unwrap()
+        .into_dyn();
+
+    let identity_cell = |go_backwards: bool| {
+        let mut layer = SimpleRNN::new(1, 1, Activation::Linear)
+            .unwrap()
+            .with_return_sequences(true)
+            .with_go_backwards(go_backwards);
+        layer
+            .set_weights(
+                Array2::from_elem((1, 1), 1.0),
+                Array2::zeros((1, 1)),
+                Array2::zeros((1, 1)),
+            )
+            .unwrap();
+        layer.forward(&x).unwrap()
+    };
+
+    let forwards = identity_cell(false);
+    let backwards = identity_cell(true);
+
+    let expected_forwards = Array::from_shape_vec((1, 5, 1), vec![1.0_f32, 2.0, 3.0, 4.0, 5.0])
+        .unwrap()
+        .into_dyn();
+    let expected_backwards = Array::from_shape_vec((1, 5, 1), vec![5.0_f32, 4.0, 3.0, 2.0, 1.0])
+        .unwrap()
+        .into_dyn();
+    assert_allclose(&forwards, &expected_forwards, 1e-6);
+    assert_allclose(&backwards, &expected_backwards, 1e-6);
+}
+
+/// The last slot of a returned sequence is bit-identical to the output of the same layer with
+/// return_sequences off, which is also the final state that the recurrence carries out
+///
+/// This holds for both settings of go_backwards, because the last processing step ends the
+/// recurrence in both directions.
+#[test]
+fn return_sequences_last_slot_equals_the_final_state() {
+    let x = flag_input();
+    for go_backwards in [false, true] {
+        let cases: Vec<(&str, Tensor, Tensor, Tensor)> = vec![
+            (
+                "SimpleRNN",
+                flag_simple_rnn(true, go_backwards).forward(&x).unwrap(),
+                flag_simple_rnn(false, go_backwards).forward(&x).unwrap(),
+                flag_simple_rnn(false, go_backwards).predict(&x).unwrap(),
+            ),
+            (
+                "LSTM",
+                flag_lstm(true, go_backwards).forward(&x).unwrap(),
+                flag_lstm(false, go_backwards).forward(&x).unwrap(),
+                flag_lstm(false, go_backwards).predict(&x).unwrap(),
+            ),
+            (
+                "GRU",
+                flag_gru(true, go_backwards).forward(&x).unwrap(),
+                flag_gru(false, go_backwards).forward(&x).unwrap(),
+                flag_gru(false, go_backwards).predict(&x).unwrap(),
+            ),
+        ];
+        for (name, sequence, last_state, predicted_state) in cases {
+            let sequence3 = sequence.into_dimensionality::<ndarray::Ix3>().unwrap();
+            let last_slot = sequence3.index_axis(ndarray::Axis(1), 2);
+            let last_state2 = last_state.into_dimensionality::<ndarray::Ix2>().unwrap();
+            let predicted2 = predicted_state
+                .into_dimensionality::<ndarray::Ix2>()
+                .unwrap();
+            assert_eq!(
+                last_slot.to_owned(),
+                last_state2,
+                "{name}: last slot must equal the return_sequences=false output \
+                 (go_backwards={go_backwards})"
+            );
+            assert_eq!(
+                last_slot.to_owned(),
+                predicted2,
+                "{name}: last slot must equal the final state of the inference pass \
+                 (go_backwards={go_backwards})"
+            );
+        }
+    }
+}
+
+/// go_backwards on the given input equals the same layer without the flag on the time-reversed
+/// input, for all 3 layers
+///
+/// This pins the forward index map on its own: only the order in which the timesteps enter the
+/// recurrence changes.
+#[test]
+fn go_backwards_equals_the_forward_layer_on_reversed_input() {
+    let x = flag_input();
+    let mut reversed = Tensor::zeros(x.raw_dim());
+    for t in 0..3 {
+        reversed
+            .index_axis_mut(ndarray::Axis(1), t)
+            .assign(&x.index_axis(ndarray::Axis(1), 2 - t));
+    }
+
+    for return_sequences in [false, true] {
+        assert_eq!(
+            flag_simple_rnn(return_sequences, true).forward(&x).unwrap(),
+            flag_simple_rnn(return_sequences, false)
+                .forward(&reversed)
+                .unwrap(),
+            "SimpleRNN go_backwards must equal the forward layer on the reversed input"
+        );
+        assert_eq!(
+            flag_lstm(return_sequences, true).forward(&x).unwrap(),
+            flag_lstm(return_sequences, false)
+                .forward(&reversed)
+                .unwrap(),
+            "LSTM go_backwards must equal the forward layer on the reversed input"
+        );
+        assert_eq!(
+            flag_gru(return_sequences, true).forward(&x).unwrap(),
+            flag_gru(return_sequences, false)
+                .forward(&reversed)
+                .unwrap(),
+            "GRU go_backwards must equal the forward layer on the reversed input"
+        );
+    }
+}
+
+/// Every SimpleRNN gradient matches a finite difference, for all 4 flag combinations
+///
+/// The upstream gradient varies along the time axis. A constant one would hide 2 defects: a
+/// backward pass that reads the upstream time axis in the reverse direction, and 1 that
+/// overwrites the carried gradient of a step instead of adding the direct contribution to it.
+#[test]
+fn simple_rnn_gradients_match_finite_difference_for_every_flag_combination() {
+    let x = flag_input();
+    for return_sequences in [false, true] {
+        for go_backwards in [false, true] {
+            check_flag_input_gradient(
+                &mut flag_simple_rnn(return_sequences, go_backwards),
+                &x,
+                2e-2,
+            );
+            check_flag_weight_gradients(
+                &mut flag_simple_rnn(return_sequences, go_backwards),
+                &x,
+                2e-2,
+            );
+        }
+    }
+}
+
+/// Every LSTM gradient matches a finite difference, for all 4 flag combinations
+#[test]
+fn lstm_gradients_match_finite_difference_for_every_flag_combination() {
+    let x = flag_input();
+    for return_sequences in [false, true] {
+        for go_backwards in [false, true] {
+            check_flag_input_gradient(&mut flag_lstm(return_sequences, go_backwards), &x, 3e-2);
+            check_flag_weight_gradients(&mut flag_lstm(return_sequences, go_backwards), &x, 3e-2);
+        }
+    }
+}
+
+/// Every GRU gradient matches a finite difference, for all 4 flag combinations
+#[test]
+fn gru_gradients_match_finite_difference_for_every_flag_combination() {
+    let x = flag_input();
+    for return_sequences in [false, true] {
+        for go_backwards in [false, true] {
+            check_flag_input_gradient(&mut flag_gru(return_sequences, go_backwards), &x, 3e-2);
+            check_flag_weight_gradients(&mut flag_gru(return_sequences, go_backwards), &x, 3e-2);
+        }
+    }
+}
+
+/// With return_sequences on, the backward pass rejects a rank-2 gradient
+#[test]
+fn return_sequences_backward_rejects_a_rank_2_gradient() {
+    let x = flag_input();
+    let mut layer = flag_simple_rnn(true, false);
+    layer.forward(&x).unwrap();
+    let err = layer.backward(&Tensor::ones(vec![2, 2])).unwrap_err();
+    assert!(
+        matches!(err, Error::InvalidInput(_)),
+        "expected InvalidInput, got: {err:?}"
+    );
+}
+
+/// With return_sequences off, the backward pass rejects a rank-3 gradient
+#[test]
+fn backward_rejects_a_rank_3_gradient_without_return_sequences() {
+    let x = flag_input();
+    let mut layer = flag_lstm(false, false);
+    layer.forward(&x).unwrap();
+    let err = layer.backward(&Tensor::ones(vec![2, 3, 2])).unwrap_err();
+    assert!(
+        matches!(err, Error::InvalidInput(_)),
+        "expected InvalidInput, got: {err:?}"
+    );
+}
+
+/// With return_sequences on, the backward pass rejects a gradient with the wrong timestep count
+#[test]
+fn return_sequences_backward_rejects_a_wrong_timestep_count() {
+    let x = flag_input();
+    let mut layer = flag_gru(true, false);
+    layer.forward(&x).unwrap();
+    let err = layer.backward(&Tensor::ones(vec![2, 4, 2])).unwrap_err();
+    assert!(
+        matches!(err, Error::InvalidInput(_)),
+        "expected InvalidInput, got: {err:?}"
+    );
+}
+
+/// `output_shape` prints the time axis only when return_sequences is on
+#[test]
+fn output_shape_shows_the_time_axis_when_return_sequences() {
+    assert_eq!(flag_simple_rnn(false, false).output_shape(), "(None, 2)");
+    assert_eq!(
+        flag_simple_rnn(true, false).output_shape(),
+        "(None, None, 2)"
+    );
+    assert_eq!(flag_lstm(true, false).output_shape(), "(None, None, 2)");
+    assert_eq!(flag_gru(true, false).output_shape(), "(None, None, 2)");
+}
+
+/// SimpleRNN with return_sequences on and go_backwards off matches Keras 3.15.1
+///
+/// Every expected value comes from Keras 3.15.1 with the same weights, the same input, and the
+/// same time-varying upstream gradient. The gradients pin the 2 rules that a plausible but wrong
+/// backward pass breaks. The upstream slice of a step must add to the carried gradient, and the
+/// gate gradient of a step must go to the input timestep of that step.
+#[test]
+fn simple_rnn_return_sequences_matches_keras() {
+    let x = flag_input();
+    let mut layer = flag_simple_rnn(true, false);
+    let output = layer.forward(&x).unwrap();
+    let upstream = flag_upstream(&output);
+    let grad_input = layer.backward(&upstream).unwrap();
+
+    let expected_output = Tensor::from_shape_vec(
+        vec![2, 3, 2],
+        vec![
+            -0.5545997,
+            0.3583574,
+            -0.24892446,
+            -0.7192768,
+            -0.83576536,
+            0.9873171,
+            -0.48633605,
+            0.635149,
+            -0.51602226,
+            0.82336944,
+            -0.22269693,
+            -0.8408054,
+        ],
+    )
+    .unwrap();
+    assert_allclose(&output, &expected_output, 1e-5);
+
+    let expected_grad_input = Tensor::from_shape_vec(
+        vec![2, 3, 2],
+        vec![
+            0.25054154,
+            -0.30537015,
+            0.12154034,
+            -0.25103593,
+            -0.03920213,
+            -0.017328419,
+            0.20742314,
+            -0.29309633,
+            0.1301502,
+            -0.2720108,
+            0.030198768,
+            -0.23810008,
+        ],
+    )
+    .unwrap();
+    assert_allclose(&grad_input, &expected_grad_input, 1e-5);
+
+    let params = layer.parameters();
+    assert_close_flat(
+        params[0].grad,
+        &[0.3496985, 0.31599754, 1.873532, 0.4730997],
+        1e-5,
+        "grad_kernel",
+    );
+    assert_close_flat(
+        params[1].grad,
+        &[-2.0973096, -0.79738307, 2.1362145, 0.89261675],
+        1e-5,
+        "grad_recurrent_kernel",
+    );
+    assert_close_flat(params[2].grad, &[5.4103193, 2.7538834], 1e-5, "grad_bias");
+}
+
+/// SimpleRNN with return_sequences on and go_backwards on matches Keras 3.15.1
+///
+/// Every expected value comes from Keras 3.15.1 with the same weights, the same input, and the
+/// same time-varying upstream gradient. The gradients pin the 2 rules that a plausible but wrong
+/// backward pass breaks. The upstream slice of a step must add to the carried gradient, and the
+/// gate gradient of a step must go to the input timestep of that step.
+#[test]
+fn simple_rnn_return_sequences_go_backwards_matches_keras() {
+    let x = flag_input();
+    let mut layer = flag_simple_rnn(true, true);
+    let output = layer.forward(&x).unwrap();
+    let upstream = flag_upstream(&output);
+    let grad_input = layer.backward(&upstream).unwrap();
+
+    let expected_output = Tensor::from_shape_vec(
+        vec![2, 3, 2],
+        vec![
+            -0.70390564,
+            0.98284495,
+            -0.057346564,
+            -0.7383669,
+            -0.7241064,
+            0.44755006,
+            -0.38528392,
+            -0.84828365,
+            -0.8011903,
+            0.86860174,
+            -0.38491935,
+            0.68672025,
+        ],
+    )
+    .unwrap();
+    assert_allclose(&output, &expected_output, 1e-5);
+
+    let expected_grad_input = Tensor::from_shape_vec(
+        vec![2, 3, 2],
+        vec![
+            0.4606049,
+            -0.549793,
+            0.11600702,
+            -0.22857058,
+            -0.027373,
+            -0.011149498,
+            0.24299803,
+            -0.4293374,
+            0.13053736,
+            -0.19356237,
+            0.024405725,
+            -0.10735464,
+        ],
+    )
+    .unwrap();
+    assert_allclose(&grad_input, &expected_grad_input, 1e-5);
+
+    let params = layer.parameters();
+    assert_close_flat(
+        params[0].grad,
+        &[0.46831328, 0.88652456, -0.29602283, 0.007811159],
+        1e-5,
+        "grad_kernel",
+    );
+    assert_close_flat(
+        params[1].grad,
+        &[-2.0633967, -1.2219566, 1.2253647, 0.05485581],
+        1e-5,
+        "grad_recurrent_kernel",
+    );
+    assert_close_flat(params[2].grad, &[4.5807, 3.039535], 1e-5, "grad_bias");
+}
+
+/// LSTM with return_sequences on and go_backwards off matches Keras 3.15.1
+///
+/// Every expected value comes from Keras 3.15.1 with the same weights, the same input, and the
+/// same time-varying upstream gradient. The gradients pin the 2 rules that a plausible but wrong
+/// backward pass breaks. The upstream slice of a step must add to the carried gradient, and the
+/// gate gradient of a step must go to the input timestep of that step.
+#[test]
+fn lstm_return_sequences_matches_keras() {
+    let x = flag_input();
+    let mut layer = flag_lstm(true, false);
+    let output = layer.forward(&x).unwrap();
+    let upstream = flag_upstream(&output);
+    let grad_input = layer.backward(&upstream).unwrap();
+
+    let expected_output = Tensor::from_shape_vec(
+        vec![2, 3, 2],
+        vec![
+            -0.06765706,
+            0.023553586,
+            -0.10493167,
+            0.196208,
+            0.033383537,
+            -0.15733401,
+            0.045450613,
+            0.050081395,
+            0.05193903,
+            -0.061121304,
+            -0.10756472,
+            0.13856108,
+        ],
+    )
+    .unwrap();
+    assert_allclose(&output, &expected_output, 1e-5);
+
+    let expected_grad_input = Tensor::from_shape_vec(
+        vec![2, 3, 2],
+        vec![
+            -0.17409706,
+            -0.031293392,
+            0.03688872,
+            -0.09638176,
+            -0.04067032,
+            -0.0666401,
+            -0.19899246,
+            -0.022938691,
+            -0.35949486,
+            -0.009079859,
+            0.00010004453,
+            0.01727938,
+        ],
+    )
+    .unwrap();
+    assert_allclose(&grad_input, &expected_grad_input, 1e-5);
+
+    let params = layer.parameters();
+    assert_close_flat(
+        params[0].grad,
+        &[
+            0.5904733,
+            -0.5597786,
+            -0.13735434,
+            0.111462876,
+            0.61537766,
+            2.2943888,
+            0.30915204,
+            -0.6266583,
+            -0.4314919,
+            0.46769798,
+            0.09959567,
+            -0.10815649,
+            -0.30539474,
+            -0.6152131,
+            -0.35726708,
+            0.33183357,
+        ],
+        1e-5,
+        "grad_kernel",
+    );
+    assert_close_flat(
+        params[1].grad,
+        &[
+            -0.008106956,
+            0.0015690634,
+            0.009512457,
+            -0.002524186,
+            -0.008245606,
+            0.034126412,
+            -0.002365034,
+            0.012811491,
+            0.026728157,
+            -0.01752933,
+            -0.013027558,
+            0.0070465943,
+            0.037620932,
+            0.06654514,
+            0.010438064,
+            -0.032600705,
+        ],
+        1e-5,
+        "grad_recurrent_kernel",
+    );
+    assert_close_flat(
+        params[2].grad,
+        &[
+            0.000060293823,
+            0.2935255,
+            -0.061339106,
+            0.017778756,
+            1.0380362,
+            2.5953631,
+            -0.1780461,
+            -0.055545352,
+        ],
+        1e-5,
+        "grad_bias",
+    );
+}
+
+/// LSTM with return_sequences on and go_backwards on matches Keras 3.15.1
+///
+/// Every expected value comes from Keras 3.15.1 with the same weights, the same input, and the
+/// same time-varying upstream gradient. The gradients pin the 2 rules that a plausible but wrong
+/// backward pass breaks. The upstream slice of a step must add to the carried gradient, and the
+/// gate gradient of a step must go to the input timestep of that step.
+#[test]
+fn lstm_return_sequences_go_backwards_matches_keras() {
+    let x = flag_input();
+    let mut layer = flag_lstm(true, true);
+    let output = layer.forward(&x).unwrap();
+    let upstream = flag_upstream(&output);
+    let grad_input = layer.backward(&upstream).unwrap();
+
+    let expected_output = Tensor::from_shape_vec(
+        vec![2, 3, 2],
+        vec![
+            0.10290291,
+            -0.19481526,
+            -0.05656884,
+            -0.19899441,
+            -0.11248118,
+            -0.08286833,
+            -0.12080535,
+            0.20313686,
+            -0.08614126,
+            0.00007648483,
+            0.015377403,
+            0.050328977,
+        ],
+    )
+    .unwrap();
+    assert_allclose(&output, &expected_output, 1e-5);
+
+    let expected_grad_input = Tensor::from_shape_vec(
+        vec![2, 3, 2],
+        vec![
+            -0.1439949,
+            -0.074894644,
+            0.15502214,
+            -0.14898567,
+            -0.17439052,
+            0.034595758,
+            -0.15369596,
+            -0.06909001,
+            -0.32124698,
+            -0.08991817,
+            0.011020429,
+            -0.038134776,
+        ],
+    )
+    .unwrap();
+    assert_allclose(&grad_input, &expected_grad_input, 1e-5);
+
+    let params = layer.parameters();
+    assert_close_flat(
+        params[0].grad,
+        &[
+            0.49334764,
+            -0.817438,
+            -0.27636185,
+            0.3176492,
+            0.44359598,
+            2.6033297,
+            0.040531687,
+            -0.13643096,
+            -0.46952128,
+            0.54946846,
+            0.083258525,
+            -0.09569697,
+            -0.2009471,
+            -0.7782507,
+            -0.22264296,
+            0.110534534,
+        ],
+        1e-5,
+        "grad_kernel",
+    );
+    assert_close_flat(
+        params[1].grad,
+        &[
+            -0.012289774,
+            0.019935433,
+            0.02210893,
+            -0.019172555,
+            -0.04920122,
+            -0.15587437,
+            0.0047810026,
+            -0.006230273,
+            0.03337007,
+            -0.040072322,
+            -0.02416394,
+            0.050993584,
+            -0.035234574,
+            0.032153495,
+            0.016554007,
+            0.019151004,
+        ],
+        1e-5,
+        "grad_recurrent_kernel",
+    );
+    assert_close_flat(
+        params[2].grad,
+        &[
+            -0.10728342,
+            0.2833891,
+            -0.16577987,
+            -0.11529134,
+            1.2285926,
+            2.5431266,
+            -0.22867866,
+            -0.06892677,
+        ],
+        1e-5,
+        "grad_bias",
+    );
+}
+
+/// GRU with return_sequences on and go_backwards off matches Keras 3.15.1
+///
+/// Every expected value comes from Keras 3.15.1 with the same weights, the same input, and the
+/// same time-varying upstream gradient. The gradients pin the 2 rules that a plausible but wrong
+/// backward pass breaks. The upstream slice of a step must add to the carried gradient, and the
+/// gate gradient of a step must go to the input timestep of that step.
+#[test]
+fn gru_return_sequences_matches_keras() {
+    let x = flag_input();
+    let mut layer = flag_gru(true, false);
+    let output = layer.forward(&x).unwrap();
+    let upstream = flag_upstream(&output);
+    let grad_input = layer.backward(&upstream).unwrap();
+
+    let expected_output = Tensor::from_shape_vec(
+        vec![2, 3, 2],
+        vec![
+            0.07740468,
+            0.0,
+            -0.15070978,
+            0.5847126,
+            -0.5187029,
+            0.4571597,
+            -0.4226371,
+            0.103469394,
+            -0.38575846,
+            0.036150984,
+            0.059671525,
+            0.39422223,
+        ],
+    )
+    .unwrap();
+    assert_allclose(&output, &expected_output, 1e-5);
+
+    let expected_grad_input = Tensor::from_shape_vec(
+        vec![2, 3, 2],
+        vec![
+            -0.010166224,
+            0.40921775,
+            -0.29145205,
+            0.43735614,
+            0.14094763,
+            0.38503677,
+            -0.27779615,
+            0.4107467,
+            0.056554534,
+            0.64688504,
+            -0.23370856,
+            0.27479464,
+        ],
+    )
+    .unwrap();
+    assert_allclose(&grad_input, &expected_grad_input, 1e-5);
+
+    let params = layer.parameters();
+    assert_close_flat(
+        params[0].grad,
+        &[
+            0.27078903,
+            1.389612,
+            -0.11682667,
+            -0.06690118,
+            3.7433739,
+            -0.06377387,
+            -1.0905398,
+            -0.63310885,
+            -0.013828568,
+            0.033715293,
+            -0.6488985,
+            0.6108237,
+        ],
+        1e-5,
+        "grad_kernel",
+    );
+    assert_close_flat(
+        params[1].grad,
+        &[
+            0.15495442,
+            -0.0131989345,
+            0.041505873,
+            0.0045489334,
+            -0.337397,
+            -0.19915271,
+            0.038828164,
+            0.09434194,
+            -0.0140583655,
+            -0.012043089,
+            0.21039428,
+            0.051282093,
+        ],
+        1e-5,
+        "grad_recurrent_kernel",
+    );
+    assert_close_flat(
+        params[2].grad,
+        &[
+            -0.011169866,
+            -0.40618157,
+            -0.10069622,
+            -0.023467647,
+            5.000223,
+            2.8018348,
+        ],
+        1e-5,
+        "grad_bias",
+    );
+}
+
+/// GRU with return_sequences on and go_backwards on matches Keras 3.15.1
+///
+/// Every expected value comes from Keras 3.15.1 with the same weights, the same input, and the
+/// same time-varying upstream gradient. The gradients pin the 2 rules that a plausible but wrong
+/// backward pass breaks. The upstream slice of a step must add to the carried gradient, and the
+/// gate gradient of a step must go to the input timestep of that step.
+#[test]
+fn gru_return_sequences_go_backwards_matches_keras() {
+    let x = flag_input();
+    let mut layer = flag_gru(true, true);
+    let output = layer.forward(&x).unwrap();
+    let upstream = flag_upstream(&output);
+    let grad_input = layer.backward(&upstream).unwrap();
+
+    let expected_output = Tensor::from_shape_vec(
+        vec![2, 3, 2],
+        vec![
+            -0.4310903,
+            -0.075711645,
+            -0.42406064,
+            0.5368707,
+            -0.13581459,
+            0.38729942,
+            0.27444428,
+            0.3911135,
+            -0.1349066,
+            0.24974419,
+            -0.5050205,
+            0.27652773,
+        ],
+    )
+    .unwrap();
+    assert_allclose(&output, &expected_output, 1e-5);
+
+    let expected_grad_input = Tensor::from_shape_vec(
+        vec![2, 3, 2],
+        vec![
+            0.04979286,
+            0.44526592,
+            -0.25146422,
+            0.43066517,
+            0.082815774,
+            0.39240703,
+            -0.14389306,
+            0.41218275,
+            0.03063862,
+            0.639113,
+            -0.37738752,
+            0.25003532,
+        ],
+    )
+    .unwrap();
+    assert_allclose(&grad_input, &expected_grad_input, 1e-5);
+
+    let params = layer.parameters();
+    assert_close_flat(
+        params[0].grad,
+        &[
+            0.81879985,
+            1.4973927,
+            0.078411855,
+            -0.0266757,
+            3.5445094,
+            0.022810549,
+            -0.9924164,
+            -0.6868999,
+            -0.044752475,
+            -0.0022787661,
+            -0.7942069,
+            1.2556272,
+        ],
+        1e-5,
+        "grad_kernel",
+    );
+    assert_close_flat(
+        params[1].grad,
+        &[
+            0.09131509,
+            0.1512349,
+            0.050219238,
+            0.0023983782,
+            -0.19612712,
+            -0.11685265,
+            0.062770486,
+            0.17555079,
+            -0.012414873,
+            -0.010123244,
+            0.52781,
+            0.2543729,
+        ],
+        1e-5,
+        "grad_recurrent_kernel",
+    );
+    assert_close_flat(
+        params[2].grad,
+        &[
+            0.18320782,
+            -0.20841561,
+            -0.060462885,
+            -0.020826302,
+            4.9836674,
+            2.9753606,
+        ],
+        1e-5,
+        "grad_bias",
+    );
 }

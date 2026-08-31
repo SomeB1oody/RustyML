@@ -1037,3 +1037,272 @@ fn max_pool_2d_same_padding_3x3() {
     assert_abs_diff_eq!(out[[0, 1, 0, 0]], 8.0, epsilon = 1e-6); // max(7,8) (row 3 is padding)
     assert_abs_diff_eq!(out[[0, 1, 1, 0]], 9.0, epsilon = 1e-6); // just 9
 }
+
+// Non-finite input: the arg-max of a window that no element wins
+
+// The max fold starts each window at `f32::NEG_INFINITY`, and `-inf > -inf` is false, so no
+// element of an all-negative-infinity window ever wins the fold. The recorded arg-max of such a
+// window is therefore the seed alone. The tests below pin that seed.
+//
+// The seed is the first element of the window itself, and it carries the channel of the output
+// element. Keras 3 on the JAX backend does the same for the windowed layers: it accepts the
+// non-finite input, gives `-inf` as the pooled value, and routes the whole upstream gradient of
+// the window to the first position that the window covers.
+//
+// Before this rule, the seed was flat offset 0, which is position 0 of the batch item on channel
+// 0. A window that starts after position 0 then sent its gradient outside itself, and a global
+// pool sent the gradient of every channel to channel 0.
+
+/// MaxPooling1D routes the gradient of an all-negative-infinity window to the first position of
+/// that window, on the channel of the output element
+#[test]
+fn max_pooling_1d_all_negative_infinity_window_keeps_gradient_inside_window() {
+    let mut layer = MaxPooling1D::new(2, vec![1, 4, 2]).unwrap();
+
+    // Positions 0 and 1 hold finite values, and positions 2 and 3 hold negative infinity on
+    // both channels. Window 1 therefore covers negative infinity alone
+    let x = Array::from_shape_vec(
+        (1, 4, 2),
+        vec![
+            1.0f32,
+            5.0,
+            2.0,
+            6.0,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ],
+    )
+    .unwrap()
+    .into_dyn();
+
+    let out = layer.forward(&x).unwrap();
+    assert_eq!(out.shape(), &[1, 2, 2]);
+    // Window 0 keeps its maxima, and window 1 keeps the start value of the fold
+    assert_abs_diff_eq!(out[[0, 0, 0]], 2.0, epsilon = 1e-6);
+    assert_abs_diff_eq!(out[[0, 0, 1]], 6.0, epsilon = 1e-6);
+    assert_eq!(out[[0, 1, 0]], f32::NEG_INFINITY);
+    assert_eq!(out[[0, 1, 1]], f32::NEG_INFINITY);
+
+    let grad_out = Array::from_shape_vec((1, 2, 2), vec![1.0f32, 2.0, 3.0, 4.0])
+        .unwrap()
+        .into_dyn();
+    let grad_in = layer.backward(&grad_out).unwrap();
+
+    // Window 1 starts at position 2, so its gradient lands there and not at position 0
+    let expected =
+        Array::from_shape_vec((1, 4, 2), vec![0.0f32, 0.0, 1.0, 2.0, 3.0, 4.0, 0.0, 0.0])
+            .unwrap()
+            .into_dyn();
+    assert_allclose(&grad_in, &expected, 1e-6);
+}
+
+/// MaxPooling2D routes the gradient of an all-negative-infinity window to the first cell of that
+/// window in row-major window order
+#[test]
+fn max_pooling_2d_all_negative_infinity_window_keeps_gradient_inside_window() {
+    let mut layer = MaxPooling2D::new((2, 2), vec![1, 4, 4, 1]).unwrap();
+
+    // The top-right window holds negative infinity in all 4 cells
+    let x = Array::from_shape_vec(
+        (1, 4, 4, 1),
+        vec![
+            1.0f32,
+            9.0,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            9.0,
+            3.0,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            4.0,
+            -1.0,
+            7.0,
+            7.0,
+            0.5,
+            4.0,
+            7.0,
+            5.0,
+        ],
+    )
+    .unwrap()
+    .into_dyn();
+
+    let out = layer.forward(&x).unwrap();
+    assert_eq!(out.shape(), &[1, 2, 2, 1]);
+    assert_abs_diff_eq!(out[[0, 0, 0, 0]], 9.0, epsilon = 1e-6);
+    assert_eq!(out[[0, 0, 1, 0]], f32::NEG_INFINITY);
+    assert_abs_diff_eq!(out[[0, 1, 0, 0]], 4.0, epsilon = 1e-6);
+    assert_abs_diff_eq!(out[[0, 1, 1, 0]], 7.0, epsilon = 1e-6);
+
+    let grad_out = Array::from_shape_vec((1, 2, 2, 1), vec![1.0f32, 2.0, 3.0, 4.0])
+        .unwrap()
+        .into_dyn();
+    let grad_in = layer.backward(&grad_out).unwrap();
+
+    // Window (0, 0) ties at (0, 1) and (1, 0), and the first tie wins. Window (0, 1) covers
+    // negative infinity alone, so its gradient lands on its own first cell (0, 2). Window
+    // (1, 1) ties at (2, 2), (2, 3), and (3, 2), and the first tie wins
+    let mut expected = Array::zeros((1, 4, 4, 1));
+    expected[[0, 0, 1, 0]] = 1.0;
+    expected[[0, 0, 2, 0]] = 2.0;
+    expected[[0, 2, 0, 0]] = 3.0;
+    expected[[0, 2, 2, 0]] = 4.0;
+    assert_allclose(&grad_in, &expected.into_dyn(), 1e-6);
+}
+
+/// MaxPooling3D routes the gradient of an all-negative-infinity window to the first voxel of
+/// that window in row-major window order
+#[test]
+fn max_pooling_3d_all_negative_infinity_window_keeps_gradient_inside_window() {
+    let mut layer = MaxPooling3D::new((2, 2, 2), vec![1, 2, 2, 4, 1]).unwrap();
+
+    // The width axis holds 4 positions, so the output holds 2 windows. Widths 2 and 3 hold
+    // negative infinity at every depth and height, so window 1 covers negative infinity alone
+    let n = f32::NEG_INFINITY;
+    let x = Array::from_shape_vec(
+        (1, 2, 2, 4, 1),
+        vec![
+            1.0f32, 3.0, n, n, // depth 0, height 0
+            8.0, 2.0, n, n, // depth 0, height 1
+            5.0, 0.0, n, n, // depth 1, height 0
+            -4.0, 6.0, n, n, // depth 1, height 1
+        ],
+    )
+    .unwrap()
+    .into_dyn();
+
+    let out = layer.forward(&x).unwrap();
+    assert_eq!(out.shape(), &[1, 1, 1, 2, 1]);
+    assert_abs_diff_eq!(out[[0, 0, 0, 0, 0]], 8.0, epsilon = 1e-6);
+    assert_eq!(out[[0, 0, 0, 1, 0]], f32::NEG_INFINITY);
+
+    let grad_out = Array::from_shape_vec((1, 1, 1, 2, 1), vec![1.0f32, 2.0])
+        .unwrap()
+        .into_dyn();
+    let grad_in = layer.backward(&grad_out).unwrap();
+
+    // Window 0 has its maximum 8.0 at depth 0, height 1, width 0. Window 1 covers widths 2 and
+    // 3, and its first voxel in window order is depth 0, height 0, width 2
+    let mut expected = Array::zeros((1, 2, 2, 4, 1));
+    expected[[0, 0, 1, 0, 0]] = 1.0;
+    expected[[0, 0, 0, 2, 0]] = 2.0;
+    assert_allclose(&grad_in, &expected.into_dyn(), 1e-6);
+}
+
+/// GlobalMaxPooling1D keeps the gradient of an all-negative-infinity channel on that channel
+#[test]
+fn global_max_pooling_1d_all_negative_infinity_keeps_gradient_on_its_channel() {
+    let mut layer = GlobalMaxPooling1D::new();
+
+    // Channel 0 holds finite values, and channel 1 holds negative infinity at every position
+    let n = f32::NEG_INFINITY;
+    let x = Array::from_shape_vec((1, 4, 2), vec![1.0f32, n, 2.0, n, 3.0, n, 0.0, n])
+        .unwrap()
+        .into_dyn();
+
+    let out = layer.forward(&x).unwrap();
+    assert_eq!(out.shape(), &[1, 2]);
+    assert_abs_diff_eq!(out[[0, 0]], 3.0, epsilon = 1e-6);
+    assert_eq!(out[[0, 1]], f32::NEG_INFINITY);
+
+    let grad_out = Array::from_shape_vec((1, 2), vec![1.0f32, 2.0])
+        .unwrap()
+        .into_dyn();
+    let grad_in = layer.backward(&grad_out).unwrap();
+
+    // Channel 0 has its maximum at position 2. Channel 1 has no winner, so its gradient goes to
+    // position 0 of channel 1, and never to channel 0
+    let mut expected = Array::zeros((1, 4, 2));
+    expected[[0, 2, 0]] = 1.0;
+    expected[[0, 0, 1]] = 2.0;
+    assert_allclose(&grad_in, &expected.into_dyn(), 1e-6);
+}
+
+/// GlobalMaxPooling1D keeps the channel of a gradient when the reduction spans more than 1
+/// fold block
+#[test]
+fn global_max_pooling_1d_all_negative_infinity_across_fold_blocks() {
+    // The fold block of a 2-channel input holds 8192 positions, so 8200 positions need 2 blocks
+    let positions = 8200_usize;
+    let mut layer = GlobalMaxPooling1D::new();
+
+    let n = f32::NEG_INFINITY;
+    let mut data = Vec::with_capacity(positions * 2);
+    for p in 0..positions {
+        data.push(p as f32);
+        data.push(n);
+    }
+    let x = Array::from_shape_vec((1, positions, 2), data)
+        .unwrap()
+        .into_dyn();
+
+    let out = layer.forward(&x).unwrap();
+    assert_abs_diff_eq!(out[[0, 0]], (positions - 1) as f32, epsilon = 1e-6);
+    assert_eq!(out[[0, 1]], f32::NEG_INFINITY);
+
+    let grad_out = Array::from_shape_vec((1, 2), vec![1.0f32, 2.0])
+        .unwrap()
+        .into_dyn();
+    let grad_in = layer.backward(&grad_out).unwrap();
+    assert_eq!(grad_in.shape(), &[1, positions, 2]);
+
+    // Channel 0 peaks in the last block, and channel 1 keeps position 0 of its own channel
+    assert_abs_diff_eq!(grad_in[[0, positions - 1, 0]], 1.0, epsilon = 1e-6);
+    assert_abs_diff_eq!(grad_in[[0, 0, 1]], 2.0, epsilon = 1e-6);
+    let total: f32 = grad_in.iter().sum();
+    assert_abs_diff_eq!(total, 3.0, epsilon = 1e-6);
+}
+
+/// GlobalMaxPooling2D keeps the gradient of an all-negative-infinity channel on that channel
+#[test]
+fn global_max_pooling_2d_all_negative_infinity_keeps_gradient_on_its_channel() {
+    let mut layer = GlobalMaxPooling2D::new();
+
+    let n = f32::NEG_INFINITY;
+    let x = Array::from_shape_vec((1, 2, 2, 2), vec![1.0f32, n, 2.0, n, 3.0, n, 0.0, n])
+        .unwrap()
+        .into_dyn();
+
+    let out = layer.forward(&x).unwrap();
+    assert_eq!(out.shape(), &[1, 2]);
+    assert_abs_diff_eq!(out[[0, 0]], 3.0, epsilon = 1e-6);
+    assert_eq!(out[[0, 1]], f32::NEG_INFINITY);
+
+    let grad_out = Array::from_shape_vec((1, 2), vec![1.0f32, 2.0])
+        .unwrap()
+        .into_dyn();
+    let grad_in = layer.backward(&grad_out).unwrap();
+
+    let mut expected = Array::zeros((1, 2, 2, 2));
+    expected[[0, 1, 0, 0]] = 1.0;
+    expected[[0, 0, 0, 1]] = 2.0;
+    assert_allclose(&grad_in, &expected.into_dyn(), 1e-6);
+}
+
+/// GlobalMaxPooling3D keeps the gradient of an all-negative-infinity channel on that channel
+#[test]
+fn global_max_pooling_3d_all_negative_infinity_keeps_gradient_on_its_channel() {
+    let mut layer = GlobalMaxPooling3D::new();
+
+    let n = f32::NEG_INFINITY;
+    let x = Array::from_shape_vec((1, 2, 1, 2, 2), vec![1.0f32, n, 2.0, n, 3.0, n, 0.0, n])
+        .unwrap()
+        .into_dyn();
+
+    let out = layer.forward(&x).unwrap();
+    assert_eq!(out.shape(), &[1, 2]);
+    assert_abs_diff_eq!(out[[0, 0]], 3.0, epsilon = 1e-6);
+    assert_eq!(out[[0, 1]], f32::NEG_INFINITY);
+
+    let grad_out = Array::from_shape_vec((1, 2), vec![1.0f32, 2.0])
+        .unwrap()
+        .into_dyn();
+    let grad_in = layer.backward(&grad_out).unwrap();
+
+    let mut expected = Array::zeros((1, 2, 1, 2, 2));
+    expected[[0, 1, 0, 0, 0]] = 1.0;
+    expected[[0, 0, 0, 0, 1]] = 2.0;
+    assert_allclose(&grad_in, &expected.into_dyn(), 1e-6);
+}

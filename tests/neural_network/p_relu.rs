@@ -443,6 +443,9 @@ fn p_relu_set_weights_repacks_a_strided_array() {
 /// the serial path. Both passes are elementwise, so the 2 paths must agree exactly
 #[test]
 fn p_relu_parallel_path_matches_the_serial_path() {
+    // The gate values are process-global. This guard holds the shared side of the lock
+    // in `common`, so no test that moves a gate runs while this test reads one
+    let _gates = crate::common::read_gates();
     let (samples, rows, cols) = (4usize, 1024usize, 1024usize);
     let work = samples * rows * cols;
     let gate = rustyml::tuning::elementwise::get_cheap_map_f32();

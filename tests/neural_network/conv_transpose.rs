@@ -311,17 +311,22 @@ fn conv2d_transpose_grows_a_single_pixel_into_the_whole_kernel() {
     let expected = t4((1, 3, 3, 1), taps.iter().map(|v| 2.0 * v).collect());
     assert_allclose(&output, &expected, 1e-6f32);
 
-    // A plain Conv2D cannot be built on this input at all
-    let refused = rustyml::neural_network::layers::convolution::conv_2d::Conv2D::new(
+    // A plain Conv2D has no valid output position on this input. The refusal belongs to the
+    // forward pass and not to the constructor, because `Same` padding makes the same geometry
+    // legal and the padding mode is chosen after construction. Keras accepts the construction
+    // and refuses the call in the same way
+    let plain = rustyml::neural_network::layers::convolution::conv_2d::Conv2D::new(
         1,
         (3, 3),
         vec![1, 1, 1, 1],
         (1, 1),
         Linear::new(),
-    );
+    )
+    .expect("construction succeeds because the padding mode is not yet fixed");
+    let refused = plain.predict(&t4((1, 1, 1, 1), vec![1.0f32]));
     assert!(
         matches!(refused, Err(Error::InvalidInput(_))),
-        "a plain Conv2D must reject an input below its kernel size, got {refused:?}"
+        "a plain Conv2D under Valid must refuse an input below its kernel size, got {refused:?}"
     );
 }
 
@@ -1086,6 +1091,9 @@ fn conv2d_transpose_backward_accepts_a_gradient_that_is_not_in_c_order() {
 /// 2 sides really do take the 2 branches
 #[test]
 fn conv2d_transpose_parallel_path_matches_the_serial_path() {
+    // The gate values are process-global. This guard holds the shared side of the lock
+    // in `common`, so no test that moves a gate runs while this test reads one
+    let _gates = crate::common::read_gates();
     let gate = rustyml::tuning::conv::get_parallel_min_flops();
     let (batch, side, cin, filters, k) = (4usize, 48usize, 4usize, 8usize, 3usize);
     // Forward FLOPs are 2 * batch * in_plane * Cin * k_plane * F
@@ -1142,6 +1150,9 @@ fn conv2d_transpose_parallel_path_matches_the_serial_path() {
 /// gradient is `batch * out_plane`, and each input gradient is `k_plane * filters`
 #[test]
 fn conv2d_transpose_parallel_gradient_counts_are_constant() {
+    // The gate values are process-global. This guard holds the shared side of the lock
+    // in `common`, so no test that moves a gate runs while this test reads one
+    let _gates = crate::common::read_gates();
     let gate = rustyml::tuning::conv::get_parallel_min_flops();
     let (batch, side, cin, filters, k) = (32usize, 16usize, 4usize, 8usize, 3usize);
     let in_plane = side * side;

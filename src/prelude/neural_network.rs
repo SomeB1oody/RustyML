@@ -9,7 +9,7 @@ pub use crate::neural_network::layers::recurrent::*;
 pub use crate::neural_network::layers::regularization::*;
 pub use crate::neural_network::layers::upsampling::*;
 pub use crate::neural_network::layers::{
-    Dense, Embedding, Flatten, Identity, Permute, RepeatVector, Reshape,
+    Dense, Embedding, Flatten, Identity, Permute, RepeatVector, Rescaling, Reshape,
 };
 pub use crate::neural_network::losses::*;
 pub use crate::neural_network::optimizers::*;

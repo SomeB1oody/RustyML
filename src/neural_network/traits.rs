@@ -105,9 +105,14 @@ pub trait Layer: std::any::Any + Send + Sync {
     /// # Numerical policy
     ///
     /// Backward is pure math: it does **not** sanitize NaN/Inf (no zeroing, no element-wise
-    /// clamping). The backward pass propagates such values instead of masking them. They
-    /// surface loudly at the next forward pass (which rejects non-finite input) or as a NaN
-    /// loss. To tame large-but-finite gradients, enable clip-by-global-norm on the optimizer
+    /// clamping). The backward pass propagates such values instead of masking them. The forward
+    /// pass masks nothing either: it validates the rank, the shape, and the layer parameters,
+    /// and it never reads the input values to reject them. A NaN or an infinity therefore stays
+    /// in the tensor, moves on through every later layer, and shows itself in the output and in
+    /// a non-finite loss. [`Embedding`](crate::neural_network::layers::Embedding) is the 1
+    /// exception, because it reads its input as a table of row indices and rejects a non-finite
+    /// index with `Error::InvalidInput`. To tame large-but-finite gradients, enable
+    /// clip-by-global-norm on the optimizer
     /// ([`Optimizer::global_clipnorm`]) instead of clamping inside a layer. Global-norm scaling
     /// preserves gradient direction, unlike per-element clamping
     ///
