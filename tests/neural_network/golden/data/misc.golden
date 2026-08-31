@@ -1,0 +1,2729 @@
+# Golden fixture data for the "misc" family.
+#
+# The harness in tests/neural_network/golden wrote this file. Do not edit it by hand.
+# Regenerate it with:
+#
+#     RUSTYML_REGEN_GOLDEN=1 cargo test --test neural_network golden
+#
+# Regeneration is an explicit claim that the behavior change was intended and reviewed.
+#
+# Each value line holds the raw f32 bits from to_bits, in 8 lowercase hexadecimal
+# digits. The text after the "#" is the same value in decimal, and it is a comment.
+#
+# The module doc comment of tests/neural_network/golden/mod.rs holds the grammar.
+
+format 5
+family misc
+content_digest 00681e4a407682df cases 35 values 2302
+
+case Dense units_4_linear
+mode training
+output_shape "(None, 4)"
+param_count trainable 16
+param_name weight layer
+param_name bias layer
+weight weight 3 4 checksum 43d903dfad34c524
+weight bias 1 4 checksum bc800fbec5d314d2
+step_weight weight 3 4 checksum 6ce9146beefb9388
+step_weight bias 1 4 checksum 5423ade2ed402521
+tensor input 2 3
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+tensor forward 2 4
+  3f23d70c  # 0.6400001
+  bf789373  # -0.9709999
+  3fa4fdf3  # 1.2889999
+  3f20418a  # 0.62600005
+  3e99999c  # 0.30000007
+  bfa6872c  # -1.3010001
+  3f781063  # 0.96900004
+  3ea1cac0  # 0.31599998
+tensor predict 2 4
+  3f23d70c  # 0.6400001
+  bf789373  # -0.9709999
+  3fa4fdf3  # 1.2889999
+  3f20418a  # 0.62600005
+  3e99999c  # 0.30000007
+  bfa6872c  # -1.3010001
+  3f781063  # 0.96900004
+  3ea1cac0  # 0.31599998
+tensor grad_input 2 3
+  400a28f6  # 2.15875
+  c0011eb9  # -2.0175002
+  3fb47ae1  # 1.41
+  c00f3333  # -2.2375
+  3fa4a3d7  # 1.28625
+  3f7570a3  # 0.95874995
+tensor grad_param.weight 12 decays
+  402ccccd  # 2.7
+  404a3d71  # 3.16
+  c003d70a  # -2.06
+  be3851ea  # -0.17999998
+  3f599999  # 0.84999996
+  3eb22d0e  # 0.348
+  bf147ae1  # -0.58
+  3ead0e56  # 0.338
+  bf7fffff  # -0.99999994
+  c01db22d  # -2.464
+  3f666666  # 0.9
+  3f5b22d1  # 0.856
+tensor step_param.weight 12
+  bfa80000  # -1.3125
+  bd3851f0  # -0.045000017
+  bd2e1480  # -0.04250002
+  bf6d70a4  # -0.9275
+  3e89999a  # 0.26875
+  bea3126f  # -0.3185
+  bf5a3d71  # -0.8525
+  3eb72b02  # 0.35775
+  be000000  # -0.125
+  bf178d50  # -0.592
+  3ea00000  # 0.3125
+  bea9fbe7  # -0.332
+tensor grad_param.bias 4 no_decay
+  bfa00000  # -1.25
+  bff33334  # -1.9000001
+  3f800000  # 1.0
+  3eb33332  # 0.34999996
+tensor step_param.bias 4
+  bf380000  # -0.71875
+  3f300000  # 0.6875
+  bea66666  # -0.325
+  bf64cccd  # -0.89375
+end
+
+case Dense units_4_relu
+mode training
+output_shape "(None, 4)"
+param_count trainable 16
+param_name weight layer
+param_name bias layer
+weight weight 3 4 checksum 43d903dfad34c524
+weight bias 1 4 checksum bc800fbec5d314d2
+step_weight weight 3 4 checksum c2639820be7957ae
+step_weight bias 1 4 checksum e6647c62ea791614
+tensor input 2 3
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+tensor forward 2 4
+  3f23d70c  # 0.6400001
+  00000000  # 0.0
+  3fa4fdf3  # 1.2889999
+  3f20418a  # 0.62600005
+  3e99999c  # 0.30000007
+  00000000  # 0.0
+  3f781063  # 0.96900004
+  3ea1cac0  # 0.31599998
+tensor predict 2 4
+  3f23d70c  # 0.6400001
+  00000000  # 0.0
+  3fa4fdf3  # 1.2889999
+  3f20418a  # 0.62600005
+  3e99999c  # 0.30000007
+  00000000  # 0.0
+  3f781063  # 0.96900004
+  3ea1cac0  # 0.31599998
+tensor grad_input 2 3
+  4010e148  # 2.26375
+  c0066667  # -2.1000001
+  3f91eb85  # 1.14
+  bfd6b851  # -1.6774999
+  3f58a3d7  # 0.84625
+  bef66666  # -0.48125
+tensor grad_param.weight 12 decays
+  402ccccd  # 2.7
+  00000000  # 0.0
+  c003d70a  # -2.06
+  be3851ea  # -0.17999998
+  3f599999  # 0.84999996
+  00000000  # 0.0
+  bf147ae1  # -0.58
+  3ead0e56  # 0.338
+  bf7fffff  # -0.99999994
+  00000000  # 0.0
+  3f666666  # 0.9
+  3f5b22d1  # 0.856
+tensor step_param.weight 12
+  bfa80000  # -1.3125
+  3eb33333  # 0.35
+  bd2e1480  # -0.04250002
+  bf6d70a4  # -0.9275
+  3e89999a  # 0.26875
+  be8ccccd  # -0.275
+  bf5a3d71  # -0.8525
+  3eb72b02  # 0.35775
+  be000000  # -0.125
+  bf666666  # -0.9
+  3ea00000  # 0.3125
+  bea9fbe7  # -0.332
+tensor grad_param.bias 4 no_decay
+  bfa00000  # -1.25
+  00000000  # 0.0
+  3f800000  # 1.0
+  3eb33332  # 0.34999996
+tensor step_param.bias 4
+  bf380000  # -0.71875
+  3ee66666  # 0.45
+  bea66666  # -0.325
+  bf64cccd  # -0.89375
+end
+
+case Dense units_4_tanh
+mode training
+output_shape "(None, 4)"
+param_count trainable 16
+param_name weight layer
+param_name bias layer
+weight weight 3 4 checksum 43d903dfad34c524
+weight bias 1 4 checksum bc800fbec5d314d2
+step_weight weight 3 4 checksum d5aab960e787e0c3
+step_weight bias 1 4 checksum 2a27d09a43906ed7
+tensor input 2 3
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+tensor forward 2 4
+  3f109d43  # 0.5648996
+  bf3fc7dc  # -0.74914336
+  3f5bde89  # 0.85886437
+  3f0e279a  # 0.5552918
+  3e9526ef  # 0.29131266
+  bf5caabf  # -0.8619804
+  3f3f8e44  # 0.74826455
+  3e9c9d0a  # 0.3058856
+tensor predict 2 4
+  3f109d43  # 0.5648996
+  bf3fc7dc  # -0.74914336
+  3f5bde89  # 0.85886437
+  3f0e279a  # 0.5552918
+  3e9526ef  # 0.29131266
+  bf5caabf  # -0.8619804
+  3f3f8e44  # 0.74826455
+  3e9c9d0a  # 0.3058856
+tensor grad_input 2 3
+  3fd31f72  # 1.6493971
+  bf73d983  # -0.9525377
+  3f3142ca  # 0.6924254
+  bfd84799  # -1.689685
+  3f512bb7  # 0.8170733
+  bd19a96a  # -0.03751508
+tensor grad_param.weight 12 decays
+  3fd353f8  # 1.651
+  3f6bd171  # 0.9211646
+  befeddc0  # -0.49778557
+  bf123d28  # -0.5712457
+  3f109032  # 0.56470025
+  3df13d23  # 0.11779239
+  be188a33  # -0.14896469
+  3e4d1415  # 0.20027192
+  bf05878a  # -0.5215994
+  bf2f8228  # -0.6855798
+  3e4ca717  # 0.19985615
+  3f78c732  # 0.9717895
+tensor step_param.weight 12
+  bf97374c  # -1.181375
+  3e707dae  # 0.23485443
+  be737bc4  # -0.23777682
+  bf60eb8e  # -0.8785943
+  3e9bdbf4  # 0.30441248
+  be9456b6  # -0.28972405
+  bf68087b  # -0.9063794
+  3ebffb8c  # 0.37496603
+  be3d3c3b  # -0.18480007
+  bf507621  # -0.8143025
+  3ecccf29  # 0.400018
+  beb16500  # -0.3464737
+tensor grad_param.bias 4 no_decay
+  bf3be687  # -0.7339863
+  bf0af630  # -0.542819
+  3e7158a9  # 0.23568977
+  3f0573a2  # 0.52129567
+tensor step_param.bias 4
+  bf48832f  # -0.7832517
+  3f0491f9  # 0.51785237
+  be6af7e2  # -0.22946122
+  bf6a480e  # -0.91516197
+end
+
+case Dense rank_3_linear
+mode training
+output_shape "(None, 4, 4)"
+param_count trainable 16
+param_name weight layer
+param_name bias layer
+weight weight 3 4 checksum 43d903dfad34c524
+weight bias 1 4 checksum bc800fbec5d314d2
+step_weight weight 3 4 checksum 32ad27fe7dc18e8e
+step_weight bias 1 4 checksum 1d5930e739d105a3
+tensor input 2 4 3
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor forward 2 4 4
+  3f23d70c  # 0.6400001
+  bf789373  # -0.9709999
+  3fa4fdf3  # 1.2889999
+  3f20418a  # 0.62600005
+  3e99999c  # 0.30000007
+  bfa6872c  # -1.3010001
+  3f781063  # 0.96900004
+  3ea1cac0  # 0.31599998
+  bd23d6f0  # -0.039999902
+  bfd0c49a  # -1.6309998
+  3f2624de  # 0.64900005
+  3bc49b80  # 0.0059999824
+  3f2147b0  # 0.6300001
+  3fd66666  # 1.675
+  bfb1a9fc  # -1.388
+  3f1ae146  # 0.6049999
+  3e947ae0  # 0.28999996
+  3fac28f6  # 1.345
+  bfda9fc0  # -1.7080002
+  3e970a3c  # 0.29499996
+  bd4cccc0  # -0.049999952
+  3f81eb85  # 1.015
+  c001cac1  # -2.028
+  bc75c280  # -0.014999986
+  bec7ae14  # -0.39
+  3f2f5c28  # 0.68499994
+  c01645a2  # -2.348
+  bea66666  # -0.325
+  c00fae14  # -2.245
+  3fbba5e4  # 1.4660001
+  3f88d4fe  # 1.069
+  c0101062  # -2.251
+tensor predict 2 4 4
+  3f23d70c  # 0.6400001
+  bf789373  # -0.9709999
+  3fa4fdf3  # 1.2889999
+  3f20418a  # 0.62600005
+  3e99999c  # 0.30000007
+  bfa6872c  # -1.3010001
+  3f781063  # 0.96900004
+  3ea1cac0  # 0.31599998
+  bd23d6f0  # -0.039999902
+  bfd0c49a  # -1.6309998
+  3f2624de  # 0.64900005
+  3bc49b80  # 0.0059999824
+  3f2147b0  # 0.6300001
+  3fd66666  # 1.675
+  bfb1a9fc  # -1.388
+  3f1ae146  # 0.6049999
+  3e947ae0  # 0.28999996
+  3fac28f6  # 1.345
+  bfda9fc0  # -1.7080002
+  3e970a3c  # 0.29499996
+  bd4cccc0  # -0.049999952
+  3f81eb85  # 1.015
+  c001cac1  # -2.028
+  bc75c280  # -0.014999986
+  bec7ae14  # -0.39
+  3f2f5c28  # 0.68499994
+  c01645a2  # -2.348
+  bea66666  # -0.325
+  c00fae14  # -2.245
+  3fbba5e4  # 1.4660001
+  3f88d4fe  # 1.069
+  c0101062  # -2.251
+tensor grad_input 2 4 3
+  400a28f6  # 2.15875
+  c0011eb9  # -2.0175002
+  3fb47ae1  # 1.41
+  c00f3333  # -2.2375
+  3fa4a3d7  # 1.28625
+  3f7570a3  # 0.95874995
+  3fb8a3d8  # 1.4425001
+  3f5ccccd  # 0.8625
+  bf8028f6  # -1.00125
+  bf2570a5  # -0.64625007
+  bf099999  # -0.53749996
+  3f5ae146  # 0.8549999
+  bead70a2  # -0.33874995
+  3eeae147  # 0.45874998
+  bff3ae14  # -1.90375
+  3f8451ec  # 1.03375
+  c01170a4  # -2.2725
+  3f570a3e  # 0.84000003
+  3c23d6d8  # 0.009999953
+  bec70a3d  # -0.38875
+  3f980000  # 1.1875
+  3ea28f5b  # 0.31749997
+  3f1b851f  # 0.6075
+  bfc91eb8  # -1.57125
+tensor grad_param.weight 12 decays
+  402e147b  # 2.72
+  40370a3e  # 2.8600001
+  bfa147ad  # -1.2599999
+  3e99999b  # 0.30000004
+  401f7cee  # 2.492
+  bfe8f5c0  # -1.8199997
+  407ccccd  # 3.95
+  c08645a2  # -4.196
+  c099cac1  # -4.806
+  c01d70a4  # -2.46
+  c08bf7d0  # -4.3740005
+  404e76c8  # 3.2259998
+tensor step_param.weight 12
+  bfa851ec  # -1.315
+  bbf5c2c0  # -0.0075000226
+  be11eb87  # -0.14250003
+  bf7ccccd  # -0.9875
+  3d820c48  # 0.06349999
+  bd428f68  # -0.047500044
+  bfb5999a  # -1.41875
+  3f6cac08  # 0.9245
+  3eb39582  # 0.35075003
+  bf17ae14  # -0.5925
+  3f78c49d  # 0.9717501
+  bf20d4fe  # -0.62825
+tensor grad_param.bias 4 no_decay
+  bf333331  # -0.69999987
+  3e800000  # 0.25
+  3f999999  # 1.1999999
+  bfb33333  # -1.4
+tensor step_param.bias 4
+  bf49999a  # -0.7875
+  3ed66666  # 0.41875
+  beb33333  # -0.35
+  bf2ccccd  # -0.675
+end
+
+case Dense rank_4_linear
+mode training
+output_shape "(None, 2, 2, 4)"
+param_count trainable 16
+param_name weight layer
+param_name bias layer
+weight weight 3 4 checksum 43d903dfad34c524
+weight bias 1 4 checksum bc800fbec5d314d2
+step_weight weight 3 4 checksum 32ad27fe7dc18e8e
+step_weight bias 1 4 checksum 1d5930e739d105a3
+tensor input 2 2 2 3
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor forward 2 2 2 4
+  3f23d70c  # 0.6400001
+  bf789373  # -0.9709999
+  3fa4fdf3  # 1.2889999
+  3f20418a  # 0.62600005
+  3e99999c  # 0.30000007
+  bfa6872c  # -1.3010001
+  3f781063  # 0.96900004
+  3ea1cac0  # 0.31599998
+  bd23d6f0  # -0.039999902
+  bfd0c49a  # -1.6309998
+  3f2624de  # 0.64900005
+  3bc49b80  # 0.0059999824
+  3f2147b0  # 0.6300001
+  3fd66666  # 1.675
+  bfb1a9fc  # -1.388
+  3f1ae146  # 0.6049999
+  3e947ae0  # 0.28999996
+  3fac28f6  # 1.345
+  bfda9fc0  # -1.7080002
+  3e970a3c  # 0.29499996
+  bd4cccc0  # -0.049999952
+  3f81eb85  # 1.015
+  c001cac1  # -2.028
+  bc75c280  # -0.014999986
+  bec7ae14  # -0.39
+  3f2f5c28  # 0.68499994
+  c01645a2  # -2.348
+  bea66666  # -0.325
+  c00fae14  # -2.245
+  3fbba5e4  # 1.4660001
+  3f88d4fe  # 1.069
+  c0101062  # -2.251
+tensor predict 2 2 2 4
+  3f23d70c  # 0.6400001
+  bf789373  # -0.9709999
+  3fa4fdf3  # 1.2889999
+  3f20418a  # 0.62600005
+  3e99999c  # 0.30000007
+  bfa6872c  # -1.3010001
+  3f781063  # 0.96900004
+  3ea1cac0  # 0.31599998
+  bd23d6f0  # -0.039999902
+  bfd0c49a  # -1.6309998
+  3f2624de  # 0.64900005
+  3bc49b80  # 0.0059999824
+  3f2147b0  # 0.6300001
+  3fd66666  # 1.675
+  bfb1a9fc  # -1.388
+  3f1ae146  # 0.6049999
+  3e947ae0  # 0.28999996
+  3fac28f6  # 1.345
+  bfda9fc0  # -1.7080002
+  3e970a3c  # 0.29499996
+  bd4cccc0  # -0.049999952
+  3f81eb85  # 1.015
+  c001cac1  # -2.028
+  bc75c280  # -0.014999986
+  bec7ae14  # -0.39
+  3f2f5c28  # 0.68499994
+  c01645a2  # -2.348
+  bea66666  # -0.325
+  c00fae14  # -2.245
+  3fbba5e4  # 1.4660001
+  3f88d4fe  # 1.069
+  c0101062  # -2.251
+tensor grad_input 2 2 2 3
+  400a28f6  # 2.15875
+  c0011eb9  # -2.0175002
+  3fb47ae1  # 1.41
+  c00f3333  # -2.2375
+  3fa4a3d7  # 1.28625
+  3f7570a3  # 0.95874995
+  3fb8a3d8  # 1.4425001
+  3f5ccccd  # 0.8625
+  bf8028f6  # -1.00125
+  bf2570a5  # -0.64625007
+  bf099999  # -0.53749996
+  3f5ae146  # 0.8549999
+  bead70a2  # -0.33874995
+  3eeae147  # 0.45874998
+  bff3ae14  # -1.90375
+  3f8451ec  # 1.03375
+  c01170a4  # -2.2725
+  3f570a3e  # 0.84000003
+  3c23d6d8  # 0.009999953
+  bec70a3d  # -0.38875
+  3f980000  # 1.1875
+  3ea28f5b  # 0.31749997
+  3f1b851f  # 0.6075
+  bfc91eb8  # -1.57125
+tensor grad_param.weight 12 decays
+  402e147b  # 2.72
+  40370a3e  # 2.8600001
+  bfa147ad  # -1.2599999
+  3e99999b  # 0.30000004
+  401f7cee  # 2.492
+  bfe8f5c0  # -1.8199997
+  407ccccd  # 3.95
+  c08645a2  # -4.196
+  c099cac1  # -4.806
+  c01d70a4  # -2.46
+  c08bf7d0  # -4.3740005
+  404e76c8  # 3.2259998
+tensor step_param.weight 12
+  bfa851ec  # -1.315
+  bbf5c2c0  # -0.0075000226
+  be11eb87  # -0.14250003
+  bf7ccccd  # -0.9875
+  3d820c48  # 0.06349999
+  bd428f68  # -0.047500044
+  bfb5999a  # -1.41875
+  3f6cac08  # 0.9245
+  3eb39582  # 0.35075003
+  bf17ae14  # -0.5925
+  3f78c49d  # 0.9717501
+  bf20d4fe  # -0.62825
+tensor grad_param.bias 4 no_decay
+  bf333331  # -0.69999987
+  3e800000  # 0.25
+  3f999999  # 1.1999999
+  bfb33333  # -1.4
+tensor step_param.bias 4
+  bf49999a  # -0.7875
+  3ed66666  # 0.41875
+  beb33333  # -0.35
+  bf2ccccd  # -0.675
+end
+
+case Flatten rank_3
+mode training
+output_shape "(None, 12)"
+param_count none
+tensor input 2 3 4
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor forward 2 12
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor predict 2 12
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor grad_input 2 3 4
+  bfe00000  # -1.75
+  be99999a  # -0.3
+  3f933333  # 1.15
+  bf733333  # -0.95
+  3f000000  # 0.5
+  bfcccccd  # -1.6
+  be19999a  # -0.15
+  3fa66666  # 1.3
+  bf4ccccd  # -0.8
+  3f266666  # 0.65
+  bfb9999a  # -1.45
+  00000000  # 0.0
+  3fb9999a  # 1.45
+  bf266666  # -0.65
+  3f4ccccd  # 0.8
+  bfa66666  # -1.3
+  3e19999a  # 0.15
+  3fcccccd  # 1.6
+  bf000000  # -0.5
+  3f733333  # 0.95
+  bf933333  # -1.15
+  3e99999a  # 0.3
+  3fe00000  # 1.75
+  beb33333  # -0.35
+end
+
+case Flatten rank_4
+mode training
+output_shape "(None, 12)"
+param_count none
+tensor input 2 2 3 2
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor forward 2 12
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor predict 2 12
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor grad_input 2 2 3 2
+  bfe00000  # -1.75
+  be99999a  # -0.3
+  3f933333  # 1.15
+  bf733333  # -0.95
+  3f000000  # 0.5
+  bfcccccd  # -1.6
+  be19999a  # -0.15
+  3fa66666  # 1.3
+  bf4ccccd  # -0.8
+  3f266666  # 0.65
+  bfb9999a  # -1.45
+  00000000  # 0.0
+  3fb9999a  # 1.45
+  bf266666  # -0.65
+  3f4ccccd  # 0.8
+  bfa66666  # -1.3
+  3e19999a  # 0.15
+  3fcccccd  # 1.6
+  bf000000  # -0.5
+  3f733333  # 0.95
+  bf933333  # -1.15
+  3e99999a  # 0.3
+  3fe00000  # 1.75
+  beb33333  # -0.35
+end
+
+case Identity rank_2
+mode training
+output_shape "(None, 5)"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor predict 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor grad_input 2 5
+  bfe00000  # -1.75
+  be99999a  # -0.3
+  3f933333  # 1.15
+  bf733333  # -0.95
+  3f000000  # 0.5
+  bfcccccd  # -1.6
+  be19999a  # -0.15
+  3fa66666  # 1.3
+  bf4ccccd  # -0.8
+  3f266666  # 0.65
+end
+
+case Identity rank_4
+mode training
+output_shape "(None, 2, 3, 2)"
+param_count none
+tensor input 2 2 3 2
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor forward 2 2 3 2
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor predict 2 2 3 2
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor grad_input 2 2 3 2
+  bfe00000  # -1.75
+  be99999a  # -0.3
+  3f933333  # 1.15
+  bf733333  # -0.95
+  3f000000  # 0.5
+  bfcccccd  # -1.6
+  be19999a  # -0.15
+  3fa66666  # 1.3
+  bf4ccccd  # -0.8
+  3f266666  # 0.65
+  bfb9999a  # -1.45
+  00000000  # 0.0
+  3fb9999a  # 1.45
+  bf266666  # -0.65
+  3f4ccccd  # 0.8
+  bfa66666  # -1.3
+  3e19999a  # 0.15
+  3fcccccd  # 1.6
+  bf000000  # -0.5
+  3f733333  # 0.95
+  bf933333  # -1.15
+  3e99999a  # 0.3
+  3fe00000  # 1.75
+  beb33333  # -0.35
+end
+
+case Reshape to_6
+mode training
+output_shape "(None, 6)"
+param_count none
+tensor input 2 2 3
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+tensor forward 2 6
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+tensor predict 2 6
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+tensor grad_input 2 2 3
+  bfe00000  # -1.75
+  be99999a  # -0.3
+  3f933333  # 1.15
+  bf733333  # -0.95
+  3f000000  # 0.5
+  bfcccccd  # -1.6
+  be19999a  # -0.15
+  3fa66666  # 1.3
+  bf4ccccd  # -0.8
+  3f266666  # 0.65
+  bfb9999a  # -1.45
+  00000000  # 0.0
+end
+
+case Reshape inferred_axis
+mode training
+output_shape "(None, 6, 2)"
+param_count none
+tensor input 2 3 4
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor forward 2 6 2
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor predict 2 6 2
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor grad_input 2 3 4
+  bfe00000  # -1.75
+  be99999a  # -0.3
+  3f933333  # 1.15
+  bf733333  # -0.95
+  3f000000  # 0.5
+  bfcccccd  # -1.6
+  be19999a  # -0.15
+  3fa66666  # 1.3
+  bf4ccccd  # -0.8
+  3f266666  # 0.65
+  bfb9999a  # -1.45
+  00000000  # 0.0
+  3fb9999a  # 1.45
+  bf266666  # -0.65
+  3f4ccccd  # 0.8
+  bfa66666  # -1.3
+  3e19999a  # 0.15
+  3fcccccd  # 1.6
+  bf000000  # -0.5
+  3f733333  # 0.95
+  bf933333  # -1.15
+  3e99999a  # 0.3
+  3fe00000  # 1.75
+  beb33333  # -0.35
+end
+
+case Permute swap_2_axes
+mode training
+output_shape "(None, 4, 3)"
+param_count none
+tensor input 2 3 4
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor forward 2 4 3
+  c0000000  # -2.0
+  bdf5c28f  # -0.12
+  3fe147ae  # 1.76
+  bf051eb8  # -0.52
+  3fae147b  # 1.36
+  bf4ccccd  # -0.8
+  3f75c28f  # 0.96
+  bf99999a  # -1.2
+  3f2e147b  # 0.68
+  bfcccccd  # -1.6
+  3e8f5c29  # 0.28
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3fbd70a4  # 1.48
+  bf2e147b  # -0.68
+  3f8a3d71  # 1.08
+  bf8a3d71  # -1.08
+  3f4ccccd  # 0.8
+  bfbd70a4  # -1.48
+  3ecccccd  # 0.4
+  bfe147ae  # -1.76
+  00000000  # 0.0
+  3ff0a3d7  # 1.88
+  be8f5c29  # -0.28
+tensor predict 2 4 3
+  c0000000  # -2.0
+  bdf5c28f  # -0.12
+  3fe147ae  # 1.76
+  bf051eb8  # -0.52
+  3fae147b  # 1.36
+  bf4ccccd  # -0.8
+  3f75c28f  # 0.96
+  bf99999a  # -1.2
+  3f2e147b  # 0.68
+  bfcccccd  # -1.6
+  3e8f5c29  # 0.28
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3fbd70a4  # 1.48
+  bf2e147b  # -0.68
+  3f8a3d71  # 1.08
+  bf8a3d71  # -1.08
+  3f4ccccd  # 0.8
+  bfbd70a4  # -1.48
+  3ecccccd  # 0.4
+  bfe147ae  # -1.76
+  00000000  # 0.0
+  3ff0a3d7  # 1.88
+  be8f5c29  # -0.28
+tensor grad_input 2 3 4
+  bfe00000  # -1.75
+  bf733333  # -0.95
+  be19999a  # -0.15
+  3f266666  # 0.65
+  be99999a  # -0.3
+  3f000000  # 0.5
+  3fa66666  # 1.3
+  bfb9999a  # -1.45
+  3f933333  # 1.15
+  bfcccccd  # -1.6
+  bf4ccccd  # -0.8
+  00000000  # 0.0
+  3fb9999a  # 1.45
+  bfa66666  # -1.3
+  bf000000  # -0.5
+  3e99999a  # 0.3
+  bf266666  # -0.65
+  3e19999a  # 0.15
+  3f733333  # 0.95
+  3fe00000  # 1.75
+  3f4ccccd  # 0.8
+  3fcccccd  # 1.6
+  bf933333  # -1.15
+  beb33333  # -0.35
+end
+
+case Permute rotate_3_axes
+mode training
+output_shape "(None, 4, 2, 3)"
+param_count none
+tensor input 2 2 3 4
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+  3f99999a  # 1.2
+  bfae147b  # -1.36
+  3df5c28f  # 0.12
+  3fcccccd  # 1.6
+  bf75c28f  # -0.96
+  3f051eb8  # 0.52
+  40000000  # 2.0
+  bf0f5c29  # -0.56
+  3f6b851f  # 0.92
+  bfd1eb85  # -1.64
+  be23d70a  # -0.16
+  3fa8f5c3  # 1.32
+  bf9eb852  # -1.24
+  3e75c28f  # 0.24
+  3fdc28f6  # 1.72
+  bf570a3d  # -0.84
+  3f23d70a  # 0.64
+  bff5c28f  # -1.92
+  bee147ae  # -0.44
+  3f851eb8  # 1.04
+  bfc28f5c  # -1.52
+  bd23d70a  # -0.04
+  3fb851ec  # 1.44
+  bf8f5c29  # -1.12
+tensor forward 2 4 2 3
+  c0000000  # -2.0
+  bdf5c28f  # -0.12
+  3fe147ae  # 1.76
+  becccccd  # -0.4
+  3fbd70a4  # 1.48
+  bf2e147b  # -0.68
+  bf051eb8  # -0.52
+  3fae147b  # 1.36
+  bf4ccccd  # -0.8
+  3f8a3d71  # 1.08
+  bf8a3d71  # -1.08
+  3f4ccccd  # 0.8
+  3f75c28f  # 0.96
+  bf99999a  # -1.2
+  3f2e147b  # 0.68
+  bfbd70a4  # -1.48
+  3ecccccd  # 0.4
+  bfe147ae  # -1.76
+  bfcccccd  # -1.6
+  3e8f5c29  # 0.28
+  bff0a3d7  # -1.88
+  00000000  # 0.0
+  3ff0a3d7  # 1.88
+  be8f5c29  # -0.28
+  3f99999a  # 1.2
+  bf75c28f  # -0.96
+  3f6b851f  # 0.92
+  bf9eb852  # -1.24
+  3f23d70a  # 0.64
+  bfc28f5c  # -1.52
+  bfae147b  # -1.36
+  3f051eb8  # 0.52
+  bfd1eb85  # -1.64
+  3e75c28f  # 0.24
+  bff5c28f  # -1.92
+  bd23d70a  # -0.04
+  3df5c28f  # 0.12
+  40000000  # 2.0
+  be23d70a  # -0.16
+  3fdc28f6  # 1.72
+  bee147ae  # -0.44
+  3fb851ec  # 1.44
+  3fcccccd  # 1.6
+  bf0f5c29  # -0.56
+  3fa8f5c3  # 1.32
+  bf570a3d  # -0.84
+  3f851eb8  # 1.04
+  bf8f5c29  # -1.12
+tensor predict 2 4 2 3
+  c0000000  # -2.0
+  bdf5c28f  # -0.12
+  3fe147ae  # 1.76
+  becccccd  # -0.4
+  3fbd70a4  # 1.48
+  bf2e147b  # -0.68
+  bf051eb8  # -0.52
+  3fae147b  # 1.36
+  bf4ccccd  # -0.8
+  3f8a3d71  # 1.08
+  bf8a3d71  # -1.08
+  3f4ccccd  # 0.8
+  3f75c28f  # 0.96
+  bf99999a  # -1.2
+  3f2e147b  # 0.68
+  bfbd70a4  # -1.48
+  3ecccccd  # 0.4
+  bfe147ae  # -1.76
+  bfcccccd  # -1.6
+  3e8f5c29  # 0.28
+  bff0a3d7  # -1.88
+  00000000  # 0.0
+  3ff0a3d7  # 1.88
+  be8f5c29  # -0.28
+  3f99999a  # 1.2
+  bf75c28f  # -0.96
+  3f6b851f  # 0.92
+  bf9eb852  # -1.24
+  3f23d70a  # 0.64
+  bfc28f5c  # -1.52
+  bfae147b  # -1.36
+  3f051eb8  # 0.52
+  bfd1eb85  # -1.64
+  3e75c28f  # 0.24
+  bff5c28f  # -1.92
+  bd23d70a  # -0.04
+  3df5c28f  # 0.12
+  40000000  # 2.0
+  be23d70a  # -0.16
+  3fdc28f6  # 1.72
+  bee147ae  # -0.44
+  3fb851ec  # 1.44
+  3fcccccd  # 1.6
+  bf0f5c29  # -0.56
+  3fa8f5c3  # 1.32
+  bf570a3d  # -0.84
+  3f851eb8  # 1.04
+  bf8f5c29  # -1.12
+tensor grad_input 2 2 3 4
+  bfe00000  # -1.75
+  be19999a  # -0.15
+  3fb9999a  # 1.45
+  bf000000  # -0.5
+  be99999a  # -0.3
+  3fa66666  # 1.3
+  bf266666  # -0.65
+  3f733333  # 0.95
+  3f933333  # 1.15
+  bf4ccccd  # -0.8
+  3f4ccccd  # 0.8
+  bf933333  # -1.15
+  bf733333  # -0.95
+  3f266666  # 0.65
+  bfa66666  # -1.3
+  3e99999a  # 0.3
+  3f000000  # 0.5
+  bfb9999a  # -1.45
+  3e19999a  # 0.15
+  3fe00000  # 1.75
+  bfcccccd  # -1.6
+  00000000  # 0.0
+  3fcccccd  # 1.6
+  beb33333  # -0.35
+  3f8ccccd  # 1.1
+  bf59999a  # -0.85
+  3f400000  # 0.75
+  bf99999a  # -1.2
+  bf800000  # -1.0
+  3f19999a  # 0.6
+  bfaccccd  # -1.35
+  3e800000  # 0.25
+  3ee66666  # 0.45
+  bfc00000  # -1.5
+  3dcccccd  # 0.1
+  3fd9999a  # 1.7
+  bfd33333  # -1.65
+  bd4ccccd  # -0.05
+  3fc66666  # 1.55
+  becccccd  # -0.4
+  be4ccccd  # -0.2
+  3fb33333  # 1.4
+  bf0ccccd  # -0.55
+  3f866666  # 1.05
+  3fa00000  # 1.25
+  bf333333  # -0.7
+  3f666666  # 0.9
+  bf866666  # -1.05
+end
+
+case RepeatVector steps_3
+mode training
+output_shape "(None, 3, 4)"
+param_count none
+tensor input 2 4
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+tensor forward 2 3 4
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+tensor predict 2 3 4
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+tensor grad_input 2 4
+  c0033333  # -2.05
+  bfa00001  # -1.2500001
+  bee66668  # -0.45000005
+  3eb33332  # 0.34999996
+  3ee66668  # 0.45000005
+  3fa00000  # 1.25
+  40033333  # 2.05
+  bf333332  # -0.6999999
+end
+
+case ReLU default
+mode training
+output_shape "(2, 5)"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  00000000  # 0.0
+  00000000  # 0.0
+  3f75c28f  # 0.96
+  00000000  # 0.0
+  00000000  # 0.0
+  3fae147b  # 1.36
+  00000000  # 0.0
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  00000000  # 0.0
+tensor predict 2 5
+  00000000  # 0.0
+  00000000  # 0.0
+  3f75c28f  # 0.96
+  00000000  # 0.0
+  00000000  # 0.0
+  3fae147b  # 1.36
+  00000000  # 0.0
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  00000000  # 0.0
+tensor grad_input 2 5
+  00000000  # 0.0
+  00000000  # 0.0
+  3f933333  # 1.15
+  00000000  # 0.0
+  00000000  # 0.0
+  bfcccccd  # -1.6
+  00000000  # 0.0
+  3fa66666  # 1.3
+  bf4ccccd  # -0.8
+  00000000  # 0.0
+end
+
+case LeakyReLU slope_0p3
+mode training
+output_shape "(2, 5)"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  bf19999a  # -0.6
+  be1fbe77  # -0.156
+  3f75c28f  # 0.96
+  bef5c290  # -0.48000002
+  bd1374bd  # -0.036000002
+  3fae147b  # 1.36
+  beb851ec  # -0.36
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  be75c290  # -0.24000001
+tensor predict 2 5
+  bf19999a  # -0.6
+  be1fbe77  # -0.156
+  3f75c28f  # 0.96
+  bef5c290  # -0.48000002
+  bd1374bd  # -0.036000002
+  3fae147b  # 1.36
+  beb851ec  # -0.36
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  be75c290  # -0.24000001
+tensor grad_input 2 5
+  bf066667  # -0.52500004
+  bdb851ec  # -0.09
+  3f933333  # 1.15
+  be91eb85  # -0.285
+  3e19999a  # 0.15
+  bfcccccd  # -1.6
+  bd3851ec  # -0.045
+  3fa66666  # 1.3
+  bf4ccccd  # -0.8
+  3e47ae15  # 0.19500001
+end
+
+case LeakyReLU slope_0p01
+mode training
+output_shape "(2, 5)"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  bca3d70a  # -0.02
+  bbaa64c2  # -0.0051999995
+  3f75c28f  # 0.96
+  bc83126f  # -0.016
+  ba9d4951  # -0.0011999999
+  3fae147b  # 1.36
+  bc449ba6  # -0.012
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bc03126f  # -0.008
+tensor predict 2 5
+  bca3d70a  # -0.02
+  bbaa64c2  # -0.0051999995
+  3f75c28f  # 0.96
+  bc83126f  # -0.016
+  ba9d4951  # -0.0011999999
+  3fae147b  # 1.36
+  bc449ba6  # -0.012
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bc03126f  # -0.008
+tensor grad_input 2 5
+  bc8f5c29  # -0.0175
+  bb449ba6  # -0.003
+  3f933333  # 1.15
+  bc1ba5e3  # -0.0095
+  3ba3d70a  # 0.005
+  bfcccccd  # -1.6
+  bac49ba6  # -0.0015
+  3fa66666  # 1.3
+  bf4ccccd  # -0.8
+  3bd4fdf3  # 0.0064999997
+end
+
+case ELU alpha_1p0
+mode training
+output_shape "(2, 5)"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  bf5d5aab  # -0.86466473
+  becf9b00  # -0.40547943
+  3f75c28f  # 0.96
+  bf4c5083  # -0.7981035
+  bde79642  # -0.11307956
+  3fae147b  # 1.36
+  bf32e4f0  # -0.6988058
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf0cf8c7  # -0.55067104
+tensor predict 2 5
+  bf5d5aab  # -0.86466473
+  becf9b00  # -0.40547943
+  3f75c28f  # 0.96
+  bf4c5083  # -0.7981035
+  bde79642  # -0.11307956
+  3fae147b  # 1.36
+  bf32e4f0  # -0.6988058
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf0cf8c7  # -0.55067104
+tensor grad_input 2 5
+  be728553  # -0.23683672
+  be36a300  # -0.17835617
+  3f933333  # 1.15
+  be4467a8  # -0.19180167
+  3ee30d38  # 0.44346023
+  bfcccccd  # -1.6
+  bd390dc0  # -0.04517913
+  3fa66666  # 1.3
+  bf4ccccd  # -0.8
+  3e958963  # 0.2920638
+end
+
+case ELU alpha_0p5
+mode training
+output_shape "(2, 5)"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  bedd5aab  # -0.43233237
+  be4f9b00  # -0.20273972
+  3f75c28f  # 0.96
+  becc5083  # -0.39905176
+  bd679642  # -0.05653978
+  3fae147b  # 1.36
+  beb2e4f0  # -0.3494029
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  be8cf8c7  # -0.27533552
+tensor predict 2 5
+  bedd5aab  # -0.43233237
+  be4f9b00  # -0.20273972
+  3f75c28f  # 0.96
+  becc5083  # -0.39905176
+  bd679642  # -0.05653978
+  3fae147b  # 1.36
+  beb2e4f0  # -0.3494029
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  be8cf8c7  # -0.27533552
+tensor grad_input 2 5
+  bdf28553  # -0.11841836
+  bdb6a300  # -0.089178085
+  3f933333  # 1.15
+  bdc467a8  # -0.09590083
+  3e630d38  # 0.22173011
+  bfcccccd  # -1.6
+  bcb90dc0  # -0.022589564
+  3fa66666  # 1.3
+  bf4ccccd  # -0.8
+  3e158963  # 0.1460319
+end
+
+case SELU default
+mode training
+output_shape "(2, 5)"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  bfc294d1  # -1.5201665
+  bf367eda  # -0.7128731
+  3f811c32  # 1.008673
+  bfb39a43  # -1.4031452
+  be4b9391  # -0.19880511
+  3fb6e7f2  # 1.4289534
+  bf9d41c8  # -1.22857
+  3e96a0e5  # 0.29419628
+  3fecb3b1  # 1.8492337
+  bf77d7a8  # -0.9681344
+tensor predict 2 5
+  bfc294d1  # -1.5201665
+  bf367eda  # -0.7128731
+  3f811c32  # 1.008673
+  bfb39a43  # -1.4031452
+  be4b9391  # -0.19880511
+  3fb6e7f2  # 1.4289534
+  bf9d41c8  # -1.22857
+  3e96a0e5  # 0.29419628
+  3fecb3b1  # 1.8492337
+  bf77d7a8  # -0.9681344
+tensor grad_input 2 5
+  bed53013  # -0.4163824
+  bea08bf8  # -0.31356788
+  3f9aa9c7  # 1.2083062
+  beaca652  # -0.33720642
+  3f4796f4  # 0.7796471
+  bfd72eff  # -1.6811217
+  bda2abe2  # -0.0794294
+  3faed62e  # 1.3659112
+  bf572eff  # -0.84056085
+  3f03733d  # 0.51347715
+end
+
+case Softplus default
+mode training
+output_shape "(2, 5)"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  3e01f96b  # 0.12692802
+  3eeee2ac  # 0.46657312
+  3fa45fee  # 1.2841775
+  3e3c507a  # 0.18390074
+  3f228bd4  # 0.6349461
+  3fcb5298  # 1.5884581
+  3e86ccf5  # 0.26328245
+  3f57c94c  # 0.8429153
+  3ff59999  # 1.9187499
+  3ebe00e8  # 0.37110066
+tensor predict 2 5
+  3e01f96b  # 0.12692802
+  3eeee2ac  # 0.46657312
+  3fa45fee  # 1.2841775
+  3e3c507a  # 0.18390074
+  3f228bd4  # 0.6349461
+  3fcb5298  # 1.5884581
+  3e86ccf5  # 0.26328245
+  3f57c94c  # 0.8429153
+  3ff59999  # 1.9187499
+  3ebe00e8  # 0.37110066
+tensor grad_input 2 5
+  be559c95  # -0.20860513
+  bde51497  # -0.11185568
+  3f54e315  # 0.83159
+  be23699b  # -0.15958254
+  3e70a88d  # 0.23501797
+  bfa2f8ba  # -1.2732155
+  bd0e37e7  # -0.03472128
+  3f3d8b84  # 0.7404101
+  bf2ebcc3  # -0.6825678
+  3e4e5a5d  # 0.20151658
+end
+
+case Softsign default
+mode training
+output_shape "(2, 5)"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  bf2aaaab  # -0.6666667
+  beaf286c  # -0.34210527
+  3efac687  # 0.4897959
+  bf1d89d9  # -0.61538464
+  bddb6db6  # -0.10714285
+  3f138682  # 0.5762712
+  bf0ba2e9  # -0.54545456
+  3e600000  # 0.21875
+  3f233f13  # 0.6376812
+  bee38e3a  # -0.44444448
+tensor predict 2 5
+  bf2aaaab  # -0.6666667
+  beaf286c  # -0.34210527
+  3efac687  # 0.4897959
+  bf1d89d9  # -0.61538464
+  bddb6db6  # -0.10714285
+  3f138682  # 0.5762712
+  bf0ba2e9  # -0.54545456
+  3e600000  # 0.21875
+  3f233f13  # 0.6376812
+  bee38e3a  # -0.44444448
+tensor grad_input 2 5
+  be471c70  # -0.19444442
+  be04f6c8  # -0.12984765
+  3e9944fc  # 0.29935443
+  be0fe7c3  # -0.14053254
+  3ecc14e6  # 0.39859694
+  be93158d  # -0.2872738
+  bcfde261  # -0.030991735
+  3f4b2000  # 0.79345703
+  bdd714b2  # -0.10501994
+  3e4d6e9c  # 0.20061725
+end
+
+case HardSigmoid default
+mode training
+output_shape "(2, 5)"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  3e2aaaab  # 0.16666667
+  3ed3a06d  # 0.41333333
+  3f28f5c3  # 0.66
+  3e6eeeef  # 0.23333333
+  3ef5c290  # 0.48000002
+  3f3a06d4  # 0.7266667
+  3e999999  # 0.29999998
+  3f0bf259  # 0.5466667
+  3f4b17e5  # 0.79333335
+  3ebbbbbc  # 0.36666667
+tensor predict 2 5
+  3e2aaaab  # 0.16666667
+  3ed3a06d  # 0.41333333
+  3f28f5c3  # 0.66
+  3e6eeeef  # 0.23333333
+  3ef5c290  # 0.48000002
+  3f3a06d4  # 0.7266667
+  3e999999  # 0.29999998
+  3f0bf259  # 0.5466667
+  3f4b17e5  # 0.79333335
+  3ebbbbbc  # 0.36666667
+tensor grad_input 2 5
+  be955556  # -0.2916667
+  bd4cccce  # -0.050000004
+  3e444444  # 0.19166666
+  be222222  # -0.15833333
+  3daaaaab  # 0.083333336
+  be888889  # -0.26666668
+  bcccccce  # -0.025000002
+  3e5dddde  # 0.21666667
+  be088889  # -0.13333334
+  3dddddde  # 0.108333334
+end
+
+case Exponential default
+mode training
+output_shape "(2, 5)"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  3e0a9555  # 0.13533528
+  3f183280  # 0.59452057
+  40272609  # 2.6116965
+  3e4ebdf6  # 0.20189652
+  3f630d38  # 0.88692045
+  40795b3b  # 3.8961933
+  3e9a3620  # 0.3011942
+  3fa95c51  # 1.3231298
+  40b9ff7d  # 5.8124375
+  3ee60e72  # 0.44932896
+tensor predict 2 5
+  3e0a9555  # 0.13533528
+  3f183280  # 0.59452057
+  40272609  # 2.6116965
+  3e4ebdf6  # 0.20189652
+  3f630d38  # 0.88692045
+  40795b3b  # 3.8961933
+  3e9a3620  # 0.3011942
+  3fa95c51  # 1.3231298
+  40b9ff7d  # 5.8124375
+  3ee60e72  # 0.44932896
+tensor grad_input 2 5
+  be728555  # -0.23683675
+  be36a300  # -0.17835617
+  4040388a  # 3.0034509
+  be4467aa  # -0.1918017
+  3ee30d38  # 0.44346023
+  c0c77c2f  # -6.233909
+  bd390dc0  # -0.04517913
+  3fdc2b36  # 1.7200687
+  c094cc64  # -4.64995
+  3e958963  # 0.2920638
+end
+
+case Linear default
+mode training
+output_shape "(2, 5)"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor predict 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor grad_input 2 5
+  bfe00000  # -1.75
+  be99999a  # -0.3
+  3f933333  # 1.15
+  bf733333  # -0.95
+  3f000000  # 0.5
+  bfcccccd  # -1.6
+  be19999a  # -0.15
+  3fa66666  # 1.3
+  bf4ccccd  # -0.8
+  3f266666  # 0.65
+end
+
+case Sigmoid default
+mode training
+output_shape "(2, 5)"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  3df420a9  # 0.11920292
+  3ebee67d  # 0.37285224
+  3f391e83  # 0.7231218
+  3e2c035f  # 0.16798161
+  3ef0a88e  # 0.47003597
+  3f4bb6e9  # 0.79575974
+  3e6d07d7  # 0.23147522
+  3f11cdc8  # 0.5695462
+  3f5a6bf3  # 0.8532097
+  3e9ebbaa  # 0.3100255
+tensor predict 2 5
+  3df420a9  # 0.11920292
+  3ebee67d  # 0.37285224
+  3f391e83  # 0.7231218
+  3e2c035f  # 0.16798161
+  3ef0a88e  # 0.47003597
+  3f4bb6e9  # 0.79575974
+  3e6d07d7  # 0.23147522
+  3f11cdc8  # 0.5695462
+  3f5a6bf3  # 0.8532097
+  3e9ebbaa  # 0.3100255
+tensor grad_input 2 5
+  be3c2604  # -0.18373877
+  bd8faad3  # -0.07015004
+  3e6bc66e  # 0.23024914
+  be07f653  # -0.13277559
+  3dff14a3  # 0.12455108
+  be852436  # -0.2600419
+  bcda98c1  # -0.026684167
+  3ea32e42  # 0.3187123
+  bdcd32b0  # -0.100194335
+  3e0e60d8  # 0.1390413
+end
+
+case Tanh default
+mode training
+output_shape "(2, 5)"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  bf76ca83  # -0.9640276
+  bef49518  # -0.4777
+  3f3e88ee  # 0.7442769
+  bf6bf278  # -0.9216685
+  bdf4964c  # -0.11942729
+  3f605b4c  # 0.8763931
+  bf556a64  # -0.83365464
+  3e8bba37  # 0.27290508
+  3f7147e1  # 0.94250304
+  bf29fe50  # -0.66403675
+tensor predict 2 5
+  bf76ca83  # -0.9640276
+  bef49518  # -0.4777
+  3f3e88ee  # 0.7442769
+  bf6bf278  # -0.9216685
+  bdf4964c  # -0.11942729
+  3f605b4c  # 0.8763931
+  bf556a64  # -0.83365464
+  3e8bba37  # 0.27290508
+  3f7147e1  # 0.94250304
+  bf29fe50  # -0.66403675
+tensor grad_input 2 5
+  bdfd3668  # -0.12363893
+  be6d190a  # -0.23154083
+  3f035153  # 0.51295966
+  be126ecb  # -0.14300077
+  3efc5945  # 0.49286857
+  bebe0053  # -0.37109622
+  bd3b677c  # -0.045752987
+  3f9a01ca  # 1.2031796
+  bdb6fd5a  # -0.08935042
+  3eba0db7  # 0.3633859
+end
+
+case Softmax rank_2
+mode training
+output_shape "(2, 5)"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  3cfa3e13  # 0.030547177
+  3e0969a7  # 0.1341921
+  3f16e961  # 0.5894986
+  3d3aa8b2  # 0.045571037
+  3e4cfee5  # 0.2001911
+  3ea94f32  # 0.33068234
+  3cd16a26  # 0.02556331
+  3de5fc9e  # 0.112298235
+  3efc9473  # 0.49332008
+  3d1c347a  # 0.038135983
+tensor predict 2 5
+  3cfa3e13  # 0.030547177
+  3e0969a7  # 0.1341921
+  3f16e961  # 0.5894986
+  3d3aa8b2  # 0.045571037
+  3e4cfee5  # 0.2001911
+  3ea94f32  # 0.33068234
+  3cd16a26  # 0.02556331
+  3de5fc9e  # 0.112298235
+  3efc9473  # 0.49332008
+  3d1c347a  # 0.038135983
+tensor grad_input 2 5
+  bd959549  # -0.073038645
+  be014e92  # -0.12627628
+  3e999fe8  # 0.3000481
+  bd947cff  # -0.072504036
+  bce740f0  # -0.028229207
+  be8ec2b6  # -0.27882928
+  3c7e25f3  # 0.0155119775
+  3e6c84e4  # 0.23097569
+  bcae8ed8  # -0.021308348
+  3d5bc00a  # 0.05364994
+end
+
+case Softmax rank_3
+mode training
+output_shape "(2, 2, 5)"
+param_count none
+tensor input 2 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+tensor forward 2 2 5
+  3cfa3e13  # 0.030547177
+  3e0969a7  # 0.1341921
+  3f16e961  # 0.5894986
+  3d3aa8b2  # 0.045571037
+  3e4cfee5  # 0.2001911
+  3ea94f32  # 0.33068234
+  3cd16a26  # 0.02556331
+  3de5fc9e  # 0.112298235
+  3efc9473  # 0.49332008
+  3d1c347a  # 0.038135983
+  3ea94f32  # 0.33068234
+  3cd16a26  # 0.02556331
+  3de5fc9e  # 0.112298235
+  3efc9473  # 0.49332008
+  3d1c347a  # 0.038135983
+  3d94a4e8  # 0.07258016
+  3ea33f16  # 0.31884068
+  3cc9ea62  # 0.024647895
+  3dddc043  # 0.10827687
+  3ef388fa  # 0.47565442
+tensor predict 2 2 5
+  3cfa3e13  # 0.030547177
+  3e0969a7  # 0.1341921
+  3f16e961  # 0.5894986
+  3d3aa8b2  # 0.045571037
+  3e4cfee5  # 0.2001911
+  3ea94f32  # 0.33068234
+  3cd16a26  # 0.02556331
+  3de5fc9e  # 0.112298235
+  3efc9473  # 0.49332008
+  3d1c347a  # 0.038135983
+  3ea94f32  # 0.33068234
+  3cd16a26  # 0.02556331
+  3de5fc9e  # 0.112298235
+  3efc9473  # 0.49332008
+  3d1c347a  # 0.038135983
+  3d94a4e8  # 0.07258016
+  3ea33f16  # 0.31884068
+  3cc9ea62  # 0.024647895
+  3dddc043  # 0.10827687
+  3ef388fa  # 0.47565442
+tensor grad_input 2 2 5
+  bd959549  # -0.073038645
+  be014e92  # -0.12627628
+  3e999fe8  # 0.3000481
+  bd947cff  # -0.072504036
+  bce740f0  # -0.028229207
+  be8ec2b6  # -0.27882928
+  3c7e25f3  # 0.0155119775
+  3e6c84e4  # 0.23097569
+  bcae8ed8  # -0.021308348
+  3d5bc00a  # 0.05364994
+  be8ec2b8  # -0.27882934
+  3c7e25f0  # 0.015511975
+  3e6c84e4  # 0.23097569
+  bcae8ee8  # -0.021308377
+  3d5bc00a  # 0.05364994
+  bdfb4dd5  # -0.12270705
+  bd9d22bb  # -0.0767264
+  3cf43030  # 0.029808134
+  bdc58030  # -0.096435905
+  3e88392c  # 0.2660612
+end
+
+case PReLU per_feature
+mode training
+output_shape "(2, 5)"
+param_count trainable 5
+param_name alpha layer
+weight alpha 5 checksum d8c662c1f40b282a
+step_weight alpha 5 checksum b40b34c9e14d32b7
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  3ff9999a  # 1.95
+  be3a5e35  # -0.182
+  3f75c28f  # 0.96
+  3fc28f5c  # 1.52
+  bd3851eb  # -0.044999998
+  3fae147b  # 1.36
+  bed70a3e  # -0.42000002
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  be99999a  # -0.3
+tensor predict 2 5
+  3ff9999a  # 1.95
+  be3a5e35  # -0.182
+  3f75c28f  # 0.96
+  3fc28f5c  # 1.52
+  bd3851eb  # -0.044999998
+  3fae147b  # 1.36
+  bed70a3e  # -0.42000002
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  be99999a  # -0.3
+tensor grad_input 2 5
+  3fda6667  # 1.7062501
+  bdd70a3e  # -0.105000004
+  3f933333  # 1.15
+  3f670a3d  # 0.9025
+  3e400000  # 0.1875
+  bfcccccd  # -1.6
+  bd570a3e  # -0.052500002
+  3fa66666  # 1.3
+  bf4ccccd  # -0.8
+  3e799999  # 0.24374999
+tensor grad_param.alpha 5 no_decay
+  40600000  # 3.5
+  3eac0832  # 0.33600003
+  00000000  # 0.0
+  3fc28f5c  # 1.52
+  bf147ae1  # -0.58
+tensor step_param.alpha 5
+  bfb4cccd  # -1.4125
+  3e9db22d  # 0.308
+  be99999a  # -0.3
+  bf91eb85  # -1.14
+  3ee51eb8  # 0.4475
+end
+
+case PReLU shared_axis_1
+mode training
+output_shape "(2, 3, 4)"
+param_count trainable 4
+param_name alpha layer
+weight alpha 1 4 checksum 657ae2b486ecb3a5
+step_weight alpha 1 4 checksum 09d8d3182828d9d4
+tensor input 2 3 4
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor forward 2 3 4
+  3ff9999a  # 1.95
+  be3a5e35  # -0.182
+  3f75c28f  # 0.96
+  3fc28f5c  # 1.52
+  3def9db2  # 0.117
+  3fae147b  # 1.36
+  3eb851ec  # 0.36
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  be8f5c29  # -0.28
+  3f2e147b  # 0.68
+  3fe49ba6  # 1.786
+  3ec7ae15  # 0.39000002
+  3f8a3d71  # 1.08
+  3ee353f9  # 0.44400004
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bec18938  # -0.37800002
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  3f29ba5f  # 0.66300005
+  3f4ccccd  # 0.8
+  3f072b02  # 0.528
+  3e883127  # 0.266
+tensor predict 2 3 4
+  3ff9999a  # 1.95
+  be3a5e35  # -0.182
+  3f75c28f  # 0.96
+  3fc28f5c  # 1.52
+  3def9db2  # 0.117
+  3fae147b  # 1.36
+  3eb851ec  # 0.36
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  be8f5c29  # -0.28
+  3f2e147b  # 0.68
+  3fe49ba6  # 1.786
+  3ec7ae15  # 0.39000002
+  3f8a3d71  # 1.08
+  3ee353f9  # 0.44400004
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bec18938  # -0.37800002
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  3f29ba5f  # 0.66300005
+  3f4ccccd  # 0.8
+  3f072b02  # 0.528
+  3e883127  # 0.266
+tensor grad_input 2 3 4
+  3fda6667  # 1.7062501
+  bdd70a3e  # -0.105000004
+  3f933333  # 1.15
+  3f670a3d  # 0.9025
+  bef9999a  # -0.4875
+  bfcccccd  # -1.6
+  3d3851ec  # 0.045
+  3fa66666  # 1.3
+  bf4ccccd  # -0.8
+  3e68f5c2  # 0.22749999
+  bfb9999a  # -1.45
+  80000000  # -0.0
+  bfb4f5c3  # -1.41375
+  bf266666  # -0.65
+  be75c290  # -0.24000001
+  00000000  # 0.0
+  3e19999a  # 0.15
+  3f0f5c29  # 0.56
+  bf000000  # -0.5
+  3f733333  # 0.95
+  3f8f851f  # 1.12125
+  3e99999a  # 0.3
+  bf066667  # -0.52500004
+  3eaa3d70  # 0.33249998
+tensor grad_param.alpha 4 no_decay
+  40691688  # 3.6420002
+  c005e354  # -2.092
+  c082b020  # -4.0839996
+  3fcf1aa0  # 1.618
+tensor step_param.alpha 4
+  bfb7126f  # -1.43025
+  3f1c8b44  # 0.6115
+  3e578d4c  # 0.21049994
+  bf937cee  # -1.15225
+end
+
+case Rescaling scale_0p5
+mode training
+output_shape "Unknown"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  bf800000  # -1.0
+  be851eb8  # -0.26
+  3ef5c28f  # 0.48
+  bf4ccccd  # -0.8
+  bd75c28f  # -0.06
+  3f2e147b  # 0.68
+  bf19999a  # -0.6
+  3e0f5c29  # 0.14
+  3f6147ae  # 0.88
+  becccccd  # -0.4
+tensor predict 2 5
+  bf800000  # -1.0
+  be851eb8  # -0.26
+  3ef5c28f  # 0.48
+  bf4ccccd  # -0.8
+  bd75c28f  # -0.06
+  3f2e147b  # 0.68
+  bf19999a  # -0.6
+  3e0f5c29  # 0.14
+  3f6147ae  # 0.88
+  becccccd  # -0.4
+tensor grad_input 2 5
+  bf600000  # -0.875
+  be19999a  # -0.15
+  3f133333  # 0.575
+  bef33333  # -0.475
+  3e800000  # 0.25
+  bf4ccccd  # -0.8
+  bd99999a  # -0.075
+  3f266666  # 0.65
+  becccccd  # -0.4
+  3ea66666  # 0.325
+end
+
+case Rescaling scale_neg_1p5
+mode training
+output_shape "Unknown"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  40400000  # 3.0
+  3f47ae14  # 0.78
+  bfb851eb  # -1.4399999
+  4019999a  # 2.4
+  3e3851eb  # 0.17999999
+  c0028f5c  # -2.04
+  3fe66667  # 1.8000001
+  bed70a3e  # -0.42000002
+  c028f5c2  # -2.6399999
+  3f99999a  # 1.2
+tensor predict 2 5
+  40400000  # 3.0
+  3f47ae14  # 0.78
+  bfb851eb  # -1.4399999
+  4019999a  # 2.4
+  3e3851eb  # 0.17999999
+  c0028f5c  # -2.04
+  3fe66667  # 1.8000001
+  bed70a3e  # -0.42000002
+  c028f5c2  # -2.6399999
+  3f99999a  # 1.2
+tensor grad_input 2 5
+  40280000  # 2.625
+  3ee66667  # 0.45000002
+  bfdccccc  # -1.7249999
+  3fb66666  # 1.425
+  bf400000  # -0.75
+  4019999a  # 2.4
+  3e666667  # 0.22500001
+  bff99999  # -1.9499999
+  3f99999a  # 1.2
+  bf799999  # -0.97499996
+end
+
+case Rescaling scale_2p0_offset_neg_1p0
+mode training
+output_shape "Unknown"
+param_count none
+tensor input 2 5
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+tensor forward 2 5
+  c0a00000  # -5.0
+  c0028f5c  # -2.04
+  3f6b851e  # 0.91999996
+  c0866666  # -4.2
+  bf9eb852  # -1.24
+  3fdc28f6  # 1.72
+  c059999a  # -3.4
+  bee147ae  # -0.44
+  402147ae  # 2.52
+  c0266666  # -2.6
+tensor predict 2 5
+  c0a00000  # -5.0
+  c0028f5c  # -2.04
+  3f6b851e  # 0.91999996
+  c0866666  # -4.2
+  bf9eb852  # -1.24
+  3fdc28f6  # 1.72
+  c059999a  # -3.4
+  bee147ae  # -0.44
+  402147ae  # 2.52
+  c0266666  # -2.6
+tensor grad_input 2 5
+  c0600000  # -3.5
+  bf19999a  # -0.6
+  40133333  # 2.3
+  bff33333  # -1.9
+  3f800000  # 1.0
+  c04ccccd  # -3.2
+  be99999a  # -0.3
+  40266666  # 2.6
+  bfcccccd  # -1.6
+  3fa66666  # 1.3
+end
+
+case Rescaling rank_4_scale_0p25
+mode training
+output_shape "Unknown"
+param_count none
+tensor input 2 2 3 2
+  c0000000  # -2.0
+  bf051eb8  # -0.52
+  3f75c28f  # 0.96
+  bfcccccd  # -1.6
+  bdf5c28f  # -0.12
+  3fae147b  # 1.36
+  bf99999a  # -1.2
+  3e8f5c29  # 0.28
+  3fe147ae  # 1.76
+  bf4ccccd  # -0.8
+  3f2e147b  # 0.68
+  bff0a3d7  # -1.88
+  becccccd  # -0.4
+  3f8a3d71  # 1.08
+  bfbd70a4  # -1.48
+  00000000  # 0.0
+  3fbd70a4  # 1.48
+  bf8a3d71  # -1.08
+  3ecccccd  # 0.4
+  3ff0a3d7  # 1.88
+  bf2e147b  # -0.68
+  3f4ccccd  # 0.8
+  bfe147ae  # -1.76
+  be8f5c29  # -0.28
+tensor forward 2 2 3 2
+  bf000000  # -0.5
+  be051eb8  # -0.13
+  3e75c28f  # 0.24
+  becccccd  # -0.4
+  bcf5c28f  # -0.03
+  3eae147b  # 0.34
+  be99999a  # -0.3
+  3d8f5c29  # 0.07
+  3ee147ae  # 0.44
+  be4ccccd  # -0.2
+  3e2e147b  # 0.17
+  bef0a3d7  # -0.47
+  bdcccccd  # -0.1
+  3e8a3d71  # 0.27
+  bebd70a4  # -0.37
+  00000000  # 0.0
+  3ebd70a4  # 0.37
+  be8a3d71  # -0.27
+  3dcccccd  # 0.1
+  3ef0a3d7  # 0.47
+  be2e147b  # -0.17
+  3e4ccccd  # 0.2
+  bee147ae  # -0.44
+  bd8f5c29  # -0.07
+tensor predict 2 2 3 2
+  bf000000  # -0.5
+  be051eb8  # -0.13
+  3e75c28f  # 0.24
+  becccccd  # -0.4
+  bcf5c28f  # -0.03
+  3eae147b  # 0.34
+  be99999a  # -0.3
+  3d8f5c29  # 0.07
+  3ee147ae  # 0.44
+  be4ccccd  # -0.2
+  3e2e147b  # 0.17
+  bef0a3d7  # -0.47
+  bdcccccd  # -0.1
+  3e8a3d71  # 0.27
+  bebd70a4  # -0.37
+  00000000  # 0.0
+  3ebd70a4  # 0.37
+  be8a3d71  # -0.27
+  3dcccccd  # 0.1
+  3ef0a3d7  # 0.47
+  be2e147b  # -0.17
+  3e4ccccd  # 0.2
+  bee147ae  # -0.44
+  bd8f5c29  # -0.07
+tensor grad_input 2 2 3 2
+  bee00000  # -0.4375
+  bd99999a  # -0.075
+  3e933333  # 0.2875
+  be733333  # -0.2375
+  3e000000  # 0.125
+  becccccd  # -0.4
+  bd19999a  # -0.0375
+  3ea66666  # 0.325
+  be4ccccd  # -0.2
+  3e266666  # 0.1625
+  beb9999a  # -0.3625
+  00000000  # 0.0
+  3eb9999a  # 0.3625
+  be266666  # -0.1625
+  3e4ccccd  # 0.2
+  bea66666  # -0.325
+  3d19999a  # 0.0375
+  3ecccccd  # 0.4
+  be000000  # -0.125
+  3e733333  # 0.2375
+  be933333  # -0.2875
+  3d99999a  # 0.075
+  3ee00000  # 0.4375
+  bdb33333  # -0.0875
+end

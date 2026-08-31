@@ -30,6 +30,8 @@ mod dense;
 mod dropout;
 /// Tests for the Embedding layer: lookup values, index rules, and the scatter-add backward pass.
 mod embedding;
+/// Bit-exact golden fixtures that pin the behavior of every layer before the layer rewrite.
+mod golden;
 /// Tests for the Identity layer: pass-through, layout, and error paths.
 mod identity;
 /// Tests for the loss functions: forward values, gradients, and error paths.
