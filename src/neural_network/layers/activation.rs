@@ -98,6 +98,11 @@ const SELU_SCALE_ALPHA: f32 = SELU_SCALE * SELU_ALPHA;
 /// The slope of the hard sigmoid's linear segment, `1/6`
 const HARD_SIGMOID_SLOPE: f32 = 1.0 / 6.0;
 
+/// The default softmax axis, the last axis of the input
+///
+/// A negative axis counts back from the end, so `-1` holds for every rank
+pub const DEFAULT_SOFTMAX_AXIS: i32 = -1;
+
 /// The element-wise activation functions that trainable layers can embed
 ///
 /// Dense, the convolutional layers, and the recurrent layers each carry an `Activation` value
@@ -156,8 +161,22 @@ pub enum Activation {
     Sigmoid,
     /// Hyperbolic tangent, `tanh(x)`
     Tanh,
-    /// Softmax over the last axis (input must be at least 2D)
-    Softmax,
+    /// Softmax over 1 axis, `e^x / sum(e^x)` along that axis
+    ///
+    /// The lanes along the chosen axis each become a probability distribution that sums
+    /// to 1. The whole tensor keeps its shape
+    Softmax {
+        /// Axis to normalize. A negative value counts back from the end, so the default
+        /// `-1` always means the last axis
+        ///
+        /// The axis resolves against the rank of the input on each call, not when the
+        /// value is built. The same value therefore normalizes the last axis of a rank-2
+        /// input and the last axis of a rank-4 input. A resolved index outside the rank
+        /// of the input fails the call
+        ///
+        /// A trainable host layer accepts `-1` alone. See [`Activation::validate`]
+        axis: i32,
+    },
     /// Leaky rectified linear unit, `x` for `x >= 0` and `negative_slope * x` below it
     ///
     /// Unlike [`Activation::ReLU`], the negative side keeps a non-zero gradient, so a unit
@@ -204,7 +223,7 @@ impl Activation {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - Softmax received an input with fewer than 2 dimensions
+    /// - `Error::InvalidInput` - The Softmax axis resolves outside the rank of `z`
     /// - `Error::Computation` - Softmax failed to reshape the input
     pub fn forward(&self, z: &Tensor) -> Result<Tensor, Error> {
         match self {
@@ -236,7 +255,7 @@ impl Activation {
                 };
                 Ok(out)
             }
-            Activation::Softmax => softmax_forward(z),
+            Activation::Softmax { axis } => softmax_forward(z, *axis),
             Activation::LeakyReLU { negative_slope } => {
                 let slope = *negative_slope;
                 let leaky_relu = |x: f32| if x >= 0.0 { x } else { slope * x };
@@ -338,6 +357,9 @@ impl Activation {
     ///
     /// # Errors
     ///
+    /// - `Error::InvalidInput` - The Softmax axis resolves outside the rank of `activated`
+    /// - `Error::ShapeMismatch` - Softmax received a `grad_output` whose shape differs from
+    ///   the shape of `activated`
     /// - `Error::Computation` - Softmax failed to reshape the tensors
     pub fn backward(&self, activated: &Tensor, grad_output: &Tensor) -> Result<Tensor, Error> {
         match self {
@@ -388,7 +410,7 @@ impl Activation {
                 }
                 Ok(grad)
             }
-            Activation::Softmax => softmax_backward(activated, grad_output),
+            Activation::Softmax { axis } => softmax_backward(activated, grad_output, *axis),
             Activation::LeakyReLU { negative_slope } => {
                 // LeakyReLU'(z) = 1 when z >= 0, and `negative_slope` below it. A positive
                 // slope keeps the sign of z, so `a < 0` marks exactly the elements with z < 0
@@ -530,6 +552,22 @@ impl Activation {
     /// or scale of 0 collapses the whole negative side onto `a = 0`, which erases the branch.
     /// A negative one inverts the sign, which reads the wrong branch
     ///
+    /// # The Softmax axis of an embedded activation
+    ///
+    /// An embedded [`Activation::Softmax`] accepts the default axis `-1` alone. This
+    /// restriction is a deliberate simplification, not a limit of the math
+    ///
+    /// The host layers do not agree on the rank of the tensor they hand to the activation.
+    /// [`Dense`](crate::neural_network::layers::dense::Dense) folds every leading axis of its
+    /// output into 1 row axis, and it applies the activation to that rank-2 matrix. The
+    /// convolution layers do not fold, and they apply the activation to the full output
+    /// tensor. The recurrent layers apply the activation to 1 rank-2 state per timestep
+    ///
+    /// The axis `-1` names the same lane in all 3 families. Any other axis names a different
+    /// tensor axis in each family. In `Dense` a non-final axis would normalize the folded
+    /// rows, which are not the wanted lanes. A per-host axis rule is deferred, not
+    /// impossible. Use the standalone [`Softmax`] layer for a different axis
+    ///
     /// # Returns
     ///
     /// - `Result<(), Error>` - Ok when the activation is usable
@@ -537,7 +575,7 @@ impl Activation {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - `LeakyReLU`'s `negative_slope` or `ELU`'s `alpha` is not
-    ///   finite and greater than 0
+    ///   finite and greater than 0, or `Softmax`'s `axis` is not `-1`
     pub fn validate(&self) -> Result<(), Error> {
         let (name, value, reason) = match self {
             Activation::LeakyReLU { negative_slope } => (
@@ -546,6 +584,15 @@ impl Activation {
                 "must be finite and greater than 0 (use Activation::ReLU for 0)",
             ),
             Activation::ELU { alpha } => ("alpha", *alpha, "must be finite and greater than 0"),
+            Activation::Softmax { axis } => {
+                if *axis != DEFAULT_SOFTMAX_AXIS {
+                    return Err(Error::invalid_parameter(
+                        "axis",
+                        "must be -1 in a trainable layer (use the Softmax layer for another axis)",
+                    ));
+                }
+                return Ok(());
+            }
             _ => return Ok(()),
         };
 
@@ -582,8 +629,8 @@ impl From<Tanh> for Activation {
 }
 impl From<Softmax> for Activation {
     #[inline]
-    fn from(_: Softmax) -> Self {
-        Activation::Softmax
+    fn from(layer: Softmax) -> Self {
+        Activation::Softmax { axis: layer.axis }
     }
 }
 impl From<LeakyReLU> for Activation {
@@ -631,105 +678,202 @@ impl From<Exponential> for Activation {
     }
 }
 
-/// Softmax forward over the last axis, with the row-max shift for numerical stability
-fn softmax_forward(input: &Tensor) -> Result<Tensor, Error> {
-    let shape = input.shape();
-    let ndim = shape.len();
-
-    if ndim < 2 {
-        return Err(Error::invalid_input(format!(
-            "Softmax requires input with at least 2 dimensions, got shape: {:?}",
-            shape
-        )));
-    }
-
-    // Flatten to [batch, features]. Softmax runs over the last axis
-    let batch_size: usize = shape[..ndim - 1].iter().product();
-    let num_features = shape[ndim - 1];
-
-    // `to_owned` keeps a non-C-order array's strides, so `into_shape_with_order` then
-    // refuses it. `as_standard_layout` puts the array in C order first.
-    let mut output_2d = input
-        .as_standard_layout()
-        .into_owned()
-        .into_shape_with_order((batch_size, num_features))
-        .context("Failed to reshape for softmax computation")?;
-
-    let apply_softmax = |mut row: ArrayViewMut1<f32>| {
-        // Subtract the row max so every exp argument is <= 0 (no overflow)
-        let max_val = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        row.map_inplace(|x| *x = (*x - max_val).exp());
-        // The max-shift guarantees one of the terms is exp(0)=1.0, so the sum is always >= 1.0
-        let sum = row.sum();
-        row.map_inplace(|x| *x /= sum);
+/// Resolves a softmax axis against the rank of the tensor it applies to
+///
+/// A negative axis counts back from the end. The resolution happens on each call, never when
+/// the [`Activation`] value or the [`Softmax`] layer is built. A value that holds a resolved
+/// index would reduce the wrong axis as soon as the rank of the input changed
+///
+/// # Parameters
+///
+/// - `axis` - Axis to normalize, which can be negative
+/// - `ndim` - Rank of the tensor
+///
+/// # Returns
+///
+/// - `Result<usize, Error>` - The resolved axis, from 0 through `ndim - 1`
+///
+/// # Errors
+///
+/// - `Error::InvalidInput` - The resolved axis falls outside the rank
+fn resolve_softmax_axis(axis: i32, ndim: usize) -> Result<usize, Error> {
+    // The widening to i64 keeps the sum in range for every i32 input, `i32::MIN` included
+    let resolved = if axis < 0 {
+        axis as i64 + ndim as i64
+    } else {
+        axis as i64
     };
 
-    // The task is 1 row, so a single-row input has nothing to spread and must stay serial
-    if batch_size > 1 && batch_size * num_features >= exp_map_parallel_threshold() {
-        output_2d
-            .axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .for_each(apply_softmax);
-    } else {
-        output_2d.axis_iter_mut(Axis(0)).for_each(apply_softmax);
+    if resolved < 0 || resolved >= ndim as i64 {
+        return Err(Error::invalid_input(format!(
+            "Softmax axis {axis} is out of bounds for an input of rank {ndim}"
+        )));
+    }
+    Ok(resolved as usize)
+}
+
+/// Softmax forward over 1 axis, with the lane-max shift for numerical stability
+///
+/// The last axis takes the fold-to-2D path, whose lanes are contiguous rows. Every other axis
+/// takes the lane path, because the lanes along a non-final axis are strided and a fold would
+/// mix them
+fn softmax_forward(input: &Tensor, axis: i32) -> Result<Tensor, Error> {
+    let shape = input.shape();
+    let ndim = shape.len();
+    let axis = resolve_softmax_axis(axis, ndim)?;
+
+    let apply_softmax = |mut lane: ArrayViewMut1<f32>| {
+        // Subtract the lane max so every exp argument is <= 0 (no overflow)
+        let max_val = lane.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        lane.map_inplace(|x| *x = (*x - max_val).exp());
+        // The max-shift guarantees one of the terms is exp(0)=1.0, so the sum is always >= 1.0
+        let sum = lane.sum();
+        lane.map_inplace(|x| *x /= sum);
+    };
+
+    if axis + 1 == ndim {
+        // Flatten to [batch, features]. A fold of the leading axes keeps every last-axis lane
+        // whole, so the 2D rows are exactly the lanes
+        let batch_size: usize = shape[..ndim - 1].iter().product();
+        let num_features = shape[ndim - 1];
+
+        // `to_owned` keeps a non-C-order array's strides, so `into_shape_with_order` then
+        // refuses it. `as_standard_layout` puts the array in C order first.
+        let mut output_2d = input
+            .as_standard_layout()
+            .into_owned()
+            .into_shape_with_order((batch_size, num_features))
+            .context("Failed to reshape for softmax computation")?;
+
+        // The task is 1 row, so a single-row input has nothing to spread and must stay serial
+        if batch_size > 1 && batch_size * num_features >= exp_map_parallel_threshold() {
+            output_2d
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .for_each(apply_softmax);
+        } else {
+            output_2d.axis_iter_mut(Axis(0)).for_each(apply_softmax);
+        }
+
+        return Ok(output_2d
+            .into_shape_with_order(shape)
+            .context("Failed to reshape back after softmax computation")?
+            .into_dyn());
     }
 
-    Ok(output_2d
-        .into_shape_with_order(shape)
-        .context("Failed to reshape back after softmax computation")?
-        .into_dyn())
+    // A fresh C-order destination takes the input values, and the lanes then hold the strided
+    // groups that the chosen axis selects. This keeps the result in C order for every input
+    // layout, which no reshape of a strided view can promise
+    let mut output = Tensor::zeros(input.raw_dim());
+    output.assign(input);
+
+    let lane_len = shape[axis];
+    let lane_count: usize = shape
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != axis)
+        .map(|(_, &length)| length)
+        .product();
+
+    // The task is 1 lane, so a single-lane input has nothing to spread and must stay serial
+    if lane_count > 1 && lane_count * lane_len >= exp_map_parallel_threshold() {
+        Zip::from(output.lanes_mut(Axis(axis))).par_for_each(apply_softmax);
+    } else {
+        Zip::from(output.lanes_mut(Axis(axis))).for_each(apply_softmax);
+    }
+
+    Ok(output)
 }
 
 /// Softmax backward using the Jacobian-vector product expressed via the cached output
-fn softmax_backward(output: &Tensor, grad_output: &Tensor) -> Result<Tensor, Error> {
+///
+/// The product `dL/dz = a * (g - sum_over_axis(a * g))` is exact for every axis, so the
+/// output-only derivative contract holds as long as the value carries the axis
+fn softmax_backward(output: &Tensor, grad_output: &Tensor, axis: i32) -> Result<Tensor, Error> {
     let shape = output.shape();
     let ndim = shape.len();
-    let batch_size: usize = shape[..ndim - 1].iter().product();
-    let num_features = shape[ndim - 1];
+    let axis = resolve_softmax_axis(axis, ndim)?;
 
-    let output_2d = output
-        .to_shape((batch_size, num_features))
-        .context("Failed to reshape output for backward")?;
-
-    let grad_output_2d = grad_output
-        .to_shape((batch_size, num_features))
-        .context("Failed to reshape grad_output for backward")?;
-
-    let mut grad_input_2d = Array2::<f32>::zeros((batch_size, num_features));
+    // Softmax keeps the shape, so the 2 tensors walk the same lanes. The lane path pairs the
+    // 2 shapes directly, and a mismatch there is a panic rather than an error
+    if grad_output.shape() != shape {
+        return Err(Error::shape_mismatch(shape, grad_output.shape()));
+    }
 
     // grad_input[i] = a[i] * (grad_output[i] - sum_j(a[j] * grad_output[j]))
-    let compute_gradient = |mut grad_row: ArrayViewMut1<f32>,
-                            out_row: ArrayView1<f32>,
-                            grad_out_row: ArrayView1<f32>| {
-        let dot: f32 = out_row
+    let compute_gradient = |mut grad_lane: ArrayViewMut1<f32>,
+                            out_lane: ArrayView1<f32>,
+                            grad_out_lane: ArrayView1<f32>| {
+        let dot: f32 = out_lane
             .iter()
-            .zip(grad_out_row.iter())
+            .zip(grad_out_lane.iter())
             .map(|(&o, &g)| o * g)
             .sum();
 
-        for j in 0..num_features {
-            grad_row[j] = out_row[j] * (grad_out_row[j] - dot);
-        }
+        Zip::from(&mut grad_lane)
+            .and(&out_lane)
+            .and(&grad_out_lane)
+            .for_each(|grad, &o, &g| *grad = o * (g - dot));
     };
 
-    // The backward pass is a row dot and a scale, with no `exp`, so it is a cheap map. The task
-    // is 1 row, so a single-row input stays serial
-    if batch_size > 1 && batch_size * num_features >= cheap_map_parallel_threshold() {
-        Zip::from(grad_input_2d.axis_iter_mut(Axis(0)))
-            .and(output_2d.axis_iter(Axis(0)))
-            .and(grad_output_2d.axis_iter(Axis(0)))
+    if axis + 1 == ndim {
+        let batch_size: usize = shape[..ndim - 1].iter().product();
+        let num_features = shape[ndim - 1];
+
+        let output_2d = output
+            .to_shape((batch_size, num_features))
+            .context("Failed to reshape output for backward")?;
+
+        let grad_output_2d = grad_output
+            .to_shape((batch_size, num_features))
+            .context("Failed to reshape grad_output for backward")?;
+
+        let mut grad_input_2d = Array2::<f32>::zeros((batch_size, num_features));
+
+        // The backward pass is a row dot and a scale, with no `exp`, so it is a cheap map. The
+        // task is 1 row, so a single-row input stays serial
+        if batch_size > 1 && batch_size * num_features >= cheap_map_parallel_threshold() {
+            Zip::from(grad_input_2d.axis_iter_mut(Axis(0)))
+                .and(output_2d.axis_iter(Axis(0)))
+                .and(grad_output_2d.axis_iter(Axis(0)))
+                .par_for_each(compute_gradient);
+        } else {
+            Zip::from(grad_input_2d.axis_iter_mut(Axis(0)))
+                .and(output_2d.axis_iter(Axis(0)))
+                .and(grad_output_2d.axis_iter(Axis(0)))
+                .for_each(compute_gradient);
+        }
+
+        return Ok(grad_input_2d
+            .into_shape_with_order(shape)
+            .context("Failed to reshape grad_input back")?
+            .into_dyn());
+    }
+
+    let mut grad_input = Tensor::zeros(output.raw_dim());
+
+    let lane_len = shape[axis];
+    let lane_count: usize = shape
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != axis)
+        .map(|(_, &length)| length)
+        .product();
+
+    // The task is 1 lane, so a single-lane input stays serial
+    if lane_count > 1 && lane_count * lane_len >= cheap_map_parallel_threshold() {
+        Zip::from(grad_input.lanes_mut(Axis(axis)))
+            .and(output.lanes(Axis(axis)))
+            .and(grad_output.lanes(Axis(axis)))
             .par_for_each(compute_gradient);
     } else {
-        Zip::from(grad_input_2d.axis_iter_mut(Axis(0)))
-            .and(output_2d.axis_iter(Axis(0)))
-            .and(grad_output_2d.axis_iter(Axis(0)))
+        Zip::from(grad_input.lanes_mut(Axis(axis)))
+            .and(output.lanes(Axis(axis)))
+            .and(grad_output.lanes(Axis(axis)))
             .for_each(compute_gradient);
     }
 
-    Ok(grad_input_2d
-        .into_shape_with_order(shape)
-        .context("Failed to reshape grad_input back")?
-        .into_dyn())
+    Ok(grad_input)
 }
 
 /// Unit tests for the activation layer helpers and the `Activation` enum
@@ -754,7 +898,7 @@ mod tests {
     #[test]
     fn softmax_forward_basic_row() {
         let input = tensor2(1, 3, vec![0.0, 1.0, 2.0]);
-        let output = softmax_forward(&input).expect("softmax_forward failed");
+        let output = softmax_forward(&input, DEFAULT_SOFTMAX_AXIS).expect("softmax_forward failed");
         let vals = output.as_slice().expect("not contiguous");
         assert_abs_diff_eq!(vals[0], 0.09003_f32, epsilon = 1e-4);
         assert_abs_diff_eq!(vals[1], 0.24473_f32, epsilon = 1e-4);
@@ -765,7 +909,7 @@ mod tests {
     #[test]
     fn softmax_forward_sums_to_one() {
         let input = tensor2(1, 3, vec![0.0, 1.0, 2.0]);
-        let output = softmax_forward(&input).expect("softmax_forward failed");
+        let output = softmax_forward(&input, DEFAULT_SOFTMAX_AXIS).expect("softmax_forward failed");
         let sum: f32 = output.iter().sum();
         assert_abs_diff_eq!(sum, 1.0_f32, epsilon = 1e-6);
     }
@@ -774,7 +918,7 @@ mod tests {
     #[test]
     fn softmax_forward_large_equal_values_stable() {
         let input = tensor2(1, 3, vec![1000.0, 1000.0, 1000.0]);
-        let output = softmax_forward(&input).expect("softmax_forward failed");
+        let output = softmax_forward(&input, DEFAULT_SOFTMAX_AXIS).expect("softmax_forward failed");
         let vals = output.as_slice().expect("not contiguous");
         let third = 1.0_f32 / 3.0;
         assert_abs_diff_eq!(vals[0], third, epsilon = 1e-6);
@@ -786,7 +930,7 @@ mod tests {
     #[test]
     fn softmax_forward_single_element_row() {
         let input = tensor2(1, 1, vec![5.0]);
-        let output = softmax_forward(&input).expect("softmax_forward failed");
+        let output = softmax_forward(&input, DEFAULT_SOFTMAX_AXIS).expect("softmax_forward failed");
         let vals = output.as_slice().expect("not contiguous");
         assert_abs_diff_eq!(vals[0], 1.0_f32, epsilon = 1e-6);
     }
@@ -808,25 +952,121 @@ mod tests {
             "the test input must not be in C order"
         );
 
-        let output = softmax_forward(&transposed).expect("softmax_forward must accept it");
+        let output = softmax_forward(&transposed, DEFAULT_SOFTMAX_AXIS)
+            .expect("softmax_forward must accept it");
         assert_eq!(output.shape(), &[3, 2]);
 
         let c_order: Tensor = transposed.as_standard_layout().into_owned();
-        let want = softmax_forward(&c_order).expect("softmax_forward failed");
+        let want = softmax_forward(&c_order, DEFAULT_SOFTMAX_AXIS).expect("softmax_forward failed");
         for (got, expected) in output.iter().zip(want.iter()) {
             assert_abs_diff_eq!(*got, *expected, epsilon = 1e-6);
         }
     }
 
-    /// A 1-D input (ndim < 2) returns an error
+    /// A 1-D input normalizes its single axis, the way the reference layer does
     #[test]
-    fn softmax_forward_rejects_1d_input() {
+    fn softmax_forward_accepts_1d_input() {
         use ndarray::Array1;
-        let input = Array1::from_vec(vec![1.0_f32, 2.0, 3.0]).into_dyn();
+        let input = Array1::from_vec(vec![0.0_f32, 1.0, 2.0]).into_dyn();
+        let output =
+            softmax_forward(&input, DEFAULT_SOFTMAX_AXIS).expect("1-D input must be accepted");
+        assert_eq!(output.shape(), &[3]);
+        let vals: Vec<f32> = output.iter().cloned().collect();
+        assert_abs_diff_eq!(vals[0], 0.09003_f32, epsilon = 1e-4);
+        assert_abs_diff_eq!(vals[1], 0.24473_f32, epsilon = 1e-4);
+        assert_abs_diff_eq!(vals[2], 0.66524_f32, epsilon = 1e-4);
+    }
+
+    /// A 0-D input has no axis to normalize, so every axis is out of bounds
+    #[test]
+    fn softmax_forward_rejects_0d_input() {
+        let input: Tensor = ndarray::arr0(1.0_f32).into_dyn();
         assert!(
-            softmax_forward(&input).is_err(),
-            "1-D input should return Err"
+            matches!(
+                softmax_forward(&input, DEFAULT_SOFTMAX_AXIS),
+                Err(Error::InvalidInput(_))
+            ),
+            "0-D input must return InvalidInput"
         );
+    }
+
+    /// An axis outside the rank of the input fails the call, at both ends
+    #[test]
+    fn softmax_forward_rejects_out_of_range_axis() {
+        let input = tensor2(2, 3, vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
+        for axis in [2, 7, -3, -5, i32::MIN, i32::MAX] {
+            assert!(
+                matches!(softmax_forward(&input, axis), Err(Error::InvalidInput(_))),
+                "axis {axis} must be rejected for a rank-2 input"
+            );
+        }
+    }
+
+    /// The axis resolves against the rank of the input, on every call
+    ///
+    /// 1 value normalizes the last axis of a rank-2 input and the middle axis of a rank-3
+    /// input. A resolved index held from an earlier call would reduce the wrong axis
+    #[test]
+    fn softmax_forward_resolves_a_negative_axis_at_call_time() {
+        use ndarray::{Array, Ix3};
+
+        let rank_2 = tensor2(2, 3, vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
+        let last = softmax_forward(&rank_2, -1).expect("rank-2 forward");
+        let same = softmax_forward(&rank_2, 1).expect("rank-2 forward");
+        assert_eq!(
+            last.iter().cloned().collect::<Vec<f32>>(),
+            same.iter().cloned().collect::<Vec<f32>>(),
+            "-1 and 1 name the same axis of a rank-2 input"
+        );
+
+        let rank_3: Tensor =
+            Array::from_shape_fn((2, 3, 4), |(i, j, k)| (i * 12 + j * 4 + k) as f32 * 0.25)
+                .into_dyn();
+        let middle = softmax_forward(&rank_3, -2).expect("rank-3 forward");
+        let by_index = softmax_forward(&rank_3, 1).expect("rank-3 forward");
+        assert_eq!(
+            middle.iter().cloned().collect::<Vec<f32>>(),
+            by_index.iter().cloned().collect::<Vec<f32>>(),
+            "-2 and 1 name the same axis of a rank-3 input"
+        );
+
+        // Every lane of the resolved axis sums to 1, and no other axis does
+        let view = middle
+            .view()
+            .into_dimensionality::<Ix3>()
+            .expect("the result is rank 3");
+        for lane in view.lanes(Axis(1)) {
+            assert_abs_diff_eq!(lane.sum(), 1.0_f32, epsilon = 1e-6);
+        }
+    }
+
+    /// The lane path and the fold-to-2D path give the same values for the same lanes
+    ///
+    /// A softmax over axis 0 of a rank-2 input runs the lane path over strided lanes. The same
+    /// values transposed, normalized over the last axis, run the fold path. The 2 results must
+    /// agree, which is what makes the strided lane walk trustworthy
+    #[test]
+    fn softmax_forward_lane_path_agrees_with_the_fold_path() {
+        use ndarray::IxDyn;
+
+        let base = tensor2(3, 4, (0..12).map(|v| v as f32 * 0.3 - 1.5).collect());
+        let by_lane = softmax_forward(&base, 0).expect("axis 0 forward");
+
+        let transposed: Tensor = {
+            let view = base.view().permuted_axes(IxDyn(&[1, 0]));
+            let mut owned = Tensor::zeros(view.raw_dim());
+            owned.assign(&view);
+            owned
+        };
+        let by_fold = softmax_forward(&transposed, -1).expect("axis -1 forward");
+
+        for (row, column) in (0..3).flat_map(|r| (0..4).map(move |c| (r, c))) {
+            assert_abs_diff_eq!(
+                by_lane[[row, column]],
+                by_fold[[column, row]],
+                epsilon = 1e-7
+            );
+        }
     }
 
     // softmax_backward
@@ -836,7 +1076,8 @@ mod tests {
     fn softmax_backward_jacobian_vector_product() {
         let output = tensor2(1, 3, vec![0.25, 0.25, 0.5]);
         let grad_output = tensor2(1, 3, vec![1.0, 0.0, 0.0]);
-        let grad_input = softmax_backward(&output, &grad_output).expect("softmax_backward failed");
+        let grad_input = softmax_backward(&output, &grad_output, DEFAULT_SOFTMAX_AXIS)
+            .expect("softmax_backward failed");
         let vals = grad_input.as_slice().expect("not contiguous");
         assert_abs_diff_eq!(vals[0], 0.1875_f32, epsilon = 1e-6);
         assert_abs_diff_eq!(vals[1], -0.0625_f32, epsilon = 1e-6);
@@ -848,9 +1089,40 @@ mod tests {
     fn softmax_backward_row_sums_to_zero() {
         let output = tensor2(1, 3, vec![0.25, 0.25, 0.5]);
         let grad_output = tensor2(1, 3, vec![1.0, 0.0, 0.0]);
-        let grad_input = softmax_backward(&output, &grad_output).expect("softmax_backward failed");
+        let grad_input = softmax_backward(&output, &grad_output, DEFAULT_SOFTMAX_AXIS)
+            .expect("softmax_backward failed");
         let row_sum: f32 = grad_input.iter().sum();
         assert_abs_diff_eq!(row_sum, 0.0_f32, epsilon = 1e-6);
+    }
+
+    /// A grad_output that does not match the output shape is an error, not a panic
+    ///
+    /// The lane path pairs the 2 shapes with a `Zip`, which panics on a mismatch. The guard
+    /// must run before that, so the caller gets `Error::ShapeMismatch`. The fold path takes
+    /// the same guard, and this test pins both paths
+    #[test]
+    fn softmax_backward_rejects_a_mismatched_grad_output() {
+        use ndarray::IxDyn;
+
+        let output = Tensor::zeros(IxDyn(&[2, 3, 4]));
+        let grad_output = Tensor::zeros(IxDyn(&[2, 3, 5]));
+
+        // Axis 1 is not the last axis, so this call takes the lane path
+        match softmax_backward(&output, &grad_output, 1) {
+            Err(Error::ShapeMismatch { expected, found }) => {
+                assert_eq!(expected, vec![2, 3, 4]);
+                assert_eq!(found, vec![2, 3, 5]);
+            }
+            other => panic!("the lane path must return ShapeMismatch, got {other:?}"),
+        }
+
+        assert!(
+            matches!(
+                softmax_backward(&output, &grad_output, DEFAULT_SOFTMAX_AXIS),
+                Err(Error::ShapeMismatch { .. })
+            ),
+            "the fold path must return ShapeMismatch as well"
+        );
     }
 
     // Round-trip tests for the Activation enum's public API
@@ -859,9 +1131,11 @@ mod tests {
     #[test]
     fn activation_softmax_forward_via_enum() {
         let input = tensor2(1, 3, vec![0.0, 1.0, 2.0]);
-        let output = Activation::Softmax
-            .forward(&input)
-            .expect("Activation::Softmax forward failed");
+        let output = Activation::Softmax {
+            axis: DEFAULT_SOFTMAX_AXIS,
+        }
+        .forward(&input)
+        .expect("Activation::Softmax forward failed");
         let vals = output.as_slice().expect("not contiguous");
         // Same expected values as softmax_forward_basic_row
         assert_abs_diff_eq!(vals[0], 0.09003_f32, epsilon = 1e-4);
@@ -874,9 +1148,11 @@ mod tests {
     fn activation_softmax_backward_via_enum() {
         let output = tensor2(1, 3, vec![0.25, 0.25, 0.5]);
         let grad_output = tensor2(1, 3, vec![1.0, 0.0, 0.0]);
-        let grad_input = Activation::Softmax
-            .backward(&output, &grad_output)
-            .expect("Activation::Softmax backward failed");
+        let grad_input = Activation::Softmax {
+            axis: DEFAULT_SOFTMAX_AXIS,
+        }
+        .backward(&output, &grad_output)
+        .expect("Activation::Softmax backward failed");
         let vals = grad_input.as_slice().expect("not contiguous");
         assert_abs_diff_eq!(vals[0], 0.1875_f32, epsilon = 1e-6);
         assert_abs_diff_eq!(vals[1], -0.0625_f32, epsilon = 1e-6);
@@ -1228,7 +1504,9 @@ mod tests {
             Activation::ReLU,
             Activation::Sigmoid,
             Activation::Tanh,
-            Activation::Softmax,
+            Activation::Softmax {
+                axis: DEFAULT_SOFTMAX_AXIS,
+            },
             Activation::LeakyReLU {
                 negative_slope: 0.3,
             },

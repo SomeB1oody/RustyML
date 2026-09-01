@@ -278,8 +278,8 @@ impl Dense {
     ///
     /// The input arrives folded, and the result goes back to the rank of `input_shape`. A
     /// fold keeps each last-axis lane whole, so the activation gives the same result on the
-    /// folded matrix as on the restored tensor. This holds for `Softmax`, which also works
-    /// over the last axis
+    /// folded matrix as on the restored tensor. This holds for `Softmax` because an embedded
+    /// `Softmax` must carry the last axis. [`Activation::validate`] rejects any other axis
     ///
     /// # Parameters
     ///

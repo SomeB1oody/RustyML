@@ -38,7 +38,7 @@ use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
-use crate::common::assert_allclose;
+use crate::common::{GateGuard, assert_allclose};
 
 /// Build a 2-D tensor from row-major `data` with shape `(rows, cols)`
 fn tensor2(rows: usize, cols: usize, data: Vec<f32>) -> Tensor {
@@ -396,17 +396,20 @@ fn softmax_backward_before_forward_is_error() {
     );
 }
 
-/// 1-D input -> InvalidInput error (Softmax requires at least 2 dimensions)
+/// 1-D input normalizes its single axis, the way the reference layer does
+///
+/// The crate used to reject every input below rank 2. The reference layer accepts a rank-1
+/// input, so this pins the agreement
 #[test]
-fn softmax_1d_input_is_error() {
+fn softmax_1d_input_normalizes_the_single_axis() {
     let mut layer = Softmax::new();
-    let input = Array1::from_vec(vec![1.0_f32, 2.0, 3.0]).into_dyn();
-    let result = layer.forward(&input);
-    assert!(
-        matches!(result, Err(Error::InvalidInput(_))),
-        "expected InvalidInput, got {:?}",
-        result
-    );
+    let input = Array1::from_vec(vec![0.0_f32, 1.0, 2.0]).into_dyn();
+    let output = layer.forward(&input).expect("1-D input must be accepted");
+    assert_eq!(output.shape(), &[3]);
+    let vals: Vec<f32> = output.iter().cloned().collect();
+    assert_abs_diff_eq!(vals[0], 0.09003057330846786_f32, epsilon = 1e-7);
+    assert_abs_diff_eq!(vals[1], 0.2447284758090973_f32, epsilon = 1e-7);
+    assert_abs_diff_eq!(vals[2], 0.6652409434318542_f32, epsilon = 1e-7);
 }
 
 /// NaN input is not rejected: it contaminates the row's normalizer, so the whole row is NaN
@@ -963,7 +966,7 @@ fn activation_enum_tanh_known_values() {
 #[test]
 fn activation_enum_softmax_known_values() {
     let input = tensor2(1, 3, vec![0.0, 1.0, 2.0]);
-    let output = Activation::Softmax
+    let output = Activation::Softmax { axis: -1 }
         .forward(&input)
         .expect("enum softmax forward");
     let vals: Vec<f32> = output.iter().cloned().collect();
@@ -974,16 +977,27 @@ fn activation_enum_softmax_known_values() {
     assert_abs_diff_eq!(sum, 1.0_f32, epsilon = 1e-6);
 }
 
-/// Activation::Softmax.forward rejects 1-D input (ndim < 2)
+/// Activation::Softmax.forward rejects an axis that resolves outside the rank
+///
+/// The reference layer builds without complaint and fails the call, so the check belongs at
+/// call time. A rank-2 input therefore accepts -2 through 1 and nothing else
 #[test]
-fn activation_enum_softmax_rejects_1d() {
-    let input = Array1::from_vec(vec![1.0_f32, 2.0, 3.0]).into_dyn();
-    let result = Activation::Softmax.forward(&input);
-    assert!(
-        matches!(result, Err(Error::InvalidInput(_))),
-        "expected InvalidInput, got {:?}",
-        result
-    );
+fn activation_enum_softmax_rejects_an_out_of_range_axis() {
+    let input = tensor2(2, 3, vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
+    for axis in [2, 7, -3, -5] {
+        let result = Activation::Softmax { axis }.forward(&input);
+        assert!(
+            matches!(result, Err(Error::InvalidInput(_))),
+            "axis {axis}: expected InvalidInput, got {:?}",
+            result
+        );
+    }
+    for axis in [0, 1, -1, -2] {
+        assert!(
+            Activation::Softmax { axis }.forward(&input).is_ok(),
+            "axis {axis} is inside the rank of a rank-2 input"
+        );
+    }
 }
 
 // From<Layer> -> Activation conversions (confirms the enum round-trips)
@@ -1016,11 +1030,18 @@ fn from_tanh_yields_activation_tanh() {
     assert_eq!(act, Activation::Tanh);
 }
 
-/// From<Softmax> for Activation yields Activation::Softmax
+/// From<Softmax> for Activation carries the axis of the layer
 #[test]
 fn from_softmax_yields_activation_softmax() {
     let act: Activation = Softmax::new().into();
-    assert_eq!(act, Activation::Softmax);
+    assert_eq!(act, Activation::Softmax { axis: -1 });
+
+    let act: Activation = Softmax::new().with_axis(1).into();
+    assert_eq!(
+        act,
+        Activation::Softmax { axis: 1 },
+        "the conversion must not drop the axis"
+    );
 }
 
 // All 5 activation layers reject 0-length input in forward() and predict().
@@ -1265,4 +1286,386 @@ fn softplus_layer_matches_activation_enum() {
         .forward(&input)
         .expect("enum Softplus forward");
     assert_allclose(&layer_out, &enum_out, 0.0_f32);
+}
+
+// ---------------------------------------------------------------------------------------
+// The Softmax axis.
+//
+// The reference layer takes an `axis` argument. It resolves a negative value against the rank
+// of the input on each call. It fails the call when the resolved index falls outside that rank.
+// The pinned float32 values below come from that reference layer, at version 3.15.1
+// ---------------------------------------------------------------------------------------
+
+/// The rank-3 input that the axis tests share, in C order
+fn axis_input() -> Tensor {
+    Array::from_shape_vec(
+        (2, 2, 3),
+        vec![
+            -2.0, -0.52, 0.96, -1.6, -0.12, 1.36, -1.2, 0.28, 1.76, -0.8, 0.68, -1.88,
+        ],
+    )
+    .expect("shape/data mismatch")
+    .into_dyn()
+}
+
+/// A middle axis gives a different result from the last axis, and both match the reference
+///
+/// This is the discriminator of the whole feature. The 2 axes of the same rank-3 input differ
+/// by 0.55818695 at the largest element. A layer that silently normalized the last axis could
+/// not pass. Every value below is a reference value
+#[test]
+fn softmax_axis_1_and_axis_minus_1_differ_on_a_rank_3_input() {
+    let input = axis_input();
+
+    let mut middle = Softmax::new().with_axis(1);
+    let by_middle = middle.forward(&input).expect("axis 1 forward");
+    let expected_middle = [
+        0.40131232142448425_f32,
+        0.40131232142448425,
+        0.40131232142448425,
+        0.5986876487731934,
+        0.5986876487731934,
+        0.5986876487731934,
+        0.40131232142448425,
+        0.40131232142448425,
+        0.9744191765785217,
+        0.5986876487731934,
+        0.5986876487731934,
+        0.025580791756510735,
+    ];
+
+    let mut last = Softmax::new();
+    let by_last = last.forward(&input).expect("axis -1 forward");
+    let expected_last = [
+        0.04050072282552719_f32,
+        0.1779174655675888,
+        0.7815818190574646,
+        0.04050072282552719,
+        0.1779174655675888,
+        0.7815818190574646,
+        0.04050072282552719,
+        0.1779174655675888,
+        0.7815818190574646,
+        0.17444270849227905,
+        0.7663173675537109,
+        0.05923996865749359,
+    ];
+
+    for (&got, &want) in by_middle.iter().zip(expected_middle.iter()) {
+        assert_abs_diff_eq!(got, want, epsilon = 1e-6);
+    }
+    for (&got, &want) in by_last.iter().zip(expected_last.iter()) {
+        assert_abs_diff_eq!(got, want, epsilon = 1e-6);
+    }
+
+    // Every lane of the chosen axis sums to 1, and the 2 axes hold different lanes
+    let mut worst = 0.0_f32;
+    for (&middle_value, &last_value) in by_middle.iter().zip(by_last.iter()) {
+        worst = worst.max((middle_value - last_value).abs());
+    }
+    assert_abs_diff_eq!(worst, 0.55818695_f32, epsilon = 1e-6);
+}
+
+/// The backward pass of a middle axis matches the reference gradient
+///
+/// The Jacobian-vector product `a * (g - sum_over_axis(a * g))` is exact for every axis. A
+/// backward pass that summed over the last axis would fail here, because the layer cached an
+/// output that was normalized over axis 1
+#[test]
+fn softmax_axis_1_backward_matches_the_reference() {
+    let input = axis_input();
+    let grad_output = Array::from_shape_vec(
+        (2, 2, 3),
+        vec![
+            -1.75,
+            -0.30000001192092896,
+            1.149999976158142,
+            -0.949999988079071,
+            0.5,
+            -1.600000023841858,
+            -0.15000000596046448,
+            1.2999999523162842,
+            -0.800000011920929,
+            0.6499999761581421,
+            -1.4500000476837158,
+            0.0,
+        ],
+    )
+    .expect("shape/data mismatch")
+    .into_dyn();
+
+    let mut layer = Softmax::new().with_axis(1);
+    layer.forward(&input).expect("axis 1 forward");
+    let grad_input = layer.backward(&grad_output).expect("axis 1 backward");
+
+    let expected = [
+        -0.19220857322216034_f32,
+        -0.19220860302448273,
+        0.6607170701026917,
+        0.1922086477279663,
+        0.19220858812332153,
+        -0.6607170104980469,
+        -0.19220858812332153,
+        0.6607170701026917,
+        -0.01994115114212036,
+        0.19220857322216034,
+        -0.6607170104980469,
+        0.01994113065302372,
+    ];
+    for (&got, &want) in grad_input.iter().zip(expected.iter()) {
+        assert_abs_diff_eq!(got, want, epsilon = 1e-6);
+    }
+}
+
+/// `Activation::Softmax` at the default axis and the `Softmax` layer agree bit for bit
+///
+/// The enum is the single source of truth, so the layer must add no math of its own
+#[test]
+fn softmax_layer_matches_the_activation_enum_bit_for_bit() {
+    let input = axis_input();
+
+    let mut layer = Softmax::new();
+    let by_layer = layer.forward(&input).expect("Softmax layer forward");
+    let by_enum = Activation::Softmax { axis: -1 }
+        .forward(&input)
+        .expect("enum Softmax forward");
+
+    for (&got, &want) in by_layer.iter().zip(by_enum.iter()) {
+        assert_eq!(
+            got.to_bits(),
+            want.to_bits(),
+            "the 2 paths must agree exactly"
+        );
+    }
+}
+
+/// The axis resolves against the rank of the input, on each call
+///
+/// 1 layer normalizes the last axis of a rank-2 input and the middle axis of a rank-3 input.
+/// A layer that stored a resolved index would reduce the wrong axis on the second call
+#[test]
+fn softmax_resolves_a_negative_axis_at_call_time() {
+    use ndarray::Axis;
+
+    let mut layer = Softmax::new().with_axis(-2);
+
+    let rank_2 = tensor2(3, 4, (0..12).map(|v| v as f32 * 0.3 - 1.5).collect());
+    let by_rank_2 = layer.forward(&rank_2).expect("rank-2 forward");
+    for lane in by_rank_2.lanes(Axis(0)) {
+        assert_abs_diff_eq!(lane.sum(), 1.0_f32, epsilon = 1e-6);
+    }
+
+    let rank_3 = axis_input();
+    let by_rank_3 = layer.forward(&rank_3).expect("rank-3 forward");
+    for lane in by_rank_3.lanes(Axis(1)) {
+        assert_abs_diff_eq!(lane.sum(), 1.0_f32, epsilon = 1e-6);
+    }
+
+    // -2 of a rank-3 input is axis 1, and the values must match the pinned middle-axis case
+    let mut by_index = Softmax::new().with_axis(1);
+    let want = by_index.forward(&rank_3).expect("axis 1 forward");
+    for (&got, &expected) in by_rank_3.iter().zip(want.iter()) {
+        assert_eq!(
+            got.to_bits(),
+            expected.to_bits(),
+            "-2 and 1 are the same axis"
+        );
+    }
+}
+
+/// An out-of-range axis builds without complaint, and fails the forward pass
+///
+/// The reference layer checks the axis when it runs, not when it is built. The rank of the
+/// input is not known before the call
+#[test]
+fn softmax_out_of_range_axis_fails_the_forward_pass() {
+    let input = axis_input();
+    for axis in [3, 9, -4, -9, i32::MIN, i32::MAX] {
+        let mut layer = Softmax::new().with_axis(axis);
+        let result = layer.forward(&input);
+        assert!(
+            matches!(result, Err(Error::InvalidInput(_))),
+            "axis {axis}: expected InvalidInput, got {:?}",
+            result
+        );
+        assert!(
+            matches!(layer.predict(&input), Err(Error::InvalidInput(_))),
+            "axis {axis}: predict must fail the same way"
+        );
+    }
+}
+
+/// The same layer accepts an axis for 1 rank and rejects it for a smaller rank
+///
+/// Axis 2 is inside a rank-3 input and outside a rank-2 input. Only a call-time check can tell
+/// the 2 apart
+#[test]
+fn softmax_axis_validity_follows_the_rank_of_the_input() {
+    let mut layer = Softmax::new().with_axis(2);
+    assert!(
+        layer.forward(&axis_input()).is_ok(),
+        "axis 2 is inside a rank-3 input"
+    );
+    let rank_2 = tensor2(2, 3, vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
+    assert!(
+        matches!(layer.forward(&rank_2), Err(Error::InvalidInput(_))),
+        "axis 2 is outside a rank-2 input"
+    );
+}
+
+/// A trainable layer takes the default axis alone
+///
+/// The restriction is a deliberate simplification. The host layers do not agree on the rank of
+/// the tensor they hand to the activation. A non-default axis would therefore mean a different
+/// thing in each host family. `Dense` folds its leading axes, and a non-final axis there would
+/// normalize the folded rows
+#[test]
+fn dense_rejects_an_embedded_softmax_over_another_axis() {
+    assert!(
+        Dense::new(2, 3, Activation::Softmax { axis: -1 }).is_ok(),
+        "the default axis is the only axis a trainable layer accepts"
+    );
+    for axis in [0, 1, 2, -2] {
+        let result = Dense::new(2, 3, Activation::Softmax { axis });
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "axis {axis}: expected InvalidParameter, got {:?}",
+            result.map(|_| "Dense")
+        );
+    }
+    assert!(
+        Dense::new(2, 3, Softmax::new().with_axis(1)).is_err(),
+        "the layer conversion carries the axis, so it is rejected the same way"
+    );
+}
+
+/// A non-final axis gives the same values on both sides of the parallel gate
+///
+/// The lane path splits the lanes into tasks. The serial branch and the parallel branch must
+/// write the same bits, because a gate picks an execution strategy alone
+#[test]
+fn softmax_non_final_axis_matches_across_the_tuning_gates() {
+    let input = Array::from_shape_fn((4, 5, 3), |(i, j, k)| {
+        ((i * 15 + j * 3 + k) as f32 * 0.37) % 3.0 - 1.5
+    })
+    .into_dyn();
+    let grad_output = Array::from_shape_fn((4, 5, 3), |(i, j, k)| {
+        ((i * 15 + j * 3 + k) as f32 * 0.29) % 2.0 - 1.0
+    })
+    .into_dyn();
+
+    let run = |value: usize| {
+        let _gates = GateGuard::set_all(value);
+        let mut layer = Softmax::new().with_axis(1);
+        let output = layer.forward(&input).expect("axis 1 forward");
+        let grad_input = layer.backward(&grad_output).expect("axis 1 backward");
+        (
+            output.iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
+            grad_input.iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
+        )
+    };
+
+    let serial = run(usize::MAX);
+    let parallel = run(0);
+    assert_eq!(serial, parallel, "the branch must not move the values");
+}
+
+/// The lane path accepts an input that is not in C order, and writes a C-order result
+///
+/// A caller can hand a transposed tensor straight to this layer. The lane path writes into a
+/// fresh C-order destination, so the result stays usable by every later layer
+#[test]
+fn softmax_non_final_axis_accepts_input_that_is_not_in_c_order() {
+    use ndarray::IxDyn;
+
+    let base = tensor2(3, 4, (0..12).map(|v| v as f32 * 0.3 - 1.5).collect());
+    let transposed = base.view().permuted_axes(IxDyn(&[1, 0])).to_owned();
+    assert!(
+        !transposed.is_standard_layout(),
+        "the test input must not be in C order"
+    );
+
+    let mut layer = Softmax::new().with_axis(0);
+    let output = layer.forward(&transposed).expect("axis 0 forward");
+    assert_eq!(output.shape(), &[4, 3]);
+    assert!(
+        output.is_standard_layout(),
+        "the result must be in C order for the layers after it"
+    );
+
+    let c_order: Tensor = transposed.as_standard_layout().into_owned();
+    let mut same = Softmax::new().with_axis(0);
+    let want = same.forward(&c_order).expect("axis 0 forward");
+    for (&got, &expected) in output.iter().zip(want.iter()) {
+        assert_eq!(
+            got.to_bits(),
+            expected.to_bits(),
+            "the layout must not move a value"
+        );
+    }
+}
+
+/// A softmax over axis 0 of a rank-2 input matches the reference layer
+///
+/// The lanes of axis 0 are strided, so this is the case the fold-to-2D path cannot serve
+#[test]
+fn softmax_axis_0_of_a_rank_2_input_matches_the_reference() {
+    let input = tensor2(
+        3,
+        4,
+        vec![
+            -2.0,
+            -0.5199999809265137,
+            0.9599999785423279,
+            -1.600000023841858,
+            -0.11999999731779099,
+            1.3600000143051147,
+            -1.2000000476837158,
+            0.2800000011920929,
+            1.7599999904632568,
+            -0.800000011920929,
+            0.6800000071525574,
+            -1.8799999952316284,
+        ],
+    );
+    let mut layer = Softmax::new().with_axis(0);
+    let output = layer.forward(&input).expect("axis 0 forward");
+
+    let expected = [
+        0.019801221787929535_f32,
+        0.12034724652767181,
+        0.5344424247741699,
+        0.12034724652767181,
+        0.12976740300655365,
+        0.7886962294578552,
+        0.06163462996482849,
+        0.7886962294578552,
+        0.8504313230514526,
+        0.09095647931098938,
+        0.4039229154586792,
+        0.09095647931098938,
+    ];
+    for (&got, &want) in output.iter().zip(expected.iter()) {
+        assert_abs_diff_eq!(got, want, epsilon = 1e-6);
+    }
+}
+
+/// A grad_output that does not match the activated shape is an error, not a panic
+///
+/// The lane path pairs the 2 shapes with a `Zip`, which panics on a mismatch. The shape guard
+/// runs before that, so a caller that pairs the wrong tensors gets `Error::ShapeMismatch`
+#[test]
+fn softmax_non_final_axis_backward_rejects_a_mismatched_grad_output() {
+    let activated = Array::from_elem((2, 3, 4), 0.25_f32).into_dyn();
+    let grad_output = Array::from_elem((2, 3, 5), 1.0_f32).into_dyn();
+
+    // Axis 1 is not the last axis, so this call takes the lane path
+    let result = Activation::Softmax { axis: 1 }.backward(&activated, &grad_output);
+    match result {
+        Err(Error::ShapeMismatch { expected, found }) => {
+            assert_eq!(expected, vec![2, 3, 4]);
+            assert_eq!(found, vec![2, 3, 5]);
+        }
+        other => panic!("expected ShapeMismatch, got {other:?}"),
+    }
 }

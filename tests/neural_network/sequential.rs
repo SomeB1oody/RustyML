@@ -115,7 +115,7 @@ fn test_predict_two_layer_stack() {
 /// Dense(1->3, Softmax) on a zero pre-activation yields the uniform distribution [1/3, 1/3, 1/3]
 #[test]
 fn test_predict_dense_softmax_equal_input() {
-    let mut dense = Dense::new(1, 3, Activation::Softmax).unwrap();
+    let mut dense = Dense::new(1, 3, Activation::Softmax { axis: -1 }).unwrap();
     let w = Array2::from_shape_vec((1, 3), vec![1.0_f32, 2.0, 3.0]).unwrap();
     let b = Array2::from_shape_vec((1, 3), vec![0.0_f32, 0.0, 0.0]).unwrap();
     dense.set_weights(w, b).unwrap();
@@ -140,7 +140,7 @@ fn test_predict_dense_softmax_equal_input() {
 /// Dense(1->3, Softmax) with all-zero weights ignores the input and stays uniform
 #[test]
 fn test_predict_dense_softmax_known_probs() {
-    let mut dense = Dense::new(1, 3, Activation::Softmax).unwrap();
+    let mut dense = Dense::new(1, 3, Activation::Softmax { axis: -1 }).unwrap();
     let w: Array2<f32> = Array2::zeros((1, 3));
     let b: Array2<f32> = Array2::zeros((1, 3));
     dense.set_weights(w, b).unwrap();
@@ -184,7 +184,7 @@ fn test_summary_does_not_panic() {
     let mut model = Sequential::new();
     model
         .add(Dense::new(4, 8, Activation::ReLU).unwrap())
-        .add(Dense::new(8, 2, Activation::Softmax).unwrap());
+        .add(Dense::new(8, 2, Activation::Softmax { axis: -1 }).unwrap());
     model.summary();
 }
 
@@ -459,7 +459,7 @@ fn test_convergence_2class_softmax_adam() {
                 .with_random_state(0),
         )
         .add(
-            Dense::new(8, 2, Activation::Softmax)
+            Dense::new(8, 2, Activation::Softmax { axis: -1 })
                 .unwrap()
                 .with_random_state(0),
         )

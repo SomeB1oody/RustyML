@@ -148,7 +148,7 @@
 //! model
 //!     .add(Dense::new(784, 128, Activation::ReLU).unwrap())
 //!     .add(Dense::new(128, 64, Activation::ReLU).unwrap())
-//!     .add(Dense::new(64, 10, Activation::Softmax).unwrap())
+//!     .add(Dense::new(64, 10, Activation::Softmax { axis: -1 }).unwrap())
 //!     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 //!
 //! // Display model structure
@@ -170,7 +170,7 @@
 //! new_model
 //!     .add(Dense::new(784, 128, Activation::ReLU).unwrap())
 //!     .add(Dense::new(128, 64, Activation::ReLU).unwrap())
-//!     .add(Dense::new(64, 10, Activation::Softmax).unwrap());
+//!     .add(Dense::new(64, 10, Activation::Softmax { axis: -1 }).unwrap());
 //!
 //! // Load weights from file
 //! new_model.load_from_path("model.bin").unwrap();
