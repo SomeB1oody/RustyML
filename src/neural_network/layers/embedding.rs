@@ -2,7 +2,7 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::layer_weight::{EmbeddingLayerWeight, LayerWeight};
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
@@ -390,8 +390,8 @@ impl Layer for Embedding {
         }
     }
 
-    fn param_count(&self) -> TrainingParameters {
-        TrainingParameters::Trainable(self.input_dim * self.output_dim)
+    fn param_count(&self) -> ParamCounts {
+        ParamCounts::trainable(self.input_dim * self.output_dim)
     }
 
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
@@ -403,6 +403,7 @@ impl Layer for Embedding {
         let mut params = Vec::new();
         if let Some(grad) = grad_embeddings.as_ref() {
             params.push(ParamGrad::weight(
+                "embeddings",
                 embeddings
                     .as_slice_mut()
                     .expect("the table is kept in C order"),

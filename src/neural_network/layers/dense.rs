@@ -2,7 +2,7 @@
 
 use crate::error::{Context, Error};
 use crate::neural_network::Tensor;
-use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::layer_weight::{DenseLayerWeight, LayerWeight};
 use crate::neural_network::layers::validation::validate_weight_shape;
@@ -438,8 +438,8 @@ impl Layer for Dense {
         }
     }
 
-    fn param_count(&self) -> TrainingParameters {
-        TrainingParameters::Trainable(self.input_dim * self.output_dim + self.output_dim)
+    fn param_count(&self) -> ParamCounts {
+        ParamCounts::trainable(self.input_dim * self.output_dim + self.output_dim)
     }
 
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
@@ -451,14 +451,19 @@ impl Layer for Dense {
             ..
         } = self;
         let mut params = Vec::new();
-        if let (Some(grad_a), Some(grad_b)) = (grad_weights.as_ref(), grad_bias.as_ref()) {
+        // Each tensor is pushed on its own, so a tensor without a gradient holds back no other
+        if let Some(grad) = grad_weights.as_ref() {
             params.push(ParamGrad::weight(
+                "kernel",
                 weights.as_slice_mut().expect("weights must be contiguous"),
-                grad_a.as_slice().expect("grad_weights must be contiguous"),
+                grad.as_slice().expect("grad_weights must be contiguous"),
             ));
+        }
+        if let Some(grad) = grad_bias.as_ref() {
             params.push(ParamGrad::no_decay(
+                "bias",
                 bias.as_slice_mut().expect("bias must be contiguous"),
-                grad_b.as_slice().expect("grad_bias must be contiguous"),
+                grad.as_slice().expect("grad_bias must be contiguous"),
             ));
         }
         params

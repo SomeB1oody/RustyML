@@ -6,7 +6,7 @@
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, Array3, Array4, IxDyn};
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::flatten::Flatten;
@@ -361,7 +361,7 @@ fn reshape_single_inferred_axis_equals_flatten() {
 #[test]
 fn reshape_param_count_is_no_trainable() {
     let r = Reshape::new(vec![2, 2]).unwrap();
-    assert_eq!(r.param_count(), TrainingParameters::NoTrainable);
+    assert_eq!(r.param_count(), ParamCounts::none());
 }
 
 /// The layer has no parameters, so get_weights gives the Empty variant

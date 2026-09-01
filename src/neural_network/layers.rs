@@ -2,8 +2,8 @@
 //!
 //! Declares every layer submodule and glob-re-exports the public layer types. It also defines
 //! the shared infrastructure used across the subsystem: the
-//! [`TrainingParameters`](crate::neural_network::layers::TrainingParameters) classification (a
-//! layer is `Trainable`, `NonTrainable`, or `NoTrainable`), and the
+//! [`ParamCounts`](crate::neural_network::layers::ParamCounts) report (how many parameter
+//! elements a layer holds, split into trainable and non-trainable), and the
 //! `no_trainable_parameters_layer_functions` macro. That macro emits the `param_count` and
 //! `get_weights` stubs for parameter-free layers.
 //!
@@ -32,23 +32,83 @@
 //! - Serialization: [`serialize_model`](crate::neural_network::layers::serialize_model)
 //!   (model-level snapshot and load-time weight application)
 
-/// Classifies a layer by its parameter training capability
+/// How many parameter elements a layer holds, split by whether training updates them
 ///
-/// Layers fall into 3 groups. Some have trainable parameters, such as Dense or a convolutional
-/// layer. Some have parameters, but they are frozen. Others have no parameters at all, such as
-/// a pooling or activation layer
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TrainingParameters {
-    /// Layer has trainable parameters updated during optimization. The `usize` is the count
-    Trainable(usize),
-    /// Layer has parameters, but they are frozen. The `usize` is the count of non-trainable
-    /// parameters
+/// The 2 counts are independent, and a layer reports both. A Dense layer holds trainable
+/// elements only. A pooling or activation layer holds none of either.
+/// [`BatchNormalization`](crate::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization)
+/// holds both: `gamma` and `beta` are trainable, and the running mean and the running variance
+/// are not. The running statistics move on every training forward pass, but no optimizer ever
+/// sees them, so they are non-trainable exactly as Keras 3 reports them
+///
+/// [`Sequential::summary`](crate::neural_network::sequential::Sequential::summary) adds the 2
+/// columns over the model and prints the total of both
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ParamCounts {
+    /// Number of parameter elements that the optimizer updates
+    pub trainable: usize,
+    /// Number of parameter elements that the layer keeps but the optimizer never updates
+    pub non_trainable: usize,
+}
+
+impl ParamCounts {
+    /// A layer that holds no parameter at all
     ///
-    /// No layer returns this variant yet, so the non-trainable column in `summary()` always
-    /// reads 0
-    NonTrainable(usize),
-    /// Layer has no trainable parameters
-    NoTrainable,
+    /// # Returns
+    ///
+    /// - `ParamCounts` - Both counts set to 0
+    #[inline]
+    pub const fn none() -> Self {
+        Self {
+            trainable: 0,
+            non_trainable: 0,
+        }
+    }
+
+    /// A layer whose parameters are all trainable
+    ///
+    /// # Parameters
+    ///
+    /// - `count` - Number of trainable parameter elements
+    ///
+    /// # Returns
+    ///
+    /// - `ParamCounts` - The given trainable count, and 0 non-trainable
+    #[inline]
+    pub const fn trainable(count: usize) -> Self {
+        Self {
+            trainable: count,
+            non_trainable: 0,
+        }
+    }
+
+    /// A layer that holds both kinds of parameter
+    ///
+    /// # Parameters
+    ///
+    /// - `trainable` - Number of parameter elements that the optimizer updates
+    /// - `non_trainable` - Number of parameter elements that the optimizer never updates
+    ///
+    /// # Returns
+    ///
+    /// - `ParamCounts` - The 2 given counts
+    #[inline]
+    pub const fn new(trainable: usize, non_trainable: usize) -> Self {
+        Self {
+            trainable,
+            non_trainable,
+        }
+    }
+
+    /// Every parameter element the layer holds, of both kinds
+    ///
+    /// # Returns
+    ///
+    /// - `usize` - The sum of the 2 counts
+    #[inline]
+    pub const fn total(&self) -> usize {
+        self.trainable + self.non_trainable
+    }
 }
 
 /// A module containing activation layer implementations for neural networks
@@ -118,12 +178,12 @@ pub use upsampling::*;
 /// rather than depending on textual macro ordering:
 /// `use crate::neural_network::layers::no_trainable_parameters_layer_functions;`
 ///
-/// The generated `param_count` returns `TrainingParameters::NoTrainable`, and `get_weights`
+/// The generated `param_count` returns `ParamCounts::none()`, and `get_weights`
 /// returns `LayerWeight::Empty`
 macro_rules! no_trainable_parameters_layer_functions {
     () => {
-        fn param_count(&self) -> TrainingParameters {
-            TrainingParameters::NoTrainable
+        fn param_count(&self) -> ParamCounts {
+            ParamCounts::none()
         }
 
         fn get_weights(&self) -> LayerWeight<'_> {

@@ -13,7 +13,8 @@ use crate::neural_network::optimizers::validation::{
     validate_decay_rate, validate_epsilon, validate_global_clipnorm, validate_learning_rate,
     validate_non_negative_finite,
 };
-use crate::neural_network::traits::Layer;
+use crate::neural_network::traits::{Layer, ParamId};
+use std::collections::HashMap;
 
 /// Adam's per-parameter first/second moment buffers, sized lazily on first use
 #[derive(Debug, Clone, Default)]
@@ -41,10 +42,9 @@ pub(super) struct AdamCore {
     epsilon: f32,
     /// Current timestep, incremented with each update
     t: u64,
-    /// Per-parameter moment buffers, indexed by the order layers yield parameters each step
-    states: Vec<AdamParamState>,
-    /// Position within `states` for the parameter currently being updated. Reset each `step`
-    cursor: usize,
+    /// Per-parameter moment buffers, keyed by the address of the parameter. A buffer therefore
+    /// follows its own tensor, whatever else the model does
+    states: HashMap<ParamId, AdamParamState>,
     /// Optional clip-by-global-norm threshold. `None` disables gradient clipping
     global_clipnorm: Option<f32>,
     /// Weight decay coefficient. `0.0` disables it
@@ -75,8 +75,7 @@ impl AdamCore {
             beta2,
             epsilon,
             t: 0,
-            states: Vec::new(),
-            cursor: 0,
+            states: HashMap::new(),
             global_clipnorm: None,
             weight_decay,
             decoupled,
@@ -105,29 +104,23 @@ impl AdamCore {
         self.learning_rate = learning_rate;
     }
 
-    /// Advances the bias-correction timestep once per batch and rewinds the parameter cursor
+    /// Advances the bias-correction timestep once per batch
     pub(super) fn step(&mut self) {
         // Clamp at i32::MAX so the bias-correction power (`t as i32`) stays valid
         self.t = self.t.saturating_add(1).min(i32::MAX as u64);
-        self.cursor = 0;
     }
 
     /// Updates a layer's parameters, applying weight decay per the `decoupled` mode
-    pub(super) fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32) {
+    pub(super) fn update(&mut self, scope: usize, layer: &mut dyn Layer, grad_scale: f32) {
         for pg in layer.parameters() {
-            if self.cursor >= self.states.len() {
-                self.states.push(AdamParamState {
-                    m: vec![0.0; pg.value.len()],
-                    v: vec![0.0; pg.value.len()],
-                });
-            } else if self.states[self.cursor].m.len() != pg.value.len() {
-                // Reset the moment buffers to match
-                self.states[self.cursor] = AdamParamState {
+            let state = self.states.entry(ParamId::new(scope, pg.name)).or_default();
+            if state.m.len() != pg.value.len() {
+                // The tensor was resized under its own name: start the moment buffers again
+                *state = AdamParamState {
                     m: vec![0.0; pg.value.len()],
                     v: vec![0.0; pg.value.len()],
                 };
             }
-            let state = &mut self.states[self.cursor];
             let grad = kernels::scaled_grad(pg.grad, grad_scale);
 
             // Weight decay applies to weight tensors only. Biases and normalization gamma/beta
@@ -175,7 +168,6 @@ impl AdamCore {
                     self.t,
                 );
             }
-            self.cursor += 1;
         }
     }
 }

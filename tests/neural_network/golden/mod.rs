@@ -51,9 +51,9 @@
 //!
 //! # 1 optimizer step binds each gradient to the parameter that it updates
 //!
-//! A recorded gradient alone does not say which tensor the gradient updates. Stage 1 of the
-//! rewrite deletes `LayerWeight`, turns the parameters into a named list, and re-keys the
-//! optimizer from a positional cursor to a path. Such a rewrite can aim a gradient at the wrong
+//! A recorded gradient alone does not say which tensor the gradient updates. The rewrite turns
+//! the parameters into a named list, re-keys the optimizer from a positional cursor to that
+//! name, and later deletes `LayerWeight`. Such a rewrite can aim a gradient at the wrong
 //! parameter tensor and leave every recorded gradient value unchanged.
 //!
 //! This is the defect class that the `step_param.<name>` tensor exists to catch: a gradient
@@ -94,24 +94,32 @@
 //! Each parameter of a case has 1 `param_name` line, and that line ends with the source of the
 //! name: `layer` or `fixture`.
 //!
-//! `ParamGrad` carries no name today, and no method of `Layer` returns one, so the layer cannot
-//! name a parameter directly. A fixture names its parameters through
-//! [`GoldenCase::with_parameter_grads`]. A name from that list alone pins nothing about the
-//! layer, and a stage that renames a parameter therefore keeps every recorded value and every
-//! recorded name.
+//! There are 2 name sets, and the parameter-identity change made them differ on purpose.
 //!
-//! The harness closes as much of that hole as the code of today permits. Before the backward
-//! pass it takes the address of the first element and the element count of every array that
-//! `get_weights` exposes and that borrows the live layer. It then compares the address and the
-//! count of each parameter value against that list. A parameter that starts at the address of
-//! exactly 1 exposed array is the same storage as that array, so the harness takes the name of
-//! that array and marks the line `layer`. See [`resolve_parameter_name`].
+//! `ParamGrad` now carries a name, and the layer supplies it. Those names are the Keras 3
+//! names: `kernel`, `recurrent_kernel`, `depthwise_kernel`, `pointwise_kernel`, `bias`,
+//! `embeddings`, `alpha`, `gamma`, `beta`. `get_weights` names the same storage through the
+//! field names of the `LayerWeight` variant, and those still read `weight`,
+//! `depthwise_weight` and `pointwise_weight` on 13 of the 43 entries. The checkpoint format
+//! owns that second set, and the change that rewrites the format is what merges the 2.
 //!
-//! **What the `layer` mark pins, and what it does not.** Every name in the net is a literal
-//! that this harness authors. The name of an exposed array is a literal of the [`exposed_weights`]
-//! macro, next to the field access that reads the array, and a fixture supplies the same list
-//! to [`GoldenCase::with_parameter_grads`]. The `layer` mark therefore pins 3 things, and the
-//! name of the layer is none of them:
+//! **The recorded name is the `get_weights` name.** Before the backward pass the harness takes
+//! the address of the first element and the element count of every array that `get_weights`
+//! exposes and that borrows the live layer. It then compares the address and the count of each
+//! parameter value against that list. A parameter that starts at the address of exactly 1
+//! exposed array is the same storage as that array, so the harness takes the name of that array
+//! and marks the line `layer`. See [`resolve_parameter_name`]. Every line of every data file is
+//! marked `layer` today.
+//!
+//! **The layer name is asserted, not recorded.** A fixture declares the layer name of every
+//! parameter through [`GoldenCase::with_parameter_grads`], and the harness asserts that the
+//! declared name equals the name in the `ParamGrad`. A rename inside a layer therefore fails
+//! the net at that assertion. It moves no recorded value, so the record and the rename stay
+//! independent.
+//!
+//! **What the `layer` mark pins.** The name of an exposed array is a literal of the
+//! [`exposed_weights`] macro, next to the field access that reads the array. The mark therefore
+//! pins 3 things:
 //!
 //! 1. **The order of the parameter list.** The names ride in the order that
 //!    `Layer::parameters` returns, and the comparison is order-sensitive.
@@ -120,30 +128,20 @@
 //! 3. **The roster.** No parameter appears 2 times, none is missing, and none is a tensor that
 //!    `get_weights` hides.
 //!
-//! The string itself carries no provenance. A rename in the layer changes no literal here. The
-//! compiler catches only the field access next to the literal: a renamed field breaks
-//! [`exposed_weights`] where it reads the field, and the mechanical repair of that access
-//! leaves the old literal in place. The record then keeps a name that the layer no longer uses,
-//! and the whole net stays green. Stage 1 re-authors all 21 arms of [`exposed_weights`],
-//! because it deletes `LayerWeight`, so this is not a remote hazard.
-//!
-//! Every parameter of every layer type of this net resolves to `layer` today. No layer keeps a
-//! trainable tensor that `get_weights` hides, and no layer exposes a copy of one. A line marked
-//! `fixture` therefore says that a parameter and its exposed weight stopped being the same
+//! A line marked `fixture` says that a parameter and its exposed weight stopped being the same
 //! storage, which is the defect of the section above, seen from the other side.
 //!
-//! **What stage 1 must change here.** Stage 1 gives `ParamGrad` a name of its own. The harness
-//! must then read that name from the layer, delete the address comparison and
-//! [`resolve_parameter_name`] with it, delete the literals of [`exposed_weights`], and mark
-//! every line `layer`. [`GoldenCase::with_parameter_grads`] then keeps the count assertion
-//! alone, and the recorded names come from the layer end to end.
+//! **What the format change must do here.** The change that deletes `LayerWeight` gives the
+//! layer 1 name set instead of 2. The harness then reads the recorded name from the `ParamGrad`
+//! as well, deletes the address comparison and [`resolve_parameter_name`] with it, deletes the
+//! literals of [`exposed_weights`], and marks every line `layer`.
 //!
 //! That change makes the name a recorded value for the first time, so the old record cannot
 //! stay. Regenerate every data file exactly 1 time in the same change, review the new name of
 //! every parameter of every case against the layer that gives it, and expect no other field of
 //! any case to move. The regeneration guard makes that review a separate act: a data file that
 //! changes needs the acknowledgment token of its own change set. See the regeneration section
-//! below. Until stage 1 does that, no rename in a layer can reach this net.
+//! below.
 //!
 //! # What this net cannot see
 //!
@@ -504,7 +502,7 @@
 //! digits themselves read as zeros. See [`self_digest`].
 //!
 //! The `param_count` class is `trainable <count>`, `non_trainable <count>`, or `none`. The 3
-//! forms are the 3 variants of `TrainingParameters`.
+//! forms are the 3 variants of `ParamCounts`.
 //!
 //! The last word of a `param_name` line is `layer` when the layer supplied the name, and
 //! `fixture` when the fixture supplied it. See the section above.
@@ -544,7 +542,7 @@
 use crate::common::{GateGuard, NEURAL_NETWORK_GATES, NEURAL_NETWORK_SPLIT_CAPS, read_gates};
 use ndarray::{ArrayBase, ArrayD, Data, Dimension, IxDyn};
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::traits::Layer;
 use std::borrow::Cow;
@@ -881,9 +879,13 @@ impl GoldenCase {
 
     /// Names every parameter gradient, in the order that `Layer::parameters` returns them.
     ///
-    /// Use the name that the layer gives the tensor in its `LayerWeight` variant, such as
-    /// `"weight"`, `"bias"`, `"kernel"`, `"recurrent_kernel"`, `"gamma"`, `"beta"`, or
-    /// `"alpha"`. The harness fails when the count differs from what `parameters` returns.
+    /// Use the name that the layer itself puts in the `ParamGrad`, such as `"kernel"`,
+    /// `"recurrent_kernel"`, `"depthwise_kernel"`, `"bias"`, `"embeddings"`, `"alpha"`,
+    /// `"gamma"`, or `"beta"`. The harness fails when the count differs from what `parameters`
+    /// returns, and it fails when any name differs from the name that the layer gives.
+    ///
+    /// That second check is what makes a rename inside a layer reach this net. It is an
+    /// assertion and not a recorded value, so it costs the record nothing.
     pub fn with_parameter_grads(mut self, names: &[&'static str]) -> Self {
         self.parameter_names = names.to_vec();
         self
@@ -1945,9 +1947,29 @@ fn record_case(layer_type: &str, case: &GoldenCase) -> RecordedCase {
         parameters.len()
     );
     let mut param_names: Vec<RecordedParameterName> = Vec::new();
+    let mut layer_names: Vec<&'static str> = Vec::new();
     for (parameter, fixture_name) in parameters.iter_mut().zip(case.parameter_names.iter()) {
-        // The layer owns the name whenever the parameter is 1 of the arrays that
-        // `get_weights` exposes. The fixture name is the fallback, and the record says which
+        // The optimizer keys its per-parameter state on the layer name, so 2 tensors of 1 layer
+        // that share a name share their momentum. Nothing else in the crate would report it
+        assert!(
+            !layer_names.contains(&parameter.name),
+            "{layer_type}/{}: 2 parameters of this layer carry the name {}",
+            case.label,
+            parameter.name
+        );
+        layer_names.push(parameter.name);
+        // The layer names every parameter of its own. The fixture declares the same name, so a
+        // rename inside a layer fails here instead of passing unseen. This is an assertion and
+        // not a recorded value
+        assert_eq!(
+            parameter.name, *fixture_name,
+            "{layer_type}/{}: the layer names this parameter {}, and the case names it {}",
+            case.label, parameter.name, fixture_name
+        );
+        // The recorded name is still the name that `get_weights` gives the same storage, which
+        // is the field name of the `LayerWeight` variant. The 2 name sets agree everywhere
+        // except the 13 entries that took a Keras name ahead of the checkpoint format. See the
+        // section "Where a parameter name comes from"
         let (name, from_layer) = resolve_parameter_name(&anchors, parameter.value, fixture_name);
         assert!(
             !param_names.iter().any(|earlier| earlier.name == name),
@@ -2022,13 +2044,14 @@ fn record_case(layer_type: &str, case: &GoldenCase) -> RecordedCase {
     }
 }
 
-/// Gives 1 parameter of `Layer::parameters` its name, and says where the name came from.
+/// Gives 1 parameter of `Layer::parameters` its recorded name, and says where the name came from.
 ///
-/// `ParamGrad` carries no name today, so the layer cannot name a parameter directly. The layer
-/// does name every array that `get_weights` exposes. This function therefore takes the address
-/// and the length of the parameter, and looks for the 1 exposed array that starts at the same
-/// address and holds the same number of elements. Such an array is the same storage as the
-/// parameter, so its name is the name of the parameter, and the layer supplied it.
+/// The recorded name is the name that `get_weights` gives the same storage, and not the name in
+/// the `ParamGrad`. The 2 differ on the 13 entries that took a Keras name ahead of the
+/// checkpoint format. This function therefore takes the address and the length of the
+/// parameter, and looks for the 1 exposed array that starts at the same address and holds the
+/// same number of elements. Such an array is the same storage as the parameter, so its name is
+/// the recorded name, and the layer supplied it.
 ///
 /// A parameter that matches no exposed array, or that matches more than 1, keeps the name that
 /// the fixture gave it.
@@ -2067,11 +2090,24 @@ fn resolve_parameter_name(
 }
 
 /// Turns a `param_count` result into the words that the data file holds.
-fn param_count_record(count: TrainingParameters) -> String {
-    match count {
-        TrainingParameters::Trainable(total) => format!("trainable {total}"),
-        TrainingParameters::NonTrainable(total) => format!("non_trainable {total}"),
-        TrainingParameters::NoTrainable => "none".to_string(),
+///
+/// The line grammar predates [`ParamCounts`], and it holds 1 number. The number is the
+/// trainable count, and the word in front of it says which count it is. The record therefore
+/// still reads `trainable N` for every layer that has trainable parameters, `non_trainable N`
+/// for a layer that has only non-trainable ones, and `none` for a layer with neither.
+///
+/// The non-trainable count of a layer that also has trainable parameters is deliberately not in
+/// the record yet. Batch normalization is the only such layer, and putting its running mean and
+/// running variance in the line would move a recorded value in a change that must move none.
+/// The change that rewrites the checkpoint format regenerates the whole record, and that is
+/// where this line grows the second number.
+fn param_count_record(count: ParamCounts) -> String {
+    if count.trainable > 0 {
+        format!("trainable {}", count.trainable)
+    } else if count.non_trainable > 0 {
+        format!("non_trainable {}", count.non_trainable)
+    } else {
+        "none".to_string()
     }
 }
 

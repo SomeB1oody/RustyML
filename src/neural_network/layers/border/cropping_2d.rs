@@ -2,7 +2,7 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::border::Border2D;
 use crate::neural_network::layers::border::pad_crop_engine::{
     crop_backward, crop_forward, crop_summary,

@@ -7,7 +7,6 @@ use crate::error::{Error, IoError};
 use crate::math::reduction::det_reduce;
 use crate::neural_network::NnError;
 use crate::neural_network::Tensor;
-use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::serialize_model::{
     LayerInfo, MODEL_FORMAT_VERSION, MODEL_MAGIC, SerializableLayer, SerializableSequential,
@@ -109,6 +108,10 @@ impl Default for Sequential {
 /// totals merge in the fixed (layer, parameter) order, so rerunning on the same machine gives
 /// the same result. Layers without gradients contribute nothing. With no gradients at all, the
 /// norm is 0.0
+///
+/// The walk is forward, from the input. That is the canonical order of the model, and the
+/// parameter-update walk in [`Sequential::train_batch`] uses the same one. The sum itself does
+/// not depend on the order, but the model has 1 order and both walks follow it
 fn global_grad_norm(layers: &mut [Box<dyn Layer>]) -> f32 {
     let mut sum_sq = 0.0_f64;
     for layer in layers.iter_mut() {
@@ -432,10 +435,13 @@ impl Sequential {
             None => 1.0,
         };
 
-        // Parameter updates
+        // Parameter updates. The walk is forward, from the input, and it is the canonical order
+        // of the model: `global_grad_norm` above uses the same one. The index is the layer half
+        // of the parameter address that the optimizer keys its state on, so it must count from
+        // the input and never from the output
         if let Some(ref mut optimizer) = self.optimizer {
-            for layer in self.layers.iter_mut().rev() {
-                optimizer.update(&mut **layer, grad_scale);
+            for (scope, layer) in self.layers.iter_mut().enumerate() {
+                optimizer.update(scope, &mut **layer, grad_scale);
             }
         }
 
@@ -771,21 +777,13 @@ impl Sequential {
 
             let out_shape = layer.output_shape();
 
-            // Exhaustive match so adding a TrainingParameters variant forces a compile error
-            // instead of silently being counted as 0
-            let param_count_num = match layer.param_count() {
-                TrainingParameters::Trainable(count) => {
-                    trainable_param_count += count;
-                    total_params += count;
-                    count
-                }
-                TrainingParameters::NonTrainable(count) => {
-                    non_trainable_param_count += count;
-                    total_params += count;
-                    count
-                }
-                TrainingParameters::NoTrainable => 0,
-            };
+            // Both counts are added, so a layer that holds non-trainable state (the running
+            // statistics of batch normalization) reaches the total and the third column
+            let counts = layer.param_count();
+            trainable_param_count += counts.trainable;
+            non_trainable_param_count += counts.non_trainable;
+            total_params += counts.total();
+            let param_count_num = counts.total();
 
             output.push_str(&format!(
                 "│ {:<31} │ {:<22} │ {:>13} │\n",

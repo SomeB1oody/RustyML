@@ -6,7 +6,7 @@
 
 use ndarray::{Array2, IxDyn};
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::layer_weight::LayerWeight;
@@ -242,10 +242,7 @@ fn rescaling_holds_no_trainable_parameters() {
     layer.forward(&ramp(&[2, 3])).unwrap();
 
     assert_eq!(layer.layer_type(), "Rescaling");
-    assert!(matches!(
-        layer.param_count(),
-        TrainingParameters::NoTrainable
-    ));
+    assert_eq!(layer.param_count(), ParamCounts::none());
     assert!(matches!(layer.get_weights(), LayerWeight::Empty));
     assert!(layer.parameters().is_empty());
 }

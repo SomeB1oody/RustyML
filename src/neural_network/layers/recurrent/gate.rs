@@ -124,28 +124,32 @@ impl FusedGates {
             ..
         } = self;
         let mut params = Vec::new();
-        if let (Some(gk), Some(grk), Some(gb)) = (
-            grad_kernel.as_ref(),
-            grad_recurrent_kernel.as_ref(),
-            grad_bias.as_ref(),
-        ) {
+        // Each tensor is pushed on its own, so a tensor without a gradient holds back no other
+        if let Some(grad) = grad_kernel.as_ref() {
             params.push(ParamGrad::weight(
+                "kernel",
                 kernel
                     .as_slice_mut()
                     .expect("fused kernel must be contiguous"),
-                gk.as_slice()
+                grad.as_slice()
                     .expect("fused kernel gradient must be contiguous"),
             ));
+        }
+        if let Some(grad) = grad_recurrent_kernel.as_ref() {
             params.push(ParamGrad::weight(
+                "recurrent_kernel",
                 recurrent_kernel
                     .as_slice_mut()
                     .expect("fused recurrent kernel must be contiguous"),
-                grk.as_slice()
+                grad.as_slice()
                     .expect("fused recurrent kernel gradient must be contiguous"),
             ));
+        }
+        if let Some(grad) = grad_bias.as_ref() {
             params.push(ParamGrad::no_decay(
+                "bias",
                 bias.as_slice_mut().expect("fused bias must be contiguous"),
-                gb.as_slice()
+                grad.as_slice()
                     .expect("fused bias gradient must be contiguous"),
             ));
         }

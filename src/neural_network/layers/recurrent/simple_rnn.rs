@@ -3,7 +3,7 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::layer_weight::{LayerWeight, SimpleRNNLayerWeight};
 use crate::neural_network::layers::recurrent::gate::take_cache;
@@ -485,10 +485,8 @@ impl Layer for SimpleRNN {
         }
     }
 
-    fn param_count(&self) -> TrainingParameters {
-        TrainingParameters::Trainable(
-            self.input_dim * self.units + self.units * self.units + self.units,
-        )
+    fn param_count(&self) -> ParamCounts {
+        ParamCounts::trainable(self.input_dim * self.units + self.units * self.units + self.units)
     }
 
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
@@ -502,25 +500,29 @@ impl Layer for SimpleRNN {
             ..
         } = self;
         let mut params = Vec::new();
-        if let (Some(gk), Some(grk), Some(gb)) = (
-            grad_kernel.as_ref(),
-            grad_recurrent_kernel.as_ref(),
-            grad_bias.as_ref(),
-        ) {
+        // Each tensor is pushed on its own, so a tensor without a gradient holds back no other
+        if let Some(grad) = grad_kernel.as_ref() {
             params.push(ParamGrad::weight(
+                "kernel",
                 kernel.as_slice_mut().expect("kernel must be contiguous"),
-                gk.as_slice().expect("kernel gradient must be contiguous"),
+                grad.as_slice().expect("kernel gradient must be contiguous"),
             ));
+        }
+        if let Some(grad) = grad_recurrent_kernel.as_ref() {
             params.push(ParamGrad::weight(
+                "recurrent_kernel",
                 recurrent_kernel
                     .as_slice_mut()
                     .expect("recurrent kernel must be contiguous"),
-                grk.as_slice()
+                grad.as_slice()
                     .expect("recurrent kernel gradient must be contiguous"),
             ));
+        }
+        if let Some(grad) = grad_bias.as_ref() {
             params.push(ParamGrad::no_decay(
+                "bias",
                 bias.as_slice_mut().expect("bias must be contiguous"),
-                gb.as_slice().expect("bias gradient must be contiguous"),
+                grad.as_slice().expect("bias gradient must be contiguous"),
             ));
         }
         params

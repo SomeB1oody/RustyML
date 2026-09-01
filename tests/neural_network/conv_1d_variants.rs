@@ -9,7 +9,6 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array3};
-use rustyml::neural_network::layers::TrainingParameters;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
@@ -31,12 +30,9 @@ fn ramp(n: usize) -> Vec<f32> {
     (0..n).map(|v| 0.1 * v as f32 - 0.5).collect()
 }
 
-/// The trainable parameter count of a layer
+/// Every parameter element of a layer, of both kinds
 fn params_of(layer: &dyn Layer) -> usize {
-    match layer.param_count() {
-        TrainingParameters::Trainable(n) | TrainingParameters::NonTrainable(n) => n,
-        TrainingParameters::NoTrainable => 0,
-    }
+    layer.param_count().total()
 }
 
 // DepthwiseConv1D - constructor validation

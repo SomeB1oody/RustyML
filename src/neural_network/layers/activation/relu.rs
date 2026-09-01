@@ -3,7 +3,7 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::{Activation, format_output_shape};
 use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;

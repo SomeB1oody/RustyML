@@ -2,7 +2,7 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::conv_op_helpers::{
     DepthwiseGeometry, depthwise_backward, depthwise_forward,
@@ -633,8 +633,8 @@ impl Layer for SeparableConv2D {
         )
     }
 
-    fn param_count(&self) -> TrainingParameters {
-        TrainingParameters::Trainable(
+    fn param_count(&self) -> ParamCounts {
+        ParamCounts::trainable(
             self.depthwise_weights.len() + self.pointwise_weights.len() + self.bias.len(),
         )
     }
@@ -650,28 +650,32 @@ impl Layer for SeparableConv2D {
             ..
         } = self;
         let mut params = Vec::new();
-        if let (Some(gd), Some(gp), Some(gb)) = (
-            depthwise_weight_gradients.as_ref(),
-            pointwise_weight_gradients.as_ref(),
-            bias_gradients.as_ref(),
-        ) {
+        // Each tensor is pushed on its own, so a tensor without a gradient holds back no other
+        if let Some(grad) = depthwise_weight_gradients.as_ref() {
             params.push(ParamGrad::weight(
+                "depthwise_kernel",
                 depthwise_weights
                     .as_slice_mut()
                     .expect("depthwise weights must be contiguous"),
-                gd.as_slice()
+                grad.as_slice()
                     .expect("depthwise weight gradient must be contiguous"),
             ));
+        }
+        if let Some(grad) = pointwise_weight_gradients.as_ref() {
             params.push(ParamGrad::weight(
+                "pointwise_kernel",
                 pointwise_weights
                     .as_slice_mut()
                     .expect("pointwise weights must be contiguous"),
-                gp.as_slice()
+                grad.as_slice()
                     .expect("pointwise weight gradient must be contiguous"),
             ));
+        }
+        if let Some(grad) = bias_gradients.as_ref() {
             params.push(ParamGrad::no_decay(
+                "bias",
                 bias.as_slice_mut().expect("bias must be contiguous"),
-                gb.as_slice().expect("bias gradient must be contiguous"),
+                grad.as_slice().expect("bias gradient must be contiguous"),
             ));
         }
         params

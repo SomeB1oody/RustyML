@@ -6,7 +6,7 @@
 
 use ndarray::{Array3, Array4, Array5, IxDyn};
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
 use rustyml::neural_network::layers::dense::Dense;
@@ -553,10 +553,7 @@ fn up_sampling_layers_hold_no_parameter() {
     let names = ["UpSampling1D", "UpSampling2D", "UpSampling3D"];
 
     for (layer, name) in layers.iter_mut().zip(names) {
-        assert!(matches!(
-            layer.param_count(),
-            TrainingParameters::NoTrainable
-        ));
+        assert_eq!(layer.param_count(), ParamCounts::none());
         assert!(matches!(layer.get_weights(), LayerWeight::Empty));
         assert!(layer.parameters().is_empty());
         // No forward pass has run, so the layer cannot know its output shape yet

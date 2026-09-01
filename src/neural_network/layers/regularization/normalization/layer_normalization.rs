@@ -8,7 +8,7 @@ use super::folds::{
 use super::{col_fold_parallel_min_elems, row_pass_parallel_min_elems};
 use crate::error::{Context, Error};
 use crate::neural_network::Tensor;
-use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::layer_weight::{LayerNormalizationLayerWeight, LayerWeight};
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
@@ -733,8 +733,8 @@ impl Layer for LayerNormalization {
         normalization_layer_output_shape!(self)
     }
 
-    fn param_count(&self) -> TrainingParameters {
-        TrainingParameters::Trainable(self.gamma.len() + self.beta.len())
+    fn param_count(&self) -> ParamCounts {
+        ParamCounts::trainable(self.gamma.len() + self.beta.len())
     }
 
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
@@ -746,14 +746,19 @@ impl Layer for LayerNormalization {
             ..
         } = self;
         let mut params = Vec::new();
-        if let (Some(grad_a), Some(grad_b)) = (grad_gamma.as_ref(), grad_beta.as_ref()) {
+        // Each tensor is pushed on its own, so a tensor without a gradient holds back no other
+        if let Some(grad) = grad_gamma.as_ref() {
             params.push(ParamGrad::no_decay(
+                "gamma",
                 gamma.as_slice_mut().expect("gamma must be contiguous"),
-                grad_a.as_slice().expect("grad_gamma must be contiguous"),
+                grad.as_slice().expect("grad_gamma must be contiguous"),
             ));
+        }
+        if let Some(grad) = grad_beta.as_ref() {
             params.push(ParamGrad::no_decay(
+                "beta",
                 beta.as_slice_mut().expect("beta must be contiguous"),
-                grad_b.as_slice().expect("grad_beta must be contiguous"),
+                grad.as_slice().expect("grad_beta must be contiguous"),
             ));
         }
         params

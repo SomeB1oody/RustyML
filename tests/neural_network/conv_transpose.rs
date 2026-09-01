@@ -20,7 +20,7 @@ use rustyml::neural_network::layers::convolution::conv_1d_transpose::Conv1DTrans
 use rustyml::neural_network::layers::convolution::conv_2d_transpose::Conv2DTranspose;
 use rustyml::neural_network::layers::convolution::conv_3d_transpose::Conv3DTranspose;
 use rustyml::neural_network::layers::layer_weight::LayerWeight;
-use rustyml::neural_network::layers::{Dense, Flatten, TrainingParameters};
+use rustyml::neural_network::layers::{Dense, Flatten, ParamCounts};
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
@@ -226,7 +226,7 @@ fn conv1d_transpose_same_output_length_cases() {
 fn conv1d_transpose_param_count_formula() {
     let layer = Conv1DTranspose::new(4, 3, vec![1, 5, 2], 1, Linear::new()).unwrap();
     // 3 * 4 * 2 kernel values plus 4 biases
-    assert_eq!(layer.param_count(), TrainingParameters::Trainable(28));
+    assert_eq!(layer.param_count(), ParamCounts::trainable(28));
 }
 
 /// get_weights returns the Conv1DTranspose variant, with the filter axis before the channel axis
@@ -403,7 +403,7 @@ fn conv2d_transpose_output_shape_cases() {
 fn conv2d_transpose_param_count_formula() {
     let layer = Conv2DTranspose::new(2, (3, 3), vec![1, 5, 5, 3], (1, 1), Linear::new()).unwrap();
     // 3 * 3 * 2 * 3 kernel values plus 2 biases
-    assert_eq!(layer.param_count(), TrainingParameters::Trainable(56));
+    assert_eq!(layer.param_count(), ParamCounts::trainable(56));
 }
 
 /// get_weights returns the Conv2DTranspose variant with shape \[kh, kw, filters, channels\]
@@ -525,7 +525,7 @@ fn conv3d_transpose_weights_and_param_count() {
         Conv3DTranspose::new(2, (2, 3, 2), vec![1, 3, 3, 3, 2], (1, 1, 1), Linear::new()).unwrap();
     assert_eq!(layer.layer_type(), "Conv3DTranspose");
     // 2 * 3 * 2 taps at 2 filters and 2 channels, plus 2 biases
-    assert_eq!(layer.param_count(), TrainingParameters::Trainable(50));
+    assert_eq!(layer.param_count(), ParamCounts::trainable(50));
     match layer.get_weights() {
         LayerWeight::Conv3DTranspose(w) => {
             assert_eq!(w.weight.shape(), &[2, 3, 2, 2, 2]);

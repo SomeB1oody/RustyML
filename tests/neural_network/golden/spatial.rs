@@ -32,7 +32,7 @@ use super::{GoldenCase, LayerFixture};
 use ndarray::IxDyn;
 use rustyml::error::Error;
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::border::{Cropping1D, Cropping2D, Cropping3D};
 use rustyml::neural_network::layers::border::{ZeroPadding1D, ZeroPadding2D, ZeroPadding3D};
 use rustyml::neural_network::layers::convolution::PaddingType;
@@ -172,7 +172,7 @@ impl Layer for HandBuiltInput {
         self.inner.output_shape()
     }
 
-    fn param_count(&self) -> TrainingParameters {
+    fn param_count(&self) -> ParamCounts {
         self.inner.param_count()
     }
 

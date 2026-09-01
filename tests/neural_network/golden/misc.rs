@@ -108,7 +108,7 @@ fn dense_cases() -> Vec<GoldenCase> {
         Box::new(layer)
     }
 
-    let names = ["weight", "bias"];
+    let names = ["kernel", "bias"];
     vec![
         GoldenCase::new("units_4_linear", &[2, 3], || build(Activation::Linear))
             .with_parameter_grads(&names),

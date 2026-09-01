@@ -15,6 +15,7 @@ use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, ArrayD};
 use rustyml::error::Error;
 use rustyml::neural_network::Tensor;
+use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::layer_weight::LayerWeight;
@@ -26,7 +27,7 @@ use rustyml::neural_network::optimizers::AdamW;
 use rustyml::neural_network::optimizers::RMSprop;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
-use rustyml::neural_network::traits::{Layer, Optimizer};
+use rustyml::neural_network::traits::{Layer, Optimizer, ParamGrad};
 
 // Helper: simple regression problem
 
@@ -742,7 +743,7 @@ fn dense_after_one_sgd_step(
 
     let mut opt = SGD::new(lr, 0.0, false, weight_decay).unwrap();
     opt.step();
-    opt.update(&mut layer, 1.0);
+    opt.update(0, &mut layer, 1.0);
     match layer.get_weights() {
         LayerWeight::Dense(d) => ((*d.weight).clone(), (*d.bias).clone()),
         _ => panic!("expected Dense weights"),
@@ -798,7 +799,7 @@ fn batchnorm_gamma_beta_after_one_sgd_step(weight_decay: f32) -> (ArrayD<f32>, A
 
     let mut opt = SGD::new(0.1, 0.0, false, weight_decay).unwrap();
     opt.step();
-    opt.update(&mut bn, 1.0);
+    opt.update(0, &mut bn, 1.0);
     match bn.get_weights() {
         LayerWeight::BatchNormalization(w) => ((*w.gamma).clone(), (*w.beta).clone()),
         _ => panic!("expected BatchNormalization weights"),
@@ -849,7 +850,7 @@ fn dense_weights_after_one_step<O: Optimizer>(
     layer.backward(&grad_out).unwrap();
 
     opt.step();
-    opt.update(&mut layer, 1.0);
+    opt.update(0, &mut layer, 1.0);
     match layer.get_weights() {
         LayerWeight::Dense(d) => ((*d.weight).clone(), (*d.bias).clone()),
         _ => panic!("expected Dense weights"),
@@ -999,4 +1000,452 @@ fn every_optimizer_reports_its_current_learning_rate() {
     round_trip(AdamW::new(0.003, 0.9, 0.999, 1e-8, 0.01).unwrap(), 0.003);
     round_trip(RMSprop::new(0.002, 0.9, 1e-8, 0.0).unwrap(), 0.002);
     round_trip(AdaGrad::new(0.02, 1e-8, 0.0).unwrap(), 0.02);
+}
+
+// Parameter identity: per-parameter optimizer state must follow the parameter, not a position
+
+/// Builds a Dense(2 -> 2, Linear) that holds the identity map, so 2 runs of the same schedule
+/// stay comparable element by element
+fn pass_through_dense() -> Dense {
+    let mut layer = Dense::new(2, 2, Linear::new()).unwrap();
+    let weights = Array::from_shape_vec((2, 2), vec![1.0_f32, 0.0, 0.0, 1.0]).unwrap();
+    let bias = Array::from_shape_vec((1, 2), vec![0.0_f32, 0.0]).unwrap();
+    layer.set_weights(weights, bias).unwrap();
+    layer
+}
+
+/// Runs 1 forward and 1 backward pass over a fixed input and a fixed upstream gradient, so the
+/// layer holds the gradients that `parameters` exposes
+fn one_pass(layer: &mut Dense) {
+    let x = Array::from_shape_vec((1, 2), vec![1.0_f32, 2.0])
+        .unwrap()
+        .into_dyn();
+    let _ = layer.forward(&x).unwrap();
+    let grad_out = Array::from_shape_vec((1, 2), vec![0.7_f32, -1.3])
+        .unwrap()
+        .into_dyn();
+    layer.backward(&grad_out).unwrap();
+}
+
+/// The live kernel of a Dense layer
+fn dense_kernel(layer: &Dense) -> Array2<f32> {
+    match layer.get_weights() {
+        LayerWeight::Dense(d) => (*d.weight).clone(),
+        _ => panic!("expected Dense weights"),
+    }
+}
+
+/// Asserts that 2 kernels agree element by element
+fn assert_same_kernel(got: &Array2<f32>, want: &Array2<f32>, message: &str) {
+    assert_eq!(got.shape(), want.shape());
+    for (g, w) in got.iter().zip(want.iter()) {
+        assert!((*g - *w).abs() <= 1e-6, "{message}: {g} != {w}");
+    }
+}
+
+/// A layer that yields no parameter on 1 step and 2 parameters on the next must not move any
+/// other layer's per-parameter optimizer state
+///
+/// `quiet` never ran a backward pass before step 1, so it yields 0 parameters there. `tracked`
+/// yields 2 on both steps. The momentum buffer of every `tracked` tensor must therefore be the
+/// same buffer on both steps, and `quiet` must start from a zero buffer of its own
+#[test]
+fn a_changing_parameter_count_must_not_move_another_layer_state() {
+    let mut quiet = pass_through_dense();
+    let mut tracked = pass_through_dense();
+    let mut opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
+
+    // Step 1: only `tracked` holds gradients
+    one_pass(&mut tracked);
+    assert_eq!(
+        quiet.parameters().len(),
+        0,
+        "a layer with no gradient must yield nothing"
+    );
+    assert_eq!(tracked.parameters().len(), 2);
+    opt.step();
+    opt.update(0, &mut quiet, 1.0);
+    opt.update(1, &mut tracked, 1.0);
+
+    // Step 2: both hold gradients
+    one_pass(&mut quiet);
+    one_pass(&mut tracked);
+    assert_eq!(quiet.parameters().len(), 2);
+    opt.step();
+    opt.update(0, &mut quiet, 1.0);
+    opt.update(1, &mut tracked, 1.0);
+
+    // Control 1: `tracked` alone, on the same 2-step schedule and its own optimizer
+    let mut tracked_control = pass_through_dense();
+    let mut tracked_control_opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
+    for _ in 0..2 {
+        one_pass(&mut tracked_control);
+        tracked_control_opt.step();
+        tracked_control_opt.update(1, &mut tracked_control, 1.0);
+    }
+
+    // Control 2: `quiet` alone, on the 1 step it takes part in, and its own optimizer
+    let mut quiet_control = pass_through_dense();
+    let mut quiet_control_opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
+    one_pass(&mut quiet_control);
+    quiet_control_opt.step();
+    quiet_control_opt.update(0, &mut quiet_control, 1.0);
+
+    assert_same_kernel(
+        &dense_kernel(&tracked),
+        &dense_kernel(&tracked_control),
+        "the momentum of `tracked` must not move when another layer starts yielding parameters",
+    );
+    assert_same_kernel(
+        &dense_kernel(&quiet),
+        &dense_kernel(&quiet_control),
+        "`quiet` must start from its own zero momentum, not inherit another layer's",
+    );
+}
+
+/// Adding a layer to a compiled model between 2 batches must not move the per-parameter
+/// optimizer state of the layers that were there first
+///
+/// The added layer holds the identity map, so it changes neither the forward output nor the
+/// gradient that reaches the first layer. The first layer must therefore end batch 2 with
+/// exactly the weights it reaches when no layer is added at all
+#[test]
+fn adding_a_layer_must_not_move_an_earlier_layer_state() {
+    let x = Array::from_shape_vec((2, 2), vec![1.0_f32, 2.0, -1.0, 0.5])
+        .unwrap()
+        .into_dyn();
+    let y = Array::from_shape_vec((2, 2), vec![0.3_f32, -0.7, 1.1, 0.2])
+        .unwrap()
+        .into_dyn();
+
+    let mut plain = Sequential::new();
+    plain.add(pass_through_dense()).compile(
+        SGD::new(0.1, 0.9, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
+    plain.train_batch(&x, &y).unwrap();
+    plain.train_batch(&x, &y).unwrap();
+
+    let mut grown = Sequential::new();
+    grown.add(pass_through_dense()).compile(
+        SGD::new(0.1, 0.9, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
+    grown.train_batch(&x, &y).unwrap();
+    grown.add(pass_through_dense());
+    grown.train_batch(&x, &y).unwrap();
+
+    let first_of = |model: &Sequential| match &model.get_weights()[0] {
+        LayerWeight::Dense(d) => (*d.weight).clone(),
+        _ => panic!("expected Dense weights"),
+    };
+    assert_same_kernel(
+        &first_of(&grown),
+        &first_of(&plain),
+        "the first layer must keep its own momentum when a second layer is added",
+    );
+}
+
+/// A stand-in for a layer whose parameter roster changes between steps
+///
+/// It holds 2 tensors of equal length and can withhold the gradient of the first. No layer of
+/// the crate can be built that way yet, because none supports `use_bias` or `scale`. The
+/// optimizer contract must hold for such a layer all the same, and this is the shape that
+/// contract is about to meet
+struct RosterLayer {
+    /// The tensor that the layer can withhold
+    gamma: Vec<f32>,
+    /// The tensor that the layer always yields
+    beta: Vec<f32>,
+    /// Whether `gamma` currently has a gradient
+    gamma_has_grad: bool,
+}
+
+impl RosterLayer {
+    /// A layer whose 2 tensors both start at 0
+    fn new() -> Self {
+        Self {
+            gamma: vec![0.0; 4],
+            beta: vec![0.0; 4],
+            gamma_has_grad: false,
+        }
+    }
+}
+
+/// The fixed gradient of every tensor of a `RosterLayer`, on every step
+const ROSTER_GRAD: [f32; 4] = [0.5, -0.25, 1.0, -2.0];
+
+impl Layer for RosterLayer {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+        Ok(input.clone())
+    }
+
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
+        Ok(input.clone())
+    }
+
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
+        Ok(grad_output.clone())
+    }
+
+    fn param_count(&self) -> ParamCounts {
+        ParamCounts::trainable(self.gamma.len() + self.beta.len())
+    }
+
+    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
+        let mut params = Vec::new();
+        if self.gamma_has_grad {
+            params.push(ParamGrad::no_decay("gamma", &mut self.gamma, &ROSTER_GRAD));
+        }
+        params.push(ParamGrad::no_decay("beta", &mut self.beta, &ROSTER_GRAD));
+        params
+    }
+
+    fn get_weights(&self) -> LayerWeight<'_> {
+        LayerWeight::Empty
+    }
+}
+
+/// A tensor that joins the parameter roster on a later step must not take the optimizer state
+/// of a tensor that was there first
+///
+/// `gamma` is the first entry of the roster and it is absent on step 1. A positional key gives
+/// its slot to `beta` on step 1, and hands that slot back to `gamma` on step 2. The 2 tensors
+/// have equal length, so a length check reports nothing
+#[test]
+fn a_tensor_joining_the_roster_must_not_take_another_tensor_state() {
+    // Run under test: gamma joins on step 2
+    let mut layer = RosterLayer::new();
+    let mut opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
+    opt.step();
+    opt.update(0, &mut layer, 1.0);
+    layer.gamma_has_grad = true;
+    opt.step();
+    opt.update(0, &mut layer, 1.0);
+
+    // Control for beta: the same 2 steps, and gamma never joins
+    let mut beta_control = RosterLayer::new();
+    let mut beta_control_opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
+    for _ in 0..2 {
+        beta_control_opt.step();
+        beta_control_opt.update(0, &mut beta_control, 1.0);
+    }
+
+    // Control for gamma: 1 step from a zero momentum buffer of its own
+    let mut gamma_control = RosterLayer::new();
+    gamma_control.gamma_has_grad = true;
+    let mut gamma_control_opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
+    gamma_control_opt.step();
+    gamma_control_opt.update(0, &mut gamma_control, 1.0);
+
+    for i in 0..4 {
+        assert!(
+            (layer.beta[i] - beta_control.beta[i]).abs() <= 1e-6,
+            "beta must keep its own momentum when gamma joins: {} != {}",
+            layer.beta[i],
+            beta_control.beta[i]
+        );
+        assert!(
+            (layer.gamma[i] - gamma_control.gamma[i]).abs() <= 1e-6,
+            "gamma must start from its own zero momentum: {} != {}",
+            layer.gamma[i],
+            gamma_control.gamma[i]
+        );
+    }
+    // Guard against a vacuous pass: both tensors must have actually moved
+    assert!(layer.beta[0].abs() > 1e-4 && layer.gamma[0].abs() > 1e-4);
+}
+
+// The layer half of the parameter address: state must never cross between 2 layers
+
+/// The upstream gradient of the layer at scope 0
+const FIRST_LAYER_GRAD: [f32; 2] = [0.7, -1.3];
+
+/// The upstream gradient of the layer at scope 1
+///
+/// The 2 gradients must differ. State that crosses between the layers then changes the result,
+/// and the test can see it
+const SECOND_LAYER_GRAD: [f32; 2] = [-0.4, 2.1];
+
+/// Runs 1 forward and 1 backward pass over a fixed input and the given upstream gradient
+///
+/// The activation is Linear and the input is fixed, so the parameter gradients are the same on
+/// every call. The schedules below are therefore deterministic
+fn one_pass_with(layer: &mut Dense, grad_out: [f32; 2]) {
+    let x = Array::from_shape_vec((1, 2), vec![1.0_f32, 2.0])
+        .unwrap()
+        .into_dyn();
+    let _ = layer.forward(&x).unwrap();
+    let grad = Array::from_shape_vec((1, 2), grad_out.to_vec())
+        .unwrap()
+        .into_dyn();
+    layer.backward(&grad).unwrap();
+}
+
+/// Asserts that an optimizer keys its per-parameter state on the layer index as well as on the
+/// name of the tensor
+///
+/// 2 Dense layers of the same shape run on 1 optimizer, at scope 0 and at scope 1. Both layers
+/// name their tensors `kernel` and `bias`, and the 2 tensors of a name have equal length. A key
+/// that drops the scope therefore collides across the 2 layers, and the length guard inside the
+/// optimizer cannot see the collision. The gradients of the 2 layers differ, so a collision
+/// moves both layers away from the control, which gives each layer an optimizer of its own
+fn scope_must_separate_2_same_shape_layers<O: Optimizer>(make: impl Fn() -> O, optimizer: &str) {
+    // 1 step is not enough. The state that step 1 writes is the state that step 2 reads
+    const STEPS: usize = 3;
+
+    // Run under test: 1 optimizer, 2 layers, 2 scopes
+    let mut first = pass_through_dense();
+    let mut second = pass_through_dense();
+    let mut opt = make();
+    for _ in 0..STEPS {
+        one_pass_with(&mut first, FIRST_LAYER_GRAD);
+        one_pass_with(&mut second, SECOND_LAYER_GRAD);
+        opt.step();
+        opt.update(0, &mut first, 1.0);
+        opt.update(1, &mut second, 1.0);
+    }
+
+    // Control: the same schedule, with 1 optimizer per layer, so no state can cross
+    let mut first_control = pass_through_dense();
+    let mut second_control = pass_through_dense();
+    let mut first_opt = make();
+    let mut second_opt = make();
+    for _ in 0..STEPS {
+        one_pass_with(&mut first_control, FIRST_LAYER_GRAD);
+        one_pass_with(&mut second_control, SECOND_LAYER_GRAD);
+        first_opt.step();
+        second_opt.step();
+        first_opt.update(0, &mut first_control, 1.0);
+        second_opt.update(1, &mut second_control, 1.0);
+    }
+
+    let first_kernel = dense_kernel(&first);
+    let second_kernel = dense_kernel(&second);
+    assert_same_kernel(
+        &first_kernel,
+        &dense_kernel(&first_control),
+        &format!(
+            "{optimizer}: the layer at scope 0 must not read the state of the layer at scope 1"
+        ),
+    );
+    assert_same_kernel(
+        &second_kernel,
+        &dense_kernel(&second_control),
+        &format!(
+            "{optimizer}: the layer at scope 1 must not read the state of the layer at scope 0"
+        ),
+    );
+
+    // Guard against a vacuous pass. Both layers must have moved away from the start, and the 2
+    // layers must reach different weights. A shared key is invisible if either fails
+    let start = dense_kernel(&pass_through_dense());
+    assert!(
+        first_kernel
+            .iter()
+            .zip(start.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-4),
+        "{optimizer}: the layer at scope 0 must have moved"
+    );
+    assert!(
+        second_kernel
+            .iter()
+            .zip(start.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-4),
+        "{optimizer}: the layer at scope 1 must have moved"
+    );
+    assert!(
+        first_kernel
+            .iter()
+            .zip(second_kernel.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-4),
+        "{optimizer}: the 2 layers must reach different weights"
+    );
+}
+
+/// SGD momentum buffers must belong to 1 layer each
+#[test]
+fn sgd_scope_must_separate_2_same_shape_layers() {
+    scope_must_separate_2_same_shape_layers(|| SGD::new(0.1, 0.9, false, 0.0).unwrap(), "SGD");
+}
+
+/// Adam moment buffers must belong to 1 layer each
+#[test]
+fn adam_scope_must_separate_2_same_shape_layers() {
+    scope_must_separate_2_same_shape_layers(
+        || Adam::new(0.05, 0.9, 0.999, 1e-8, 0.0).unwrap(),
+        "Adam",
+    );
+}
+
+/// AdamW moment buffers must belong to 1 layer each
+#[test]
+fn adamw_scope_must_separate_2_same_shape_layers() {
+    scope_must_separate_2_same_shape_layers(
+        || AdamW::new(0.05, 0.9, 0.999, 1e-8, 0.01).unwrap(),
+        "AdamW",
+    );
+}
+
+/// RMSprop caches must belong to 1 layer each
+#[test]
+fn rmsprop_scope_must_separate_2_same_shape_layers() {
+    scope_must_separate_2_same_shape_layers(
+        || RMSprop::new(0.05, 0.9, 1e-8, 0.0).unwrap(),
+        "RMSprop",
+    );
+}
+
+/// AdaGrad accumulators must belong to 1 layer each
+#[test]
+fn adagrad_scope_must_separate_2_same_shape_layers() {
+    scope_must_separate_2_same_shape_layers(|| AdaGrad::new(0.1, 1e-8, 0.0).unwrap(), "AdaGrad");
+}
+
+// Momentum state must reach the parameter, and not only the right parameter
+
+/// The SGD momentum buffer must survive between 2 calls to `update`
+///
+/// Every identity test above is control relative. It sees state that reaches the wrong tensor,
+/// and never state that reaches no tensor at all. This test closes that hole for SGD.
+///
+/// The gradient is the same on every step, so the trajectory has a closed form. With
+/// `v = momentum * v + g` and `p -= lr * v`, 3 steps at momentum 0.9 move the parameter by
+/// `(1 + 1.9 + 2.71) = 5.61` times the plain SGD step. A buffer that starts again on every
+/// call gives 3 times the plain step, which is plain SGD. The Nesterov arm uses the look-ahead
+/// step `g + momentum * v`, where the same 3 steps sum to 8.049, against 5.7 for a buffer that
+/// is thrown away
+#[test]
+fn sgd_momentum_velocity_must_survive_between_steps() {
+    // 1 plain SGD step gives the displacement `lr * g` of every element
+    let mut plain = pass_through_dense();
+    let mut plain_opt = SGD::new(0.1, 0.0, false, 0.0).unwrap();
+    one_pass(&mut plain);
+    plain_opt.step();
+    plain_opt.update(0, &mut plain, 1.0);
+    let start = dense_kernel(&pass_through_dense());
+    let unit = &start - &dense_kernel(&plain);
+    assert!(
+        unit.iter().any(|d| d.abs() > 1e-4),
+        "the plain step must move the kernel, or every comparison below is vacuous"
+    );
+
+    for (nesterov, factor) in [(false, 5.61_f32), (true, 8.049_f32)] {
+        let mut layer = pass_through_dense();
+        let mut opt = SGD::new(0.1, 0.9, nesterov, 0.0).unwrap();
+        for _ in 0..3 {
+            one_pass(&mut layer);
+            opt.step();
+            opt.update(0, &mut layer, 1.0);
+        }
+        let got = dense_kernel(&layer);
+        for ((g, s), u) in got.iter().zip(start.iter()).zip(unit.iter()) {
+            let want = *s - factor * *u;
+            assert!(
+                (*g - want).abs() <= 1e-4,
+                "3 momentum steps with nesterov={nesterov} must sum to {factor} plain steps: \
+                 {g} != {want}"
+            );
+        }
+    }
 }

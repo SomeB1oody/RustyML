@@ -53,7 +53,7 @@ use super::{GoldenCase, LayerFixture, golden_weights, golden_weights_from};
 use ndarray::{Array2, ArrayD, Ix2};
 use rustyml::error::Error;
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::Activation;
 use rustyml::neural_network::layers::embedding::Embedding;
 use rustyml::neural_network::layers::layer_weight::LayerWeight;
@@ -477,7 +477,7 @@ impl Layer for IndexedEmbedding {
         self.inner.output_shape()
     }
 
-    fn param_count(&self) -> TrainingParameters {
+    fn param_count(&self) -> ParamCounts {
         self.inner.param_count()
     }
 

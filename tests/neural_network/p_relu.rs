@@ -12,7 +12,7 @@
 
 use ndarray::{Array, Array1, Array2, Array4, ArrayD, IxDyn};
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::leaky_relu::LeakyReLU;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::activation::p_relu::PReLU;
@@ -124,7 +124,7 @@ fn p_relu_holds_1_slope_per_position_without_shared_axes() {
         let layer = PReLU::new(shape.clone(), 0.25).unwrap();
         assert_eq!(
             layer.param_count(),
-            TrainingParameters::Trainable(count),
+            ParamCounts::trainable(count),
             "shape {shape:?}"
         );
         assert_eq!(slopes_of(&layer).shape(), &shape[1..]);
@@ -190,7 +190,7 @@ fn p_relu_shared_axes_set_the_slope_shape() {
             "shape {shape:?} shared {shared:?}"
         );
         let count: usize = want.iter().product();
-        assert_eq!(layer.param_count(), TrainingParameters::Trainable(count));
+        assert_eq!(layer.param_count(), ParamCounts::trainable(count));
     }
 }
 
@@ -680,7 +680,7 @@ fn p_relu_trains_with_shared_spatial_axes() {
         .unwrap()
         .with_shared_axes(vec![1, 2])
         .unwrap();
-    assert_eq!(layer.param_count(), TrainingParameters::Trainable(2));
+    assert_eq!(layer.param_count(), ParamCounts::trainable(2));
 
     let out = layer.forward(&x).unwrap();
     assert_eq!(out.shape(), &[2, 3, 3, 2]);

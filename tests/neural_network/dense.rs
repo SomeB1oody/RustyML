@@ -76,18 +76,18 @@ fn dense_new_accepts_valid_dims() {
 /// param_count = input_dim * units + units (weights + bias elements)
 #[test]
 fn dense_param_count_2x2() {
-    use rustyml::neural_network::layers::TrainingParameters;
+    use rustyml::neural_network::layers::ParamCounts;
     let d = Dense::new(2, 2, Linear::new()).unwrap();
     // 2*2 weights + 2 bias = 6
-    assert_eq!(d.param_count(), TrainingParameters::Trainable(6));
+    assert_eq!(d.param_count(), ParamCounts::trainable(6));
 }
 
 #[test]
 fn dense_param_count_3x5() {
-    use rustyml::neural_network::layers::TrainingParameters;
+    use rustyml::neural_network::layers::ParamCounts;
     let d = Dense::new(3, 5, Linear::new()).unwrap();
     // 3*5 weights + 5 bias = 20
-    assert_eq!(d.param_count(), TrainingParameters::Trainable(20));
+    assert_eq!(d.param_count(), ParamCounts::trainable(20));
 }
 
 // Dense: forward, identity weight gives output equal to input
@@ -824,9 +824,9 @@ fn flatten_get_weights_is_empty() {
 
 #[test]
 fn flatten_param_count_is_no_trainable() {
-    use rustyml::neural_network::layers::TrainingParameters;
+    use rustyml::neural_network::layers::ParamCounts;
     let fl = Flatten::new(vec![2, 3, 4]).unwrap();
-    assert_eq!(fl.param_count(), TrainingParameters::NoTrainable);
+    assert_eq!(fl.param_count(), ParamCounts::none());
 }
 
 // Flatten: layer_type string

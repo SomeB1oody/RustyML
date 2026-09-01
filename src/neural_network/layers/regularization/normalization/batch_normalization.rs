@@ -13,7 +13,7 @@ use super::col_fold_parallel_min_elems;
 use super::folds::{par_col_dot, par_col_sum, rows_per_block};
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::layer_weight::{BatchNormalizationLayerWeight, LayerWeight};
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
@@ -552,8 +552,13 @@ impl Layer for BatchNormalization {
         normalization_layer_output_shape!(self)
     }
 
-    fn param_count(&self) -> TrainingParameters {
-        TrainingParameters::Trainable(self.gamma.len() + self.beta.len())
+    fn param_count(&self) -> ParamCounts {
+        // The running statistics are parameters of the layer, and no optimizer updates them.
+        // They move only in the training forward pass, so they are non-trainable
+        ParamCounts::new(
+            self.gamma.len() + self.beta.len(),
+            self.running_mean.len() + self.running_var.len(),
+        )
     }
 
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
@@ -565,14 +570,19 @@ impl Layer for BatchNormalization {
             ..
         } = self;
         let mut params = Vec::new();
-        if let (Some(grad_a), Some(grad_b)) = (grad_gamma.as_ref(), grad_beta.as_ref()) {
+        // Each tensor is pushed on its own, so a tensor without a gradient holds back no other
+        if let Some(grad) = grad_gamma.as_ref() {
             params.push(ParamGrad::no_decay(
+                "gamma",
                 gamma.as_slice_mut().expect("gamma must be contiguous"),
-                grad_a.as_slice().expect("grad_gamma must be contiguous"),
+                grad.as_slice().expect("grad_gamma must be contiguous"),
             ));
+        }
+        if let Some(grad) = grad_beta.as_ref() {
             params.push(ParamGrad::no_decay(
+                "beta",
                 beta.as_slice_mut().expect("beta must be contiguous"),
-                grad_b.as_slice().expect("grad_beta must be contiguous"),
+                grad.as_slice().expect("grad_beta must be contiguous"),
             ));
         }
         params

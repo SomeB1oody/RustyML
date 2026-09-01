@@ -2,7 +2,7 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::layer_weight::{GRULayerWeight, LayerWeight};
 use crate::neural_network::layers::recurrent::gate::{FusedGates, project_input, take_cache};
@@ -657,8 +657,8 @@ impl Layer for GRU {
         }
     }
 
-    fn param_count(&self) -> TrainingParameters {
-        TrainingParameters::Trainable(
+    fn param_count(&self) -> ParamCounts {
+        ParamCounts::trainable(
             3 * (self.input_dim * self.units + self.units * self.units + self.units),
         )
     }

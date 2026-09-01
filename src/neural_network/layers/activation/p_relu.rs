@@ -3,7 +3,7 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::format_shape;
 use crate::neural_network::layers::layer_weight::{LayerWeight, PReLULayerWeight};
 use crate::neural_network::layers::validation::validate_weight_shape;
@@ -408,8 +408,8 @@ impl Layer for PReLU {
         }
     }
 
-    fn param_count(&self) -> TrainingParameters {
-        TrainingParameters::Trainable(self.alpha.len())
+    fn param_count(&self) -> ParamCounts {
+        ParamCounts::trainable(self.alpha.len())
     }
 
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
@@ -419,6 +419,7 @@ impl Layer for PReLU {
         let mut params = Vec::new();
         if let Some(grad) = grad_alpha.as_ref() {
             params.push(ParamGrad::no_decay(
+                "alpha",
                 alpha
                     .as_slice_mut()
                     .expect("the slopes are kept in C order"),

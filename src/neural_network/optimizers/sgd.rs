@@ -5,7 +5,8 @@ use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
     validate_global_clipnorm, validate_learning_rate, validate_non_negative_finite,
 };
-use crate::neural_network::traits::{Layer, Optimizer};
+use crate::neural_network::traits::{Layer, Optimizer, ParamId};
+use std::collections::HashMap;
 
 /// SGD (Stochastic Gradient Descent) optimizer
 ///
@@ -23,11 +24,10 @@ pub struct SGD {
     weight_decay: f32,
     /// Optional clip-by-global-norm threshold. `None` disables gradient clipping
     global_clipnorm: Option<f32>,
-    /// Per-parameter momentum buffers, allocated lazily when `momentum > 0`, indexed by the order
-    /// layers yield parameters each step
-    velocities: Vec<Vec<f32>>,
-    /// Position within `velocities` for the parameter currently being updated. Reset each `step`
-    cursor: usize,
+    /// Per-parameter momentum buffers, allocated lazily when `momentum > 0` and keyed by the
+    /// address of the parameter. A buffer therefore follows its own tensor, whatever else the
+    /// model does
+    velocities: HashMap<ParamId, Vec<f32>>,
 }
 
 impl SGD {
@@ -69,8 +69,7 @@ impl SGD {
             nesterov,
             weight_decay,
             global_clipnorm: None,
-            velocities: Vec::new(),
-            cursor: 0,
+            velocities: HashMap::new(),
         })
     }
 
@@ -95,11 +94,6 @@ impl SGD {
 }
 
 impl Optimizer for SGD {
-    fn step(&mut self) {
-        // Rewind to the first parameter
-        self.cursor = 0;
-    }
-
     fn global_clipnorm(&self) -> Option<f32> {
         self.global_clipnorm
     }
@@ -112,7 +106,7 @@ impl Optimizer for SGD {
         self.learning_rate = learning_rate;
     }
 
-    fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32) {
+    fn update(&mut self, scope: usize, layer: &mut dyn Layer, grad_scale: f32) {
         for pg in layer.parameters() {
             let grad = kernels::scaled_grad(pg.grad, grad_scale);
             // Decoupled weight decay shrinks the parameter before the gradient step (weights only,
@@ -124,21 +118,22 @@ impl Optimizer for SGD {
             if self.momentum == 0.0 {
                 kernels::sgd_step(pg.value, &grad, self.learning_rate);
             } else {
-                if self.cursor >= self.velocities.len() {
-                    self.velocities.push(vec![0.0; pg.value.len()]);
-                } else if self.velocities[self.cursor].len() != pg.value.len() {
-                    // Parameter length changed at this position: reset the buffer to match
-                    self.velocities[self.cursor] = vec![0.0; pg.value.len()];
+                let velocity = self
+                    .velocities
+                    .entry(ParamId::new(scope, pg.name))
+                    .or_default();
+                if velocity.len() != pg.value.len() {
+                    // The tensor was resized under its own name: start the buffer again
+                    *velocity = vec![0.0; pg.value.len()];
                 }
                 kernels::sgd_momentum_step(
                     pg.value,
                     &grad,
-                    &mut self.velocities[self.cursor],
+                    velocity,
                     self.learning_rate,
                     self.momentum,
                     self.nesterov,
                 );
-                self.cursor += 1;
             }
         }
     }

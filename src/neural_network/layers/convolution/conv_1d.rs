@@ -2,7 +2,7 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
 #[doc(inline)]
 pub use crate::neural_network::layers::convolution::convolution_engine::ConvPadding;
@@ -391,8 +391,8 @@ impl Layer for Conv1D {
         )
     }
 
-    fn param_count(&self) -> TrainingParameters {
-        TrainingParameters::Trainable(self.weights.len() + self.bias.len())
+    fn param_count(&self) -> ParamCounts {
+        ParamCounts::trainable(self.weights.len() + self.bias.len())
     }
 
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
@@ -404,18 +404,20 @@ impl Layer for Conv1D {
             ..
         } = self;
         let mut params = Vec::new();
-        if let (Some(grad_a), Some(grad_b)) = (weight_gradients.as_ref(), bias_gradients.as_ref()) {
+        // Each tensor is pushed on its own, so a tensor without a gradient holds back no other
+        if let Some(grad) = weight_gradients.as_ref() {
             params.push(ParamGrad::weight(
+                "kernel",
                 weights.as_slice_mut().expect("weights must be contiguous"),
-                grad_a
-                    .as_slice()
+                grad.as_slice()
                     .expect("weight_gradients must be contiguous"),
             ));
+        }
+        if let Some(grad) = bias_gradients.as_ref() {
             params.push(ParamGrad::no_decay(
+                "bias",
                 bias.as_slice_mut().expect("bias must be contiguous"),
-                grad_b
-                    .as_slice()
-                    .expect("bias_gradients must be contiguous"),
+                grad.as_slice().expect("bias_gradients must be contiguous"),
             ));
         }
         params

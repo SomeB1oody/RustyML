@@ -3,8 +3,47 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::layer_weight::LayerWeight;
+
+/// The stable address of 1 parameter tensor inside a model
+///
+/// A parameter is identified by the layer that holds it and by the name that the layer gives
+/// it. Neither half moves while the model trains, so an optimizer can key its per-parameter
+/// state on the pair and reach the same buffer on every step
+///
+/// The scope is the position of the layer in the model that drives the update.
+/// [`Sequential`](crate::neural_network::sequential::Sequential) passes the index of the layer,
+/// counted from the input. A caller that drives 1 layer directly passes any value it likes,
+/// as long as it passes the same value on every step for that layer
+///
+/// The name is the `&'static str` that [`Layer::parameters`] puts in the
+/// [`ParamGrad`]. It follows the layer, so a layer that stops yielding 1 of its
+/// tensors, or that starts yielding a new one, moves no other tensor's address
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ParamId {
+    /// Position of the owning layer in the model, counted from the input
+    pub scope: usize,
+    /// Name the layer gives the tensor, such as `"kernel"`, `"bias"`, or `"gamma"`
+    pub name: &'static str,
+}
+
+impl ParamId {
+    /// Builds the address of the named parameter of the layer at the given position
+    ///
+    /// # Parameters
+    ///
+    /// - `scope` - Position of the owning layer in the model, counted from the input
+    /// - `name` - Name the layer gives the tensor
+    ///
+    /// # Returns
+    ///
+    /// - `ParamId` - The parameter address
+    #[inline]
+    pub const fn new(scope: usize, name: &'static str) -> Self {
+        Self { scope, name }
+    }
+}
 
 /// A single trainable parameter tensor paired with its gradient, exposed as flat slices
 ///
@@ -17,7 +56,14 @@ use crate::neural_network::layers::layer_weight::LayerWeight;
 /// (weight matrices, conv/recurrent kernels). Use [`ParamGrad::no_decay`] for a tensor it skips
 /// (biases and normalization scale/shift `gamma`/`beta`). The `decays` flag tells the optimizer
 /// which rule applies, so it never has to guess
+///
+/// The `name` is the half of the parameter address that the layer owns. It uses the Keras 3
+/// name of the tensor, such as `kernel`, `recurrent_kernel`, `depthwise_kernel`, `bias`,
+/// `embeddings`, `alpha`, `gamma`, or `beta`. A layer must give the same name to the same
+/// storage on every call, and must give 2 different tensors 2 different names
 pub struct ParamGrad<'a> {
+    /// Name the layer gives this tensor. See [`ParamId`]
+    pub name: &'static str,
     /// Mutable view of the parameter's contiguous data that the optimizer updates in place
     pub value: &'a mut [f32],
     /// The corresponding gradient data (same length and ordering as `value`)
@@ -30,9 +76,20 @@ pub struct ParamGrad<'a> {
 
 impl<'a> ParamGrad<'a> {
     /// A weight tensor that decoupled weight decay applies to (dense/conv/recurrent kernels)
+    ///
+    /// # Parameters
+    ///
+    /// - `name` - Name the layer gives the tensor, such as `"kernel"`
+    /// - `value` - Mutable view of the parameter's contiguous data
+    /// - `grad` - The gradient data, of the same length and ordering as `value`
+    ///
+    /// # Returns
+    ///
+    /// - `ParamGrad` - The entry, with `decays` set to `true`
     #[inline]
-    pub fn weight(value: &'a mut [f32], grad: &'a [f32]) -> Self {
+    pub fn weight(name: &'static str, value: &'a mut [f32], grad: &'a [f32]) -> Self {
         Self {
+            name,
             value,
             grad,
             decays: true,
@@ -40,9 +97,20 @@ impl<'a> ParamGrad<'a> {
     }
 
     /// A bias or normalization scale/shift (`gamma`/`beta`) tensor that weight decay skips
+    ///
+    /// # Parameters
+    ///
+    /// - `name` - Name the layer gives the tensor, such as `"bias"`
+    /// - `value` - Mutable view of the parameter's contiguous data
+    /// - `grad` - The gradient data, of the same length and ordering as `value`
+    ///
+    /// # Returns
+    ///
+    /// - `ParamGrad` - The entry, with `decays` set to `false`
     #[inline]
-    pub fn no_decay(value: &'a mut [f32], grad: &'a [f32]) -> Self {
+    pub fn no_decay(name: &'static str, value: &'a mut [f32], grad: &'a [f32]) -> Self {
         Self {
+            name,
             value,
             grad,
             decays: false,
@@ -140,24 +208,28 @@ pub trait Layer: std::any::Any + Send + Sync {
         "Unknown".to_string()
     }
 
-    /// Returns the total number of trainable parameters in the layer
+    /// Returns how many parameters the layer holds, split by whether training updates them
     ///
     /// # Returns
     ///
-    /// - `TrainingParameters` - The count of parameters as an enum variant
-    fn param_count(&self) -> TrainingParameters;
+    /// - `ParamCounts` - The trainable and the non-trainable element counts
+    fn param_count(&self) -> ParamCounts;
 
     /// Exposes the layer's trainable parameters and their gradients to the optimizer
     ///
-    /// Each returned [`ParamGrad`] pairs a parameter tensor's flat data with its gradient. Layers
-    /// without trainable parameters (or before a backward pass has produced gradients) return
-    /// the empty vector that the default implementation gives. The order of the returned entries
-    /// must stay stable across calls, because step-based optimizers key their per-parameter
-    /// state by position
+    /// Each returned [`ParamGrad`] pairs a parameter tensor's flat data with its gradient, and
+    /// names the tensor. Layers without trainable parameters return the empty vector that the
+    /// default implementation gives. A layer yields 1 entry per tensor that currently holds a
+    /// gradient, so the count can differ from step to step. A tensor with no gradient yet is
+    /// simply absent, and it holds back none of the other tensors of the same layer
+    ///
+    /// The name is the identity of the tensor, and the optimizer keys its per-parameter state
+    /// on it (see [`ParamId`]). The same storage must therefore always come back under the same
+    /// name, and 2 tensors of 1 layer must never share a name. The order of the entries is free
     ///
     /// # Returns
     ///
-    /// - `Vec<ParamGrad<'_>>` - 1 entry per trainable tensor that currently has a gradient
+    /// - `Vec<ParamGrad<'_>>` - 1 named entry per trainable tensor that currently has a gradient
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
         Vec::new()
     }
@@ -284,12 +356,15 @@ pub trait Optimizer {
     /// Advances the optimizer's global training step
     ///
     /// Called exactly once per batch, before the per-layer [`update`](Optimizer::update) calls.
-    /// Step-dependent optimizers such as Adam use this to advance their bias-correction timestep
-    /// once per training step rather than once per layer. The default implementation is a no-op,
-    /// but every optimizer in this crate overrides it. SGD, RMSprop, and AdaGrad rewind the
-    /// cursor that walks their per-parameter state buffers. Adam and AdamW also advance
-    /// the timestep. Any optimizer carrying per-parameter state must do the same. Otherwise the
-    /// cursor keeps climbing into the next batch, and every layer reads the wrong slot
+    /// The method now carries 1 duty only: a step-dependent optimizer advances the counter that
+    /// its own math reads. [`Adam`](crate::neural_network::optimizers::Adam) and
+    /// [`AdamW`](crate::neural_network::optimizers::AdamW) advance the bias-correction timestep
+    /// here, so the correction moves once per batch rather than once per layer. SGD, RMSprop,
+    /// and AdaGrad hold no such counter and keep the no-op default
+    ///
+    /// The method no longer rewinds anything. Per-parameter state is keyed by
+    /// [`ParamId`], which is the position of the layer plus the name the layer gives the
+    /// tensor, so nothing walks a cursor that a rewind could leave in the wrong place
     fn step(&mut self) {}
 
     /// The global gradient-norm clip threshold, or `None` (the default) to disable clipping
@@ -312,12 +387,18 @@ pub trait Optimizer {
 
     /// Updates the parameters of a layer according to the optimization algorithm
     ///
+    /// The optimizer builds a [`ParamId`] from `scope` and the name of each
+    /// [`ParamGrad`], and keys its per-parameter state on that address. The caller must
+    /// therefore give the same layer the same `scope` on every step
+    ///
     /// # Parameters
     ///
+    /// - `scope` - Position of this layer in the model, counted from the input. It is the
+    ///   layer half of the parameter address
     /// - `layer` - The layer whose parameters should be updated
     /// - `grad_scale` - Uniform factor that the training loop applies to every gradient before
     ///   the update, to implement clip-by-global-norm. Pass `1.0` for an unscaled update
-    fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32);
+    fn update(&mut self, scope: usize, layer: &mut dyn Layer, grad_scale: f32);
 
     /// The current learning rate
     ///

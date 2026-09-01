@@ -5,7 +5,8 @@ use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
     validate_global_clipnorm, validate_non_negative_finite, validate_positive_finite,
 };
-use crate::neural_network::traits::{Layer, Optimizer};
+use crate::neural_network::traits::{Layer, Optimizer, ParamId};
+use std::collections::HashMap;
 
 /// AdaGrad (Adaptive Gradient Algorithm) optimizer
 ///
@@ -16,10 +17,9 @@ pub struct AdaGrad {
     learning_rate: f32,
     /// Small constant added for numerical stability
     epsilon: f32,
-    /// Per-parameter accumulated squared gradients, indexed by parameter order each step
-    accumulators: Vec<Vec<f32>>,
-    /// Position within `accumulators` for the parameter currently being updated. Reset each `step`
-    cursor: usize,
+    /// Per-parameter accumulated squared gradients, keyed by the address of the parameter. An
+    /// accumulator therefore follows its own tensor, whatever else the model does
+    accumulators: HashMap<ParamId, Vec<f32>>,
     /// Optional clip-by-global-norm threshold. `None` disables gradient clipping
     global_clipnorm: Option<f32>,
     /// Decoupled (AdamW-style) weight decay coefficient. `0.0` disables it
@@ -56,8 +56,7 @@ impl AdaGrad {
         Ok(Self {
             learning_rate,
             epsilon,
-            accumulators: Vec::new(),
-            cursor: 0,
+            accumulators: HashMap::new(),
             global_clipnorm: None,
             weight_decay,
         })
@@ -84,10 +83,6 @@ impl AdaGrad {
 }
 
 impl Optimizer for AdaGrad {
-    fn step(&mut self) {
-        self.cursor = 0;
-    }
-
     fn global_clipnorm(&self) -> Option<f32> {
         self.global_clipnorm
     }
@@ -100,13 +95,15 @@ impl Optimizer for AdaGrad {
         self.learning_rate = learning_rate;
     }
 
-    fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32) {
+    fn update(&mut self, scope: usize, layer: &mut dyn Layer, grad_scale: f32) {
         for pg in layer.parameters() {
-            if self.cursor >= self.accumulators.len() {
-                self.accumulators.push(vec![0.0; pg.value.len()]);
-            } else if self.accumulators[self.cursor].len() != pg.value.len() {
-                // Reset the accumulator to match
-                self.accumulators[self.cursor] = vec![0.0; pg.value.len()];
+            let accumulator = self
+                .accumulators
+                .entry(ParamId::new(scope, pg.name))
+                .or_default();
+            if accumulator.len() != pg.value.len() {
+                // The tensor was resized under its own name: start the accumulator again
+                *accumulator = vec![0.0; pg.value.len()];
             }
             let grad = kernels::scaled_grad(pg.grad, grad_scale);
             // Decoupled weight decay shrinks the parameter before the adaptive step (weights
@@ -117,11 +114,10 @@ impl Optimizer for AdaGrad {
             kernels::adagrad_step(
                 pg.value,
                 &grad,
-                &mut self.accumulators[self.cursor],
+                accumulator,
                 self.learning_rate,
                 self.epsilon,
             );
-            self.cursor += 1;
         }
     }
 }

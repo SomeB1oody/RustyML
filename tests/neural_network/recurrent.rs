@@ -911,28 +911,28 @@ fn gru_forward_is_deterministic() {
 /// SimpleRNN param_count = input_dim*units + units*units + units (1 gate)
 #[test]
 fn simple_rnn_param_count_formula() {
-    use rustyml::neural_network::layers::TrainingParameters;
+    use rustyml::neural_network::layers::ParamCounts;
     let rnn = SimpleRNN::new(3, 2, Tanh::new()).unwrap();
     // 3*2 + 2*2 + 2 = 6 + 4 + 2 = 12
-    assert_eq!(rnn.param_count(), TrainingParameters::Trainable(12));
+    assert_eq!(rnn.param_count(), ParamCounts::trainable(12));
 }
 
 /// GRU param_count = 3 * (input_dim*units + units*units + units) (3 gates)
 #[test]
 fn gru_param_count_formula() {
-    use rustyml::neural_network::layers::TrainingParameters;
+    use rustyml::neural_network::layers::ParamCounts;
     let gru = GRU::new(3, 2, Tanh::new()).unwrap();
     // 3 * (3*2 + 2*2 + 2) = 3 * 12 = 36
-    assert_eq!(gru.param_count(), TrainingParameters::Trainable(36));
+    assert_eq!(gru.param_count(), ParamCounts::trainable(36));
 }
 
 /// LSTM param_count = 4 * (input_dim*units + units*units + units) (4 gates)
 #[test]
 fn lstm_param_count_formula() {
-    use rustyml::neural_network::layers::TrainingParameters;
+    use rustyml::neural_network::layers::ParamCounts;
     let lstm = LSTM::new(3, 2, Tanh::new()).unwrap();
     // 4 * (3*2 + 2*2 + 2) = 4 * 12 = 48
-    assert_eq!(lstm.param_count(), TrainingParameters::Trainable(48));
+    assert_eq!(lstm.param_count(), ParamCounts::trainable(48));
 }
 
 // return_sequences and go_backwards

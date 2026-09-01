@@ -107,10 +107,10 @@ fn golden_conv_family() {
 }
 
 /// The parameter names of a layer that carries 1 kernel and 1 bias.
-const KERNEL_AND_BIAS: [&str; 2] = ["weight", "bias"];
+const KERNEL_AND_BIAS: [&str; 2] = ["kernel", "bias"];
 
 /// The parameter names of a separable layer, in `Layer::parameters` order.
-const SEPARABLE_PARAMETERS: [&str; 3] = ["depthwise_weight", "pointwise_weight", "bias"];
+const SEPARABLE_PARAMETERS: [&str; 3] = ["depthwise_kernel", "pointwise_kernel", "bias"];
 
 /// The rank-3 input shape that every 1D case uses, as \[batch, length, channels\].
 const SHAPE_1D: [usize; 3] = [2, 6, 2];

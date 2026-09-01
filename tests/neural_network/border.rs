@@ -5,7 +5,7 @@
 
 use ndarray::{Array3, Array4, Array5, IxDyn};
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::border::{
     Cropping1D, Cropping2D, Cropping3D, ZeroPadding1D, ZeroPadding2D, ZeroPadding3D,
@@ -485,14 +485,8 @@ fn border_layer_types_are_named() {
 /// No border layer has parameters, so param_count is NoTrainable
 #[test]
 fn border_layers_have_no_trainable_parameters() {
-    assert_eq!(
-        ZeroPadding2D::new(1).param_count(),
-        TrainingParameters::NoTrainable
-    );
-    assert_eq!(
-        Cropping3D::new(1).param_count(),
-        TrainingParameters::NoTrainable
-    );
+    assert_eq!(ZeroPadding2D::new(1).param_count(), ParamCounts::none());
+    assert_eq!(Cropping3D::new(1).param_count(), ParamCounts::none());
 }
 
 /// No border layer has weights, so get_weights gives the Empty variant

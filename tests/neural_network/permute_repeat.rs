@@ -5,7 +5,7 @@
 
 use ndarray::{Array2, Array3, Array4, Array5, IxDyn};
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::activation::softmax::Softmax;
 use rustyml::neural_network::layers::dense::Dense;
@@ -318,7 +318,7 @@ fn permute_backward_wrong_grad_shape_returns_err() {
 fn permute_metadata() {
     let p = Permute::new(vec![2, 1]).unwrap();
     assert_eq!(p.layer_type(), "Permute");
-    assert_eq!(p.param_count(), TrainingParameters::NoTrainable);
+    assert_eq!(p.param_count(), ParamCounts::none());
     assert!(
         matches!(p.get_weights(), LayerWeight::Empty),
         "Permute must expose LayerWeight::Empty"
@@ -485,7 +485,7 @@ fn repeat_vector_backward_wrong_grad_shape_returns_err() {
 fn repeat_vector_metadata() {
     let r = RepeatVector::new(3).unwrap();
     assert_eq!(r.layer_type(), "RepeatVector");
-    assert_eq!(r.param_count(), TrainingParameters::NoTrainable);
+    assert_eq!(r.param_count(), ParamCounts::none());
     assert!(
         matches!(r.get_weights(), LayerWeight::Empty),
         "RepeatVector must expose LayerWeight::Empty"

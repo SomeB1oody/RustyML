@@ -98,7 +98,7 @@ impl Optimizer for Adam {
         self.core.step();
     }
 
-    fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32) {
-        self.core.update(layer, grad_scale);
+    fn update(&mut self, scope: usize, layer: &mut dyn Layer, grad_scale: f32) {
+        self.core.update(scope, layer, grad_scale);
     }
 }

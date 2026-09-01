@@ -279,17 +279,17 @@ fn conv1d_two_input_channels_cross_channel_sum() {
 /// param_count = filters * channels * kernel_size + filters
 #[test]
 fn conv1d_param_count_formula() {
-    use rustyml::neural_network::layers::TrainingParameters;
+    use rustyml::neural_network::layers::ParamCounts;
     let layer = Conv1D::new(4, 2, vec![1, 8, 3], 1, Linear::new()).unwrap();
-    assert_eq!(layer.param_count(), TrainingParameters::Trainable(28));
+    assert_eq!(layer.param_count(), ParamCounts::trainable(28));
 }
 
 /// param_count for filters=2, channels=1, kernel=3 is 2*1*3 + 2 = 8
 #[test]
 fn conv1d_param_count_single_channel() {
-    use rustyml::neural_network::layers::TrainingParameters;
+    use rustyml::neural_network::layers::ParamCounts;
     let layer = Conv1D::new(2, 3, vec![1, 5, 1], 1, Linear::new()).unwrap();
-    assert_eq!(layer.param_count(), TrainingParameters::Trainable(8));
+    assert_eq!(layer.param_count(), ParamCounts::trainable(8));
 }
 
 // Conv1D - set_weights
@@ -712,17 +712,17 @@ fn conv2d_same_padding_all_ones_values() {
 /// param_count = filters * channels * kh * kw + filters
 #[test]
 fn conv2d_param_count_formula() {
-    use rustyml::neural_network::layers::TrainingParameters;
+    use rustyml::neural_network::layers::ParamCounts;
     let layer = Conv2D::new(2, (3, 3), vec![1, 5, 5, 3], (1, 1), Linear::new()).unwrap();
-    assert_eq!(layer.param_count(), TrainingParameters::Trainable(56));
+    assert_eq!(layer.param_count(), ParamCounts::trainable(56));
 }
 
 /// param_count for filters=1, channels=1, kernel=(2,2) is 1*1*2*2 + 1 = 5
 #[test]
 fn conv2d_param_count_single_filter_single_channel() {
-    use rustyml::neural_network::layers::TrainingParameters;
+    use rustyml::neural_network::layers::ParamCounts;
     let layer = Conv2D::new(1, (2, 2), vec![1, 4, 4, 1], (1, 1), Linear::new()).unwrap();
-    assert_eq!(layer.param_count(), TrainingParameters::Trainable(5));
+    assert_eq!(layer.param_count(), ParamCounts::trainable(5));
 }
 
 // Conv2D - set_weights

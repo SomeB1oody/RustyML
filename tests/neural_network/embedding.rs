@@ -10,7 +10,7 @@
 
 use ndarray::{Array1, Array2, Array3, IxDyn};
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::embedding::Embedding;
@@ -77,7 +77,7 @@ fn embedding_param_count_is_the_table_size() {
         let layer = Embedding::new(input_dim, output_dim).unwrap();
         assert_eq!(
             layer.param_count(),
-            TrainingParameters::Trainable(input_dim * output_dim)
+            ParamCounts::trainable(input_dim * output_dim)
         );
     }
 }

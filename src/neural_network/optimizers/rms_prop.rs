@@ -6,7 +6,8 @@ use crate::neural_network::optimizers::validation::{
     validate_decay_rate, validate_epsilon, validate_global_clipnorm, validate_learning_rate,
     validate_non_negative_finite,
 };
-use crate::neural_network::traits::{Layer, Optimizer};
+use crate::neural_network::traits::{Layer, Optimizer, ParamId};
+use std::collections::HashMap;
 
 /// RMSprop (Root Mean Square Propagation) optimizer
 ///
@@ -19,10 +20,9 @@ pub struct RMSprop {
     rho: f32,
     /// Small constant added for numerical stability
     epsilon: f32,
-    /// Per-parameter squared-gradient running averages, indexed by parameter order each step
-    caches: Vec<Vec<f32>>,
-    /// Position within `caches` for the parameter currently being updated. Reset each `step`
-    cursor: usize,
+    /// Per-parameter squared-gradient running averages, keyed by the address of the parameter.
+    /// A cache therefore follows its own tensor, whatever else the model does
+    caches: HashMap<ParamId, Vec<f32>>,
     /// Optional clip-by-global-norm threshold. `None` disables gradient clipping
     global_clipnorm: Option<f32>,
     /// Decoupled (AdamW-style) weight decay coefficient. `0.0` disables it
@@ -67,8 +67,7 @@ impl RMSprop {
             learning_rate,
             rho,
             epsilon,
-            caches: Vec::new(),
-            cursor: 0,
+            caches: HashMap::new(),
             global_clipnorm: None,
             weight_decay,
         })
@@ -95,11 +94,6 @@ impl RMSprop {
 }
 
 impl Optimizer for RMSprop {
-    fn step(&mut self) {
-        // Rewind to the first parameter. Layers yield parameters in the same order every step
-        self.cursor = 0;
-    }
-
     fn global_clipnorm(&self) -> Option<f32> {
         self.global_clipnorm
     }
@@ -112,13 +106,12 @@ impl Optimizer for RMSprop {
         self.learning_rate = learning_rate;
     }
 
-    fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32) {
+    fn update(&mut self, scope: usize, layer: &mut dyn Layer, grad_scale: f32) {
         for pg in layer.parameters() {
-            if self.cursor >= self.caches.len() {
-                self.caches.push(vec![0.0; pg.value.len()]);
-            } else if self.caches[self.cursor].len() != pg.value.len() {
-                // Reset the cache to match
-                self.caches[self.cursor] = vec![0.0; pg.value.len()];
+            let cache = self.caches.entry(ParamId::new(scope, pg.name)).or_default();
+            if cache.len() != pg.value.len() {
+                // The tensor was resized under its own name: start the cache again
+                *cache = vec![0.0; pg.value.len()];
             }
             let grad = kernels::scaled_grad(pg.grad, grad_scale);
             // Decoupled weight decay shrinks the parameter before the adaptive step (weights
@@ -129,12 +122,11 @@ impl Optimizer for RMSprop {
             kernels::rmsprop_step(
                 pg.value,
                 &grad,
-                &mut self.caches[self.cursor],
+                cache,
                 self.rho,
                 self.learning_rate,
                 self.epsilon,
             );
-            self.cursor += 1;
         }
     }
 }

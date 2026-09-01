@@ -901,12 +901,13 @@ fn bn_new_scalar_param_branch_forward_1d() {
 #[test]
 fn bn_spatial_4d_normalizes_per_channel() {
     use rustyml::neural_network::Tensor;
-    use rustyml::neural_network::layers::TrainingParameters;
+    use rustyml::neural_network::layers::ParamCounts;
 
     // [N=1, H=2, W=2, C=2]
     let mut bn = BatchNormalization::new(vec![1, 2, 2, 2], 0.9, 1e-5).unwrap();
-    // Per-channel (C=2) parameters: gamma[2] + beta[2] = 4 trainable (not 2*C*H*W = 16)
-    assert!(matches!(bn.param_count(), TrainingParameters::Trainable(4)));
+    // Per-channel (C=2) parameters: gamma[2] + beta[2] = 4 trainable (not 2*C*H*W = 16), plus
+    // the running mean[2] and the running variance[2], which no optimizer updates
+    assert_eq!(bn.param_count(), ParamCounts::new(4, 4));
 
     // Channels-last row-major order is [h, w, c], so each adjacent pair holds a single spatial
     // position's [channel0, channel1]. This lays down channel 0 = {1,2,3,4} and
@@ -1059,4 +1060,84 @@ fn bn_gate_move_does_not_change_any_bit() {
             mismatches.join(", ")
         );
     }
+}
+
+// PARAMETER COUNTS
+
+/// BatchNormalization reports 4 parameter elements per channel, split 2 trainable and 2
+/// non-trainable
+///
+/// `gamma` and `beta` are the trainable half. The running mean and the running variance are the
+/// non-trainable half: the layer keeps them, the training forward pass moves them, and no
+/// optimizer ever updates them. The split matches Keras 3, which reports 4 * C in total and
+/// 2 * C of them as non-trainable
+#[test]
+fn bn_param_count_splits_the_trainable_and_the_non_trainable_half() {
+    for channels in [1usize, 3, 8] {
+        let bn = BatchNormalization::new(vec![4, channels], 0.9, 1e-5).unwrap();
+        let counts = bn.param_count();
+        assert_eq!(
+            counts.trainable,
+            2 * channels,
+            "gamma and beta over {channels} channels"
+        );
+        assert_eq!(
+            counts.non_trainable,
+            2 * channels,
+            "running mean and running variance over {channels} channels"
+        );
+        assert_eq!(
+            counts.total(),
+            4 * channels,
+            "the total over {channels} channels must be 4 per channel"
+        );
+        assert_eq!(
+            counts.total(),
+            counts.trainable + counts.non_trainable,
+            "the total must be the sum of the 2 counts, and must not drop either half"
+        );
+    }
+}
+
+/// The parameter count of BatchNormalization follows the channel axis alone
+///
+/// The parameters are per channel at every rank. A rank 4 input of shape
+/// `[batch, height, width, channels]` therefore reports the same counts as a rank 2 input with
+/// the same channel count. Neither the batch nor the spatial axes enter the count
+#[test]
+fn bn_param_count_counts_the_channel_axis_alone() {
+    let flat = BatchNormalization::new(vec![2, 7], 0.9, 1e-5).unwrap();
+    let spatial = BatchNormalization::new(vec![2, 5, 5, 7], 0.9, 1e-5).unwrap();
+    assert_eq!(spatial.param_count(), flat.param_count());
+    assert_eq!(spatial.param_count().trainable, 14);
+    assert_eq!(spatial.param_count().non_trainable, 14);
+    assert_eq!(spatial.param_count().total(), 28);
+
+    // A 1-D input shape has no channel axis and gives scalar parameters
+    let scalar = BatchNormalization::new(vec![4], 0.9, 1e-5).unwrap();
+    assert_eq!(scalar.param_count().trainable, 2);
+    assert_eq!(scalar.param_count().non_trainable, 2);
+    assert_eq!(scalar.param_count().total(), 4);
+}
+
+/// LayerNormalization holds trainable parameters only, so its non-trainable count is 0
+///
+/// The layer keeps no running statistic. Nothing of it survives a step without the optimizer,
+/// so the total must equal the trainable count. This is the control for the BatchNormalization
+/// counts above: it shows that a non-zero non-trainable count is a property of the layer, and
+/// not a constant that every layer reports
+#[test]
+fn ln_param_count_reports_no_non_trainable_parameter() {
+    let ln = LayerNormalization::new(vec![4, 3], 1e-5).unwrap();
+    let counts = ln.param_count();
+    assert_eq!(counts.trainable, 6, "gamma and beta over 3 features");
+    assert_eq!(
+        counts.non_trainable, 0,
+        "LayerNormalization keeps no running statistic"
+    );
+    assert_eq!(
+        counts.total(),
+        counts.trainable,
+        "with no non-trainable half, the total is the trainable count"
+    );
 }
