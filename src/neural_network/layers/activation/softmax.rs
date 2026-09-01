@@ -6,7 +6,6 @@ use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::{
     Activation, DEFAULT_SOFTMAX_AXIS, format_output_shape,
 };
-use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
 

@@ -20,11 +20,10 @@ use rustyml::neural_network::layers::convolution::conv_1d::{Conv1D, ConvPadding}
 use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
 use rustyml::neural_network::layers::convolution::depthwise_conv_1d::DepthwiseConv1D;
 use rustyml::neural_network::layers::convolution::separable_conv_1d::SeparableConv1D;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
-use super::common::assert_allclose;
+use super::common::{assert_allclose, named};
 
 // Conv1D - forward with known weights
 
@@ -467,19 +466,14 @@ fn conv1d_predict_deterministic() {
     assert_allclose(&out1, &out2, 0.0f32);
 }
 
-// Conv1D - get_weights shape
+// Conv1D - named weight shapes
 
-/// get_weights returns Conv1D weights with shape [kernel, channels, filters] and bias [filters]
+/// The Conv1D kernel has shape [kernel, channels, filters], and the bias [filters]
 #[test]
-fn conv1d_get_weights_correct_shapes() {
+fn conv1d_weights_correct_shapes() {
     let layer = Conv1D::new(3, 5, vec![1, 10, 2], 1, Linear::new()).unwrap();
-    match layer.get_weights() {
-        LayerWeight::Conv1D(w) => {
-            assert_eq!(w.weight.shape(), &[5, 2, 3]);
-            assert_eq!(w.bias.shape(), &[3]);
-        }
-        _other => panic!("expected LayerWeight::Conv1D variant"),
-    }
+    assert_eq!(named(&layer, "kernel").shape(), &[5, 2, 3]);
+    assert_eq!(named(&layer, "bias").shape(), &[3]);
 }
 
 // Conv2D - forward with known weights
@@ -907,19 +901,14 @@ fn conv2d_predict_deterministic() {
     assert_allclose(&out1, &out2, 0.0f32);
 }
 
-// Conv2D - get_weights shape
+// Conv2D - named weight shapes
 
-/// get_weights returns Conv2D weights with shape [kh, kw, channels, filters] and bias [filters]
+/// The Conv2D kernel has shape [kh, kw, channels, filters], and the bias [filters]
 #[test]
-fn conv2d_get_weights_correct_shapes() {
+fn conv2d_weights_correct_shapes() {
     let layer = Conv2D::new(4, (3, 3), vec![1, 8, 8, 2], (1, 1), Linear::new()).unwrap();
-    match layer.get_weights() {
-        LayerWeight::Conv2D(w) => {
-            assert_eq!(w.weight.shape(), &[3, 3, 2, 4]);
-            assert_eq!(w.bias.shape(), &[4]);
-        }
-        _other => panic!("expected LayerWeight::Conv2D variant"),
-    }
+    assert_eq!(named(&layer, "kernel").shape(), &[3, 3, 2, 4]);
+    assert_eq!(named(&layer, "bias").shape(), &[4]);
 }
 
 // Conv1D - Valid output length formula for diverse (len, kernel, stride) cases

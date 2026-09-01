@@ -3,7 +3,6 @@
 use crate::error::{Context, Error};
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
 use ndarray::IxDyn;
@@ -18,7 +17,7 @@ use ndarray::IxDyn;
 /// by position, with all channels of one position adjacent, rather than plane by plane. A
 /// `Dense` layer trained against the other ordering then reads its inputs permuted, even though
 /// its weight shape stays the same. This is why saved models carry a format version (see
-/// [`MODEL_FORMAT_VERSION`](crate::neural_network::layers::serialize_model::MODEL_FORMAT_VERSION))
+/// [`MODEL_FORMAT_VERSION`](crate::neural_network::layers::checkpoint::MODEL_FORMAT_VERSION))
 /// instead of relying on a shape check to catch the mismatch
 ///
 /// Input shapes are `[batch_size, length, features]`, `[batch_size, height, width, channels]`,

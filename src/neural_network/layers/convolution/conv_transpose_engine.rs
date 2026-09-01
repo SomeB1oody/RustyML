@@ -169,8 +169,8 @@ fn parallel_plan(gemm_flops: usize, batch: usize) -> (bool, Parallelism) {
     (parallel, gemm_par)
 }
 
-/// Runs the forward transposed convolution. `weight_shape` is `[k..., F, Cin]`, `bias` is `[F]`,
-/// and `strides` has 1 entry per spatial axis
+/// Runs the forward transposed convolution. `weight_shape` is `[k..., F, Cin]`, `bias` is
+/// `[F]` or `None` for a layer built without one, and `strides` has 1 entry per spatial axis
 ///
 /// # Errors
 ///
@@ -180,7 +180,7 @@ pub(super) fn conv_transpose_forward(
     input: &Tensor,
     weights: &[f32],
     weight_shape: &[usize],
-    bias: &[f32],
+    bias: Option<&[f32]>,
     strides: &[usize],
     dilation: &[usize],
     padding: PaddingType,
@@ -247,10 +247,13 @@ pub(super) fn conv_transpose_forward(
             pad_out
         };
         // The bias reaches every output position, including any that no input position wrote.
-        // Adding it after the crop keeps these positions at exactly the bias
-        for position in out_b.chunks_exact_mut(filters) {
-            for (value, &b_f) in position.iter_mut().zip(bias) {
-                *value += b_f;
+        // Adding it after the crop keeps these positions at exactly the bias. A layer without
+        // a bias adds nothing, so such a position stays at exactly 0
+        if let Some(bias) = bias {
+            for position in out_b.chunks_exact_mut(filters) {
+                for (value, &b_f) in position.iter_mut().zip(bias) {
+                    *value += b_f;
+                }
             }
         }
         out_b
@@ -521,7 +524,7 @@ mod tests {
             &input,
             &weights,
             &[2, 1, 1],
-            &bias,
+            Some(&bias),
             &[1],
             &[1],
             PaddingType::Valid,
@@ -548,7 +551,7 @@ mod tests {
             &input,
             &weights,
             &[1, 1, 1],
-            &bias,
+            Some(&bias),
             &[3],
             &[1],
             PaddingType::Valid,
@@ -575,7 +578,7 @@ mod tests {
             &input,
             &weights,
             &[1, 2, 1],
-            &bias,
+            Some(&bias),
             &[1],
             &[1],
             PaddingType::Valid,
@@ -630,7 +633,7 @@ mod tests {
                 &x_t,
                 &weights,
                 &[k, filters, cin],
-                &no_transpose_bias,
+                Some(no_transpose_bias.as_slice()),
                 &[stride],
                 &[dilation],
                 padding,
@@ -640,7 +643,7 @@ mod tests {
                 &y_t,
                 &weights,
                 &[k, filters, cin],
-                &no_conv_bias,
+                Some(no_conv_bias.as_slice()),
                 &[stride],
                 &[dilation],
                 padding.into(),

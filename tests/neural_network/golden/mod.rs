@@ -36,10 +36,10 @@
 //! **What each case records.** The input shape and data, the forward output, the input
 //! gradient from `backward`, every parameter gradient, the parameter value that 1 optimizer
 //! step leaves behind, and the `predict` output. Each case also records the metadata that the
-//! layer reports after its forward pass: the `output_shape` string, the `param_count`
-//! classification, the name and the source of the name of every parameter, and the shape and
-//! the value fingerprint of every weight that `get_weights` exposes, 1 time before the
-//! optimizer step and 1 time after it. For a layer that does not depend on the training mode,
+//! layer reports after its forward pass: the `output_shape` string, both counts of
+//! `param_count`, the name of every parameter, and the shape and the value fingerprint of
+//! every weight that `Layer::weights` exposes, 1 time before the optimizer step and 1 time
+//! after it. For a layer that does not depend on the training mode,
 //! the harness also asserts that `predict` returns exactly the `forward` output. That assertion
 //! pins a property that a later stage makes structural.
 //!
@@ -51,10 +51,11 @@
 //!
 //! # 1 optimizer step binds each gradient to the parameter that it updates
 //!
-//! A recorded gradient alone does not say which tensor the gradient updates. The rewrite turns
-//! the parameters into a named list, re-keys the optimizer from a positional cursor to that
-//! name, and later deletes `LayerWeight`. Such a rewrite can aim a gradient at the wrong
-//! parameter tensor and leave every recorded gradient value unchanged.
+//! A recorded gradient alone does not say which tensor the gradient updates. The rewrite turned
+//! the parameters into a named list, re-keyed the optimizer from a positional cursor to that
+//! name, and then deleted the weight enum for a checkpoint addressed by name. Such a rewrite
+//! can aim a gradient at the wrong parameter tensor and leave every recorded gradient value
+//! unchanged.
 //!
 //! This is the defect class that the `step_param.<name>` tensor exists to catch: a gradient
 //! that reaches the wrong parameter tensor, a parameter list that comes back in a new order,
@@ -80,68 +81,52 @@
 //! write through, so the whole training loop leaves the model where it started. Nothing else in
 //! this net sees that, and it is the most likely defect of stage 1.
 //!
-//! Each case therefore takes a second value fingerprint of every weight that `get_weights`
+//! Each case therefore takes a second value fingerprint of every weight that `Layer::weights`
 //! exposes, directly after the optimizer step, and records it as `step_weight.<name>` in a
-//! `step_weight` line. `get_weights` reads the arrays of the layer itself, so a stepped copy no
-//! longer agrees with it.
+//! `step_weight` line. `Layer::weights` reads the arrays of the layer itself, so a stepped copy
+//! no longer agrees with it.
 //!
 //! The 2 fingerprints of 1 name must differ when the step touched that array, and they must
 //! agree when no parameter covers it. BatchNormalization shows both halves in 1 case: `gamma`
-//! and `beta` move, and `running_mean` and `running_var` do not.
+//! and `beta` move, and `moving_mean` and `moving_variance` do not.
 //!
 //! # Where a parameter name comes from
 //!
-//! Each parameter of a case has 1 `param_name` line, and that line ends with the source of the
-//! name: `layer` or `fixture`.
+//! The layer, and nothing else. `Layer::parameters` gives each tensor a name, `Layer::weights`
+//! gives each array a name, and the 2 methods use 1 name set: the Keras 3 names `kernel`,
+//! `recurrent_kernel`, `depthwise_kernel`, `pointwise_kernel`, `bias`, `embeddings`, `alpha`,
+//! `gamma`, `beta`, `moving_mean`, and `moving_variance`. The checkpoint format addresses every
+//! array by that name, so the name is a value that the file carries and not a label of this
+//! harness.
 //!
-//! There are 2 name sets, and the parameter-identity change made them differ on purpose.
+//! Each parameter of a case therefore has 1 `param_name` line, and the recorded name is the
+//! name in the `ParamGrad`. The line still ends with the word `layer`, and that word is now a
+//! constant. It was a choice of 2 before: the layer named 1 set of tensors, the weight enum
+//! named another through its field names, and the harness worked out which set a recorded name
+//! belonged to. The change that deleted the enum merged the 2 sets, so 1 source is left.
 //!
-//! `ParamGrad` now carries a name, and the layer supplies it. Those names are the Keras 3
-//! names: `kernel`, `recurrent_kernel`, `depthwise_kernel`, `pointwise_kernel`, `bias`,
-//! `embeddings`, `alpha`, `gamma`, `beta`. `get_weights` names the same storage through the
-//! field names of the `LayerWeight` variant, and those still read `weight`,
-//! `depthwise_weight` and `pointwise_weight` on 13 of the 43 entries. The checkpoint format
-//! owns that second set, and the change that rewrites the format is what merges the 2.
+//! **The fixture asserts the name, and records none of it.** A fixture declares the name of
+//! every parameter through [`GoldenCase::with_parameter_grads`], and the harness asserts that
+//! the declared name equals the name in the `ParamGrad`. A rename inside a layer therefore
+//! fails the net at that assertion as well as moving the recorded line.
 //!
-//! **The recorded name is the `get_weights` name.** Before the backward pass the harness takes
-//! the address of the first element and the element count of every array that `get_weights`
-//! exposes and that borrows the live layer. It then compares the address and the count of each
-//! parameter value against that list. A parameter that starts at the address of exactly 1
-//! exposed array is the same storage as that array, so the harness takes the name of that array
-//! and marks the line `layer`. See [`resolve_parameter_name`]. Every line of every data file is
-//! marked `layer` today.
+//! **A parameter and the weight of the same name must be 1 storage.** Before the backward pass
+//! the harness takes the address of the first element and the element count of every array that
+//! `Layer::weights` exposes. It then compares each parameter against the array that carries the
+//! same name. See [`assert_same_storage`]. That comparison pins 3 things that a name alone
+//! does not:
 //!
-//! **The layer name is asserted, not recorded.** A fixture declares the layer name of every
-//! parameter through [`GoldenCase::with_parameter_grads`], and the harness asserts that the
-//! declared name equals the name in the `ParamGrad`. A rename inside a layer therefore fails
-//! the net at that assertion. It moves no recorded value, so the record and the rename stay
-//! independent.
+//! 1. **The roster.** Every parameter has a weight of its name, so no parameter is a tensor
+//!    that a checkpoint would not hold.
+//! 2. **The storage identity of each parameter.** Parameter `kernel` starts at the first
+//!    element of weight `kernel`, and holds the same element count. An optimizer that writes
+//!    the parameter therefore writes what a saved model holds.
+//! 3. **The 2 methods stay 1 list.** `parameters` and `weights` are 2 separate methods of every
+//!    layer, and nothing in the compiler binds them. A layer that renames an array in 1 of them
+//!    alone fails here.
 //!
-//! **What the `layer` mark pins.** The name of an exposed array is a literal of the
-//! [`exposed_weights`] macro, next to the field access that reads the array. The mark therefore
-//! pins 3 things:
-//!
-//! 1. **The order of the parameter list.** The names ride in the order that
-//!    `Layer::parameters` returns, and the comparison is order-sensitive.
-//! 2. **The storage identity of each parameter.** Parameter `i` starts at the first element of
-//!    the exposed array that carries this name, and it holds the same element count.
-//! 3. **The roster.** No parameter appears 2 times, none is missing, and none is a tensor that
-//!    `get_weights` hides.
-//!
-//! A line marked `fixture` says that a parameter and its exposed weight stopped being the same
-//! storage, which is the defect of the section above, seen from the other side.
-//!
-//! **What the format change must do here.** The change that deletes `LayerWeight` gives the
-//! layer 1 name set instead of 2. The harness then reads the recorded name from the `ParamGrad`
-//! as well, deletes the address comparison and [`resolve_parameter_name`] with it, deletes the
-//! literals of [`exposed_weights`], and marks every line `layer`.
-//!
-//! That change makes the name a recorded value for the first time, so the old record cannot
-//! stay. Regenerate every data file exactly 1 time in the same change, review the new name of
-//! every parameter of every case against the layer that gives it, and expect no other field of
-//! any case to move. The regeneration guard makes that review a separate act: a data file that
-//! changes needs the acknowledgment token of its own change set. See the regeneration section
-//! below.
+//! The comparison is an assertion and not a recorded value, so it moves no line of any data
+//! file.
 //!
 //! # What this net cannot see
 //!
@@ -182,10 +167,10 @@
 //!
 //! # A recorded weight carries a value fingerprint
 //!
-//! 4 normalization layers expose 2 or more arrays of the same shape through `get_weights`, and
-//! BatchNormalization exposes 4. A recorded shape alone therefore lets a later stage exchange 2
-//! of those arrays with no failure. `get_weights` is the exact surface that the checkpoint
-//! format reads, so such an exchange corrupts every saved model.
+//! 4 normalization layers expose 2 or more arrays of the same shape through `Layer::weights`,
+//! and BatchNormalization exposes 4. A recorded shape alone therefore lets a later stage
+//! exchange 2 of those arrays with no failure. `Layer::weights` is the exact surface that the
+//! checkpoint format reads, so such an exchange corrupts every saved model.
 //!
 //! Each recorded weight therefore carries a checksum of its values next to its shape. See
 //! [`weight_checksum`] for the mixing function, which this harness owns. The harness takes the
@@ -473,16 +458,16 @@
 //! [`previous_reasons`]. Every other line starts with a keyword:
 //!
 //! ```text
-//! format 5                     the format version, 1 time, at the head of the file
+//! format 6                     the format version, 1 time, at the head of the file
 //! family <name>                the family name, 1 time, at the head of the file
 //! content_digest <digits> cases <count> values <count>
 //!                              the digest of the file over itself, 1 time, before the cases
 //! case <layer-type> <label>    starts a case
 //! mode training|inference      the mode that the case ran in
 //! output_shape "<text>"        what output_shape returned after the forward pass
-//! param_count <class>          what param_count returned. See below
-//! param_name <name> layer|fixture
-//!                              the name of 1 parameter, and where the name came from
+//! param_count trainable <count> non_trainable <count>
+//!                              what param_count returned, both halves
+//! param_name <name> layer      the name of 1 parameter, and the source of the name
 //! weight <name> <extent>... checksum <digits>
 //!                              the shape and the values of 1 exposed weight. See below
 //! step_weight <name> <extent>... checksum <digits>
@@ -501,11 +486,11 @@
 //! the number of value lines. The digits are the digest of every byte of the file, with the
 //! digits themselves read as zeros. See [`self_digest`].
 //!
-//! The `param_count` class is `trainable <count>`, `non_trainable <count>`, or `none`. The 3
-//! forms are the 3 variants of `ParamCounts`.
+//! The `param_count` line holds both fields of `ParamCounts`, always, and either count may be
+//! 0. A layer that holds no parameter at all records `trainable 0 non_trainable 0`.
 //!
-//! The last word of a `param_name` line is `layer` when the layer supplied the name, and
-//! `fixture` when the fixture supplied it. See the section above.
+//! The last word of a `param_name` line is `layer`, always. The layer supplies every name. See
+//! the section above.
 //!
 //! A `weight` line and a `step_weight` line each end with the word `checksum` and 16 lowercase
 //! hexadecimal digits. The digits are the value fingerprint of the array, from
@@ -540,12 +525,10 @@
 #![allow(dead_code)]
 
 use crate::common::{GateGuard, NEURAL_NETWORK_GATES, NEURAL_NETWORK_SPLIT_CAPS, read_gates};
-use ndarray::{ArrayBase, ArrayD, Data, Dimension, IxDyn};
+use ndarray::{ArrayBase, ArrayD, ArrayViewD, Data, Dimension, IxDyn};
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::traits::Layer;
-use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
@@ -596,9 +579,29 @@ const MAX_REPORTED_DIFFERENCES: usize = 3;
 
 /// The version of the data-file format that this harness reads and writes.
 ///
-/// Version 5 added the `content_digest` header line. Version 4 added the `param_name` line and
-/// the `step_weight` line. Neither version moved a recorded value of the version before it.
-const FORMAT_VERSION: u32 = 5;
+/// Version 6 put both halves of `ParamCounts` in the `param_count` line, and it narrowed the
+/// last word of a `param_name` line to `layer`. Version 5 added the `content_digest` header
+/// line. Version 4 added the `param_name` line and the `step_weight` line. No version moved a
+/// recorded value of the version before it.
+const FORMAT_VERSION: u32 = 6;
+
+/// The data-file format version that this harness also reads, and never writes.
+///
+/// A format bump makes every data file of the version before it unreadable, and an unreadable
+/// file blocks the regeneration guard: the guard parses the file to work out what a
+/// regeneration would change, and the acknowledgment token covers exactly that change set. With
+/// no reader for the earlier version, the only way to bump the format is to delete the data
+/// files, and a deleted data file is the 1 act this guard refuses outright.
+///
+/// This harness therefore reads 2 versions and writes 1. The parser decodes an earlier line
+/// exactly as the earlier version wrote it, and invents nothing: a version 5 `param_count` line
+/// holds 1 count, and it compares against the 2 counts of a version 6 record as the different
+/// text that it is. Every case of such a file is therefore a changed case, and it needs the
+/// token like any other.
+///
+/// The change that bumps [`FORMAT_VERSION`] again replaces the decode below with the decode of
+/// its own predecessor.
+const EARLIER_FORMAT_VERSION: u32 = FORMAT_VERSION - 1;
 
 /// The largest number of elements that 1 recorded tensor may hold.
 const MAX_TENSOR_ELEMENTS: usize = 256;
@@ -616,11 +619,13 @@ const PARAMETER_PREFIX: &str = "grad_param.";
 /// behind. It carries no decay class, because the matching gradient tensor already holds one.
 const STEPPED_PREFIX: &str = "step_param.";
 
-/// The word that a `param_name` line uses when the layer supplied the name.
+/// The last word of every `param_name` line, which says that the layer supplied the name.
+///
+/// The word is a constant now, and it was a choice of 2 before. The layer named 1 set of
+/// tensors and the weight enum named another, and the harness worked out which one a recorded
+/// name came from. The named checkpoint merged the 2 sets, so a name has 1 source and the word
+/// records it.
 const LAYER_NAME_SOURCE: &str = "layer";
-
-/// The word that a `param_name` line uses when the fixture supplied the name.
-const FIXTURE_NAME_SOURCE: &str = "fixture";
 
 // ---------------------------------------------------------------------------------------
 // The 1 optimizer step
@@ -1766,14 +1771,14 @@ struct RecordedTensor {
     bits: Vec<u32>,
 }
 
-/// The name, the shape, and the value fingerprint of 1 weight that `Layer::get_weights` exposes.
+/// The name, the shape, and the value fingerprint of 1 weight that `Layer::weights` exposes.
 ///
 /// A shape alone does not pin the identity of an array. 4 normalization layers expose 2 or more
 /// arrays of the same shape, and BatchNormalization exposes 4. The fingerprint therefore rides
 /// next to the shape, and a stage that exchanges 2 such arrays fails the comparison.
 #[derive(Clone, PartialEq, Eq)]
 struct RecordedWeight {
-    /// The field name that the `LayerWeight` variant gives the array
+    /// The name that `Layer::weights` gives the array
     name: String,
     /// Shape in C order
     shape: Vec<usize>,
@@ -1783,26 +1788,15 @@ struct RecordedWeight {
 
 /// 1 exposed weight, together with the storage that it borrows.
 ///
-/// The record goes in the data file. The anchor never does. The harness uses the anchor to find
-/// out which exposed array a parameter of `Layer::parameters` is, and it therefore uses the
-/// anchor to take the name of that parameter from the layer. See [`resolve_parameter_name`].
+/// The record goes in the data file. The anchor never does. The harness compares the anchor
+/// against the parameter of the same name, and a difference says that the 2 stopped being 1
+/// storage. See [`assert_same_storage`].
 struct ExposedWeight {
     /// What the data file holds about this weight
     record: RecordedWeight,
-    /// The address of the first element and the element count, for an array that borrows the
-    /// live layer and holds its elements in 1 contiguous run. `None` for every other array,
-    /// which includes an array that the weight container owns
+    /// The address of the first element and the element count, for an array that holds its
+    /// elements in 1 contiguous run. `None` for every other array
     anchor: Option<(usize, usize)>,
-}
-
-/// The name of 1 parameter of `Layer::parameters`, together with the source of that name.
-#[derive(PartialEq, Eq)]
-struct RecordedParameterName {
-    /// The name that the tensors `grad_param.<name>` and `step_param.<name>` carry
-    name: String,
-    /// `true` when the layer supplied the name, and `false` when the fixture supplied it. See
-    /// the module doc comment
-    from_layer: bool,
 }
 
 /// 1 recorded case, keyed by the layer type and the configuration label.
@@ -1819,10 +1813,10 @@ struct RecordedCase {
     /// What `Layer::param_count` returned, as the words the data file holds
     param_count: String,
     /// The name of every parameter of `Layer::parameters`, in the order that method returns
-    /// them, and the source of each name
-    param_names: Vec<RecordedParameterName>,
-    /// The shape and the value fingerprint of every weight that `Layer::get_weights` exposes,
-    /// in the order of the `LayerWeight` variant
+    /// them. The layer supplies every one of them
+    param_names: Vec<String>,
+    /// The shape and the value fingerprint of every weight that `Layer::weights` exposes, in
+    /// the order that method returns them
     weights: Vec<RecordedWeight>,
     /// The same weights, fingerprinted a second time after the optimizer step. A parameter
     /// store that the step cannot write through leaves every one of these unchanged
@@ -1911,9 +1905,9 @@ fn record_case(layer_type: &str, case: &GoldenCase) -> RecordedCase {
     let param_count = param_count_record(layer.param_count());
     // The fingerprints come from the weights as the forward pass left them, and before the
     // optimizer step below, so the 2 recorded fields stay independent of each other. The
-    // anchors go no further than this function, and they give each parameter the name that the
-    // layer holds for the same storage
-    let exposed = exposed_weights(&layer.get_weights());
+    // anchors go no further than this function, and they prove that a parameter and the array
+    // of the same name are 1 storage
+    let exposed = exposed_weights(layer.as_ref());
     let weights: Vec<RecordedWeight> = exposed.iter().map(|item| item.record.clone()).collect();
     let anchors: Vec<(String, usize, usize)> = exposed
         .iter()
@@ -1946,7 +1940,7 @@ fn record_case(layer_type: &str, case: &GoldenCase) -> RecordedCase {
         case.parameter_names.len(),
         parameters.len()
     );
-    let mut param_names: Vec<RecordedParameterName> = Vec::new();
+    let mut param_names: Vec<String> = Vec::new();
     let mut layer_names: Vec<&'static str> = Vec::new();
     for (parameter, fixture_name) in parameters.iter_mut().zip(case.parameter_names.iter()) {
         // The optimizer keys its per-parameter state on the layer name, so 2 tensors of 1 layer
@@ -1966,16 +1960,12 @@ fn record_case(layer_type: &str, case: &GoldenCase) -> RecordedCase {
             "{layer_type}/{}: the layer names this parameter {}, and the case names it {}",
             case.label, parameter.name, fixture_name
         );
-        // The recorded name is still the name that `get_weights` gives the same storage, which
-        // is the field name of the `LayerWeight` variant. The 2 name sets agree everywhere
-        // except the 13 entries that took a Keras name ahead of the checkpoint format. See the
-        // section "Where a parameter name comes from"
-        let (name, from_layer) = resolve_parameter_name(&anchors, parameter.value, fixture_name);
-        assert!(
-            !param_names.iter().any(|earlier| earlier.name == name),
-            "{layer_type}/{}: 2 parameters resolve to the name {name}",
-            case.label
-        );
+        // The layer owns the name end to end now, so the recorded name is the name in the
+        // `ParamGrad`. The anchor comparison stayed, as an assertion: the array that
+        // `Layer::weights` gives this name must be the storage that the parameter writes
+        // through. See the section "Where a parameter name comes from"
+        let name = parameter.name.to_string();
+        assert_same_storage(&anchors, &name, parameter.value, layer_type, case.label);
         assert!(
             parameter.grad.len() <= MAX_TENSOR_ELEMENTS,
             "{layer_type}/{}: the gradient of {name} holds {} elements, and the cap is \
@@ -2018,7 +2008,7 @@ fn record_case(layer_type: &str, case: &GoldenCase) -> RecordedCase {
                 .map(|value| value.to_bits())
                 .collect(),
         });
-        param_names.push(RecordedParameterName { name, from_layer });
+        param_names.push(name);
     }
 
     // The second fingerprint reads the arrays of the layer itself, and the step above wrote
@@ -2026,7 +2016,7 @@ fn record_case(layer_type: &str, case: &GoldenCase) -> RecordedCase {
     // gives back a copy of each value buffer therefore leaves every one of these unchanged,
     // while every `step_param` tensor above still holds the stepped numbers
     drop(parameters);
-    let step_weights: Vec<RecordedWeight> = exposed_weights(&layer.get_weights())
+    let step_weights: Vec<RecordedWeight> = exposed_weights(layer.as_ref())
         .into_iter()
         .map(|item| item.record)
         .collect();
@@ -2044,71 +2034,66 @@ fn record_case(layer_type: &str, case: &GoldenCase) -> RecordedCase {
     }
 }
 
-/// Gives 1 parameter of `Layer::parameters` its recorded name, and says where the name came from.
+/// Fails when a parameter and the exposed array of the same name are not 1 storage.
 ///
-/// The recorded name is the name that `get_weights` gives the same storage, and not the name in
-/// the `ParamGrad`. The 2 differ on the 13 entries that took a Keras name ahead of the
-/// checkpoint format. This function therefore takes the address and the length of the
-/// parameter, and looks for the 1 exposed array that starts at the same address and holds the
-/// same number of elements. Such an array is the same storage as the parameter, so its name is
-/// the recorded name, and the layer supplied it.
+/// `Layer::parameters` and `Layer::weights` name the same tensors, and the checkpoint format
+/// reads the second list. A parameter that an optimizer writes must therefore reach the array
+/// that a saved model holds under that name. The 2 lists are 2 separate methods, and nothing in
+/// the compiler binds them, so this comparison is what holds them together.
 ///
-/// A parameter that matches no exposed array, or that matches more than 1, keeps the name that
-/// the fixture gave it.
+/// The check takes the address of the first element and the element count of the parameter, and
+/// looks for the exposed array of the same name. That array must start at the same address and
+/// hold the same number of elements.
 ///
 /// # Parameters
 ///
 /// - `anchors` - The name, the first-element address, and the element count of every exposed
-///   array that borrows the live layer
+///   array
+/// - `name` - The name that the layer gave this parameter
 /// - `value` - The parameter value slice that `Layer::parameters` handed out
-/// - `fixture` - The name that the fixture gave this parameter
+/// - `layer_type` - The layer type of the case, for the report
+/// - `label` - The configuration label of the case, for the report
 ///
-/// # Returns
+/// # Panics
 ///
-/// - `(String, bool)` - The name, and `true` when the layer supplied it
-fn resolve_parameter_name(
+/// - When no exposed array carries the name, or when the array of that name is another storage
+fn assert_same_storage(
     anchors: &[(String, usize, usize)],
+    name: &str,
     value: &[f32],
-    fixture: &str,
-) -> (String, bool) {
+    layer_type: &str,
+    label: &str,
+) {
     let address = value.as_ptr() as usize;
-    let mut found: Option<&str> = None;
-    for (name, anchor_address, length) in anchors {
-        if *anchor_address == address && *length == value.len() {
-            if found.is_some() {
-                // 2 exposed arrays cannot be the same storage, so this says the anchor list is
-                // not trustworthy. Fall back to the fixture name
-                return (fixture.to_string(), false);
-            }
-            found = Some(name);
-        }
-    }
-    match found {
-        Some(name) => (name.to_string(), true),
-        None => (fixture.to_string(), false),
-    }
+    let Some((_, anchor_address, length)) = anchors.iter().find(|(other, _, _)| other == name)
+    else {
+        let held: Vec<&str> = anchors.iter().map(|(other, _, _)| other.as_str()).collect();
+        panic!(
+            "{layer_type}/{label}: the parameter {name} has no weight of that name; the layer \
+             exposes {held:?}"
+        );
+    };
+    assert!(
+        *anchor_address == address && *length == value.len(),
+        "{layer_type}/{label}: the parameter {name} and the weight {name} are not 1 storage. \
+         The parameter holds {} elements at {address:#x}, and the weight holds {length} \
+         elements at {anchor_address:#x}",
+        value.len()
+    );
 }
 
 /// Turns a `param_count` result into the words that the data file holds.
 ///
-/// The line grammar predates [`ParamCounts`], and it holds 1 number. The number is the
-/// trainable count, and the word in front of it says which count it is. The record therefore
-/// still reads `trainable N` for every layer that has trainable parameters, `non_trainable N`
-/// for a layer that has only non-trainable ones, and `none` for a layer with neither.
-///
-/// The non-trainable count of a layer that also has trainable parameters is deliberately not in
-/// the record yet. Batch normalization is the only such layer, and putting its running mean and
-/// running variance in the line would move a recorded value in a change that must move none.
-/// The change that rewrites the checkpoint format regenerates the whole record, and that is
-/// where this line grows the second number.
+/// [`ParamCounts`] holds 2 independent counts, and the line holds both of them, always. The
+/// earlier line held 1 number and a word that said which count it was. That form could not
+/// record a layer that holds both kinds at once, so the 5 BatchNormalization cases recorded
+/// their trainable count alone and left the running mean and the running variance out of the
+/// record entirely. The 2 numbers here are the whole of what the method returns.
 fn param_count_record(count: ParamCounts) -> String {
-    if count.trainable > 0 {
-        format!("trainable {}", count.trainable)
-    } else if count.non_trainable > 0 {
-        format!("non_trainable {}", count.non_trainable)
-    } else {
-        "none".to_string()
-    }
+    format!(
+        "trainable {} non_trainable {}",
+        count.trainable, count.non_trainable
+    )
 }
 
 /// Folds the values of 1 exposed array into a 64-bit fingerprint.
@@ -2126,8 +2111,8 @@ fn param_count_record(count: ParamCounts) -> String {
 ///
 /// # Parameters
 ///
-/// - `array` - 1 array that `Layer::get_weights` exposes. A weight container holds arrays of
-///   more than 1 dimension type, so the function takes every rank
+/// - `array` - 1 array that `Layer::weights` exposes. The harness also fingerprints owned
+///   arrays of other ranks in its own tests, so the function takes every rank
 ///
 /// # Returns
 ///
@@ -2161,102 +2146,52 @@ fn mix_byte(state: u64, byte: u8) -> u64 {
 /// The address of the first element and the element count of 1 array that holds its elements in
 /// 1 contiguous run.
 ///
-/// An array with any other layout gives `None`. The caller passes only an array that borrows the
-/// live layer, because the address of an owned array says nothing about the storage of the layer
-/// and dies with the weight container.
+/// An array with any other layout gives `None`. Every view here borrows the live layer, so the
+/// address is the address of the storage of the layer itself.
 ///
 /// # Parameters
 ///
-/// - `array` - 1 array that a `LayerWeight` variant borrows from the layer
+/// - `array` - 1 view that `Layer::weights` borrowed from the layer
 ///
 /// # Returns
 ///
 /// - `Option<(usize, usize)>` - The first-element address and the element count, or `None`
-fn contiguous_anchor<S, D>(array: &ArrayBase<S, D>) -> Option<(usize, usize)>
-where
-    S: Data<Elem = f32>,
-    D: Dimension,
-{
+fn contiguous_anchor(array: &ArrayViewD<'_, f32>) -> Option<(usize, usize)> {
     let slice = array.as_slice()?;
     Some((slice.as_ptr() as usize, slice.len()))
 }
 
-/// Turns a `get_weights` result into the name, the shape, the fingerprint, and the storage
-/// anchor of every array it exposes.
+/// Turns `Layer::weights` into the name, the shape, the fingerprint, and the storage anchor of
+/// every array that the layer exposes.
 ///
-/// The order follows the fields of the `LayerWeight` variant, which is the order that a reader
-/// of the enum sees. A layer with no trainable parameter gives the empty list.
+/// The order is the order the layer gives, which is the order a checkpoint records. A layer
+/// with no array gives the empty list.
 ///
-/// The name of each array is a literal here, and the field access next to it is not. The
-/// compiler binds `w.gamma` to the field `gamma` of the weight container of the layer, so a
-/// stage that renames that field breaks this function instead of passing unseen.
-fn exposed_weights(weights: &LayerWeight<'_>) -> Vec<ExposedWeight> {
-    /// Builds the list from a name and array pair per exposed weight.
-    macro_rules! shapes {
-        ($($name:literal => $array:expr),+ $(,)?) => {
-            vec![$(ExposedWeight {
-                record: RecordedWeight {
-                    name: $name.to_string(),
-                    shape: $array.shape().to_vec(),
-                    checksum: weight_checksum(&$array),
-                },
-                // An owned array is a copy that dies with this container, so it anchors nothing
-                anchor: match &$array {
-                    Cow::Borrowed(live) => contiguous_anchor(*live),
-                    Cow::Owned(_) => None,
-                },
-            }),+]
-        };
-    }
-
-    match weights {
-        LayerWeight::Dense(w) => shapes!("weight" => w.weight, "bias" => w.bias),
-        LayerWeight::SimpleRNN(w) => shapes!(
-            "kernel" => w.kernel,
-            "recurrent_kernel" => w.recurrent_kernel,
-            "bias" => w.bias,
-        ),
-        LayerWeight::LSTM(w) => shapes!(
-            "kernel" => w.kernel,
-            "recurrent_kernel" => w.recurrent_kernel,
-            "bias" => w.bias,
-        ),
-        LayerWeight::GRU(w) => shapes!(
-            "kernel" => w.kernel,
-            "recurrent_kernel" => w.recurrent_kernel,
-            "bias" => w.bias,
-        ),
-        LayerWeight::Conv1D(w) => shapes!("weight" => w.weight, "bias" => w.bias),
-        LayerWeight::Conv2D(w) => shapes!("weight" => w.weight, "bias" => w.bias),
-        LayerWeight::Conv3D(w) => shapes!("weight" => w.weight, "bias" => w.bias),
-        LayerWeight::Conv1DTranspose(w) => shapes!("weight" => w.weight, "bias" => w.bias),
-        LayerWeight::Conv2DTranspose(w) => shapes!("weight" => w.weight, "bias" => w.bias),
-        LayerWeight::Conv3DTranspose(w) => shapes!("weight" => w.weight, "bias" => w.bias),
-        LayerWeight::DepthwiseConv1D(w) => shapes!("weight" => w.weight, "bias" => w.bias),
-        LayerWeight::DepthwiseConv2D(w) => shapes!("weight" => w.weight, "bias" => w.bias),
-        LayerWeight::SeparableConv1D(w) => shapes!(
-            "depthwise_weight" => w.depthwise_weight,
-            "pointwise_weight" => w.pointwise_weight,
-            "bias" => w.bias,
-        ),
-        LayerWeight::SeparableConv2D(w) => shapes!(
-            "depthwise_weight" => w.depthwise_weight,
-            "pointwise_weight" => w.pointwise_weight,
-            "bias" => w.bias,
-        ),
-        LayerWeight::BatchNormalization(w) => shapes!(
-            "gamma" => w.gamma,
-            "beta" => w.beta,
-            "running_mean" => w.running_mean,
-            "running_var" => w.running_var,
-        ),
-        LayerWeight::LayerNormalization(w) => shapes!("gamma" => w.gamma, "beta" => w.beta),
-        LayerWeight::InstanceNormalization(w) => shapes!("gamma" => w.gamma, "beta" => w.beta),
-        LayerWeight::GroupNormalization(w) => shapes!("gamma" => w.gamma, "beta" => w.beta),
-        LayerWeight::Embedding(w) => shapes!("embeddings" => w.embeddings),
-        LayerWeight::PReLU(w) => shapes!("alpha" => w.alpha),
-        LayerWeight::Empty => Vec::new(),
-    }
+/// Every name here comes from the layer. The earlier version of this function held 1 name
+/// literal per array of every weight-enum variant, and a rename inside a layer left those
+/// literals where they were. The names now ride with the arrays, so this function invents
+/// nothing at all.
+///
+/// # Parameters
+///
+/// - `layer` - The layer to read, after its forward pass
+///
+/// # Returns
+///
+/// - `Vec<ExposedWeight>` - 1 entry per array, in the order the layer gives
+fn exposed_weights(layer: &dyn Layer) -> Vec<ExposedWeight> {
+    layer
+        .weights()
+        .into_iter()
+        .map(|entry| ExposedWeight {
+            record: RecordedWeight {
+                name: entry.name.to_string(),
+                shape: entry.value.shape().to_vec(),
+                checksum: weight_checksum(&entry.value),
+            },
+            anchor: contiguous_anchor(&entry.value),
+        })
+        .collect()
 }
 
 /// Fails when a built layer reports a type that differs from the registered one.
@@ -2296,15 +2231,6 @@ fn decay_class_name(decays: Option<bool>) -> &'static str {
     match decays {
         Some(value) => decay_word(value),
         None => "absent",
-    }
-}
-
-/// The word that a `param_name` line uses for the source of a parameter name.
-fn name_source_word(from_layer: bool) -> &'static str {
-    if from_layer {
-        LAYER_NAME_SOURCE
-    } else {
-        FIXTURE_NAME_SOURCE
     }
 }
 
@@ -2439,14 +2365,8 @@ fn render(family: &str, cases: &[RecordedCase], reasons: &[String]) -> String {
         .unwrap();
         writeln!(text, "output_shape {}", quote(&case.output_shape)).unwrap();
         writeln!(text, "param_count {}", case.param_count).unwrap();
-        for parameter in &case.param_names {
-            writeln!(
-                text,
-                "param_name {} {}",
-                parameter.name,
-                name_source_word(parameter.from_layer)
-            )
-            .unwrap();
+        for name in &case.param_names {
+            writeln!(text, "param_name {name} {LAYER_NAME_SOURCE}").unwrap();
         }
         for (keyword, group) in [
             ("weight", &case.weights),
@@ -2560,6 +2480,9 @@ fn parse(text: &str, family: &str, path: &std::path::Path) -> ParsedFile {
     let mut tensor: Option<RecordedTensor> = None;
     let mut output_shape_seen = false;
     let mut param_count_seen = false;
+    // Every line before the `format` line is a comment, so the version is known before the
+    // first line that reads it
+    let mut file_version = FORMAT_VERSION;
 
     for (offset, raw) in text.lines().enumerate() {
         let line = offset + 1;
@@ -2576,12 +2499,17 @@ fn parse(text: &str, family: &str, path: &std::path::Path) -> ParsedFile {
                     .next()
                     .and_then(|word| word.parse().ok())
                     .unwrap_or_else(|| fail(line, "format needs a whole-number version".into()));
-                if version != FORMAT_VERSION {
+                if version != FORMAT_VERSION && version != EARLIER_FORMAT_VERSION {
                     fail(
                         line,
-                        format!("format {version} is not the supported format {FORMAT_VERSION}"),
+                        format!(
+                            "format {version} is neither the format {FORMAT_VERSION} that this \
+                             harness writes nor the format {EARLIER_FORMAT_VERSION} that it \
+                             still reads"
+                        ),
                     );
                 }
+                file_version = version;
                 format_seen = true;
             }
             "family" => {
@@ -2709,24 +2637,27 @@ fn parse(text: &str, family: &str, path: &std::path::Path) -> ParsedFile {
                 let Some(case) = open.as_mut() else {
                     fail(line, "param_count appears outside a case".into());
                 };
-                let class = words.next().unwrap_or("");
-                let count = words.next();
-                let valid = match (class, count) {
-                    ("none", None) => true,
-                    ("trainable" | "non_trainable", Some(total)) => total.parse::<usize>().is_ok(),
+                let words: Vec<&str> = words.collect();
+                let current = match words.as_slice() {
+                    ["trainable", trainable, "non_trainable", non_trainable] => {
+                        trainable.parse::<usize>().is_ok() && non_trainable.parse::<usize>().is_ok()
+                    }
                     _ => false,
                 };
-                if !valid || words.next().is_some() {
+                // Version 5 held 1 count, and a word that said which of the 2 counts it was
+                let earlier = file_version == EARLIER_FORMAT_VERSION
+                    && match words.as_slice() {
+                        ["none"] => true,
+                        ["trainable" | "non_trainable", total] => total.parse::<usize>().is_ok(),
+                        _ => false,
+                    };
+                if !current && !earlier {
                     fail(
                         line,
-                        "param_count is trainable <count>, non_trainable <count>, or none"
-                            .to_string(),
+                        "param_count is trainable <count> non_trainable <count>".to_string(),
                     );
                 }
-                case.param_count = match count {
-                    Some(total) => format!("{class} {total}"),
-                    None => class.to_string(),
-                };
+                case.param_count = words.join(" ");
                 param_count_seen = true;
             }
             "param_name" => {
@@ -2736,24 +2667,16 @@ fn parse(text: &str, family: &str, path: &std::path::Path) -> ParsedFile {
                 let name = words
                     .next()
                     .unwrap_or_else(|| fail(line, "param_name needs a name".into()));
-                let from_layer = match words.next() {
-                    Some(LAYER_NAME_SOURCE) => true,
-                    Some(FIXTURE_NAME_SOURCE) => false,
-                    other => fail(
+                if words.next() != Some(LAYER_NAME_SOURCE) {
+                    fail(
                         line,
-                        format!(
-                            "the name source of {name} is {other:?}, not \
-                             {LAYER_NAME_SOURCE} or {FIXTURE_NAME_SOURCE}"
-                        ),
-                    ),
-                };
+                        format!("the name source of {name} is not {LAYER_NAME_SOURCE}"),
+                    );
+                }
                 if words.next().is_some() {
                     fail(line, "param_name is a name and then a source".into());
                 }
-                case.param_names.push(RecordedParameterName {
-                    name: name.to_string(),
-                    from_layer,
-                });
+                case.param_names.push(name.to_string());
             }
             "weight" | "step_weight" => {
                 let Some(case) = open.as_mut() else {
@@ -3095,37 +3018,20 @@ fn compare_case(recorded: &RecordedCase, stored: &RecordedCase, problems: &mut V
     }
 }
 
-/// Compares the parameter roster and the source of every parameter name, and appends every
-/// problem it finds.
+/// Compares the parameter roster, and appends every problem it finds.
 ///
-/// A rename in the parameter store of a later stage lands here first. So does a parameter name
-/// that stops coming from the layer, which says that the parameter is no longer the storage
-/// that `get_weights` exposes.
+/// A rename in the parameter store of a later stage lands here first, and so does a parameter
+/// that the layer stops yielding or starts yielding.
 fn compare_param_names(
     head: &str,
     recorded: &RecordedCase,
     stored: &RecordedCase,
     problems: &mut Vec<String>,
 ) {
-    let describe = |names: &[RecordedParameterName]| -> Vec<String> {
-        names
-            .iter()
-            .map(|parameter| {
-                format!(
-                    "{} ({})",
-                    parameter.name,
-                    name_source_word(parameter.from_layer)
-                )
-            })
-            .collect()
-    };
     if recorded.param_names != stored.param_names {
         problems.push(format!(
-            "{head}: the parameters are {:?} now, and the data file records {:?}. A name marked \
-             {LAYER_NAME_SOURCE:?} comes from the layer, and a name marked \
-             {FIXTURE_NAME_SOURCE:?} comes from the fixture alone",
-            describe(&recorded.param_names),
-            describe(&stored.param_names)
+            "{head}: the parameters are {:?} now, and the data file records {:?}",
+            recorded.param_names, stored.param_names
         ));
     }
 }
@@ -3148,7 +3054,7 @@ fn compare_weights(
             .find(|candidate| candidate.name == weight.name)
         else {
             problems.push(format!(
-                "{head}, {keyword} {}: get_weights exposes this weight, and the data file holds \
+                "{head}, {keyword} {}: the layer exposes this weight, and the data file holds \
                  no such weight",
                 weight.name
             ));
@@ -3163,8 +3069,8 @@ fn compare_weights(
         if weight.checksum != other.checksum {
             problems.push(format!(
                 "{head}, {keyword} {}: the value checksum is {:0width$x} now, and the data file \
-                 records {:0width$x}. Either the values behind get_weights changed, or 2 \
-                 exposed arrays of the same shape changed places",
+                 records {:0width$x}. Either the values of the array changed, or 2 exposed \
+                 arrays of the same shape changed places",
                 weight.name,
                 weight.checksum,
                 other.checksum,
@@ -3179,7 +3085,7 @@ fn compare_weights(
             .any(|candidate| candidate.name == weight.name)
         {
             problems.push(format!(
-                "{head}, {keyword} {}: the data file holds this weight, and get_weights no \
+                "{head}, {keyword} {}: the data file holds this weight, and the layer no \
                  longer exposes it",
                 weight.name
             ));
@@ -3201,7 +3107,7 @@ fn compare_weights(
     if problems.len() > before && keyword == "step_weight" {
         problems.push(format!(
             "{head}: a {keyword} fingerprint holds the weight after 1 step of \
-             param -= {OPTIMIZER_STEP} * grad, and get_weights reads the arrays of the layer \
+             param -= {OPTIMIZER_STEP} * grad, and Layer::weights reads the arrays of the layer \
              itself. Check whether Layer::parameters hands out the storage of the layer or a \
              copy of it. A copy makes every step_param tensor agree and leaves the layer \
              unchanged, which is training that does nothing"
@@ -3325,18 +3231,15 @@ mod guard_tests {
                     label: format!("case_{index}"),
                     training: index % 2 == 0,
                     output_shape: "(None, 3)".to_string(),
-                    param_count: "trainable 6".to_string(),
-                    param_names: vec![RecordedParameterName {
-                        name: "weight".to_string(),
-                        from_layer: true,
-                    }],
+                    param_count: "trainable 6 non_trainable 0".to_string(),
+                    param_names: vec!["kernel".to_string()],
                     weights: vec![RecordedWeight {
-                        name: "weight".to_string(),
+                        name: "kernel".to_string(),
                         shape: vec![2, 3],
                         checksum: 0x0123_4567_89ab_cdef + u64::from(seed),
                     }],
                     step_weights: vec![RecordedWeight {
-                        name: "weight".to_string(),
+                        name: "kernel".to_string(),
                         shape: vec![2, 3],
                         checksum: 0xfedc_ba98_7654_3210 - u64::from(seed),
                     }],
@@ -3348,13 +3251,13 @@ mod guard_tests {
                             bits: bits(0),
                         },
                         RecordedTensor {
-                            name: "grad_param.weight".to_string(),
+                            name: "grad_param.kernel".to_string(),
                             shape: vec![6],
                             decays: Some(true),
                             bits: bits(6),
                         },
                         RecordedTensor {
-                            name: "step_param.weight".to_string(),
+                            name: "step_param.kernel".to_string(),
                             shape: vec![6],
                             decays: None,
                             bits: bits(12),

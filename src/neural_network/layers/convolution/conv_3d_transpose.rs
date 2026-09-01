@@ -15,12 +15,11 @@ use crate::neural_network::layers::convolution::validation::{
     validate_dilation, validate_filters, validate_kernel_size_3d,
     validate_stride_dilation_exclusive, validate_strides_3d, validate_transpose_input_shape,
 };
-use crate::neural_network::layers::layer_weight::{Conv3DTransposeLayerWeight, LayerWeight};
-use crate::neural_network::layers::validation::validate_weight_shape;
+use crate::neural_network::layers::named_weight_layer_functions;
+use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array1, Array5};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
-use std::borrow::Cow;
 
 /// A 3D transposed convolutional layer for neural networks
 ///
@@ -115,6 +114,10 @@ pub struct Conv3DTranspose {
     /// filters, channels\]
     weights: Array5<f32>,
     /// 1D array of bias values with shape \[filters\]
+    ///
+    /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
+    /// The forward pass adds nothing, `weights` hides the array, and `parameters` never yields
+    /// it, so a bias-free layer holds it and no more
     bias: Array1<f32>,
     /// Activation applied to the transposed convolution output
     activation: Activation,
@@ -128,6 +131,8 @@ pub struct Conv3DTranspose {
     weight_gradients: Option<Array5<f32>>,
     /// Gradients for the biases, computed during backpropagation
     bias_gradients: Option<Array1<f32>>,
+    /// Whether the layer adds a bias to the convolution output
+    use_bias: bool,
 }
 
 impl Conv3DTranspose {
@@ -199,6 +204,7 @@ impl Conv3DTranspose {
             input_shape,
             weight_gradients: None,
             bias_gradients: None,
+            use_bias: true,
         })
     }
 
@@ -327,23 +333,57 @@ impl Conv3DTranspose {
         ]
     }
 
+    /// Sets whether the layer adds a bias to the convolution output (defaults to `true`)
+    ///
+    /// With `use_bias` set to false the layer holds the kernel alone: `param_count` counts the
+    /// kernel alone, `parameters` yields the kernel alone, and a checkpoint of the layer holds
+    /// 1 array under the path `<position>.kernel`. A checkpoint written by a layer that has a
+    /// bias therefore fails to load into a layer that has none, and the refusal names the path
+    ///
+    /// # Parameters
+    ///
+    /// - `use_bias` - `true` to add a bias, `false` to leave it out
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_use_bias(mut self, use_bias: bool) -> Self {
+        self.use_bias = use_bias;
+        if !use_bias {
+            // Drop any gradient a previous backward pass left, so the bias cannot reach
+            // `parameters` after the layer stops holding it
+            self.bias_gradients = None;
+        }
+        self
+    }
+
     /// Sets the weights and bias for this layer
     ///
     /// # Parameters
     ///
     /// - `weights` - 5D array of filter weights with shape \[kernel_depth, kernel_height,
     ///   kernel_width, filters, channels\]
-    /// - `bias` - 1D array of bias values with shape \[filters\]
+    /// - `bias` - 1D array of bias values with shape \[filters\], or `None` for a layer
+    ///   built with [`with_use_bias(false)`](Self::with_use_bias)
     ///
     /// # Errors
     ///
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` does not match the
     ///   layer's expected shape
-    pub fn set_weights(&mut self, weights: Array5<f32>, bias: Array1<f32>) -> Result<(), Error> {
-        validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
-        validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
+    pub fn set_weights(
+        &mut self,
+        weights: Array5<f32>,
+        bias: impl Into<Option<Array1<f32>>>,
+    ) -> Result<(), Error> {
+        validate_weight_shape("kernel", self.weights.shape(), weights.shape())?;
+        let bias = validate_optional_weight("bias", "use_bias", self.use_bias, bias.into())?;
+        if let Some(bias) = bias.as_ref() {
+            validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
+        }
         self.weights = weights;
-        self.bias = bias;
+        if let Some(bias) = bias {
+            self.bias = bias;
+        }
         Ok(())
     }
 }
@@ -360,7 +400,8 @@ impl Layer for Conv3DTranspose {
             input,
             self.weights.as_slice().expect("weights must be contiguous"),
             self.weights.shape(),
-            self.bias.as_slice().expect("bias must be contiguous"),
+            self.use_bias
+                .then(|| self.bias.as_slice().expect("bias must be contiguous")),
             &[self.strides.0, self.strides.1, self.strides.2],
             &[
                 self.dilation_rate.0,
@@ -384,7 +425,8 @@ impl Layer for Conv3DTranspose {
             input,
             self.weights.as_slice().expect("weights must be contiguous"),
             self.weights.shape(),
-            self.bias.as_slice().expect("bias must be contiguous"),
+            self.use_bias
+                .then(|| self.bias.as_slice().expect("bias must be contiguous")),
             &[self.strides.0, self.strides.1, self.strides.2],
             &[
                 self.dilation_rate.0,
@@ -427,10 +469,12 @@ impl Layer for Conv3DTranspose {
             Array5::from_shape_vec(self.weights.raw_dim(), grads.weight_grad)
                 .expect("weight gradient shape matches weights"),
         );
-        self.bias_gradients = Some(
+        // A bias-free layer keeps no bias gradient, so `parameters` yields none and no
+        // optimizer state is ever keyed on a bias that the layer does not hold
+        self.bias_gradients = self.use_bias.then(|| {
             Array1::from_shape_vec(self.bias.raw_dim(), grads.bias_grad)
-                .expect("bias gradient shape matches bias"),
-        );
+                .expect("bias gradient shape matches bias")
+        });
 
         Ok(grads.input_grad)
     }
@@ -448,7 +492,10 @@ impl Layer for Conv3DTranspose {
     }
 
     fn param_count(&self) -> ParamCounts {
-        ParamCounts::trainable(self.weights.len() + self.bias.len())
+        // Read the arrays the layer holds rather than the configuration, so dropping the
+        // bias corrects the count with no second formula to keep in step
+        let bias = if self.use_bias { self.bias.len() } else { 0 };
+        ParamCounts::trainable(self.weights.len() + bias)
     }
 
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
@@ -479,10 +526,8 @@ impl Layer for Conv3DTranspose {
         params
     }
 
-    fn get_weights(&self) -> LayerWeight<'_> {
-        LayerWeight::Conv3DTranspose(Conv3DTransposeLayerWeight {
-            weight: Cow::Borrowed(&self.weights),
-            bias: Cow::Borrowed(&self.bias),
-        })
-    }
+    named_weight_layer_functions!(
+        trainable "kernel" => weights,
+        trainable "bias" => bias if use_bias,
+    );
 }

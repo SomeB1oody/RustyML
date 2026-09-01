@@ -14,11 +14,10 @@ use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
 use rustyml::neural_network::layers::convolution::depthwise_conv_1d::DepthwiseConv1D;
 use rustyml::neural_network::layers::convolution::separable_conv_1d::SeparableConv1D;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
-use crate::common::assert_allclose;
+use crate::common::{assert_allclose, named};
 
 /// A `[batch, length, channels]` tensor holding `values` in row-major order
 fn seq(shape: [usize; 3], values: Vec<f32>) -> rustyml::neural_network::Tensor {
@@ -730,29 +729,23 @@ fn separable_conv1d_emits_c_order_tensors_from_a_strided_input() {
     assert_allclose(&twin.backward(&grad_seed).unwrap(), &grad, 0.0_f32);
 }
 
-// Weight containers
+// Named weights
 
-/// `get_weights` returns the matching variant, with the shapes the layer declares
+/// Each layer names its arrays as Keras does, and the shapes are the ones it declares
 #[test]
-fn conv_1d_variants_report_their_weight_containers() {
+fn conv_1d_variants_name_their_weights() {
     let depthwise = DepthwiseConv1D::new(3, vec![1, 10, 4], 1, Linear::new())
         .unwrap()
         .with_depth_multiplier(2)
         .unwrap();
-    let LayerWeight::DepthwiseConv1D(dw) = depthwise.get_weights() else {
-        panic!("DepthwiseConv1D must report its own variant");
-    };
-    assert_eq!(dw.weight.shape(), &[3, 4, 2]);
-    assert_eq!(dw.bias.len(), 8);
+    assert_eq!(named(&depthwise, "kernel").shape(), &[3, 4, 2]);
+    assert_eq!(named(&depthwise, "bias").len(), 8);
     assert_eq!(depthwise.layer_type(), "DepthwiseConv1D");
 
     let separable = SeparableConv1D::new(5, 3, vec![1, 10, 4], 1, 2, Linear::new()).unwrap();
-    let LayerWeight::SeparableConv1D(sw) = separable.get_weights() else {
-        panic!("SeparableConv1D must report its own variant");
-    };
-    assert_eq!(sw.depthwise_weight.shape(), &[3, 4, 2]);
-    assert_eq!(sw.pointwise_weight.shape(), &[1, 8, 5]);
-    assert_eq!(sw.bias.len(), 5);
+    assert_eq!(named(&separable, "depthwise_kernel").shape(), &[3, 4, 2]);
+    assert_eq!(named(&separable, "pointwise_kernel").shape(), &[1, 8, 5]);
+    assert_eq!(named(&separable, "bias").len(), 5);
     assert_eq!(separable.layer_type(), "SeparableConv1D");
 }
 

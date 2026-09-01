@@ -3,7 +3,6 @@
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::pooling::layer_functions_global_pooling;
 use crate::neural_network::layers::pooling::pooling_engine::{
     PoolKind, global_pool_backward, global_pool_forward,

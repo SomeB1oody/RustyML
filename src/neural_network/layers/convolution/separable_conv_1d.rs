@@ -16,12 +16,11 @@ use crate::neural_network::layers::convolution::validation::{
     validate_input_shape_1d, validate_kernel_size_1d, validate_strides_1d,
     validate_valid_kernel_fits,
 };
-use crate::neural_network::layers::layer_weight::{LayerWeight, SeparableConv1DLayerWeight};
-use crate::neural_network::layers::validation::validate_weight_shape;
+use crate::neural_network::layers::named_weight_layer_functions;
+use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array1, Array3};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
-use std::borrow::Cow;
 
 /// A 1D separable convolutional layer
 ///
@@ -93,6 +92,10 @@ pub struct SeparableConv1D {
     /// Pointwise filters with shape \[1, channels * depth_multiplier, filters\]
     pointwise_weights: Array3<f32>,
     /// Bias vector with shape \[filters\]
+    ///
+    /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
+    /// The pointwise stage adds nothing, `weights` hides the array, and `parameters` never
+    /// yields it, so a bias-free layer holds it and no more
     bias: Array1<f32>,
     /// Activation applied to the layer output
     activation: Activation,
@@ -110,6 +113,8 @@ pub struct SeparableConv1D {
     pointwise_weight_gradients: Option<Array3<f32>>,
     /// Gradients for the biases
     bias_gradients: Option<Array1<f32>>,
+    /// Whether the layer adds a bias to the pointwise output
+    use_bias: bool,
 }
 
 impl SeparableConv1D {
@@ -188,6 +193,7 @@ impl SeparableConv1D {
             depthwise_weight_gradients: None,
             pointwise_weight_gradients: None,
             bias_gradients: None,
+            use_bias: true,
         })
     }
 
@@ -415,13 +421,39 @@ impl SeparableConv1D {
                 .as_slice()
                 .expect("pointwise weights must be contiguous"),
             self.pointwise_weights.shape(),
-            self.bias.as_slice().expect("bias must be contiguous"),
+            self.use_bias
+                .then(|| self.bias.as_slice().expect("bias must be contiguous")),
             &[1],
             &[1],
             ConvPadding::Valid,
         )
         // A 1-tap kernel under Valid padding can never exceed the input (every length >= 1)
         .expect("1-tap pointwise convolution geometry is always valid")
+    }
+
+    /// Sets whether the layer adds a bias to the pointwise output (defaults to `true`)
+    ///
+    /// With `use_bias` set to false the layer holds the 2 kernels alone: `param_count` counts
+    /// the 2 kernels, `parameters` yields the 2 kernels, and a checkpoint of the layer holds
+    /// the paths `<position>.depthwise_kernel` and `<position>.pointwise_kernel`. A checkpoint
+    /// written by a layer that has a bias therefore fails to load into a layer that has none,
+    /// and the refusal names the path
+    ///
+    /// # Parameters
+    ///
+    /// - `use_bias` - `true` to add a bias, `false` to leave it out
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_use_bias(mut self, use_bias: bool) -> Self {
+        self.use_bias = use_bias;
+        if !use_bias {
+            // Drop any gradient a previous backward pass left, so the bias cannot reach
+            // `parameters` after the layer stops holding it
+            self.bias_gradients = None;
+        }
+        self
     }
 
     /// Sets the weights and bias for this layer
@@ -432,31 +464,39 @@ impl SeparableConv1D {
     ///   \[kernel_size, channels, depth_multiplier\]
     /// - `pointwise_weights` - 3D array for pointwise filters with shape
     ///   \[1, channels * depth_multiplier, filters\]
-    /// - `bias` - 1D bias vector with shape \[filters\]
+    /// - `bias` - 1D bias vector with shape \[filters\], or `None` for a layer built with
+    ///   [`with_use_bias(false)`](Self::with_use_bias)
     ///
     /// # Errors
     ///
     /// - `Error` - If any supplied array shape does not match the existing layer weights
+    /// - `Error::InvalidParameter` - If a bias is given to a layer that holds none, or none
+    ///   is given to a layer that holds one
     pub fn set_weights(
         &mut self,
         depthwise_weights: Array3<f32>,
         pointwise_weights: Array3<f32>,
-        bias: Array1<f32>,
+        bias: impl Into<Option<Array1<f32>>>,
     ) -> Result<(), Error> {
         validate_weight_shape(
-            "depthwise_weight",
+            "depthwise_kernel",
             self.depthwise_weights.shape(),
             depthwise_weights.shape(),
         )?;
         validate_weight_shape(
-            "pointwise_weight",
+            "pointwise_kernel",
             self.pointwise_weights.shape(),
             pointwise_weights.shape(),
         )?;
-        validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
+        let bias = validate_optional_weight("bias", "use_bias", self.use_bias, bias.into())?;
+        if let Some(bias) = bias.as_ref() {
+            validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
+        }
         self.depthwise_weights = depthwise_weights;
         self.pointwise_weights = pointwise_weights;
-        self.bias = bias;
+        if let Some(bias) = bias {
+            self.bias = bias;
+        }
         Ok(())
     }
 }
@@ -527,7 +567,9 @@ impl Layer for SeparableConv1D {
             Array3::from_shape_vec(self.pointwise_weights.raw_dim(), pw_grads.weight_grad)
                 .expect("pointwise weight gradient shape matches weights"),
         );
-        self.bias_gradients = Some(Array1::from_vec(pw_grads.bias_grad));
+        // A bias-free layer keeps no bias gradient, so `parameters` yields none and no
+        // optimizer state is ever keyed on a bias that the layer does not hold
+        self.bias_gradients = self.use_bias.then(|| Array1::from_vec(pw_grads.bias_grad));
         let depthwise_grad = pw_grads.input_grad;
 
         // Depthwise backward through the shared driver
@@ -573,9 +615,10 @@ impl Layer for SeparableConv1D {
     }
 
     fn param_count(&self) -> ParamCounts {
-        ParamCounts::trainable(
-            self.depthwise_weights.len() + self.pointwise_weights.len() + self.bias.len(),
-        )
+        // Read the arrays the layer holds rather than the configuration, so dropping the
+        // bias corrects the count with no second formula to keep in step
+        let bias = if self.use_bias { self.bias.len() } else { 0 };
+        ParamCounts::trainable(self.depthwise_weights.len() + self.pointwise_weights.len() + bias)
     }
 
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
@@ -620,13 +663,11 @@ impl Layer for SeparableConv1D {
         params
     }
 
-    fn get_weights(&self) -> LayerWeight<'_> {
-        LayerWeight::SeparableConv1D(SeparableConv1DLayerWeight {
-            depthwise_weight: Cow::Borrowed(&self.depthwise_weights),
-            pointwise_weight: Cow::Borrowed(&self.pointwise_weights),
-            bias: Cow::Borrowed(&self.bias),
-        })
-    }
+    named_weight_layer_functions!(
+        trainable "depthwise_kernel" => depthwise_weights,
+        trainable "pointwise_kernel" => pointwise_weights,
+        trainable "bias" => bias if use_bias,
+    );
 }
 
 /// Unit tests for `SeparableConv1D`

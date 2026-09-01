@@ -56,13 +56,12 @@ use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::Activation;
 use rustyml::neural_network::layers::embedding::Embedding;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::layers::recurrent::{GRU, LSTM, SimpleRNN};
 use rustyml::neural_network::layers::regularization::normalization::{
     GroupNormalization, InstanceNormalization, LayerNormalization, LayerNormalizationAxis,
     UnitNormalization, UnitNormalizationAxis,
 };
-use rustyml::neural_network::traits::{Layer, ParamGrad};
+use rustyml::neural_network::traits::{Layer, ParamGrad, WeightMut, WeightRef};
 
 /// Every layer type of the sequence family, in the order the data file records them.
 fn fixtures() -> Vec<LayerFixture> {
@@ -485,8 +484,12 @@ impl Layer for IndexedEmbedding {
         self.inner.parameters()
     }
 
-    fn get_weights(&self) -> LayerWeight<'_> {
-        self.inner.get_weights()
+    fn weights(&self) -> Vec<WeightRef<'_>> {
+        self.inner.weights()
+    }
+
+    fn weights_mut(&mut self) -> Vec<WeightMut<'_>> {
+        self.inner.weights_mut()
     }
 }
 

@@ -3,28 +3,42 @@
 # The harness in tests/neural_network/golden wrote this file. Do not edit it by hand.
 # Regenerate it with:
 #
-#     RUSTYML_REGEN_GOLDEN=1 cargo test --test neural_network golden
+#     RUSTYML_REGEN_GOLDEN="<reason>" cargo test --test neural_network golden
 #
 # Regeneration is an explicit claim that the behavior change was intended and reviewed.
+# The first capture of a family needs that claim alone. A run that adds, changes, or
+# removes a case of a file that exists is refused 1 time. The refusal prints every
+# difference and 1 acknowledgment token, and a second run must carry that token in
+# RUSTYML_REGEN_GOLDEN_ACCEPT. Force a rebuild of the test binary before every regeneration.
+#
+# The content_digest line below records a digest of this whole file, the number of
+# cases, and the number of recorded values. The harness verifies all 3 before it reads
+# the file. An edit by hand therefore stops every run of the net. Restore such a file
+# from version control. A deletion of this file is refused as well.
+#
+# Regeneration history, newest first. Each line holds the reason of 1 run that wrote
+# this file.
+#
+# reason the checkpoint is addressed by name, so the layer supplies every recorded parameter name and the parameter count records both halves
 #
 # Each value line holds the raw f32 bits from to_bits, in 8 lowercase hexadecimal
 # digits. The text after the "#" is the same value in decimal, and it is a comment.
 #
 # The module doc comment of tests/neural_network/golden/mod.rs holds the grammar.
 
-format 5
+format 6
 family conv
-content_digest ecb16a97c26d9334 cases 32 values 8224
+content_digest cdef563a58959d24 cases 32 values 8224
 
 case Conv1D valid_stride_1
 mode training
 output_shape "(2, 4, 3)"
-param_count trainable 21
-param_name weight layer
+param_count trainable 21 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 2 3 checksum 034117b78625aa29
+weight kernel 3 2 3 checksum 034117b78625aa29
 weight bias 3 checksum 86b58be68ae8a50d
-step_weight weight 3 2 3 checksum 9bcdcb55d0042ca0
+step_weight kernel 3 2 3 checksum 9bcdcb55d0042ca0
 step_weight bias 3 checksum 9269182fb2c62e00
 tensor input 2 6 2
   c0000000  # -2.0
@@ -126,7 +140,7 @@ tensor grad_input 2 6 2
   3fd0a3d7  # 1.63
   3f1851eb  # 0.59499997
   3f233332  # 0.6374999
-tensor grad_param.weight 18 decays
+tensor grad_param.kernel 18 decays
   40233332  # 2.5499997
   4099db23  # 4.808
   c10451ec  # -8.27
@@ -145,7 +159,7 @@ tensor grad_param.weight 18 decays
   c103df3c  # -8.242001
   402b020d  # 2.6720002
   4044fdf4  # 3.078
-tensor step_param.weight 18
+tensor step_param.kernel 18
   bfa5999a  # -1.29375
   be808313  # -0.25100002
   3f3bd70b  # 0.73375005
@@ -177,12 +191,12 @@ end
 case Conv1D same_stride_2
 mode training
 output_shape "(2, 3, 3)"
-param_count trainable 21
-param_name weight layer
+param_count trainable 21 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 2 3 checksum 034117b78625aa29
+weight kernel 3 2 3 checksum 034117b78625aa29
 weight bias 3 checksum 86b58be68ae8a50d
-step_weight weight 3 2 3 checksum b18be4d0061f763d
+step_weight kernel 3 2 3 checksum b18be4d0061f763d
 step_weight bias 3 checksum 882221db9b9a00e7
 tensor input 2 6 2
   c0000000  # -2.0
@@ -272,7 +286,7 @@ tensor grad_input 2 6 2
   3ef8f5c0  # 0.48624992
   3f4d70a4  # 0.8025
   3f4f5c28  # 0.80999994
-tensor grad_param.weight 18 decays
+tensor grad_param.kernel 18 decays
   408c49ba  # 4.384
   3fec49ba  # 1.846
   c058d4fe  # -3.388
@@ -291,7 +305,7 @@ tensor grad_param.weight 18 decays
   c01851ec  # -2.38
   3f256044  # 0.64600015
   3fc83127  # 1.564
-tensor step_param.weight 18
+tensor step_param.kernel 18
   bfc2f1aa  # -1.523
   3df43958  # 0.11925
   3dfced90  # 0.12349999
@@ -323,12 +337,12 @@ end
 case Conv1D valid_dilation_2
 mode training
 output_shape "(2, 2, 3)"
-param_count trainable 21
-param_name weight layer
+param_count trainable 21 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 2 3 checksum 034117b78625aa29
+weight kernel 3 2 3 checksum 034117b78625aa29
 weight bias 3 checksum 86b58be68ae8a50d
-step_weight weight 3 2 3 checksum 2f6187f1f6ebb04d
+step_weight kernel 3 2 3 checksum 2f6187f1f6ebb04d
 step_weight bias 3 checksum 15088a26ba258649
 tensor input 2 6 2
   c0000000  # -2.0
@@ -406,7 +420,7 @@ tensor grad_input 2 6 2
   3f628f5c  # 0.885
   bf9c51eb  # -1.2212499
   bf9ee148  # -1.24125
-tensor grad_param.weight 18 decays
+tensor grad_param.kernel 18 decays
   3fd7ceda  # 1.6860001
   402d2f1c  # 2.7060003
   c0610625  # -3.516
@@ -425,7 +439,7 @@ tensor grad_param.weight 18 decays
   40389374  # 2.8839998
   3f3ef9db  # 0.746
   3fb95810  # 1.448
-tensor step_param.weight 18
+tensor step_param.kernel 18
   bf97c6a8  # -1.18575
   3c4082e0  # 0.011749953
   3e0ed916  # 0.13949999
@@ -457,12 +471,12 @@ end
 case Conv1D causal_dilation_1
 mode training
 output_shape "(2, 6, 3)"
-param_count trainable 21
-param_name weight layer
+param_count trainable 21 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 2 3 checksum 034117b78625aa29
+weight kernel 3 2 3 checksum 034117b78625aa29
 weight bias 3 checksum 86b58be68ae8a50d
-step_weight weight 3 2 3 checksum 8e06076383e43a9d
+step_weight kernel 3 2 3 checksum 8e06076383e43a9d
 step_weight bias 3 checksum 6f6a3ac0e34c10e7
 tensor input 2 6 2
   c0000000  # -2.0
@@ -588,7 +602,7 @@ tensor grad_input 2 6 2
   400451ec  # 2.0675
   3f5051eb  # 0.81374997
   3f547ae1  # 0.83
-tensor grad_param.weight 18 decays
+tensor grad_param.kernel 18 decays
   40422d0d  # 3.0339997
   bff99998  # -1.9499998
   c09e45a2  # -4.946
@@ -607,7 +621,7 @@ tensor grad_param.weight 18 decays
   bfe6e978  # -1.8039999
   40318937  # 2.774
   c049fbe7  # -3.156
-tensor step_param.weight 18
+tensor step_param.kernel 18
   bfad5810  # -1.35425
   3f180000  # 0.59375
   3ea2f1aa  # 0.31825
@@ -639,12 +653,12 @@ end
 case Conv1D causal_dilation_3
 mode training
 output_shape "(2, 6, 3)"
-param_count trainable 21
-param_name weight layer
+param_count trainable 21 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 2 3 checksum 034117b78625aa29
+weight kernel 3 2 3 checksum 034117b78625aa29
 weight bias 3 checksum 86b58be68ae8a50d
-step_weight weight 3 2 3 checksum 7f056f6c40cf4840
+step_weight kernel 3 2 3 checksum 7f056f6c40cf4840
 step_weight bias 3 checksum 6f6a3ac0e34c10e7
 tensor input 2 6 2
   c0000000  # -2.0
@@ -770,7 +784,7 @@ tensor grad_input 2 6 2
   3fa28f5d  # 1.2700001
   3f5051eb  # 0.81374997
   3f547ae1  # 0.83
-tensor grad_param.weight 18 decays
+tensor grad_param.kernel 18 decays
   00000000  # 0.0
   00000000  # 0.0
   00000000  # 0.0
@@ -789,7 +803,7 @@ tensor grad_param.weight 18 decays
   bfe6e978  # -1.8039999
   40318937  # 2.774
   c049fbe7  # -3.156
-tensor step_param.weight 18
+tensor step_param.kernel 18
   bf79999a  # -0.975
   3eb33333  # 0.35
   be99999a  # -0.3
@@ -821,12 +835,12 @@ end
 case Conv2D valid_kernel_3x2
 mode training
 output_shape "(2, 3, 3, 3)"
-param_count trainable 39
-param_name weight layer
+param_count trainable 39 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 2 2 3 checksum 81fe7e62d394ae84
+weight kernel 3 2 2 3 checksum 81fe7e62d394ae84
 weight bias 3 checksum 9fa39a24c06b7171
-step_weight weight 3 2 2 3 checksum 65e2e702c36c6490
+step_weight kernel 3 2 2 3 checksum 65e2e702c36c6490
 step_weight bias 3 checksum 32134ff5db71cbe7
 tensor input 2 5 4 2
   c0000000  # -2.0
@@ -1100,7 +1114,7 @@ tensor grad_input 2 5 4 2
   c032e148  # -2.795
   bfb80001  # -1.4375001
   bfb547ae  # -1.41625
-tensor grad_param.weight 36 decays
+tensor grad_param.kernel 36 decays
   40d08312  # 6.516
   c0189374  # -2.3839998
   c0bc6a80  # -5.8880005
@@ -1137,7 +1151,7 @@ tensor grad_param.weight 36 decays
   bea8f5d0  # -0.3300004
   c0649ba7  # -3.5720003
   bfb58109  # -1.4180003
-tensor step_param.weight 36
+tensor step_param.kernel 36
   bfe50e56  # -1.7895
   3f25e354  # 0.648
   3edf3b66  # 0.43600005
@@ -1187,12 +1201,12 @@ end
 case Conv2D same_stride_2
 mode training
 output_shape "(2, 3, 2, 3)"
-param_count trainable 57
-param_name weight layer
+param_count trainable 57 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 3 2 3 checksum 5f9fc2de303cbacd
+weight kernel 3 3 2 3 checksum 5f9fc2de303cbacd
 weight bias 3 checksum 77827388c8a2fbc7
-step_weight weight 3 3 2 3 checksum f16aee5ff347f46c
+step_weight kernel 3 3 2 3 checksum f16aee5ff347f46c
 step_weight bias 3 checksum 3b8abde7004f55b9
 tensor input 2 5 4 2
   c0000000  # -2.0
@@ -1430,7 +1444,7 @@ tensor grad_input 2 5 4 2
   3f92e147  # 1.1474999
   3f451eb8  # 0.77
   3f4e147a  # 0.80499995
-tensor grad_param.weight 54 decays
+tensor grad_param.kernel 54 decays
   402d70a3  # 2.7099998
   40743956  # 3.8159995
   bff9999a  # -1.95
@@ -1485,7 +1499,7 @@ tensor grad_param.weight 54 decays
   bfdd70a5  # -1.7300001
   3f9db22c  # 1.2319999
   3fce147a  # 1.6099999
-tensor step_param.weight 54
+tensor step_param.kernel 54
   bfa828f6  # -1.31375
   be020c46  # -0.12699994
   bd666668  # -0.056250006
@@ -1553,12 +1567,12 @@ end
 case Conv2D valid_dilation_2x1
 mode training
 output_shape "(2, 3, 3, 3)"
-param_count trainable 27
-param_name weight layer
+param_count trainable 27 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 2 2 2 3 checksum e6d8d96d841efbcd
+weight kernel 2 2 2 3 checksum e6d8d96d841efbcd
 weight bias 3 checksum 71cbe12f7f20652f
-step_weight weight 2 2 2 3 checksum 478befa85a0a57b4
+step_weight kernel 2 2 2 3 checksum 478befa85a0a57b4
 step_weight bias 3 checksum 93aad01135cae6a9
 tensor input 2 5 4 2
   c0000000  # -2.0
@@ -1832,7 +1846,7 @@ tensor grad_input 2 5 4 2
   c02e6667  # -2.7250001
   bfc2e148  # -1.5225
   bfc028f6  # -1.50125
-tensor grad_param.weight 24 decays
+tensor grad_param.kernel 24 decays
   40d08312  # 6.516
   c0189374  # -2.3839998
   c0bc6a80  # -5.8880005
@@ -1857,7 +1871,7 @@ tensor grad_param.weight 24 decays
   bea8f5d0  # -0.3300004
   c0649ba7  # -3.5720003
   bfb58109  # -1.4180003
-tensor step_param.weight 24
+tensor step_param.kernel 24
   bfe50e56  # -1.7895
   3f25e354  # 0.648
   3edf3b66  # 0.43600005
@@ -1895,12 +1909,12 @@ end
 case Conv2D same_dilation_2
 mode training
 output_shape "(2, 5, 4, 3)"
-param_count trainable 57
-param_name weight layer
+param_count trainable 57 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 3 2 3 checksum 5f9fc2de303cbacd
+weight kernel 3 3 2 3 checksum 5f9fc2de303cbacd
 weight bias 3 checksum 77827388c8a2fbc7
-step_weight weight 3 3 2 3 checksum f45434e060d5fa84
+step_weight kernel 3 3 2 3 checksum f45434e060d5fa84
 step_weight bias 3 checksum 63d62e09491b3624
 tensor input 2 5 4 2
   c0000000  # -2.0
@@ -2306,7 +2320,7 @@ tensor grad_input 2 5 4 2
   3f9c7ae2  # 1.2225001
   bf270a3c  # -0.6524999
   bf11eb84  # -0.56999993
-tensor grad_param.weight 54 decays
+tensor grad_param.kernel 54 decays
   c0a9eb85  # -5.31
   3fffbe75  # 1.9979998
   4098624f  # 4.7620006
@@ -2361,7 +2375,7 @@ tensor grad_param.weight 54 decays
   3f59168a  # 0.84800017
   408cdd2f  # 4.402
   3fda9fbe  # 1.708
-tensor step_param.weight 54
+tensor step_param.kernel 54
   be9f5c2a  # -0.31125003
   3dcd4fe2  # 0.10025002
   bf652f1c  # -0.8952501
@@ -2429,12 +2443,12 @@ end
 case Conv3D valid_stride_1
 mode training
 output_shape "(2, 2, 2, 2, 2)"
-param_count trainable 34
-param_name weight layer
+param_count trainable 34 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 2 2 2 2 2 checksum c1871dc6f8068bfe
+weight kernel 2 2 2 2 2 checksum c1871dc6f8068bfe
 weight bias 2 checksum a945b3a36937699d
-step_weight weight 2 2 2 2 2 checksum 5e0616cc62a63d21
+step_weight kernel 2 2 2 2 2 checksum 5e0616cc62a63d21
 step_weight bias 2 checksum 45cdab130dbb61cd
 tensor input 2 3 3 3 2
   c0000000  # -2.0
@@ -2720,7 +2734,7 @@ tensor grad_input 2 3 3 3 2
   3f07ae15  # 0.53000003
   bf08a3d7  # -0.53375
   3f79eb86  # 0.97625005
-tensor grad_param.weight 32 decays
+tensor grad_param.kernel 32 decays
   40a072b2  # 5.014001
   4106e148  # 8.43
   c0e59168  # -7.174
@@ -2753,7 +2767,7 @@ tensor grad_param.weight 32 decays
   c0aa3d70  # -5.3199997
   c011a9fa  # -2.2759995
   40f72b01  # 7.7239995
-tensor step_param.weight 32
+tensor step_param.kernel 32
   bfcd0626  # -1.6017501
   bf3428f6  # -0.70375
   3f18c49b  # 0.59674996
@@ -2797,12 +2811,12 @@ end
 case Conv3D same_stride_2
 mode training
 output_shape "(2, 2, 2, 2, 2)"
-param_count trainable 34
-param_name weight layer
+param_count trainable 34 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 2 2 2 2 2 checksum c1871dc6f8068bfe
+weight kernel 2 2 2 2 2 checksum c1871dc6f8068bfe
 weight bias 2 checksum a945b3a36937699d
-step_weight weight 2 2 2 2 2 checksum f8ef08fc42828802
+step_weight kernel 2 2 2 2 2 checksum f8ef08fc42828802
 step_weight bias 2 checksum 3494eb1a1164a47a
 tensor input 2 3 3 3 2
   c0000000  # -2.0
@@ -3088,7 +3102,7 @@ tensor grad_input 2 3 3 3 2
   00000000  # 0.0
   3e570a3e  # 0.21000001
   bf11eb85  # -0.57
-tensor grad_param.weight 32 decays
+tensor grad_param.kernel 32 decays
   40a0c49c  # 5.024
   40443958  # 3.066
   bc031280  # -0.008000016
@@ -3121,7 +3135,7 @@ tensor grad_param.weight 32 decays
   bfa04189  # -1.252
   c0333333  # -2.8
   3f2c0832  # 0.67200005
-tensor step_param.weight 32
+tensor step_param.kernel 32
   bfcd2f1b  # -1.603
   bd083128  # -0.033250004
   be991688  # -0.29900002
@@ -3165,12 +3179,12 @@ end
 case Conv3D valid_dilation_2x1x1
 mode training
 output_shape "(2, 2, 2, 2, 2)"
-param_count trainable 34
-param_name weight layer
+param_count trainable 34 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 2 2 2 2 2 checksum c1871dc6f8068bfe
+weight kernel 2 2 2 2 2 checksum c1871dc6f8068bfe
 weight bias 2 checksum a945b3a36937699d
-step_weight weight 2 2 2 2 2 checksum 8e4b52ef9fb290e5
+step_weight kernel 2 2 2 2 2 checksum 8e4b52ef9fb290e5
 step_weight bias 2 checksum 45cdab130dbb61cd
 tensor input 2 4 3 3 2
   c0000000  # -2.0
@@ -3528,7 +3542,7 @@ tensor grad_input 2 4 3 3 2
   3f07ae15  # 0.53000003
   bf08a3d7  # -0.53375
   3f79eb86  # 0.97625005
-tensor grad_param.weight 32 decays
+tensor grad_param.kernel 32 decays
   40d39582  # 6.6120005
   c028f5c2  # -2.6399999
   c0abf7ce  # -5.3739996
@@ -3561,7 +3575,7 @@ tensor grad_param.weight 32 decays
   c0da7efa  # -6.828
   bef9db28  # -0.48800015
   40c072b1  # 6.0140004
-tensor step_param.weight 32
+tensor step_param.kernel 32
   bfe6978e  # -1.8015001
   3f2e147a  # 0.67999995
   3ebe5602  # 0.37174994
@@ -3605,12 +3619,12 @@ end
 case Conv3D same_dilation_2
 mode training
 output_shape "(2, 3, 3, 3, 2)"
-param_count trainable 34
-param_name weight layer
+param_count trainable 34 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 2 2 2 2 2 checksum c1871dc6f8068bfe
+weight kernel 2 2 2 2 2 checksum c1871dc6f8068bfe
 weight bias 2 checksum a945b3a36937699d
-step_weight weight 2 2 2 2 2 checksum 7402493cfb86db42
+step_weight kernel 2 2 2 2 2 checksum 7402493cfb86db42
 step_weight bias 2 checksum 625055148f9519fa
 tensor input 2 3 3 3 2
   c0000000  # -2.0
@@ -4048,7 +4062,7 @@ tensor grad_input 2 3 3 3 2
   c020a3d8  # -2.5100002
   3ef70a3d  # 0.4825
   bfabae15  # -1.3412501
-tensor grad_param.weight 32 decays
+tensor grad_param.kernel 32 decays
   3fd9db24  # 1.7020001
   409f3b64  # 4.976
   c06b8520  # -3.6800003
@@ -4081,7 +4095,7 @@ tensor grad_param.weight 32 decays
   40d81062  # 6.752
   bfc7ef9f  # -1.5620002
   be656040  # -0.22399998
-tensor step_param.weight 32
+tensor step_param.kernel 32
   bf980832  # -1.1877501
   be8b4395  # -0.27199998
   3e23d70c  # 0.16000003
@@ -4125,12 +4139,12 @@ end
 case Conv1DTranspose valid_stride_2_kernel_4
 mode training
 output_shape "(2, 8, 2)"
-param_count trainable 18
-param_name weight layer
+param_count trainable 18 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 4 2 2 checksum 11c875a323701c33
+weight kernel 4 2 2 checksum 11c875a323701c33
 weight bias 2 checksum 319d13a502d3ad5f
-step_weight weight 4 2 2 checksum d4c134fc0bbf484d
+step_weight kernel 4 2 2 checksum d4c134fc0bbf484d
 step_weight bias 2 checksum 3b59d9117a2c9887
 tensor input 2 3 2
   c0000000  # -2.0
@@ -4224,7 +4238,7 @@ tensor grad_input 2 3 2
   bef00000  # -0.46875
   400828f6  # 2.1275
   bee28f5c  # -0.4425
-tensor grad_param.weight 16 decays
+tensor grad_param.kernel 16 decays
   4027ae16  # 2.6200004
   c0056042  # -2.084
   c0458106  # -3.086
@@ -4241,7 +4255,7 @@ tensor grad_param.weight 16 decays
   40a6d917  # 5.214
   c090a3d7  # -4.52
   c0166667  # -2.3500001
-tensor step_param.weight 16
+tensor step_param.kernel 16
   bfa6b852  # -1.3025
   3f1c49ba  # 0.6105
   3daf9db0  # 0.085749984
@@ -4269,12 +4283,12 @@ end
 case Conv1DTranspose same_stride_3_kernel_4
 mode training
 output_shape "(2, 9, 2)"
-param_count trainable 18
-param_name weight layer
+param_count trainable 18 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 4 2 2 checksum 11c875a323701c33
+weight kernel 4 2 2 checksum 11c875a323701c33
 weight bias 2 checksum 319d13a502d3ad5f
-step_weight weight 4 2 2 checksum cd64945127ea24ce
+step_weight kernel 4 2 2 checksum cd64945127ea24ce
 step_weight bias 2 checksum 1e4712c4b70529d8
 tensor input 2 3 2
   c0000000  # -2.0
@@ -4376,7 +4390,7 @@ tensor grad_input 2 3 2
   3e5c28f5  # 0.21499999
   bfb1eb85  # -1.39
   bfa147ad  # -1.2599999
-tensor grad_param.weight 16 decays
+tensor grad_param.kernel 16 decays
   407d2f1a  # 3.9559999
   3f8147ae  # 1.01
   3efdf3b4  # 0.49599993
@@ -4393,7 +4407,7 @@ tensor grad_param.weight 16 decays
   3d9fbe77  # 0.078
   beb020c0  # -0.34399986
   bfb7ced9  # -1.436
-tensor step_param.weight 16
+tensor step_param.kernel 16
   bfbc1894  # -1.4695001
   3e651eb8  # 0.22375
   beb95810  # -0.362
@@ -4421,12 +4435,12 @@ end
 case Conv2DTranspose valid_stride_2_kernel_2
 mode training
 output_shape "(2, 6, 6, 2)"
-param_count trainable 18
-param_name weight layer
+param_count trainable 18 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 2 2 2 2 checksum 11c875a323701c33
+weight kernel 2 2 2 2 checksum 11c875a323701c33
 weight bias 2 checksum 319d13a502d3ad5f
-step_weight weight 2 2 2 2 checksum 1f2eaca5db0f4161
+step_weight kernel 2 2 2 2 checksum 1f2eaca5db0f4161
 step_weight bias 2 checksum 5cc335e6f576a358
 tensor input 2 3 3 2
   c0000000  # -2.0
@@ -4792,7 +4806,7 @@ tensor grad_input 2 3 3 2
   3f20f5c2  # 0.62874997
   3ffb8520  # 1.9650002
   be13332f  # -0.14374994
-tensor grad_param.weight 16 decays
+tensor grad_param.kernel 16 decays
   3f1a1ca8  # 0.60199976
   3fd374ba  # 1.6519997
   3fa39584  # 1.2780004
@@ -4809,7 +4823,7 @@ tensor grad_param.weight 16 decays
   c0a45a1c  # -5.1359997
   c089eb85  # -4.31
   40a2e148  # 5.09
-tensor step_param.weight 16
+tensor step_param.kernel 16
   bf866e98  # -1.05025
   3e12f1ac  # 0.14350003
   beeb645c  # -0.45975006
@@ -4837,12 +4851,12 @@ end
 case Conv2DTranspose same_stride_2_kernel_3
 mode training
 output_shape "(2, 6, 6, 2)"
-param_count trainable 38
-param_name weight layer
+param_count trainable 38 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 3 2 2 checksum 81fe7e62d394ae84
+weight kernel 3 3 2 2 checksum 81fe7e62d394ae84
 weight bias 2 checksum dd3092b49caf7f30
-step_weight weight 3 3 2 2 checksum e8b26d7093a78b18
+step_weight kernel 3 3 2 2 checksum e8b26d7093a78b18
 step_weight bias 2 checksum c1e3ac38bfe153af
 tensor input 2 3 3 2
   c0000000  # -2.0
@@ -5208,7 +5222,7 @@ tensor grad_input 2 3 3 2
   400e8f5c  # 2.2275
   3fe9999b  # 1.8250002
   bf97ae14  # -1.185
-tensor grad_param.weight 36 decays
+tensor grad_param.kernel 36 decays
   3e6353f0  # 0.22199988
   4086b852  # 4.21
   3e800008  # 0.25000024
@@ -5245,7 +5259,7 @@ tensor grad_param.weight 36 decays
   40633333  # 3.55
   c0eae148  # -7.34
   405a5e35  # 3.412
-tensor step_param.weight 36
+tensor step_param.kernel 36
   bf805a1d  # -1.00275
   be347ae2  # -0.17625001
   bea9999b  # -0.33125004
@@ -5293,12 +5307,12 @@ end
 case Conv3DTranspose valid_stride_2_kernel_2
 mode training
 output_shape "(2, 4, 4, 4, 1)"
-param_count trainable 17
-param_name weight layer
+param_count trainable 17 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 2 2 2 1 2 checksum 11c875a323701c33
+weight kernel 2 2 2 1 2 checksum 11c875a323701c33
 weight bias 1 checksum 46753572528c2d6b
-step_weight weight 2 2 2 1 2 checksum 2b449c801c01b6fd
+step_weight kernel 2 2 2 1 2 checksum 2b449c801c01b6fd
 step_weight bias 1 checksum 379acd749f7ca56b
 tensor input 2 2 2 2 2
   c0000000  # -2.0
@@ -5624,7 +5638,7 @@ tensor grad_input 2 2 2 2 2
   400dc290  # 2.2150002
   3f2eb851  # 0.68249995
   c06b1eb8  # -3.67375
-tensor grad_param.weight 16 decays
+tensor grad_param.kernel 16 decays
   4095e355  # 4.6840005
   bf62d0e8  # -0.88600016
   c023b646  # -2.558
@@ -5641,7 +5655,7 @@ tensor grad_param.weight 16 decays
   bf9c6a7e  # -1.2219999
   3f599994  # 0.84999967
   3fe66668  # 1.8000002
-tensor step_param.weight 16
+tensor step_param.kernel 16
   bfc7be78  # -1.5605001
   3eebe76d  # 0.46075
   3ca1cac0  # 0.019749999
@@ -5667,12 +5681,12 @@ end
 case Conv3DTranspose same_stride_2_kernel_3
 mode training
 output_shape "(2, 4, 4, 4, 1)"
-param_count trainable 55
-param_name weight layer
+param_count trainable 55 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 3 3 1 2 checksum 5f9fc2de303cbacd
+weight kernel 3 3 3 1 2 checksum 5f9fc2de303cbacd
 weight bias 1 checksum 9aceb272638abeab
-step_weight weight 3 3 3 1 2 checksum 2048bc322aac0f70
+step_weight kernel 3 3 3 1 2 checksum 2048bc322aac0f70
 step_weight bias 1 checksum fe62b3024fe24837
 tensor input 2 2 2 2 2
   c0000000  # -2.0
@@ -5998,7 +6012,7 @@ tensor grad_input 2 2 2 2 2
   bf966666  # -1.175
   3f2eb852  # 0.6825
   be7ae147  # -0.24499999
-tensor grad_param.weight 54 decays
+tensor grad_param.kernel 54 decays
   4091999a  # 4.55
   3eb22d0c  # 0.34799993
   bfe08311  # -1.7539998
@@ -6053,7 +6067,7 @@ tensor grad_param.weight 54 decays
   bff4bc6b  # -1.9120001
   bf849ba6  # -1.036
   3f418938  # 0.75600004
-tensor step_param.weight 54
+tensor step_param.kernel 54
   bfc5999a  # -1.54375
   3e9ced92  # 0.30650002
   bda56046  # -0.08075003
@@ -6117,12 +6131,12 @@ end
 case DepthwiseConv1D valid_multiplier_1
 mode training
 output_shape "(2, 4, 2)"
-param_count trainable 8
-param_name weight layer
+param_count trainable 8 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 2 1 checksum 29caed60fcd3895e
+weight kernel 3 2 1 checksum 29caed60fcd3895e
 weight bias 2 checksum ca71253d7f89d860
-step_weight weight 3 2 1 checksum f2c80a19b991aa5d
+step_weight kernel 3 2 1 checksum f2c80a19b991aa5d
 step_weight bias 2 checksum b93066ef8d8324da
 tensor input 2 6 2
   c0000000  # -2.0
@@ -6208,14 +6222,14 @@ tensor grad_input 2 6 2
   3fb4f5c2  # 1.4137499
   3e99999a  # 0.3
   3eb70a3d  # 0.3575
-tensor grad_param.weight 6 decays
+tensor grad_param.kernel 6 decays
   411a7efa  # 9.656
   bf96872c  # -1.1760001
   c066e979  # -3.608
   c091fbe8  # -4.5620003
   c091999a  # -4.55
   c02c8b44  # -2.696
-tensor step_param.weight 6
+tensor step_param.kernel 6
   c00ba5e4  # -2.1820002
   3efe76c9  # 0.497
   3e1a9fbe  # 0.151
@@ -6233,12 +6247,12 @@ end
 case DepthwiseConv1D same_multiplier_2_stride_2
 mode training
 output_shape "(2, 3, 4)"
-param_count trainable 16
-param_name weight layer
+param_count trainable 16 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 2 2 checksum 43d903dfad34c524
+weight kernel 3 2 2 checksum 43d903dfad34c524
 weight bias 4 checksum bc800fbec5d314d2
-step_weight weight 3 2 2 checksum d1a4ec002f9cff95
+step_weight kernel 3 2 2 checksum d1a4ec002f9cff95
 step_weight bias 4 checksum 1169fe0629e42797
 tensor input 2 6 2
   c0000000  # -2.0
@@ -6340,7 +6354,7 @@ tensor grad_input 2 6 2
   be5ae147  # -0.21374999
   bda8f5c3  # -0.0825
   00000000  # 0.0
-tensor grad_param.weight 12 decays
+tensor grad_param.kernel 12 decays
   40600000  # 3.5
   4053b646  # 3.308
   3f0fdf3d  # 0.5620001
@@ -6353,7 +6367,7 @@ tensor grad_param.weight 12 decays
   bf8b4396  # -1.088
   3fc83127  # 1.564
   3f428f5c  # 0.76
-tensor step_param.weight 12
+tensor step_param.kernel 12
   bfb4cccd  # -1.4125
   bd820c4c  # -0.06350002
   bebd9169  # -0.37025002
@@ -6381,12 +6395,12 @@ end
 case DepthwiseConv1D valid_dilation_2
 mode training
 output_shape "(2, 2, 2)"
-param_count trainable 8
-param_name weight layer
+param_count trainable 8 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 2 1 checksum 29caed60fcd3895e
+weight kernel 3 2 1 checksum 29caed60fcd3895e
 weight bias 2 checksum ca71253d7f89d860
-step_weight weight 3 2 1 checksum 8673f1aea8c38bbf
+step_weight kernel 3 2 1 checksum 8673f1aea8c38bbf
 step_weight bias 2 checksum 2dc169be28f24c82
 tensor input 2 6 2
   c0000000  # -2.0
@@ -6456,14 +6470,14 @@ tensor grad_input 2 6 2
   3ee147af  # 0.44000003
   bd666667  # -0.056250002
   beb70a3d  # -0.3575
-tensor grad_param.weight 6 decays
+tensor grad_param.kernel 6 decays
   40940831  # 4.626
   bd54fe00  # -0.052000046
   befae146  # -0.48999995
   405fdf3b  # 3.498
   c017ef9d  # -2.3739998
   3ec39580  # 0.38199997
-tensor step_param.weight 6
+tensor step_param.kernel 6
   bfc6d0e6  # -1.5532501
   3eb6872b  # 0.3565
   be747ae2  # -0.23875001
@@ -6481,12 +6495,12 @@ end
 case DepthwiseConv1D same_dilation_3_stride_2
 mode training
 output_shape "(2, 3, 2)"
-param_count trainable 8
-param_name weight layer
+param_count trainable 8 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 2 1 checksum 29caed60fcd3895e
+weight kernel 3 2 1 checksum 29caed60fcd3895e
 weight bias 2 checksum ca71253d7f89d860
-step_weight weight 3 2 1 checksum df1cf4512ecdf68d
+step_weight kernel 3 2 1 checksum df1cf4512ecdf68d
 step_weight bias 2 checksum 6cc423df47439247
 tensor input 2 6 2
   c0000000  # -2.0
@@ -6564,14 +6578,14 @@ tensor grad_input 2 6 2
   beb70a3d  # -0.3575
   3edeb853  # 0.43500003
   00000000  # 0.0
-tensor grad_param.weight 6 decays
+tensor grad_param.kernel 6 decays
   c085f3b6  # -4.186
   bf7ae14a  # -0.98000014
   be883128  # -0.26600003
   408e3540  # 4.4440002
   c03e978d  # -2.978
   3fa3d70a  # 1.28
-tensor step_param.weight 6
+tensor step_param.kernel 6
   bee74bc8  # -0.45175004
   3ef1eb86  # 0.47250003
   be889375  # -0.26675
@@ -6589,12 +6603,12 @@ end
 case DepthwiseConv2D valid_multiplier_2_kernel_2x3
 mode training
 output_shape "(2, 4, 2, 4)"
-param_count trainable 28
-param_name weight layer
+param_count trainable 28 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 2 3 2 2 checksum e6d8d96d841efbcd
+weight kernel 2 3 2 2 checksum e6d8d96d841efbcd
 weight bias 4 checksum 3b5ed8e2178db8e5
-step_weight weight 2 3 2 2 checksum 28b1388714b03521
+step_weight kernel 2 3 2 2 checksum 28b1388714b03521
 step_weight bias 4 checksum 655ba4a1e052a456
 tensor input 2 5 4 2
   c0000000  # -2.0
@@ -6888,7 +6902,7 @@ tensor grad_input 2 5 4 2
   3fbb3333  # 1.4625
   bf9a8f5d  # -1.2075001
   bed7ae14  # -0.42125
-tensor grad_param.weight 24 decays
+tensor grad_param.kernel 24 decays
   402020c6  # 2.5020003
   bd9fbe60  # -0.07799983
   c04c8b42  # -3.1959996
@@ -6913,7 +6927,7 @@ tensor grad_param.weight 24 decays
   401ef9db  # 2.484
   bf5374bb  # -0.8259999
   3f8b851c  # 1.0899997
-tensor step_param.weight 24
+tensor step_param.kernel 24
   bfa4d4fe  # -1.28775
   3eb83126  # 0.35974997
   3dcbc6a0  # 0.09949994
@@ -6953,12 +6967,12 @@ end
 case DepthwiseConv2D same_stride_2
 mode training
 output_shape "(2, 3, 2, 2)"
-param_count trainable 20
-param_name weight layer
+param_count trainable 20 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 3 2 1 checksum 034117b78625aa29
+weight kernel 3 3 2 1 checksum 034117b78625aa29
 weight bias 2 checksum 5d14559cfa2c5ae2
-step_weight weight 3 3 2 1 checksum f0a563a913ad4d71
+step_weight kernel 3 3 2 1 checksum f0a563a913ad4d71
 step_weight bias 2 checksum 260064f193fc96f2
 tensor input 2 5 4 2
   c0000000  # -2.0
@@ -7172,7 +7186,7 @@ tensor grad_input 2 5 4 2
   bd8a3d71  # -0.0675
   00000000  # 0.0
   00000000  # 0.0
-tensor grad_param.weight 18 decays
+tensor grad_param.kernel 18 decays
   3fde353f  # 1.736
   408db22e  # 4.4280005
   bfa83128  # -1.3140001
@@ -7191,7 +7205,7 @@ tensor grad_param.weight 18 decays
   3de978c8  # 0.1139999
   3e810625  # 0.252
   bfddb22d  # -1.732
-tensor step_param.weight 18
+tensor step_param.kernel 18
   bf989375  # -1.192
   be506252  # -0.20350006
   be0b020c  # -0.13575
@@ -7221,12 +7235,12 @@ end
 case DepthwiseConv2D valid_dilation_1x2
 mode training
 output_shape "(2, 4, 2, 2)"
-param_count trainable 10
-param_name weight layer
+param_count trainable 10 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 2 2 2 1 checksum 2c9df443f2bf7933
+weight kernel 2 2 2 1 checksum 2c9df443f2bf7933
 weight bias 2 checksum 623b58dc42d46182
-step_weight weight 2 2 2 1 checksum b7edd2311c7a4f76
+step_weight kernel 2 2 2 1 checksum b7edd2311c7a4f76
 step_weight bias 2 checksum 5ca9444ae72cdc44
 tensor input 2 5 4 2
   c0000000  # -2.0
@@ -7456,7 +7470,7 @@ tensor grad_input 2 5 4 2
   3f000000  # 0.5
   3f4947af  # 0.78625005
   3e75c290  # 0.24000001
-tensor grad_param.weight 8 decays
+tensor grad_param.kernel 8 decays
   409b9582  # 4.8620005
   c0743959  # -3.8160002
   40e072b0  # 7.014
@@ -7465,7 +7479,7 @@ tensor grad_param.weight 8 decays
   41038d50  # 8.222
   c06851ee  # -3.6300006
   3fced914  # 1.6159997
-tensor step_param.weight 8
+tensor step_param.kernel 8
   bfca978e  # -1.5827501
   3f53b646  # 0.827
   bf969fbe  # -1.17675
@@ -7485,15 +7499,15 @@ end
 case SeparableConv1D valid_multiplier_1
 mode training
 output_shape "(2, 4, 3)"
-param_count trainable 15
-param_name depthwise_weight layer
-param_name pointwise_weight layer
+param_count trainable 15 non_trainable 0
+param_name depthwise_kernel layer
+param_name pointwise_kernel layer
 param_name bias layer
-weight depthwise_weight 3 2 1 checksum 29caed60fcd3895e
-weight pointwise_weight 1 2 3 checksum 1f58d7cb9914783f
+weight depthwise_kernel 3 2 1 checksum 29caed60fcd3895e
+weight pointwise_kernel 1 2 3 checksum 1f58d7cb9914783f
 weight bias 3 checksum 193f5a3ea5c104c0
-step_weight depthwise_weight 3 2 1 checksum 18d1c8422577b907
-step_weight pointwise_weight 1 2 3 checksum 59bc5f0a1752cf40
+step_weight depthwise_kernel 3 2 1 checksum 18d1c8422577b907
+step_weight pointwise_kernel 1 2 3 checksum 59bc5f0a1752cf40
 step_weight bias 3 checksum f5bd62879e2de91a
 tensor input 2 6 2
   c0000000  # -2.0
@@ -7595,28 +7609,28 @@ tensor grad_input 2 6 2
   bf54b020  # -0.83081245
   3e43d70a  # 0.19125
   be1b9581  # -0.1519375
-tensor grad_param.depthwise_weight 6 decays
+tensor grad_param.depthwise_kernel 6 decays
   3fd0e3be  # 1.6319501
   c083f4f1  # -4.12365
   3ff631fe  # 1.9234006
   40355254  # 2.83315
   c0a65a86  # -5.19855
   40fb8c16  # 7.8608503
-tensor step_param.depthwise_weight 6
+tensor step_param.depthwise_kernel 6
   bf96e945  # -1.1789938
   3f5d8e8a  # 0.8654562
   bf0a594c  # -0.54042506
   bfa6ee2e  # -1.3041437
   3f832d43  # 1.0248188
   bfa0f93e  # -1.2576063
-tensor grad_param.pointwise_weight 6 decays
+tensor grad_param.pointwise_kernel 6 decays
   3d271e20  # 0.040800214
   c09d76ca  # -4.9207506
   41072441  # 8.446351
   401e7c85  # 2.47635
   c0ab8035  # -5.3594003
   40fe9582  # 7.9557505
-tensor step_param.pointwise_weight 6
+tensor step_param.pointwise_kernel 6
   bf6e1b09  # -0.9301
   3f81ee98  # 1.0150938
   bfa72441  # -1.3057939
@@ -7636,15 +7650,15 @@ end
 case SeparableConv1D same_multiplier_2_stride_2
 mode training
 output_shape "(2, 3, 3)"
-param_count trainable 27
-param_name depthwise_weight layer
-param_name pointwise_weight layer
+param_count trainable 27 non_trainable 0
+param_name depthwise_kernel layer
+param_name pointwise_kernel layer
 param_name bias layer
-weight depthwise_weight 3 2 2 checksum 43d903dfad34c524
-weight pointwise_weight 1 4 3 checksum 42a7dfd46e2bb6b4
+weight depthwise_kernel 3 2 2 checksum 43d903dfad34c524
+weight pointwise_kernel 1 4 3 checksum 42a7dfd46e2bb6b4
 weight bias 3 checksum 71cbe12f7f20652f
-step_weight depthwise_weight 3 2 2 checksum 809445c6c7f5ea18
-step_weight pointwise_weight 1 4 3 checksum ac5e275fa0ccac11
+step_weight depthwise_kernel 3 2 2 checksum 809445c6c7f5ea18
+step_weight pointwise_kernel 1 4 3 checksum ac5e275fa0ccac11
 step_weight bias 3 checksum 67dc4e3cbc4c3223
 tensor input 2 6 2
   c0000000  # -2.0
@@ -7734,7 +7748,7 @@ tensor grad_input 2 6 2
   be2276ca  # -0.15865627
   3bbb645c  # 0.005718751
   bd1b22d1  # -0.037875
-tensor grad_param.depthwise_weight 12 decays
+tensor grad_param.depthwise_kernel 12 decays
   3f68ff96  # 0.91014993
   3f74f764  # 0.9568999
   3f483afd  # 0.7821501
@@ -7747,7 +7761,7 @@ tensor grad_param.depthwise_weight 12 decays
   3fa96387  # 1.3233498
   bf342f85  # -0.7038501
   bf318fc4  # -0.69359994
-tensor step_param.depthwise_weight 12
+tensor step_param.depthwise_kernel 12
   bf8b5cc6  # -1.0887687
   3e6beab4  # 0.23038751
   becba859  # -0.39776877
@@ -7760,7 +7774,7 @@ tensor step_param.depthwise_weight 12
   bf885fa4  # -1.0654187
   3f0352be  # 0.5129813
   be0d9e84  # -0.1383
-tensor grad_param.pointwise_weight 12 decays
+tensor grad_param.pointwise_kernel 12 decays
   3ec5f06f  # 0.3866
   bfef79a6  # -1.8708999
   3f9e4f77  # 1.2368001
@@ -7773,7 +7787,7 @@ tensor grad_param.pointwise_weight 12 decays
   3ee1d152  # 0.4410501
   bf83020e  # -1.0235002
   3fcccccf  # 1.6000003
-tensor step_param.pointwise_weight 12
+tensor step_param.pointwise_kernel 12
   bf6c5f07  # -0.923325
   3f2f119c  # 0.68386245
   beb58e22  # -0.3546
@@ -7799,15 +7813,15 @@ end
 case SeparableConv1D valid_dilation_2
 mode training
 output_shape "(2, 2, 3)"
-param_count trainable 15
-param_name depthwise_weight layer
-param_name pointwise_weight layer
+param_count trainable 15 non_trainable 0
+param_name depthwise_kernel layer
+param_name pointwise_kernel layer
 param_name bias layer
-weight depthwise_weight 3 2 1 checksum 29caed60fcd3895e
-weight pointwise_weight 1 2 3 checksum 1f58d7cb9914783f
+weight depthwise_kernel 3 2 1 checksum 29caed60fcd3895e
+weight pointwise_kernel 1 2 3 checksum 1f58d7cb9914783f
 weight bias 3 checksum 193f5a3ea5c104c0
-step_weight depthwise_weight 3 2 1 checksum 5cc971c45d314ac1
-step_weight pointwise_weight 1 2 3 checksum d45bc60008332a16
+step_weight depthwise_kernel 3 2 1 checksum 5cc971c45d314ac1
+step_weight pointwise_kernel 1 2 3 checksum d45bc60008332a16
 step_weight bias 3 checksum f72bd2bda6c7ad81
 tensor input 2 6 2
   c0000000  # -2.0
@@ -7885,28 +7899,28 @@ tensor grad_input 2 6 2
   be7449bb  # -0.23856251
   bee2cccc  # -0.44296873
   3ea922d1  # 0.33034375
-tensor grad_param.depthwise_weight 6 decays
+tensor grad_param.depthwise_kernel 6 decays
   3ecdbf4c  # 0.4018501
   bffb8d51  # -1.9652501
   bf8f8a09  # -1.1214
   bf96e490  # -1.1788502
   40943c9f  # 4.6324
   c026adac  # -2.60435
-tensor step_param.depthwise_weight 6
+tensor step_param.depthwise_kernel 6
   bf833ac7  # -1.0252312
   3f187cee  # 0.5956563
   be23a92b  # -0.15982501
   bf4d7a0f  # -0.8026437
   be50f27c  # -0.20405
   3d4f06f8  # 0.050543755
-tensor grad_param.pointwise_weight 6 decays
+tensor grad_param.pointwise_kernel 6 decays
   c07649ba  # -3.84825
   c0144f77  # -2.3173501
   40736fd1  # 3.8036997
   3f998c80  # 1.1996002
   4087a57b  # 4.2389503
   bff28c16  # -1.8949001
-tensor step_param.pointwise_weight 6
+tensor step_param.pointwise_kernel 6
   bee34fe0  # -0.44396877
   3f308e22  # 0.6896688
   bf39b7e8  # -0.72546244
@@ -7926,15 +7940,15 @@ end
 case SeparableConv2D valid_kernel_3x2
 mode training
 output_shape "(2, 3, 3, 3)"
-param_count trainable 21
-param_name depthwise_weight layer
-param_name pointwise_weight layer
+param_count trainable 21 non_trainable 0
+param_name depthwise_kernel layer
+param_name pointwise_kernel layer
 param_name bias layer
-weight depthwise_weight 3 2 2 1 checksum 43d903dfad34c524
-weight pointwise_weight 1 1 2 3 checksum 7bd8226c0c724018
+weight depthwise_kernel 3 2 2 1 checksum 43d903dfad34c524
+weight pointwise_kernel 1 1 2 3 checksum 7bd8226c0c724018
 weight bias 3 checksum 86b58be68ae8a50d
-step_weight depthwise_weight 3 2 2 1 checksum 3b11169208dc96d9
-step_weight pointwise_weight 1 1 2 3 checksum ae1b043b0cd5d5f2
+step_weight depthwise_kernel 3 2 2 1 checksum 3b11169208dc96d9
+step_weight pointwise_kernel 1 1 2 3 checksum ae1b043b0cd5d5f2
 step_weight bias 3 checksum be0693bca10038cd
 tensor input 2 5 4 2
   c0000000  # -2.0
@@ -8208,7 +8222,7 @@ tensor grad_input 2 5 4 2
   3fd1a0c5  # 1.6377188
   bf2a45a3  # -0.6651251
   3eb1d70b  # 0.34734377
-tensor grad_param.depthwise_weight 12 decays
+tensor grad_param.depthwise_kernel 12 decays
   c0b3182c  # -5.5967007
   bea957f8  # -0.33074927
   3ed212d0  # 0.41029978
@@ -8221,7 +8235,7 @@ tensor grad_param.depthwise_weight 12 decays
   400707c6  # 2.1098495
   c090432c  # -4.5081997
   bf9582b0  # -1.1680508
-tensor step_param.depthwise_weight 12
+tensor step_param.depthwise_kernel 12
   be8d02dc  # -0.27541244
   3ec85e32  # 0.39134365
   beb3dbf4  # -0.35128748
@@ -8234,14 +8248,14 @@ tensor step_param.depthwise_weight 12
   bf94f524  # -1.1637311
   3f7d0ff9  # 0.988525
   bda1c76c  # -0.07899365
-tensor grad_param.pointwise_weight 6 decays
+tensor grad_param.pointwise_kernel 6 decays
   c161eb85  # -14.12
   40fd006a  # 7.9063005
   4085acda  # 4.17735
   402d3d04  # 2.706849
   c0de809f  # -6.953201
   4084ef9c  # 4.154249
-tensor step_param.pointwise_weight 6
+tensor step_param.pointwise_kernel 6
   3f63d70a  # 0.89
   bf09cd37  # -0.5382876
   bf38e00d  # -0.72216874
@@ -8261,15 +8275,15 @@ end
 case SeparableConv2D same_multiplier_2_stride_2
 mode training
 output_shape "(2, 3, 2, 2)"
-param_count trainable 46
-param_name depthwise_weight layer
-param_name pointwise_weight layer
+param_count trainable 46 non_trainable 0
+param_name depthwise_kernel layer
+param_name pointwise_kernel layer
 param_name bias layer
-weight depthwise_weight 3 3 2 2 checksum 81fe7e62d394ae84
-weight pointwise_weight 1 1 4 2 checksum b55b500b610b3a39
+weight depthwise_kernel 3 3 2 2 checksum 81fe7e62d394ae84
+weight pointwise_kernel 1 1 4 2 checksum b55b500b610b3a39
 weight bias 2 checksum bfd4c74a2bd0f180
-step_weight depthwise_weight 3 3 2 2 checksum 86c5b56daae71397
-step_weight pointwise_weight 1 1 4 2 checksum 0cc96573fea863d8
+step_weight depthwise_kernel 3 3 2 2 checksum 86c5b56daae71397
+step_weight pointwise_kernel 1 1 4 2 checksum 0cc96573fea863d8
 step_weight bias 2 checksum bd5d409d90ba7809
 tensor input 2 5 4 2
   c0000000  # -2.0
@@ -8483,7 +8497,7 @@ tensor grad_input 2 5 4 2
   3e48c49e  # 0.19606254
   bf0fa3d7  # -0.56109375
   bfc2bd70  # -1.5214062
-tensor grad_param.depthwise_weight 36 decays
+tensor grad_param.depthwise_kernel 36 decays
   c05ac3ca  # -3.4182
   00000000  # 0.0
   c0078fc5  # -2.11815
@@ -8520,7 +8534,7 @@ tensor grad_param.depthwise_weight 36 decays
   00000000  # 0.0
   bf983c9f  # -1.18935
   3f8cf5c3  # 1.10125
-tensor step_param.depthwise_weight 36
+tensor step_param.depthwise_kernel 36
   bf0c37b5  # -0.547725
   3eb33333  # 0.35
   bd104ea8  # -0.035231262
@@ -8557,7 +8571,7 @@ tensor step_param.depthwise_weight 36
   bf333333  # -0.7
   3f460f28  # 0.77366877
   be268f5d  # -0.16265626
-tensor grad_param.pointwise_weight 8 decays
+tensor grad_param.pointwise_kernel 8 decays
   c105758e  # -8.3412
   c0a98fc4  # -5.2987995
   40a9eab3  # 5.3099
@@ -8566,7 +8580,7 @@ tensor grad_param.pointwise_weight 8 decays
   c024a71d  # -2.5726998
   40ea5dcb  # 7.3239493
   3fbb5dcc  # 1.4638
-tensor step_param.pointwise_weight 8
+tensor step_param.pointwise_kernel 8
   3ebc3c9e  # 0.36764997
   3fa7fb15  # 1.3123499
   bf29eab3  # -0.6637375
@@ -8586,15 +8600,15 @@ end
 case SeparableConv2D valid_dilation_2x1
 mode training
 output_shape "(2, 3, 3, 3)"
-param_count trainable 17
-param_name depthwise_weight layer
-param_name pointwise_weight layer
+param_count trainable 17 non_trainable 0
+param_name depthwise_kernel layer
+param_name pointwise_kernel layer
 param_name bias layer
-weight depthwise_weight 2 2 2 1 checksum 2c9df443f2bf7933
-weight pointwise_weight 1 1 2 3 checksum bdc23b9501084c61
+weight depthwise_kernel 2 2 2 1 checksum 2c9df443f2bf7933
+weight pointwise_kernel 1 1 2 3 checksum bdc23b9501084c61
 weight bias 3 checksum 786535c5d2c55a1b
-step_weight depthwise_weight 2 2 2 1 checksum cb7b3502cb1ae1a8
-step_weight pointwise_weight 1 1 2 3 checksum 7b9ade949f95b27a
+step_weight depthwise_kernel 2 2 2 1 checksum cb7b3502cb1ae1a8
+step_weight pointwise_kernel 1 1 2 3 checksum 7b9ade949f95b27a
 step_weight bias 3 checksum 24a225d01d7cb790
 tensor input 2 5 4 2
   c0000000  # -2.0
@@ -8868,7 +8882,7 @@ tensor grad_input 2 5 4 2
   3e9b74be  # 0.30362505
   bf301eb7  # -0.6879687
   3e9cac08  # 0.306
-tensor grad_param.depthwise_weight 8 decays
+tensor grad_param.depthwise_kernel 8 decays
   bffe2eb2  # -1.9858
   c0cbc9ec  # -6.3683987
   4084af4f  # 4.1464
@@ -8877,7 +8891,7 @@ tensor grad_param.depthwise_weight 8 decays
   c072de01  # -3.7948
   41081a6b  # 8.50645
   4023f210  # 2.5616493
-tensor step_param.depthwise_weight 8
+tensor step_param.depthwise_kernel 8
   bf3a0dee  # -0.72677505
   3f92b1c3  # 1.1460499
   bf517c1c  # -0.8183
@@ -8886,14 +8900,14 @@ tensor step_param.depthwise_weight 8
   3e4c2268  # 0.19935
   bffe80d2  # -1.9883063
   3da36af4  # 0.07979384
-tensor grad_param.pointwise_weight 6 decays
+tensor grad_param.pointwise_kernel 6 decays
   c0f71413  # -7.7212005
   412df86c  # 10.87315
   3f79a6b9  # 0.97520024
   40294539  # 2.64485
   c0ed9fc1  # -7.425751
   40c3ab9e  # 6.1146994
-tensor step_param.pointwise_weight 6
+tensor step_param.pointwise_kernel 6
   3f371413  # 0.71515006
   c01095d0  # -2.2591438
   3e9b2fec  # 0.3031

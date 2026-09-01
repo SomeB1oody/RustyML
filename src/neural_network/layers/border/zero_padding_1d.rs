@@ -7,7 +7,6 @@ use crate::neural_network::layers::border::Border1D;
 use crate::neural_network::layers::border::pad_crop_engine::{
     pad_backward, pad_forward, pad_summary,
 };
-use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
 

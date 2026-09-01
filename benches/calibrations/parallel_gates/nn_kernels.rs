@@ -40,7 +40,7 @@ pub fn calibrate_conv_forward() -> Section {
                     &input,
                     &weights,
                     &[k, k, cin, f],
-                    &bias,
+                    Some(&bias),
                     &[1, 1],
                     PaddingType::Valid,
                     Some(force),

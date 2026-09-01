@@ -3,23 +3,37 @@
 # The harness in tests/neural_network/golden wrote this file. Do not edit it by hand.
 # Regenerate it with:
 #
-#     RUSTYML_REGEN_GOLDEN=1 cargo test --test neural_network golden
+#     RUSTYML_REGEN_GOLDEN="<reason>" cargo test --test neural_network golden
 #
 # Regeneration is an explicit claim that the behavior change was intended and reviewed.
+# The first capture of a family needs that claim alone. A run that adds, changes, or
+# removes a case of a file that exists is refused 1 time. The refusal prints every
+# difference and 1 acknowledgment token, and a second run must carry that token in
+# RUSTYML_REGEN_GOLDEN_ACCEPT. Force a rebuild of the test binary before every regeneration.
+#
+# The content_digest line below records a digest of this whole file, the number of
+# cases, and the number of recorded values. The harness verifies all 3 before it reads
+# the file. An edit by hand therefore stops every run of the net. Restore such a file
+# from version control. A deletion of this file is refused as well.
+#
+# Regeneration history, newest first. Each line holds the reason of 1 run that wrote
+# this file.
+#
+# reason the checkpoint is addressed by name, so the layer supplies every recorded parameter name and the parameter count records both halves
 #
 # Each value line holds the raw f32 bits from to_bits, in 8 lowercase hexadecimal
 # digits. The text after the "#" is the same value in decimal, and it is a comment.
 #
 # The module doc comment of tests/neural_network/golden/mod.rs holds the grammar.
 
-format 5
+format 6
 family sequence
-content_digest 4c8b364331ba45a8 cases 40 values 6716
+content_digest cfb50dabb094d8c2 cases 40 values 6716
 
 case SimpleRNN units_3_tanh
 mode training
 output_shape "(None, 3)"
-param_count trainable 24
+param_count trainable 24 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -168,7 +182,7 @@ end
 case SimpleRNN units_3_relu
 mode training
 output_shape "(None, 3)"
-param_count trainable 24
+param_count trainable 24 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -317,7 +331,7 @@ end
 case SimpleRNN units_3_linear
 mode training
 output_shape "(None, 3)"
-param_count trainable 24
+param_count trainable 24 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -466,7 +480,7 @@ end
 case SimpleRNN seq_false_backwards_false
 mode training
 output_shape "(None, 3)"
-param_count trainable 24
+param_count trainable 24 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -615,7 +629,7 @@ end
 case SimpleRNN seq_true_backwards_false
 mode training
 output_shape "(None, None, 3)"
-param_count trainable 24
+param_count trainable 24 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -800,7 +814,7 @@ end
 case SimpleRNN seq_false_backwards_true
 mode training
 output_shape "(None, 3)"
-param_count trainable 24
+param_count trainable 24 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -949,7 +963,7 @@ end
 case SimpleRNN seq_true_backwards_true
 mode training
 output_shape "(None, None, 3)"
-param_count trainable 24
+param_count trainable 24 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -1134,7 +1148,7 @@ end
 case LSTM units_3_fused
 mode training
 output_shape "(None, 3)"
-param_count trainable 96
+param_count trainable 96 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -1427,7 +1441,7 @@ end
 case LSTM units_3_per_gate
 mode training
 output_shape "(None, 3)"
-param_count trainable 96
+param_count trainable 96 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -1720,7 +1734,7 @@ end
 case LSTM seq_false_backwards_false
 mode training
 output_shape "(None, 3)"
-param_count trainable 96
+param_count trainable 96 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -2013,7 +2027,7 @@ end
 case LSTM seq_true_backwards_false
 mode training
 output_shape "(None, None, 3)"
-param_count trainable 96
+param_count trainable 96 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -2342,7 +2356,7 @@ end
 case LSTM seq_false_backwards_true
 mode training
 output_shape "(None, 3)"
-param_count trainable 96
+param_count trainable 96 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -2635,7 +2649,7 @@ end
 case LSTM seq_true_backwards_true
 mode training
 output_shape "(None, None, 3)"
-param_count trainable 96
+param_count trainable 96 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -2964,7 +2978,7 @@ end
 case GRU units_3_fused
 mode training
 output_shape "(None, 3)"
-param_count trainable 72
+param_count trainable 72 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -3209,7 +3223,7 @@ end
 case GRU units_3_per_gate
 mode training
 output_shape "(None, 3)"
-param_count trainable 72
+param_count trainable 72 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -3454,7 +3468,7 @@ end
 case GRU seq_false_backwards_false
 mode training
 output_shape "(None, 3)"
-param_count trainable 72
+param_count trainable 72 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -3699,7 +3713,7 @@ end
 case GRU seq_true_backwards_false
 mode training
 output_shape "(None, None, 3)"
-param_count trainable 72
+param_count trainable 72 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -3980,7 +3994,7 @@ end
 case GRU seq_false_backwards_true
 mode training
 output_shape "(None, 3)"
-param_count trainable 72
+param_count trainable 72 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -4225,7 +4239,7 @@ end
 case GRU seq_true_backwards_true
 mode training
 output_shape "(None, None, 3)"
-param_count trainable 72
+param_count trainable 72 non_trainable 0
 param_name kernel layer
 param_name recurrent_kernel layer
 param_name bias layer
@@ -4506,7 +4520,7 @@ end
 case Embedding indices_whole
 mode training
 output_shape "(None, 4, 3)"
-param_count trainable 18
+param_count trainable 18 non_trainable 0
 param_name embeddings layer
 weight embeddings 6 3 checksum 034117b78625aa29
 step_weight embeddings 6 3 checksum 8ea5df986e4b78da
@@ -4621,7 +4635,7 @@ end
 case Embedding indices_truncated
 mode training
 output_shape "(None, 4, 3)"
-param_count trainable 18
+param_count trainable 18 non_trainable 0
 param_name embeddings layer
 weight embeddings 6 3 checksum 034117b78625aa29
 step_weight embeddings 6 3 checksum 8ea5df986e4b78da
@@ -4736,7 +4750,7 @@ end
 case LayerNormalization axis_default_rank_2
 mode training
 output_shape "(2, 8)"
-param_count trainable 16
+param_count trainable 16 non_trainable 0
 param_name gamma layer
 param_name beta layer
 weight gamma 8 checksum 2c9df443f2bf7933
@@ -4852,7 +4866,7 @@ end
 case LayerNormalization axis_default_rank_3
 mode training
 output_shape "(2, 3, 4)"
-param_count trainable 8
+param_count trainable 8 non_trainable 0
 param_name gamma layer
 param_name beta layer
 weight gamma 4 checksum 657ae2b486ecb3a5
@@ -4984,7 +4998,7 @@ end
 case LayerNormalization axis_custom_1
 mode training
 output_shape "(2, 3, 4)"
-param_count trainable 6
+param_count trainable 6 non_trainable 0
 param_name gamma layer
 param_name beta layer
 weight gamma 3 checksum 31f54272e7718862
@@ -5112,7 +5126,7 @@ end
 case LayerNormalization axes_multiple_2_3
 mode training
 output_shape "(2, 2, 3, 2)"
-param_count trainable 12
+param_count trainable 12 non_trainable 0
 param_name gamma layer
 param_name beta layer
 weight gamma 6 checksum 29caed60fcd3895e
@@ -5252,7 +5266,7 @@ end
 case LayerNormalization axes_multiple_1_3
 mode training
 output_shape "(2, 2, 3, 2)"
-param_count trainable 8
+param_count trainable 8 non_trainable 0
 param_name gamma layer
 param_name beta layer
 weight gamma 4 checksum 657ae2b486ecb3a5
@@ -5384,7 +5398,7 @@ end
 case LayerNormalization inference_rank_2
 mode inference
 output_shape "(2, 8)"
-param_count trainable 16
+param_count trainable 16 non_trainable 0
 weight gamma 8 checksum 2c9df443f2bf7933
 weight beta 8 checksum e394d9a37233ac79
 step_weight gamma 8 checksum 2c9df443f2bf7933
@@ -5462,7 +5476,7 @@ end
 case InstanceNormalization rank_3
 mode training
 output_shape "(2, 4, 3)"
-param_count trainable 6
+param_count trainable 6 non_trainable 0
 param_name gamma layer
 param_name beta layer
 weight gamma 3 checksum 31f54272e7718862
@@ -5590,7 +5604,7 @@ end
 case InstanceNormalization rank_4
 mode training
 output_shape "(2, 2, 3, 4)"
-param_count trainable 8
+param_count trainable 8 non_trainable 0
 param_name gamma layer
 param_name beta layer
 weight gamma 4 checksum 657ae2b486ecb3a5
@@ -5818,7 +5832,7 @@ end
 case InstanceNormalization inference_rank_3
 mode inference
 output_shape "(2, 4, 3)"
-param_count trainable 6
+param_count trainable 6 non_trainable 0
 weight gamma 3 checksum 31f54272e7718862
 weight beta 3 checksum d5a405aeffc5af9f
 step_weight gamma 3 checksum 31f54272e7718862
@@ -5928,7 +5942,7 @@ end
 case GroupNormalization groups_1
 mode training
 output_shape "(2, 4, 6)"
-param_count trainable 12
+param_count trainable 12 non_trainable 0
 param_name gamma layer
 param_name beta layer
 weight gamma 6 checksum 29caed60fcd3895e
@@ -6164,7 +6178,7 @@ end
 case GroupNormalization groups_2
 mode training
 output_shape "(2, 4, 6)"
-param_count trainable 12
+param_count trainable 12 non_trainable 0
 param_name gamma layer
 param_name beta layer
 weight gamma 6 checksum 29caed60fcd3895e
@@ -6400,7 +6414,7 @@ end
 case GroupNormalization groups_6
 mode training
 output_shape "(2, 4, 6)"
-param_count trainable 12
+param_count trainable 12 non_trainable 0
 param_name gamma layer
 param_name beta layer
 weight gamma 6 checksum 29caed60fcd3895e
@@ -6636,7 +6650,7 @@ end
 case GroupNormalization rank_4_groups_2
 mode training
 output_shape "(2, 2, 3, 4)"
-param_count trainable 8
+param_count trainable 8 non_trainable 0
 param_name gamma layer
 param_name beta layer
 weight gamma 4 checksum 657ae2b486ecb3a5
@@ -6864,7 +6878,7 @@ end
 case GroupNormalization inference_groups_2
 mode inference
 output_shape "(2, 4, 6)"
-param_count trainable 12
+param_count trainable 12 non_trainable 0
 weight gamma 6 checksum 29caed60fcd3895e
 weight beta 6 checksum 1f58d7cb9914783f
 step_weight gamma 6 checksum 29caed60fcd3895e
@@ -7070,7 +7084,7 @@ end
 case UnitNormalization axis_default_rank_2
 mode training
 output_shape "(None, 6)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 6
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -7128,7 +7142,7 @@ end
 case UnitNormalization axis_default_rank_3
 mode training
 output_shape "(None, 3, 4)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 3 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -7234,7 +7248,7 @@ end
 case UnitNormalization axis_custom_1
 mode training
 output_shape "(None, 3, 4)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 3 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -7340,7 +7354,7 @@ end
 case UnitNormalization axes_multiple_1_2
 mode training
 output_shape "(None, 3, 4)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 3 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -7446,7 +7460,7 @@ end
 case UnitNormalization axes_multiple_1_3
 mode training
 output_shape "(None, 2, 3, 2)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 2 3 2
   c0000000  # -2.0
   bf051eb8  # -0.52

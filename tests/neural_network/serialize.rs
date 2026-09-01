@@ -8,6 +8,9 @@
 //! ModelStructureMismatch). They also cover a nonexistent file (IoError::Std), corrupt binary
 //! data (IoError::Serialization), and a wrong magic tag or format version
 //! (IoError::UnsupportedModelFormat).
+//!
+//! The last 2 tests pin the atomicity of a refusal. A load validates the whole file before it
+//! writes any array, so a refusal leaves every array of the model bit for bit as it was.
 
 use crate::common::assert_allclose;
 use ndarray::Array;
@@ -16,6 +19,9 @@ use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::activation::p_relu::PReLU;
 use rustyml::neural_network::layers::activation::tanh::Tanh;
+use rustyml::neural_network::layers::checkpoint::{
+    LayerCheckpoint, MODEL_FORMAT_VERSION, MODEL_MAGIC, ModelCheckpoint, WeightRecord,
+};
 use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
 use rustyml::neural_network::layers::convolution::conv_1d_transpose::Conv1DTranspose;
@@ -30,11 +36,6 @@ use rustyml::neural_network::layers::convolution::separable_conv_2d::SeparableCo
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::embedding::Embedding;
 use rustyml::neural_network::layers::flatten::Flatten;
-use rustyml::neural_network::layers::layer_weight::{
-    Conv1DTransposeLayerWeight, Conv2DTransposeLayerWeight, Conv3DTransposeLayerWeight,
-    DepthwiseConv1DLayerWeight, EmbeddingLayerWeight, LayerWeight, PReLULayerWeight,
-    SeparableConv1DLayerWeight,
-};
 use rustyml::neural_network::layers::recurrent::gru::GRU;
 use rustyml::neural_network::layers::recurrent::lstm::LSTM;
 use rustyml::neural_network::layers::recurrent::simple_rnn::SimpleRNN;
@@ -43,12 +44,11 @@ use rustyml::neural_network::layers::regularization::normalization::batch_normal
 use rustyml::neural_network::layers::regularization::normalization::group_normalization::GroupNormalization;
 use rustyml::neural_network::layers::regularization::normalization::instance_normalization::InstanceNormalization;
 use rustyml::neural_network::layers::regularization::normalization::layer_normalization::LayerNormalization;
-use rustyml::neural_network::layers::serialize_model::{
-    MODEL_FORMAT_VERSION, MODEL_MAGIC, SerializableSequential,
-};
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::traits::WeightKind;
+use std::borrow::Cow;
 use std::env;
 
 // Helpers
@@ -683,10 +683,13 @@ fn p_relu_shared_axes_round_trip_keeps_the_slope_rank() {
         .unwrap();
     let mut model = Sequential::new();
     model.add(injected);
-    match model.get_weights().first() {
-        Some(LayerWeight::PReLU(w)) => assert_eq!(w.alpha.shape(), &[1, 1, 2]),
-        other => panic!("layer 0 must report LayerWeight::PReLU, got {other:?}"),
-    }
+    assert_eq!(
+        model
+            .weight("0.alpha")
+            .expect("layer 0 is the PReLU")
+            .shape(),
+        &[1, 1, 2]
+    );
 
     let x: Tensor = Array::from_shape_vec(
         (2, 3, 3, 2),
@@ -699,14 +702,17 @@ fn p_relu_shared_axes_round_trip_keeps_the_slope_rank() {
     let fresh = round_trip(&model, make_arch, tmp.path());
     let after = fresh.predict(&x).unwrap();
     assert_allclose(&after, &before, 1e-6_f32);
-    match fresh.get_weights().first() {
-        Some(LayerWeight::PReLU(w)) => assert_eq!(w.alpha.shape(), &[1, 1, 2]),
-        other => panic!("the loaded layer must report LayerWeight::PReLU, got {other:?}"),
-    }
+    assert_eq!(
+        fresh
+            .weight("0.alpha")
+            .expect("layer 0 is the PReLU")
+            .shape(),
+        &[1, 1, 2]
+    );
 }
 
-// BatchNormalization round-trip: trained running_mean/running_var must survive serialization,
-// so eval-mode predict returns the identical tensor afterward
+// BatchNormalization round-trip: the trained moving_mean/moving_variance must survive
+// serialization, so eval-mode predict returns the identical tensor afterward
 #[test]
 fn batch_normalization_trained_round_trip_preserves_running_stats() {
     let tmp = TempFile::new("batchnorm");
@@ -734,7 +740,7 @@ fn batch_normalization_trained_round_trip_preserves_running_stats() {
     );
     trainable_model.fit(&x_train, &x_train, 8).unwrap();
 
-    // Eval-mode prediction uses running_mean / running_var
+    // Eval-mode prediction uses moving_mean / moving_variance
     let before = trainable_model.predict(&x_train).unwrap();
 
     // Save and restore into a fresh (untrained) model
@@ -1000,6 +1006,37 @@ fn load_layer_type_mismatch_gives_structure_error() {
     }
 }
 
+/// 2 normalization layers that name and shape their arrays identically are still told apart
+///
+/// InstanceNormalization and GroupNormalization both hold `gamma` and `beta` of length
+/// `channels`. A name and a shape therefore say nothing about which of the 2 wrote the file,
+/// and the layer type of the position is what separates them. The refusal names both types
+#[test]
+fn load_refuses_a_layer_type_that_no_longer_matches() {
+    let tmp = TempFile::new("norm_type_mismatch");
+
+    let mut saved = Sequential::new();
+    saved.add(InstanceNormalization::new(vec![2, 4, 4, 3], 1e-5).unwrap());
+    saved.save_to_path(tmp.path()).unwrap();
+
+    // The same 2 arrays, under the same 2 names, at the same extent
+    let mut target = Sequential::new();
+    target.add(GroupNormalization::new(vec![2, 4, 4, 3], 3, 1e-5).unwrap());
+    assert_eq!(target.weight_paths(), vec!["0.gamma", "0.beta"]);
+
+    match target.load_from_path(tmp.path()) {
+        Err(Error::Io(IoError::ModelStructureMismatch(message))) => {
+            assert!(
+                message.contains("layer 0")
+                    && message.contains("GroupNormalization")
+                    && message.contains("InstanceNormalization"),
+                "the refusal must name the position and both types, got {message:?}"
+            );
+        }
+        other => panic!("expected ModelStructureMismatch, got {other:?}"),
+    }
+}
+
 /// Weight-shape mismatch (Dense 2->2 saved, Dense 3->3 target) gives
 /// Error::Io(IoError::ModelStructureMismatch)
 #[test]
@@ -1015,7 +1052,12 @@ fn load_weight_shape_mismatch_gives_structure_error() {
 
     let result = model_big.load_from_path(tmp.path());
     match result {
-        Err(Error::Io(IoError::ModelStructureMismatch(_))) => {}
+        Err(Error::Io(IoError::ModelStructureMismatch(message))) => {
+            assert!(
+                message.contains("`0.kernel`"),
+                "the refusal must name the parameter path, got {message:?}"
+            );
+        }
         other => panic!("expected ModelStructureMismatch, got {:?}", other),
     }
 }
@@ -1026,7 +1068,7 @@ fn load_weight_shape_mismatch_gives_structure_error() {
 fn load_wrong_magic_gives_unsupported_format_error() {
     let tmp = TempFile::new("wrong_magic");
 
-    let headerless = SerializableSequential {
+    let headerless = ModelCheckpoint {
         magic: 1,
         format_version: MODEL_FORMAT_VERSION,
         layers: Vec::new(),
@@ -1068,91 +1110,309 @@ fn load_wrong_format_version_gives_unsupported_format_error() {
     }
 }
 
-// On-disk variant tags
+// The named checkpoint
 
-/// A new `LayerWeight` variant is appended, never inserted, so an existing file keeps its meaning
+/// A file of the format version before this one is refused, and the refusal names both numbers
 ///
-/// postcard writes the variant index and not the variant name. A variant placed before `Empty`
-/// would renumber `Empty`, and every saved parameter-free layer would then decode as some other
-/// layer. This pins the tag of the 2 variants at that boundary, so such a change fails here
-/// instead of silently corrupting a checkpoint
+/// Version 2 replaced the closed weight enum with the named checkpoint, so no byte of a
+/// version 1 file means what this build reads. The number in the header is what says so
 #[test]
-fn layer_weight_variant_tags_stay_stable() {
-    let empty = postcard::to_allocvec(&LayerWeight::Empty).unwrap();
-    assert_eq!(empty, vec![13], "`Empty` must keep variant index 13");
+fn load_older_format_version_names_the_version_it_found_and_the_one_it_wants() {
+    let tmp = TempFile::new("older_version");
 
-    let table = EmbeddingLayerWeight {
-        embeddings: std::borrow::Cow::Owned(Array::zeros((1, 1))),
+    let mut saved = Sequential::new();
+    saved.add(Dense::new(2, 2, Linear::new()).unwrap());
+    saved.save_to_path(tmp.path()).unwrap();
+
+    // Keep the body, and put the version of the format before this one in the header
+    let bytes = std::fs::read(tmp.path()).unwrap();
+    let (_, body) = postcard::take_from_bytes::<(u32, u32)>(&bytes).unwrap();
+    let mut older = postcard::to_allocvec(&(MODEL_MAGIC, MODEL_FORMAT_VERSION - 1)).unwrap();
+    older.extend_from_slice(body);
+    std::fs::write(tmp.path(), &older).unwrap();
+
+    let mut model = Sequential::new();
+    model.add(Dense::new(2, 2, Linear::new()).unwrap());
+
+    match model.load_from_path(tmp.path()) {
+        Err(Error::Io(IoError::UnsupportedModelFormat(message))) => {
+            assert!(
+                message.contains(&format!("version {}", MODEL_FORMAT_VERSION - 1))
+                    && message.contains(&format!("version {MODEL_FORMAT_VERSION}")),
+                "the refusal must name the version it found and the version it wants, got \
+                 {message:?}"
+            );
+        }
+        other => panic!("expected UnsupportedModelFormat, got {other:?}"),
+    }
+}
+
+/// A model whose layers repeat a type round trips, and no position takes another position's
+/// values
+///
+/// The 3 Dense layers here share every shape, so nothing but the position half of a path tells
+/// their arrays apart. Each one carries its own injected values, and an exchange of any 2 moves
+/// both
+#[test]
+fn repeated_layer_type_round_trips_by_position() {
+    let tmp = TempFile::new("repeated_type");
+
+    // Every layer holds the same shapes, and its own values
+    let injected = |base: f32| {
+        let mut layer = Dense::new(2, 2, Linear::new()).unwrap();
+        layer
+            .set_weights(
+                Array::from_shape_vec((2, 2), vec![base, base + 1.0, base + 2.0, base + 3.0])
+                    .unwrap(),
+                Array::from_shape_vec((1, 2), vec![base + 4.0, base + 5.0]).unwrap(),
+            )
+            .unwrap();
+        layer
     };
-    let embedding = postcard::to_allocvec(&LayerWeight::Embedding(table)).unwrap();
+    let make_arch = || {
+        let mut m = Sequential::new();
+        m.add(Dense::new(2, 2, Linear::new()).unwrap())
+            .add(Dense::new(2, 2, Linear::new()).unwrap())
+            .add(Dense::new(2, 2, Linear::new()).unwrap());
+        m
+    };
+
+    let mut model = Sequential::new();
+    model
+        .add(injected(1.0))
+        .add(injected(10.0))
+        .add(injected(100.0));
     assert_eq!(
-        embedding[0], 14,
-        "`Embedding` must be appended after `Empty`"
+        model.weight_paths(),
+        vec![
+            "0.kernel", "0.bias", "1.kernel", "1.bias", "2.kernel", "2.bias"
+        ]
     );
 
-    let one = Conv1DTransposeLayerWeight {
-        weight: std::borrow::Cow::Owned(Array::zeros((1, 1, 1))),
-        bias: std::borrow::Cow::Owned(Array::zeros(1)),
-    };
-    let two = Conv2DTransposeLayerWeight {
-        weight: std::borrow::Cow::Owned(Array::zeros((1, 1, 1, 1))),
-        bias: std::borrow::Cow::Owned(Array::zeros(1)),
-    };
-    let three = Conv3DTransposeLayerWeight {
-        weight: std::borrow::Cow::Owned(Array::zeros((1, 1, 1, 1, 1))),
-        bias: std::borrow::Cow::Owned(Array::zeros(1)),
-    };
-    for (index, bytes) in [
-        (
-            15u8,
-            postcard::to_allocvec(&LayerWeight::Conv1DTranspose(one)).unwrap(),
-        ),
-        (
-            16,
-            postcard::to_allocvec(&LayerWeight::Conv2DTranspose(two)).unwrap(),
-        ),
-        (
-            17,
-            postcard::to_allocvec(&LayerWeight::Conv3DTranspose(three)).unwrap(),
-        ),
-    ] {
+    let x: Tensor = Array::from_shape_vec((1, 2), vec![0.5f32, -0.25])
+        .unwrap()
+        .into_dyn();
+    let before = model.predict(&x).unwrap();
+    model.save_to_path(tmp.path()).unwrap();
+
+    let mut fresh = make_arch();
+    fresh.load_from_path(tmp.path()).unwrap();
+    assert_allclose(&fresh.predict(&x).unwrap(), &before, 0.0_f32);
+    for path in model.weight_paths() {
         assert_eq!(
-            bytes[0], index,
-            "the transposed convolution variants must keep indices 15, 16, and 17"
+            fresh.weight(&path).unwrap(),
+            model.weight(&path).unwrap(),
+            "the path {path} did not come back"
         );
     }
+}
 
-    let slopes = PReLULayerWeight {
-        alpha: std::borrow::Cow::Owned(Array::zeros(1).into_dyn()),
-    };
-    let p_relu = postcard::to_allocvec(&LayerWeight::PReLU(slopes)).unwrap();
+/// The lenient load applies what matches, and reports the missing and the unused paths
+///
+/// The file holds 4 layers and the model holds 3. Layer 0 agrees, layer 1 disagrees on every
+/// extent, layer 2 holds another layer type, and layer 3 of the file reaches no layer at all
+#[test]
+fn load_partial_reports_applied_missing_and_unused() {
+    let tmp = TempFile::new("partial");
+
+    let mut saved = Sequential::new();
+    saved
+        .add(Dense::new(2, 3, Linear::new()).unwrap())
+        .add(Dense::new(3, 4, Linear::new()).unwrap())
+        .add(InstanceNormalization::new(vec![2, 4, 4, 3], 1e-5).unwrap())
+        .add(Dense::new(4, 1, Linear::new()).unwrap());
+    saved.save_to_path(tmp.path()).unwrap();
+
+    let mut model = Sequential::new();
+    model
+        .add(Dense::new(2, 3, Linear::new()).unwrap())
+        .add(Dense::new(3, 5, Linear::new()).unwrap())
+        .add(GroupNormalization::new(vec![2, 4, 4, 3], 3, 1e-5).unwrap());
+
+    let report = model.load_partial_from_path(tmp.path()).unwrap();
+    assert_eq!(report.applied, vec!["0.kernel", "0.bias"]);
     assert_eq!(
-        p_relu[0], 18,
-        "`PReLU` must be appended after the transposed convolution variants"
+        report.missing,
+        vec!["1.kernel", "1.bias", "2.gamma", "2.beta"]
+    );
+    // Layer 2 of the file names the same 2 arrays at the same extent, and its layer type
+    // differs, so neither side reaches the other
+    assert_eq!(
+        report.unused,
+        vec![
+            "1.kernel", "1.bias", "2.gamma", "2.beta", "3.kernel", "3.bias"
+        ]
     );
 
-    let depthwise = DepthwiseConv1DLayerWeight {
-        weight: std::borrow::Cow::Owned(Array::zeros((1, 1, 1))),
-        bias: std::borrow::Cow::Owned(Array::zeros(1)),
-    };
-    let separable = SeparableConv1DLayerWeight {
-        depthwise_weight: std::borrow::Cow::Owned(Array::zeros((1, 1, 1))),
-        pointwise_weight: std::borrow::Cow::Owned(Array::zeros((1, 1, 1))),
-        bias: std::borrow::Cow::Owned(Array::zeros(1)),
-    };
-    for (index, bytes) in [
-        (
-            19u8,
-            postcard::to_allocvec(&LayerWeight::DepthwiseConv1D(depthwise)).unwrap(),
-        ),
-        (
-            20,
-            postcard::to_allocvec(&LayerWeight::SeparableConv1D(separable)).unwrap(),
-        ),
-    ] {
-        assert_eq!(
-            bytes[0], index,
-            "the 1D depthwise and separable variants must keep indices 19 and 20"
-        );
+    // What the report calls applied really reached the model
+    assert_eq!(
+        model.weight("0.kernel").unwrap(),
+        saved.weight("0.kernel").unwrap()
+    );
+    // What it calls missing did not, so layer 1 keeps the shape it was built with
+    assert_eq!(model.weight("1.kernel").unwrap().shape(), &[3, 5]);
+
+    // The strict load still refuses the same file
+    assert!(matches!(
+        model.load_from_path(tmp.path()),
+        Err(Error::Io(IoError::ModelStructureMismatch(_)))
+    ));
+}
+
+// The atomic refusal
+
+/// Every array of 1 layer of a model, as a path and the raw f32 bits of its elements
+///
+/// A load either writes an array or leaves it alone, and nothing between the 2. The comparison
+/// is therefore a bit comparison, and no epsilon takes part in it
+fn layer_bits(model: &Sequential, scope: usize) -> Vec<(String, Vec<u32>)> {
+    let prefix = format!("{scope}.");
+    model
+        .weight_paths()
+        .into_iter()
+        .filter(|path| path.starts_with(&prefix))
+        .map(|path| {
+            let bits = model
+                .weight(&path)
+                .unwrap_or_else(|| panic!("the model holds no array at `{path}`"))
+                .iter()
+                .map(|value| value.to_bits())
+                .collect();
+            (path, bits)
+        })
+        .collect()
+}
+
+/// A refused load leaves every layer before the disagreement exactly as it was
+///
+/// The file holds 2 Dense layers. Position 0 agrees with the model on the layer type, on the
+/// names, on the kinds, and on the shapes. It carries other values there. Position 1 has 4
+/// units where the model has 5, so both of its arrays disagree on shape.
+///
+/// The validate pass reads the model and writes nothing, and the write pass runs only after
+/// it. The refusal at position 1 must therefore leave position 0 untouched. A load that wrote
+/// position 0 on its way to the refusal would leave the model holding 1 layer of the file next
+/// to 1 layer of its own, and no error would say so
+#[test]
+fn a_refused_load_writes_no_array_of_the_layers_before_the_mismatch() {
+    let tmp = TempFile::new("atomic_refusal_across_layers");
+
+    let mut saved = Sequential::new();
+    let mut saved_head = Dense::new(3, 2, Linear::new()).unwrap();
+    saved_head
+        .set_weights(
+            Array::from_shape_vec((3, 2), vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap(),
+            Array::from_shape_vec((1, 2), vec![7.0f32, 8.0]).unwrap(),
+        )
+        .unwrap();
+    saved
+        .add(saved_head)
+        .add(Dense::new(2, 4, Linear::new()).unwrap());
+    saved.save_to_path(tmp.path()).unwrap();
+
+    let mut model = Sequential::new();
+    let mut head = Dense::new(3, 2, Linear::new()).unwrap();
+    head.set_weights(
+        Array::from_shape_vec((3, 2), vec![-1.0f32, -2.0, -3.0, -4.0, -5.0, -6.0]).unwrap(),
+        Array::from_shape_vec((1, 2), vec![-7.0f32, -8.0]).unwrap(),
+    )
+    .unwrap();
+    model
+        .add(head)
+        .add(Dense::new(2, 5, Linear::new()).unwrap());
+
+    // The 2 sides hold other values at position 0, so a write there really shows
+    let before = layer_bits(&model, 0);
+    assert_eq!(
+        before
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect::<Vec<_>>(),
+        vec!["0.kernel".to_string(), "0.bias".to_string()]
+    );
+    assert_ne!(
+        before,
+        layer_bits(&saved, 0),
+        "the file must carry other values at position 0, or the test proves nothing"
+    );
+
+    match model.load_from_path(tmp.path()) {
+        Err(Error::Io(IoError::ModelStructureMismatch(message))) => {
+            assert!(
+                message.contains("`1.kernel`"),
+                "the refusal must name the array that disagrees, got {message:?}"
+            );
+        }
+        other => panic!("expected ModelStructureMismatch, got {other:?}"),
     }
+
+    assert_eq!(
+        layer_bits(&model, 0),
+        before,
+        "the refusal wrote layer 0, so a load is not atomic"
+    );
+}
+
+/// A refused load writes no earlier array of the layer that disagrees either
+///
+/// The file holds 1 Dense layer. Its `kernel` record agrees on the name, on the kind, and on
+/// the shape, and it carries other values. Its `bias` record carries a shape that the layer
+/// does not hold. The validate pass reaches the last array of the last layer before any write
+/// starts, so the kernel keeps its value
+#[test]
+fn a_refused_load_writes_no_earlier_array_of_the_layer_that_disagrees() {
+    let tmp = TempFile::new("atomic_refusal_within_a_layer");
+
+    let mut model = Sequential::new();
+    let mut layer = Dense::new(3, 2, Linear::new()).unwrap();
+    layer
+        .set_weights(
+            Array::from_shape_vec((3, 2), vec![-1.0f32, -2.0, -3.0, -4.0, -5.0, -6.0]).unwrap(),
+            Array::from_shape_vec((1, 2), vec![-7.0f32, -8.0]).unwrap(),
+        )
+        .unwrap();
+    model.add(layer);
+
+    let file = ModelCheckpoint {
+        magic: MODEL_MAGIC,
+        format_version: MODEL_FORMAT_VERSION,
+        layers: vec![LayerCheckpoint {
+            layer_type: Cow::Borrowed("Dense"),
+            build: None,
+            weights: vec![
+                // Agrees on every check, and holds other values
+                WeightRecord {
+                    name: Cow::Borrowed("kernel"),
+                    kind: WeightKind::Trainable,
+                    shape: vec![3, 2],
+                    data: Cow::Owned(vec![9.0f32; 6]),
+                },
+                // The layer holds a bias of shape [1, 2], and this record is 1 element longer
+                WeightRecord {
+                    name: Cow::Borrowed("bias"),
+                    kind: WeightKind::Trainable,
+                    shape: vec![1, 3],
+                    data: Cow::Owned(vec![9.0f32; 3]),
+                },
+            ],
+        }],
+    };
+    std::fs::write(tmp.path(), postcard::to_allocvec(&file).unwrap()).unwrap();
+
+    let before = layer_bits(&model, 0);
+    match model.load_from_path(tmp.path()) {
+        Err(Error::Io(IoError::ModelStructureMismatch(message))) => {
+            assert!(
+                message.contains("`0.bias`"),
+                "the refusal must name the array that disagrees, got {message:?}"
+            );
+        }
+        other => panic!("expected ModelStructureMismatch, got {other:?}"),
+    }
+
+    assert_eq!(
+        layer_bits(&model, 0),
+        before,
+        "the refusal wrote the kernel before it read the bias, so a load is not atomic"
+    );
 }

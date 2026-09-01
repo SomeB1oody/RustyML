@@ -9,7 +9,6 @@ use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::dense::Dense;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::layers::rescaling::Rescaling;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
@@ -243,7 +242,7 @@ fn rescaling_holds_no_trainable_parameters() {
 
     assert_eq!(layer.layer_type(), "Rescaling");
     assert_eq!(layer.param_count(), ParamCounts::none());
-    assert!(matches!(layer.get_weights(), LayerWeight::Empty));
+    assert!(layer.weights().is_empty());
     assert!(layer.parameters().is_empty());
 }
 

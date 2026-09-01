@@ -9,7 +9,6 @@ use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::activation::softmax::Softmax;
 use rustyml::neural_network::layers::dense::Dense;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::layers::permute::Permute;
 use rustyml::neural_network::layers::recurrent::lstm::LSTM;
 use rustyml::neural_network::layers::repeat_vector::RepeatVector;
@@ -319,10 +318,7 @@ fn permute_metadata() {
     let p = Permute::new(vec![2, 1]).unwrap();
     assert_eq!(p.layer_type(), "Permute");
     assert_eq!(p.param_count(), ParamCounts::none());
-    assert!(
-        matches!(p.get_weights(), LayerWeight::Empty),
-        "Permute must expose LayerWeight::Empty"
-    );
+    assert!(p.weights().is_empty(), "Permute must expose no weight");
 }
 
 /// output_shape is unknown before the first forward pass and resolved after it
@@ -486,10 +482,7 @@ fn repeat_vector_metadata() {
     let r = RepeatVector::new(3).unwrap();
     assert_eq!(r.layer_type(), "RepeatVector");
     assert_eq!(r.param_count(), ParamCounts::none());
-    assert!(
-        matches!(r.get_weights(), LayerWeight::Empty),
-        "RepeatVector must expose LayerWeight::Empty"
-    );
+    assert!(r.weights().is_empty(), "RepeatVector must expose no weight");
 }
 
 /// output_shape is unknown before the first forward pass and resolved after it

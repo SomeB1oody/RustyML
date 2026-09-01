@@ -10,7 +10,6 @@ use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::flatten::Flatten;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::layers::reshape::Reshape;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
@@ -364,14 +363,11 @@ fn reshape_param_count_is_no_trainable() {
     assert_eq!(r.param_count(), ParamCounts::none());
 }
 
-/// The layer has no parameters, so get_weights gives the Empty variant
+/// The layer has no parameters, so the named weight list is empty
 #[test]
-fn reshape_get_weights_is_empty() {
+fn reshape_weights_is_empty() {
     let r = Reshape::new(vec![2, 2]).unwrap();
-    assert!(
-        matches!(r.get_weights(), LayerWeight::Empty),
-        "Reshape must expose LayerWeight::Empty"
-    );
+    assert!(r.weights().is_empty(), "Reshape must expose no weight");
 }
 
 /// layer_type names the layer

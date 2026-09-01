@@ -4,19 +4,21 @@ use crate::error::{Context, Error};
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
-use crate::neural_network::layers::layer_weight::{DenseLayerWeight, LayerWeight};
-use crate::neural_network::layers::validation::validate_weight_shape;
+use crate::neural_network::layers::named_weight_layer_functions;
+use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
 use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Activation as FusedActivation, Bias, Parallelism};
 use ndarray::{Array, Array2, ArrayView2, Axis, CowArray, Ix2};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
-use std::borrow::Cow;
 
 /// Dense (fully connected) layer for neural networks
 ///
 /// Applies a linear transform with a weight matrix and a bias vector, then an optional
 /// activation: `output = activation(input * weights + bias)`
+///
+/// [`with_use_bias(false)`](Dense::with_use_bias) drops the bias, and the layer then computes
+/// `output = activation(input * weights)` and holds the kernel alone
 ///
 /// The layer contracts the last axis only. The input shape is
 /// `(batch_size, ..., input_dim)` with rank 2 or more, and the output shape is the same shape
@@ -80,6 +82,10 @@ pub struct Dense {
     /// Weight matrix with shape (input_dim, output_dim)
     weights: Array2<f32>,
     /// Bias vector with shape (1, output_dim)
+    ///
+    /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
+    /// The forward pass drops the bias epilogue, `weights` hides the array, and `parameters`
+    /// never yields it, so a bias-free layer holds it and no more
     bias: Array2<f32>,
     /// Cache of the folded input `[rows, input_dim]` from the forward pass
     input_cache: Option<Array2<f32>>,
@@ -96,6 +102,8 @@ pub struct Dense {
     grad_bias: Option<Array2<f32>>,
     /// Activation function applied to the linear output
     activation: Activation,
+    /// Whether the layer adds a bias to the linear output
+    use_bias: bool,
 }
 
 impl Dense {
@@ -151,6 +159,7 @@ impl Dense {
             grad_weights: None,
             grad_bias: None,
             activation,
+            use_bias: true,
         })
     }
 
@@ -170,6 +179,31 @@ impl Dense {
     pub fn with_random_state(mut self, random_state: u64) -> Self {
         self.weights =
             Self::init_weights_array(self.input_dim, self.output_dim, Some(random_state));
+        self
+    }
+
+    /// Sets whether the layer adds a bias to the linear output (defaults to `true`)
+    ///
+    /// With `use_bias` set to false the layer computes `activation(input * weights)`. It holds
+    /// the kernel alone: `param_count` counts the kernel alone, `parameters` yields the kernel
+    /// alone, and a checkpoint of the layer holds 1 array under the path `<position>.kernel`.
+    /// A checkpoint written by a layer that has a bias therefore fails to load into a layer
+    /// that has none, and the refusal names the path
+    ///
+    /// # Parameters
+    ///
+    /// - `use_bias` - `true` to add a bias, `false` to leave it out
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_use_bias(mut self, use_bias: bool) -> Self {
+        self.use_bias = use_bias;
+        if !use_bias {
+            // Drop any gradient a previous backward pass left, so the bias cannot reach
+            // `parameters` after the layer stops holding it
+            self.grad_bias = None;
+        }
         self
     }
 
@@ -193,7 +227,8 @@ impl Dense {
     /// # Parameters
     ///
     /// - `weights` - Weight matrix with shape (input_dim, output_dim)
-    /// - `bias` - Bias vector with shape (1, output_dim)
+    /// - `bias` - Bias vector with shape (1, output_dim), or `None` for a layer built with
+    ///   [`with_use_bias(false)`](Dense::with_use_bias)
     ///
     /// # Returns
     ///
@@ -203,12 +238,23 @@ impl Dense {
     ///
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` do not match the
     ///   layer's configured shape
-    pub fn set_weights(&mut self, weights: Array2<f32>, bias: Array2<f32>) -> Result<(), Error> {
-        validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
-        validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
+    /// - `Error::InvalidParameter` - If a bias is given to a layer that holds none, or none is
+    ///   given to a layer that holds one
+    pub fn set_weights(
+        &mut self,
+        weights: Array2<f32>,
+        bias: impl Into<Option<Array2<f32>>>,
+    ) -> Result<(), Error> {
+        validate_weight_shape("kernel", self.weights.shape(), weights.shape())?;
+        let bias = validate_optional_weight("bias", "use_bias", self.use_bias, bias.into())?;
+        if let Some(bias) = bias.as_ref() {
+            validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
+        }
 
         self.weights = weights.as_standard_layout().into_owned();
-        self.bias = bias.as_standard_layout().into_owned();
+        if let Some(bias) = bias {
+            self.bias = bias.as_standard_layout().into_owned();
+        }
         Ok(())
     }
 
@@ -303,7 +349,11 @@ impl Dense {
     /// - `Error::Computation` - Softmax failed to reshape the fused pre-activation, or the
     ///   result failed to go back to the rank of `input_shape`
     fn project(&self, input: &ArrayView2<'_, f32>, input_shape: &[usize]) -> Result<Tensor, Error> {
-        let bias = self.bias.as_slice().expect("bias must be contiguous");
+        // A bias-free layer passes no epilogue at all, so the product is exactly the product.
+        // A zero addend would give the same value for every input except a negative zero
+        let bias = self
+            .use_bias
+            .then(|| self.bias.as_slice().expect("bias must be contiguous"));
         // `beta == 0` means the fill value is never read. This only allocates the destination
         // the epilogue writes into
         let mut output = Array2::from_elem((input.nrows(), self.output_dim), 0.0);
@@ -317,7 +367,7 @@ impl Dense {
             &self.weights,
             0.0,
             &mut output,
-            Some(Bias::PerCol(bias)),
+            bias.map(Bias::PerCol),
             fused_act,
             Parallelism::Rayon(0),
         );
@@ -401,12 +451,14 @@ impl Layer for Dense {
         // Weight gradients
         let grad_w = dot(&input.t(), &grad_upstream_2d);
 
-        // Bias gradients: sum over every axis except the last one
-        let grad_b = grad_upstream_2d.sum_axis(Axis(0)).insert_axis(Axis(0));
-
         // Store gradients in a contiguous layout for `parameters()`
         self.grad_weights = Some(grad_w.as_standard_layout().to_owned());
-        self.grad_bias = Some(grad_b.as_standard_layout().to_owned());
+        // Bias gradients: sum over every axis except the last one. A bias-free layer computes
+        // none, so `parameters` yields none and no optimizer state is ever keyed on one
+        self.grad_bias = self.use_bias.then(|| {
+            let grad_b = grad_upstream_2d.sum_axis(Axis(0)).insert_axis(Axis(0));
+            grad_b.as_standard_layout().to_owned()
+        });
 
         // Gradient with respect to the input, back at the rank of the cached input
         let grad_input = dot(&grad_upstream_2d, &self.weights.t());
@@ -439,7 +491,10 @@ impl Layer for Dense {
     }
 
     fn param_count(&self) -> ParamCounts {
-        ParamCounts::trainable(self.input_dim * self.output_dim + self.output_dim)
+        // Read the arrays the layer holds rather than the configuration, so dropping the bias
+        // corrects the count with no second formula to keep in step
+        let bias = if self.use_bias { self.bias.len() } else { 0 };
+        ParamCounts::trainable(self.weights.len() + bias)
     }
 
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
@@ -469,10 +524,8 @@ impl Layer for Dense {
         params
     }
 
-    fn get_weights(&self) -> LayerWeight<'_> {
-        LayerWeight::Dense(DenseLayerWeight {
-            weight: Cow::Borrowed(&self.weights),
-            bias: Cow::Borrowed(&self.bias),
-        })
-    }
+    named_weight_layer_functions!(
+        trainable "kernel" => weights,
+        trainable "bias" => bias if use_bias,
+    );
 }

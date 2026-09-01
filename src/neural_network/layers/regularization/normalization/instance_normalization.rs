@@ -3,7 +3,7 @@
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::layer_weight::{InstanceNormalizationLayerWeight, LayerWeight};
+use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape;
@@ -13,9 +13,8 @@ use crate::neural_network::layers::regularization::normalization::{
 use crate::neural_network::layers::regularization::validation::{
     validate_epsilon, validate_input_shape, validate_input_shape_not_empty, validate_min_input_ndim,
 };
-use crate::neural_network::layers::validation::validate_weight_shape;
+use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
-use std::borrow::Cow;
 
 /// Instance Normalization layer for neural networks
 ///
@@ -49,8 +48,16 @@ pub struct InstanceNormalization {
     /// Shape of the input tensor
     input_shape: Vec<usize>,
     /// Scale parameter (trainable)
+    ///
+    /// The array stays allocated and holds every element at 1 when `scale` is false. A scale of
+    /// 1 changes no value, so the forward pass reads it and gives the same result that dropping
+    /// the multiply gives. `weights` hides the array and `parameters` never yields it
     gamma: Tensor,
     /// Shift parameter (trainable)
+    ///
+    /// The array stays allocated and holds every element at 0 when `center` is false. A shift
+    /// of 0 changes every value except a negative zero, which it turns into a positive zero.
+    /// `weights` hides the array and `parameters` never yields it
     beta: Tensor,
     /// Whether the layer is in training mode or inference mode
     training: bool,
@@ -62,6 +69,10 @@ pub struct InstanceNormalization {
     grad_gamma: Option<Tensor>,
     /// Gradient for the beta parameter
     grad_beta: Option<Tensor>,
+    /// Whether the layer adds the shift `beta`
+    center: bool,
+    /// Whether the layer applies the scale `gamma`
+    scale: bool,
 }
 
 impl InstanceNormalization {
@@ -103,27 +114,94 @@ impl InstanceNormalization {
             inv_std: None,
             grad_gamma: None,
             grad_beta: None,
+            center: true,
+            scale: true,
         })
     }
 
     mode_dependent_layer_set_training!();
 
+    /// Sets whether the layer adds the shift `beta` (defaults to `true`)
+    ///
+    /// With `center` set to false the layer holds no `beta`: `param_count` counts none for it,
+    /// `parameters` yields none for it, and a checkpoint of the layer holds no
+    /// `<position>.beta` path. The normalized value passes through unshifted
+    ///
+    /// # Parameters
+    ///
+    /// - `center` - `true` to add `beta`, `false` to leave it out
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_center(mut self, center: bool) -> Self {
+        self.center = center;
+        if !center {
+            // Put the array back at the identity shift and drop any gradient a previous
+            // backward pass left, so nothing the layer no longer holds can reach a result
+            self.beta = Tensor::zeros(self.beta.shape());
+            self.grad_beta = None;
+        }
+        self
+    }
+
+    /// Sets whether the layer applies the scale `gamma` (defaults to `true`)
+    ///
+    /// With `scale` set to false the layer holds no `gamma`: `param_count` counts none for it,
+    /// `parameters` yields none for it, and a checkpoint of the layer holds no
+    /// `<position>.gamma` path. `beta` keeps its own name and its own optimizer state, because
+    /// a checkpoint and an optimizer both address an array by name and never by position
+    ///
+    /// # Parameters
+    ///
+    /// - `scale` - `true` to apply `gamma`, `false` to leave it out
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_scale(mut self, scale: bool) -> Self {
+        self.scale = scale;
+        if !scale {
+            // Put the array back at the identity scale and drop any gradient a previous
+            // backward pass left, so nothing the layer no longer holds can reach a result
+            self.gamma = Tensor::ones(self.gamma.shape());
+            self.grad_gamma = None;
+        }
+        self
+    }
+
     /// Sets the weights for the InstanceNormalization layer
     ///
     /// # Parameters
     ///
-    /// - `gamma` - Scale parameter (trainable)
-    /// - `beta` - Shift parameter (trainable)
+    /// - `gamma` - Scale parameter (trainable), or `None` for a layer built with
+    ///   [`with_scale(false)`](Self::with_scale)
+    /// - `beta` - Shift parameter (trainable), or `None` for a layer built with
+    ///   [`with_center(false)`](Self::with_center)
     ///
     /// # Errors
     ///
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `gamma` or `beta` does not match the
     ///   existing weight shape
-    pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) -> Result<(), Error> {
-        validate_weight_shape("gamma", self.gamma.shape(), gamma.shape())?;
-        validate_weight_shape("beta", self.beta.shape(), beta.shape())?;
-        self.gamma = gamma;
-        self.beta = beta;
+    pub fn set_weights(
+        &mut self,
+        gamma: impl Into<Option<Tensor>>,
+        beta: impl Into<Option<Tensor>>,
+    ) -> Result<(), Error> {
+        let gamma = validate_optional_weight("gamma", "scale", self.scale, gamma.into())?;
+        let beta = validate_optional_weight("beta", "center", self.center, beta.into())?;
+        if let Some(gamma) = gamma.as_ref() {
+            validate_weight_shape("gamma", self.gamma.shape(), gamma.shape())?;
+        }
+        if let Some(beta) = beta.as_ref() {
+            validate_weight_shape("beta", self.beta.shape(), beta.shape())?;
+        }
+        if let Some(gamma) = gamma {
+            self.gamma = gamma;
+        }
+        if let Some(beta) = beta {
+            self.beta = beta;
+        }
         Ok(())
     }
 }
@@ -186,8 +264,10 @@ impl Layer for InstanceNormalization {
             &self.gamma,
         );
 
-        self.grad_gamma = Some(grad_gamma);
-        self.grad_beta = Some(grad_beta);
+        // An array the layer does not hold keeps no gradient, so `parameters` yields
+        // none for it and no optimizer state is ever keyed on it
+        self.grad_gamma = self.scale.then_some(grad_gamma);
+        self.grad_beta = self.center.then_some(grad_beta);
 
         Ok(grad_input)
     }
@@ -201,7 +281,11 @@ impl Layer for InstanceNormalization {
     }
 
     fn param_count(&self) -> ParamCounts {
-        ParamCounts::trainable(self.gamma.len() + self.beta.len())
+        // Read the arrays the layer holds rather than the configuration, so dropping
+        // `gamma` or `beta` corrects the count with no second formula to keep in step
+        let gamma = if self.scale { self.gamma.len() } else { 0 };
+        let beta = if self.center { self.beta.len() } else { 0 };
+        ParamCounts::trainable(gamma + beta)
     }
 
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
@@ -231,12 +315,10 @@ impl Layer for InstanceNormalization {
         params
     }
 
-    fn get_weights(&self) -> LayerWeight<'_> {
-        LayerWeight::InstanceNormalization(InstanceNormalizationLayerWeight {
-            gamma: Cow::Borrowed(&self.gamma),
-            beta: Cow::Borrowed(&self.beta),
-        })
-    }
+    named_weight_layer_functions!(
+        trainable "gamma" => gamma if scale,
+        trainable "beta" => beta if center,
+    );
 
     mode_dependent_layer_trait!();
 }

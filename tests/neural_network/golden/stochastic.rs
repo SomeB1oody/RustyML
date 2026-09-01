@@ -22,7 +22,6 @@
 use super::{GoldenCase, LayerFixture, golden_input, golden_weights, golden_weights_from};
 use ndarray::IxDyn;
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::layers::regularization::dropout::{
     Dropout, SpatialDropout1D, SpatialDropout2D, SpatialDropout3D,
 };
@@ -337,13 +336,16 @@ fn batch_norm_running_statistics() -> (Tensor, Tensor) {
     layer
         .forward(&golden_input(&BATCH_NORM_SHAPE))
         .expect("the fixture input has the declared shape");
-    match layer.get_weights() {
-        LayerWeight::BatchNormalization(weight) => (
-            weight.running_mean.into_owned(),
-            weight.running_var.into_owned(),
-        ),
-        _ => panic!("BatchNormalization returns its own weight variant"),
-    }
+    (
+        layer
+            .weight("moving_mean")
+            .expect("BatchNormalization names its running mean")
+            .to_owned(),
+        layer
+            .weight("moving_variance")
+            .expect("BatchNormalization names its running variance")
+            .to_owned(),
+    )
 }
 
 /// Builds a layer that returns 1 running statistic as its inference output.

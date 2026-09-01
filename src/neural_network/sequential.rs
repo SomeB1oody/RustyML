@@ -7,13 +7,12 @@ use crate::error::{Error, IoError};
 use crate::math::reduction::det_reduce;
 use crate::neural_network::NnError;
 use crate::neural_network::Tensor;
-use crate::neural_network::layers::layer_weight::LayerWeight;
-use crate::neural_network::layers::serialize_model::{
-    LayerInfo, MODEL_FORMAT_VERSION, MODEL_MAGIC, SerializableLayer, SerializableSequential,
-    apply_weights_to_layer,
+use crate::neural_network::layers::checkpoint::{
+    LoadReport, MODEL_FORMAT_VERSION, MODEL_MAGIC, ModelCheckpoint, apply, apply_partial, capture,
+    weight_path,
 };
 use crate::parallel_gates::sq_sum_f32_parallel_min_elems;
-use ndarray::Axis;
+use ndarray::{ArrayViewD, Axis};
 use ndarray_rand::rand::seq::SliceRandom;
 use std::collections::HashMap;
 use std::fs::File;
@@ -818,29 +817,59 @@ impl Sequential {
         println!("{}", output);
     }
 
-    /// Returns all the weights from each layer in the model
+    /// Every checkpoint path of the model, in order
     ///
-    /// Collects the weights from all layers in the sequential model and returns them
-    /// as a vector of `LayerWeight` enums. Each `LayerWeight` borrows the weight matrices and
-    /// bias vectors of its corresponding layer (via `Cow`), so no weights are cloned
+    /// A path is `<scope>.<name>`: the position of the layer, counted from the input, and the
+    /// name that the layer gives the array. The list holds the trainable arrays and the
+    /// non-trainable state alike, which is exactly what a saved file holds
     ///
     /// # Returns
     ///
-    /// - `Vec<LayerWeight<'_>>` - A vector borrowing each layer's weights
-    pub fn get_weights(&self) -> Vec<LayerWeight<'_>> {
-        let mut weights = Vec::with_capacity(self.layers.len());
-        for layer in &self.layers {
-            weights.push(layer.get_weights());
+    /// - `Vec<String>` - 1 path per array of the model
+    pub fn weight_paths(&self) -> Vec<String> {
+        let mut paths = Vec::new();
+        for (scope, layer) in self.layers.iter().enumerate() {
+            paths.extend(
+                layer
+                    .weights()
+                    .iter()
+                    .map(|entry| weight_path(scope, entry.name)),
+            );
         }
-        weights
+        paths
     }
 
-    /// Saves the model architecture and weights to a binary file at the specified path
+    /// 1 array of the model, by its checkpoint path
     ///
-    /// Serializes the model structure including layer types, configurations,
-    /// and all trainable parameters (weights and biases) to a compact binary format using
-    /// postcard. This does not save the optimizer or loss function. Reconfigure them with
-    /// `compile` after loading
+    /// The view borrows the live array, so nothing is copied
+    ///
+    /// # Parameters
+    ///
+    /// - `path` - The dotted path of the array, such as `"0.kernel"`. See
+    ///   [`weight_paths`](Sequential::weight_paths)
+    ///
+    /// # Returns
+    ///
+    /// - `Option<ArrayViewD<'_, f32>>` - A read view of the array, or `None` when the model
+    ///   holds no array at that path
+    pub fn weight(&self, path: &str) -> Option<ArrayViewD<'_, f32>> {
+        let (scope, name) = path.split_once('.')?;
+        let layer = self.layers.get(scope.parse::<usize>().ok()?)?;
+        layer.weight(name)
+    }
+
+    /// Writes a named checkpoint of every array of the model to a binary file
+    ///
+    /// The file holds the layer type of each position, and every array that the layer at that
+    /// position holds, under the name that the layer gives it. It holds the non-trainable
+    /// state next to the trainable parameters, so the running statistics of
+    /// [`BatchNormalization`](crate::neural_network::layers::BatchNormalization) go in it as
+    /// well. postcard writes the bytes. See
+    /// [`checkpoint`](crate::neural_network::layers::checkpoint)
+    ///
+    /// The file carries no architecture and no layer configuration. A load therefore needs a
+    /// model that is already built, and it compares that model against the file. The file
+    /// holds no optimizer and no loss function either. Call `compile` again after a load
     ///
     /// # Parameters
     ///
@@ -859,32 +888,8 @@ impl Sequential {
         &self,
         path: impl AsRef<std::path::Path>,
     ) -> crate::error::RustymlResult<()> {
-        // Convert layers to serializable format
-        let serializable_layers = self
-            .layers
-            .iter()
-            .map(|layer| {
-                let layer_info = LayerInfo {
-                    layer_type: layer.layer_type().to_string(),
-                    output_shape: layer.output_shape(),
-                };
-
-                // `get_weights` already borrows the live arrays via `Cow`, so this is clone-free
-                SerializableLayer {
-                    info: layer_info,
-                    weights: layer.get_weights(),
-                }
-            })
-            .collect();
-
-        let serializable_model = SerializableSequential {
-            magic: MODEL_MAGIC,
-            format_version: MODEL_FORMAT_VERSION,
-            layers: serializable_layers,
-        };
-
-        // Serialize the model to the compact postcard binary format
-        let bytes = postcard::to_allocvec(&serializable_model)?;
+        // `capture` borrows the live arrays, so nothing is copied before postcard reads them
+        let bytes = postcard::to_allocvec(&capture(&self.layers))?;
 
         // Create or overwrite the file
         let file = File::create(path)?;
@@ -901,9 +906,13 @@ impl Sequential {
 
     /// Loads model weights from a binary file and applies them to the current model
     ///
-    /// Deserializes weights from a previously saved model file and applies them
-    /// to the current model's layers. The current model must have the same architecture
-    /// (same number and types of layers) as the saved model
+    /// Reads a checkpoint that [`save_to_path`](Sequential::save_to_path) wrote and applies
+    /// every array of it to the layer that holds the matching path. The load is strict: the
+    /// file and the model must agree on the layer count, on the layer type of every position,
+    /// and on the name, the kind, and the shape of every array. A disagreement is an error
+    /// that names the checkpoint path, and no lenient rule replaces it. Use
+    /// [`load_partial_from_path`](Sequential::load_partial_from_path) to load what matches and
+    /// read a report of the rest
     ///
     /// Build the model structure first, then call this method to load weights. After loading,
     /// call `compile()` to set the optimizer and loss function
@@ -924,69 +933,98 @@ impl Sequential {
     /// - `Error::Io(IoError::UnsupportedModelFormat)` - The file is not a RustyML model, or a
     ///   release whose on-disk format version differs from this one wrote it
     /// - `Error::Io(IoError::Serialization)` - Deserialization failed
-    /// - `Error::Io(IoError::ModelStructureMismatch)` - The current model's structure (layer
-    ///   count, a layer type at some position, or a weight shape) does not match the saved model
+    /// - `Error::Io(IoError::ModelStructureMismatch)` - The file and the model disagree. The
+    ///   message names the checkpoint path, or the layer position for a whole-layer
+    ///   disagreement
     pub fn load_from_path(
         &mut self,
         path: impl AsRef<std::path::Path>,
     ) -> crate::error::RustymlResult<()> {
-        // Read the whole file into memory
-        let bytes = std::fs::read(path)?;
-
-        // Validate the header before the body. postcard is sequential and carries no field names.
-        // So a file from an incompatible release otherwise runs off the end of some weight
-        // array. It then reports an opaque deserialization failure instead of naming the real
-        // problem. Where the extents happen to coincide, it does not fail at all
-        let (magic, format_version): (u32, u32) = postcard::take_from_bytes(&bytes)
-            .map(|(header, _rest)| header)
-            .map_err(|_| {
-                Error::Io(IoError::UnsupportedModelFormat(
-                    "file is too short to contain a model header".to_string(),
-                ))
-            })?;
-        if magic != MODEL_MAGIC {
-            return Err(Error::Io(IoError::UnsupportedModelFormat(format!(
-                "not a RustyML model file: expected magic {MODEL_MAGIC:#010x}, found {magic:#010x} \
-                 (a model saved before the format carried a header must be re-saved)"
-            ))));
-        }
-        if format_version != MODEL_FORMAT_VERSION {
-            return Err(Error::Io(IoError::UnsupportedModelFormat(format!(
-                "model file is format version {format_version}, but this build reads version \
-                 {MODEL_FORMAT_VERSION}; re-save the model with this version of RustyML"
-            ))));
-        }
-
-        // Deserialize the model from the postcard binary format
-        let serializable_model: SerializableSequential<'static> = postcard::from_bytes(&bytes)?;
-
-        // Verify layer count matches
-        if serializable_model.layers.len() != self.layers.len() {
-            return Err(Error::Io(IoError::ModelStructureMismatch(format!(
-                "layer count mismatch: model has {} layers, file has {} layers",
-                self.layers.len(),
-                serializable_model.layers.len()
-            ))));
-        }
-
-        // Apply weights to each layer
-        for (i, serializable_layer) in serializable_model.layers.iter().enumerate() {
-            let expected_type = self.layers[i].layer_type();
-            let saved_type = serializable_layer.info.layer_type.as_str();
-            if expected_type != saved_type {
-                return Err(Error::Io(IoError::ModelStructureMismatch(format!(
-                    "layer {} type mismatch: model has `{}`, file has `{}`",
-                    i, expected_type, saved_type
-                ))));
-            }
-
-            apply_weights_to_layer(
-                &mut *self.layers[i],
-                &serializable_layer.weights,
-                saved_type,
-            )?;
-        }
-
+        let file = read_checkpoint(path)?;
+        apply(&mut self.layers, &file)?;
         Ok(())
     }
+
+    /// Loads what the file and the model agree on, and reports the rest
+    ///
+    /// This is the lenient load, and a caller asks for it by name. It writes an array when the
+    /// position holds the same layer type and the file holds the same name, the same kind, and
+    /// the same shape. Every other path of the model, and every path of the file that reached
+    /// no array, goes into the report. Nothing about the layer roster fails
+    ///
+    /// The header is still checked, because a file of another format version carries bytes
+    /// that mean something else. Such a file is an error here as well
+    ///
+    /// # Parameters
+    ///
+    /// - `path` - File path from which to load the weights
+    ///
+    /// # Returns
+    ///
+    /// - `crate::error::RustymlResult<LoadReport>` - The paths that took a value, the paths of
+    ///   the model that got none, and the paths of the file that reached no array
+    ///
+    /// # Errors
+    ///
+    /// - `Error::Io(IoError::Std)` - File not found or read operation failed
+    /// - `Error::Io(IoError::UnsupportedModelFormat)` - The file is not a RustyML model, or a
+    ///   release whose on-disk format version differs from this one wrote it
+    /// - `Error::Io(IoError::Serialization)` - Deserialization failed
+    pub fn load_partial_from_path(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+    ) -> crate::error::RustymlResult<LoadReport> {
+        let file = read_checkpoint(path)?;
+        Ok(apply_partial(&mut self.layers, &file))
+    }
+}
+
+/// Reads 1 checkpoint file, and validates its header before its body
+///
+/// postcard is sequential and carries no field names, so a file from an incompatible release
+/// otherwise runs off the end of some array. It then reports an opaque deserialization failure
+/// instead of naming the real problem. Where the extents happen to coincide, it does not fail
+/// at all
+///
+/// # Parameters
+///
+/// - `path` - File path to read
+///
+/// # Returns
+///
+/// - `crate::error::RustymlResult<ModelCheckpoint<'static>>` - The whole file, with owned
+///   arrays
+///
+/// # Errors
+///
+/// - `Error::Io(IoError::Std)` - File not found or read operation failed
+/// - `Error::Io(IoError::UnsupportedModelFormat)` - The file is too short for a header, does
+///   not carry the magic tag, or carries another format version
+/// - `Error::Io(IoError::Serialization)` - Deserialization failed
+fn read_checkpoint(
+    path: impl AsRef<std::path::Path>,
+) -> crate::error::RustymlResult<ModelCheckpoint<'static>> {
+    let bytes = std::fs::read(path)?;
+
+    let (magic, format_version): (u32, u32) = postcard::take_from_bytes(&bytes)
+        .map(|(header, _rest)| header)
+        .map_err(|_| {
+            Error::Io(IoError::UnsupportedModelFormat(
+                "file is too short to contain a model header".to_string(),
+            ))
+        })?;
+    if magic != MODEL_MAGIC {
+        return Err(Error::Io(IoError::UnsupportedModelFormat(format!(
+            "not a RustyML model file: expected magic {MODEL_MAGIC:#010x}, found {magic:#010x} \
+             (a model saved before the format carried a header must be re-saved)"
+        ))));
+    }
+    if format_version != MODEL_FORMAT_VERSION {
+        return Err(Error::Io(IoError::UnsupportedModelFormat(format!(
+            "model file is format version {format_version}, and this build reads version \
+             {MODEL_FORMAT_VERSION}; re-save the model with this version of RustyML"
+        ))));
+    }
+
+    Ok(postcard::from_bytes(&bytes)?)
 }

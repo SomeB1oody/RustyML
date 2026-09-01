@@ -19,7 +19,6 @@ use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::convolution::conv_1d_transpose::Conv1DTranspose;
 use rustyml::neural_network::layers::convolution::conv_2d_transpose::Conv2DTranspose;
 use rustyml::neural_network::layers::convolution::conv_3d_transpose::Conv3DTranspose;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::layers::{Dense, Flatten, ParamCounts};
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
@@ -27,7 +26,7 @@ use rustyml::neural_network::sequential::Sequential;
 use rustyml::neural_network::traits::Layer;
 use rustyml::neural_network::{NnError, Tensor};
 
-use super::common::assert_allclose;
+use super::common::{assert_allclose, named};
 
 // helpers
 
@@ -229,17 +228,12 @@ fn conv1d_transpose_param_count_formula() {
     assert_eq!(layer.param_count(), ParamCounts::trainable(28));
 }
 
-/// get_weights returns the Conv1DTranspose variant, with the filter axis before the channel axis
+/// The named weights carry the filter axis before the channel axis
 #[test]
-fn conv1d_transpose_get_weights_correct_shapes() {
+fn conv1d_transpose_weights_correct_shapes() {
     let layer = Conv1DTranspose::new(4, 3, vec![1, 5, 2], 1, Linear::new()).unwrap();
-    match layer.get_weights() {
-        LayerWeight::Conv1DTranspose(w) => {
-            assert_eq!(w.weight.shape(), &[3, 4, 2]);
-            assert_eq!(w.bias.shape(), &[4]);
-        }
-        _other => panic!("expected LayerWeight::Conv1DTranspose variant"),
-    }
+    assert_eq!(named(&layer, "kernel").shape(), &[3, 4, 2]);
+    assert_eq!(named(&layer, "bias").shape(), &[4]);
 }
 
 /// layer_type and output_shape report the transposed geometry
@@ -406,17 +400,12 @@ fn conv2d_transpose_param_count_formula() {
     assert_eq!(layer.param_count(), ParamCounts::trainable(56));
 }
 
-/// get_weights returns the Conv2DTranspose variant with shape \[kh, kw, filters, channels\]
+/// The named kernel has shape \[kh, kw, filters, channels\]
 #[test]
-fn conv2d_transpose_get_weights_correct_shapes() {
+fn conv2d_transpose_weights_correct_shapes() {
     let layer = Conv2DTranspose::new(4, (3, 3), vec![1, 8, 8, 2], (1, 1), Linear::new()).unwrap();
-    match layer.get_weights() {
-        LayerWeight::Conv2DTranspose(w) => {
-            assert_eq!(w.weight.shape(), &[3, 3, 4, 2]);
-            assert_eq!(w.bias.shape(), &[4]);
-        }
-        _other => panic!("expected LayerWeight::Conv2DTranspose variant"),
-    }
+    assert_eq!(named(&layer, "kernel").shape(), &[3, 3, 4, 2]);
+    assert_eq!(named(&layer, "bias").shape(), &[4]);
 }
 
 /// layer_type and output_shape report the transposed geometry
@@ -438,19 +427,18 @@ fn conv2d_transpose_with_random_state_is_reproducible() {
         .unwrap()
         .with_random_state(19);
 
-    match (first.get_weights(), second.get_weights()) {
-        (LayerWeight::Conv2DTranspose(a), LayerWeight::Conv2DTranspose(b)) => {
-            assert_eq!(a.weight.as_ref(), b.weight.as_ref());
-            assert!(a.bias.iter().all(|&v| v == 0.0), "the bias must start at 0");
-            // Xavier bound for 3*3 taps at 2 channels and 2 filters is sqrt(6 / 36)
-            let bound = (6.0f32 / 36.0).sqrt();
-            assert!(
-                a.weight.iter().all(|&v| v.abs() <= bound),
-                "every weight must stay inside the Xavier bound {bound}"
-            );
-        }
-        _other => panic!("expected LayerWeight::Conv2DTranspose variants"),
-    }
+    let kernel = named(&first, "kernel");
+    assert_eq!(kernel, named(&second, "kernel"));
+    assert!(
+        named(&first, "bias").iter().all(|&v| v == 0.0),
+        "the bias must start at 0"
+    );
+    // Xavier bound for 3*3 taps at 2 channels and 2 filters is sqrt(6 / 36)
+    let bound = (6.0f32 / 36.0).sqrt();
+    assert!(
+        kernel.iter().all(|&v| v.abs() <= bound),
+        "every weight must stay inside the Xavier bound {bound}"
+    );
 }
 
 // Conv3DTranspose
@@ -518,7 +506,7 @@ fn conv3d_transpose_output_shape_cases() {
     }
 }
 
-/// get_weights returns the Conv3DTranspose variant, and param_count matches its extent
+/// The named weights carry the transposed geometry, and param_count matches their extent
 #[test]
 fn conv3d_transpose_weights_and_param_count() {
     let layer =
@@ -526,13 +514,8 @@ fn conv3d_transpose_weights_and_param_count() {
     assert_eq!(layer.layer_type(), "Conv3DTranspose");
     // 2 * 3 * 2 taps at 2 filters and 2 channels, plus 2 biases
     assert_eq!(layer.param_count(), ParamCounts::trainable(50));
-    match layer.get_weights() {
-        LayerWeight::Conv3DTranspose(w) => {
-            assert_eq!(w.weight.shape(), &[2, 3, 2, 2, 2]);
-            assert_eq!(w.bias.shape(), &[2]);
-        }
-        _other => panic!("expected LayerWeight::Conv3DTranspose variant"),
-    }
+    assert_eq!(named(&layer, "kernel").shape(), &[2, 3, 2, 2, 2]);
+    assert_eq!(named(&layer, "bias").shape(), &[2]);
 }
 
 // Round trip against the plain convolution
@@ -988,19 +971,15 @@ fn conv3d_transpose_with_random_state_is_reproducible() {
     let first = make();
     let second = make();
 
-    match (first.get_weights(), second.get_weights()) {
-        (LayerWeight::Conv3DTranspose(a), LayerWeight::Conv3DTranspose(b)) => {
-            assert_eq!(a.weight.shape(), &[2, 4, 5, 3, 2]);
-            assert_eq!(a.weight.as_ref(), b.weight.as_ref());
-            // Xavier bound for 2*4*5 taps at 2 channels and 3 filters is sqrt(6 / (40 * 5))
-            let bound = (6.0f32 / 200.0).sqrt();
-            assert!(
-                a.weight.iter().all(|&v| v.abs() <= bound),
-                "every weight must stay inside the Xavier bound {bound}"
-            );
-        }
-        _other => panic!("expected LayerWeight::Conv3DTranspose variants"),
-    }
+    let kernel = named(&first, "kernel");
+    assert_eq!(kernel.shape(), &[2, 4, 5, 3, 2]);
+    assert_eq!(kernel, named(&second, "kernel"));
+    // Xavier bound for 2*4*5 taps at 2 channels and 3 filters is sqrt(6 / (40 * 5))
+    let bound = (6.0f32 / 200.0).sqrt();
+    assert!(
+        kernel.iter().all(|&v| v.abs() <= bound),
+        "every weight must stay inside the Xavier bound {bound}"
+    );
 
     // Valid: 6 + 1, 7 + 3, 8 + 4 at stride 1, so the axes must not be reordered
     assert_eq!(first.output_shape(), "(1, 7, 10, 12, 3)");

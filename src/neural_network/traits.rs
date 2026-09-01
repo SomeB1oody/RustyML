@@ -1,10 +1,12 @@
-//! Core traits for the neural network module: layers, losses, optimizers, weight
-//! application, and the flat parameter/gradient view shared between them
+//! Core traits for the neural network module: layers, losses, optimizers, and the named
+//! parameter and weight views shared between them
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::layer_weight::LayerWeight;
+use crate::neural_network::layers::checkpoint::BuildConfig;
+use crate::{Deserialize, Serialize};
+use ndarray::{ArrayViewD, ArrayViewMutD};
 
 /// The stable address of 1 parameter tensor inside a model
 ///
@@ -114,6 +116,133 @@ impl<'a> ParamGrad<'a> {
             value,
             grad,
             decays: false,
+        }
+    }
+}
+
+/// Whether training updates a named array of a layer
+///
+/// The 2 kinds are what [`ParamCounts`] counts, seen 1 array at a time.
+/// A checkpoint holds the kind next to every array, so a load can refuse a file that offers a
+/// trainable array where the layer keeps state, and the other way round
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WeightKind {
+    /// An optimizer updates this array. It is a kernel, a bias, or a normalization
+    /// scale/shift
+    Trainable,
+    /// The layer keeps this array and no optimizer writes it. The running statistics of
+    /// [`BatchNormalization`](crate::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization)
+    /// are the 1 example today
+    NonTrainable,
+}
+
+/// 1 named array of a layer, borrowed for reading
+///
+/// [`Layer::weights`] gives 1 of these per array that the layer holds. The name is the layer
+/// half of the address of the array, and the checkpoint format writes it. See
+/// [`checkpoint`](crate::neural_network::layers::checkpoint)
+///
+/// The view borrows the live array, so nothing is copied
+pub struct WeightRef<'a> {
+    /// Name the layer gives this array, such as `"kernel"` or `"moving_mean"`
+    pub name: &'static str,
+    /// Whether an optimizer updates the array
+    pub kind: WeightKind,
+    /// Read-only view of the array, at the rank the layer holds it
+    pub value: ArrayViewD<'a, f32>,
+}
+
+impl<'a> WeightRef<'a> {
+    /// A read view of an array that an optimizer updates
+    ///
+    /// # Parameters
+    ///
+    /// - `name` - Name the layer gives the array
+    /// - `value` - View of the array
+    ///
+    /// # Returns
+    ///
+    /// - `WeightRef` - The entry, with the kind set to [`WeightKind::Trainable`]
+    #[inline]
+    pub fn trainable(name: &'static str, value: ArrayViewD<'a, f32>) -> Self {
+        Self {
+            name,
+            kind: WeightKind::Trainable,
+            value,
+        }
+    }
+
+    /// A read view of an array that no optimizer updates
+    ///
+    /// # Parameters
+    ///
+    /// - `name` - Name the layer gives the array
+    /// - `value` - View of the array
+    ///
+    /// # Returns
+    ///
+    /// - `WeightRef` - The entry, with the kind set to [`WeightKind::NonTrainable`]
+    #[inline]
+    pub fn non_trainable(name: &'static str, value: ArrayViewD<'a, f32>) -> Self {
+        Self {
+            name,
+            kind: WeightKind::NonTrainable,
+            value,
+        }
+    }
+}
+
+/// 1 named array of a layer, borrowed for writing
+///
+/// [`Layer::weights_mut`] gives 1 of these per array that the layer holds, under the same
+/// names and in the same order as [`Layer::weights`]. A checkpoint load writes through these
+/// views, so it reaches the storage of the layer itself and keeps the memory order of that
+/// storage
+pub struct WeightMut<'a> {
+    /// Name the layer gives this array, such as `"kernel"` or `"moving_mean"`
+    pub name: &'static str,
+    /// Whether an optimizer updates the array
+    pub kind: WeightKind,
+    /// Writable view of the array, at the rank the layer holds it
+    pub value: ArrayViewMutD<'a, f32>,
+}
+
+impl<'a> WeightMut<'a> {
+    /// A write view of an array that an optimizer updates
+    ///
+    /// # Parameters
+    ///
+    /// - `name` - Name the layer gives the array
+    /// - `value` - View of the array
+    ///
+    /// # Returns
+    ///
+    /// - `WeightMut` - The entry, with the kind set to [`WeightKind::Trainable`]
+    #[inline]
+    pub fn trainable(name: &'static str, value: ArrayViewMutD<'a, f32>) -> Self {
+        Self {
+            name,
+            kind: WeightKind::Trainable,
+            value,
+        }
+    }
+
+    /// A write view of an array that no optimizer updates
+    ///
+    /// # Parameters
+    ///
+    /// - `name` - Name the layer gives the array
+    /// - `value` - View of the array
+    ///
+    /// # Returns
+    ///
+    /// - `WeightMut` - The entry, with the kind set to [`WeightKind::NonTrainable`]
+    #[inline]
+    pub fn non_trainable(name: &'static str, value: ArrayViewMutD<'a, f32>) -> Self {
+        Self {
+            name,
+            kind: WeightKind::NonTrainable,
+            value,
         }
     }
 }
@@ -234,38 +363,69 @@ pub trait Layer: std::any::Any + Send + Sync {
         Vec::new()
     }
 
-    /// Returns a borrowing view of all weights in the layer
+    /// Every array the layer holds, by name, borrowed for reading
     ///
-    /// Exposes all weight matrices and bias vectors the layer uses. Each array comes back as a
-    /// `Cow::Borrowed` over the layer's live data, so no weights are cloned. The same enum
-    /// doubles as the on-disk weight format (owned when deserialized)
+    /// The set covers the trainable arrays and the non-trainable state alike, which is exactly
+    /// what a checkpoint holds. It is therefore a superset of what
+    /// [`parameters`](Layer::parameters) yields:
+    /// [`BatchNormalization`](crate::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization)
+    /// adds its running statistics here, and every array comes back whether it holds a
+    /// gradient or not
+    ///
+    /// The name of an array is its address inside the layer, and it follows Keras 3:
+    /// `kernel`, `recurrent_kernel`, `depthwise_kernel`, `pointwise_kernel`, `bias`,
+    /// `embeddings`, `alpha`, `gamma`, `beta`, `moving_mean`, `moving_variance`. A layer must
+    /// give 1 array the same name on every call, and must never give 2 arrays the same name.
+    /// A name that [`parameters`](Layer::parameters) also uses must reach the same storage
+    ///
+    /// The order is free, and it is the order a checkpoint records. Layers without any array
+    /// return the empty vector
     ///
     /// # Returns
     ///
-    /// - `LayerWeight<'_>` - An enum borrowing the layer's weights:
-    ///     - `LayerWeight::Dense` for Dense layers with weight and bias
-    ///     - `LayerWeight::Embedding` for Embedding layers with the lookup table
-    ///     - `LayerWeight::SimpleRNN` for SimpleRNN layers with kernel, recurrent_kernel, and bias
-    ///     - `LayerWeight::LSTM` / `LayerWeight::GRU` for recurrent layers with fused kernel,
-    ///       recurrent_kernel, and bias (gate column blocks `[i | f | g | o]` / `[z | r | h]`)
-    ///     - `LayerWeight::Conv1D`, `LayerWeight::Conv2D`, `LayerWeight::Conv3D` for
-    ///       convolutional layers
-    ///     - `LayerWeight::Conv1DTranspose`, `LayerWeight::Conv2DTranspose`, and
-    ///       `LayerWeight::Conv3DTranspose` for the transposed convolutional layers, whose kernel
-    ///       carries its filter axis before its input-channel axis
-    ///     - `LayerWeight::SeparableConv1D` and `LayerWeight::SeparableConv2D` for the
-    ///       separable convolutions, each with a depthwise kernel, a pointwise kernel, and a bias
-    ///     - `LayerWeight::DepthwiseConv1D` and `LayerWeight::DepthwiseConv2D` for the depthwise
-    ///       convolutions, each with a kernel and a bias
-    ///     - `LayerWeight::BatchNormalization` for batch normalization, with gamma, beta, and
-    ///       the running mean and variance
-    ///     - `LayerWeight::LayerNormalization`, `LayerWeight::InstanceNormalization`, and
-    ///       `LayerWeight::GroupNormalization` for their respective layers, each with gamma and
-    ///       beta
-    ///     - `LayerWeight::PReLU` for the PReLU layer, with its negative-side slopes, whose
-    ///       rank follows the input rank
-    ///     - `LayerWeight::Empty` for layers with no trainable parameters
-    fn get_weights(&self) -> LayerWeight<'_>;
+    /// - `Vec<WeightRef<'_>>` - 1 named view per array the layer holds
+    fn weights(&self) -> Vec<WeightRef<'_>>;
+
+    /// Every array the layer holds, by name, borrowed for writing
+    ///
+    /// The roster, the names, the kinds, and the order repeat [`weights`](Layer::weights)
+    /// exactly. A checkpoint load looks a name up here and writes into the view, so the values
+    /// reach the storage of the layer and take the memory order that the storage already has
+    ///
+    /// # Returns
+    ///
+    /// - `Vec<WeightMut<'_>>` - 1 named view per array the layer holds
+    fn weights_mut(&mut self) -> Vec<WeightMut<'_>>;
+
+    /// 1 named array of the layer, or `None` when the layer holds no array of that name
+    ///
+    /// # Parameters
+    ///
+    /// - `name` - The name the layer gives the array, such as `"kernel"`
+    ///
+    /// # Returns
+    ///
+    /// - `Option<ArrayViewD<'_, f32>>` - A read view of the array
+    fn weight(&self, name: &str) -> Option<ArrayViewD<'_, f32>> {
+        self.weights()
+            .into_iter()
+            .find(|entry| entry.name == name)
+            .map(|entry| entry.value)
+    }
+
+    /// The shape that the layer was built for, when the layer knows it
+    ///
+    /// The slot is reserved. Every layer allocates its arrays in its constructor today, so the
+    /// default `None` is what every layer reports and a checkpoint carries no build shape. The
+    /// change that moves the allocation out of the constructors fills the slot, and the format
+    /// that reads it is already in place. See [`BuildConfig`]
+    ///
+    /// # Returns
+    ///
+    /// - `Option<BuildConfig>` - The build shape, or `None` while the layer holds none
+    fn build_config(&self) -> Option<BuildConfig> {
+        None
+    }
 
     /// Sets the training mode if the layer is mode-dependent
     ///
@@ -419,26 +579,4 @@ pub trait Optimizer {
     ///
     /// - `learning_rate` - The new learning rate to use for subsequent updates
     fn set_learning_rate(&mut self, learning_rate: f32);
-}
-
-/// Trait for applying serialized weights to a specific layer type
-///
-/// A serializable weight structure implements this to apply its contained weights to the
-/// corresponding layer type. Gives every layer type the same interface for deserializing and
-/// applying weights
-///
-/// # Type Parameters
-///
-/// - `L` - The layer type that these weights can be applied to
-pub trait ApplyWeights<L> {
-    /// Applies the serialized weights to a layer instance
-    ///
-    /// # Parameters
-    ///
-    /// - `layer` - Mutable reference to the layer that will receive the weights
-    ///
-    /// # Errors
-    ///
-    /// - `Error` - Weight shape mismatch or conversion error
-    fn apply_to_layer(&self, layer: &mut L) -> Result<(), Error>;
 }

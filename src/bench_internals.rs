@@ -27,7 +27,7 @@ pub type SplitCapSetter = fn(usize);
 /// block indexing, and the partial reassembly stay unread
 ///
 /// A cap holds the task at that size or below. The production value of every cap is 0, which
-/// keeps the calibrated size. See [`split_cap`](crate::parallel_gates::split_cap)
+/// keeps the calibrated size. See the `split_cap` helper of `crate::parallel_gates`
 ///
 /// # Why a cap changes no value
 ///

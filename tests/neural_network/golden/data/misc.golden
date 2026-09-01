@@ -3,28 +3,42 @@
 # The harness in tests/neural_network/golden wrote this file. Do not edit it by hand.
 # Regenerate it with:
 #
-#     RUSTYML_REGEN_GOLDEN=1 cargo test --test neural_network golden
+#     RUSTYML_REGEN_GOLDEN="<reason>" cargo test --test neural_network golden
 #
 # Regeneration is an explicit claim that the behavior change was intended and reviewed.
+# The first capture of a family needs that claim alone. A run that adds, changes, or
+# removes a case of a file that exists is refused 1 time. The refusal prints every
+# difference and 1 acknowledgment token, and a second run must carry that token in
+# RUSTYML_REGEN_GOLDEN_ACCEPT. Force a rebuild of the test binary before every regeneration.
+#
+# The content_digest line below records a digest of this whole file, the number of
+# cases, and the number of recorded values. The harness verifies all 3 before it reads
+# the file. An edit by hand therefore stops every run of the net. Restore such a file
+# from version control. A deletion of this file is refused as well.
+#
+# Regeneration history, newest first. Each line holds the reason of 1 run that wrote
+# this file.
+#
+# reason the checkpoint is addressed by name, so the layer supplies every recorded parameter name and the parameter count records both halves
 #
 # Each value line holds the raw f32 bits from to_bits, in 8 lowercase hexadecimal
 # digits. The text after the "#" is the same value in decimal, and it is a comment.
 #
 # The module doc comment of tests/neural_network/golden/mod.rs holds the grammar.
 
-format 5
+format 6
 family misc
-content_digest 00681e4a407682df cases 35 values 2302
+content_digest c36f966c98a31ac0 cases 35 values 2302
 
 case Dense units_4_linear
 mode training
 output_shape "(None, 4)"
-param_count trainable 16
-param_name weight layer
+param_count trainable 16 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 4 checksum 43d903dfad34c524
+weight kernel 3 4 checksum 43d903dfad34c524
 weight bias 1 4 checksum bc800fbec5d314d2
-step_weight weight 3 4 checksum 6ce9146beefb9388
+step_weight kernel 3 4 checksum 6ce9146beefb9388
 step_weight bias 1 4 checksum 5423ade2ed402521
 tensor input 2 3
   c0000000  # -2.0
@@ -58,7 +72,7 @@ tensor grad_input 2 3
   c00f3333  # -2.2375
   3fa4a3d7  # 1.28625
   3f7570a3  # 0.95874995
-tensor grad_param.weight 12 decays
+tensor grad_param.kernel 12 decays
   402ccccd  # 2.7
   404a3d71  # 3.16
   c003d70a  # -2.06
@@ -71,7 +85,7 @@ tensor grad_param.weight 12 decays
   c01db22d  # -2.464
   3f666666  # 0.9
   3f5b22d1  # 0.856
-tensor step_param.weight 12
+tensor step_param.kernel 12
   bfa80000  # -1.3125
   bd3851f0  # -0.045000017
   bd2e1480  # -0.04250002
@@ -99,12 +113,12 @@ end
 case Dense units_4_relu
 mode training
 output_shape "(None, 4)"
-param_count trainable 16
-param_name weight layer
+param_count trainable 16 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 4 checksum 43d903dfad34c524
+weight kernel 3 4 checksum 43d903dfad34c524
 weight bias 1 4 checksum bc800fbec5d314d2
-step_weight weight 3 4 checksum c2639820be7957ae
+step_weight kernel 3 4 checksum c2639820be7957ae
 step_weight bias 1 4 checksum e6647c62ea791614
 tensor input 2 3
   c0000000  # -2.0
@@ -138,7 +152,7 @@ tensor grad_input 2 3
   bfd6b851  # -1.6774999
   3f58a3d7  # 0.84625
   bef66666  # -0.48125
-tensor grad_param.weight 12 decays
+tensor grad_param.kernel 12 decays
   402ccccd  # 2.7
   00000000  # 0.0
   c003d70a  # -2.06
@@ -151,7 +165,7 @@ tensor grad_param.weight 12 decays
   00000000  # 0.0
   3f666666  # 0.9
   3f5b22d1  # 0.856
-tensor step_param.weight 12
+tensor step_param.kernel 12
   bfa80000  # -1.3125
   3eb33333  # 0.35
   bd2e1480  # -0.04250002
@@ -179,12 +193,12 @@ end
 case Dense units_4_tanh
 mode training
 output_shape "(None, 4)"
-param_count trainable 16
-param_name weight layer
+param_count trainable 16 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 4 checksum 43d903dfad34c524
+weight kernel 3 4 checksum 43d903dfad34c524
 weight bias 1 4 checksum bc800fbec5d314d2
-step_weight weight 3 4 checksum d5aab960e787e0c3
+step_weight kernel 3 4 checksum d5aab960e787e0c3
 step_weight bias 1 4 checksum 2a27d09a43906ed7
 tensor input 2 3
   c0000000  # -2.0
@@ -218,7 +232,7 @@ tensor grad_input 2 3
   bfd84799  # -1.689685
   3f512bb7  # 0.8170733
   bd19a96a  # -0.03751508
-tensor grad_param.weight 12 decays
+tensor grad_param.kernel 12 decays
   3fd353f8  # 1.651
   3f6bd171  # 0.9211646
   befeddc0  # -0.49778557
@@ -231,7 +245,7 @@ tensor grad_param.weight 12 decays
   bf2f8228  # -0.6855798
   3e4ca717  # 0.19985615
   3f78c732  # 0.9717895
-tensor step_param.weight 12
+tensor step_param.kernel 12
   bf97374c  # -1.181375
   3e707dae  # 0.23485443
   be737bc4  # -0.23777682
@@ -259,12 +273,12 @@ end
 case Dense rank_3_linear
 mode training
 output_shape "(None, 4, 4)"
-param_count trainable 16
-param_name weight layer
+param_count trainable 16 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 4 checksum 43d903dfad34c524
+weight kernel 3 4 checksum 43d903dfad34c524
 weight bias 1 4 checksum bc800fbec5d314d2
-step_weight weight 3 4 checksum 32ad27fe7dc18e8e
+step_weight kernel 3 4 checksum 32ad27fe7dc18e8e
 step_weight bias 1 4 checksum 1d5930e739d105a3
 tensor input 2 4 3
   c0000000  # -2.0
@@ -382,7 +396,7 @@ tensor grad_input 2 4 3
   3ea28f5b  # 0.31749997
   3f1b851f  # 0.6075
   bfc91eb8  # -1.57125
-tensor grad_param.weight 12 decays
+tensor grad_param.kernel 12 decays
   402e147b  # 2.72
   40370a3e  # 2.8600001
   bfa147ad  # -1.2599999
@@ -395,7 +409,7 @@ tensor grad_param.weight 12 decays
   c01d70a4  # -2.46
   c08bf7d0  # -4.3740005
   404e76c8  # 3.2259998
-tensor step_param.weight 12
+tensor step_param.kernel 12
   bfa851ec  # -1.315
   bbf5c2c0  # -0.0075000226
   be11eb87  # -0.14250003
@@ -423,12 +437,12 @@ end
 case Dense rank_4_linear
 mode training
 output_shape "(None, 2, 2, 4)"
-param_count trainable 16
-param_name weight layer
+param_count trainable 16 non_trainable 0
+param_name kernel layer
 param_name bias layer
-weight weight 3 4 checksum 43d903dfad34c524
+weight kernel 3 4 checksum 43d903dfad34c524
 weight bias 1 4 checksum bc800fbec5d314d2
-step_weight weight 3 4 checksum 32ad27fe7dc18e8e
+step_weight kernel 3 4 checksum 32ad27fe7dc18e8e
 step_weight bias 1 4 checksum 1d5930e739d105a3
 tensor input 2 2 2 3
   c0000000  # -2.0
@@ -546,7 +560,7 @@ tensor grad_input 2 2 2 3
   3ea28f5b  # 0.31749997
   3f1b851f  # 0.6075
   bfc91eb8  # -1.57125
-tensor grad_param.weight 12 decays
+tensor grad_param.kernel 12 decays
   402e147b  # 2.72
   40370a3e  # 2.8600001
   bfa147ad  # -1.2599999
@@ -559,7 +573,7 @@ tensor grad_param.weight 12 decays
   c01d70a4  # -2.46
   c08bf7d0  # -4.3740005
   404e76c8  # 3.2259998
-tensor step_param.weight 12
+tensor step_param.kernel 12
   bfa851ec  # -1.315
   bbf5c2c0  # -0.0075000226
   be11eb87  # -0.14250003
@@ -587,7 +601,7 @@ end
 case Flatten rank_3
 mode training
 output_shape "(None, 12)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 3 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -693,7 +707,7 @@ end
 case Flatten rank_4
 mode training
 output_shape "(None, 12)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 2 3 2
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -799,7 +813,7 @@ end
 case Identity rank_2
 mode training
 output_shape "(None, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -849,7 +863,7 @@ end
 case Identity rank_4
 mode training
 output_shape "(None, 2, 3, 2)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 2 3 2
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -955,7 +969,7 @@ end
 case Reshape to_6
 mode training
 output_shape "(None, 6)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 2 3
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1013,7 +1027,7 @@ end
 case Reshape inferred_axis
 mode training
 output_shape "(None, 6, 2)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 3 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1119,7 +1133,7 @@ end
 case Permute swap_2_axes
 mode training
 output_shape "(None, 4, 3)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 3 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1225,7 +1239,7 @@ end
 case Permute rotate_3_axes
 mode training
 output_shape "(None, 4, 2, 3)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 2 3 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1427,7 +1441,7 @@ end
 case RepeatVector steps_3
 mode training
 output_shape "(None, 3, 4)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1501,7 +1515,7 @@ end
 case ReLU default
 mode training
 output_shape "(2, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1551,7 +1565,7 @@ end
 case LeakyReLU slope_0p3
 mode training
 output_shape "(2, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1601,7 +1615,7 @@ end
 case LeakyReLU slope_0p01
 mode training
 output_shape "(2, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1651,7 +1665,7 @@ end
 case ELU alpha_1p0
 mode training
 output_shape "(2, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1701,7 +1715,7 @@ end
 case ELU alpha_0p5
 mode training
 output_shape "(2, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1751,7 +1765,7 @@ end
 case SELU default
 mode training
 output_shape "(2, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1801,7 +1815,7 @@ end
 case Softplus default
 mode training
 output_shape "(2, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1851,7 +1865,7 @@ end
 case Softsign default
 mode training
 output_shape "(2, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1901,7 +1915,7 @@ end
 case HardSigmoid default
 mode training
 output_shape "(2, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1951,7 +1965,7 @@ end
 case Exponential default
 mode training
 output_shape "(2, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2001,7 +2015,7 @@ end
 case Linear default
 mode training
 output_shape "(2, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2051,7 +2065,7 @@ end
 case Sigmoid default
 mode training
 output_shape "(2, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2101,7 +2115,7 @@ end
 case Tanh default
 mode training
 output_shape "(2, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2151,7 +2165,7 @@ end
 case Softmax rank_2
 mode training
 output_shape "(2, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2201,7 +2215,7 @@ end
 case Softmax rank_3
 mode training
 output_shape "(2, 2, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2291,7 +2305,7 @@ end
 case PReLU per_feature
 mode training
 output_shape "(2, 5)"
-param_count trainable 5
+param_count trainable 5 non_trainable 0
 param_name alpha layer
 weight alpha 5 checksum d8c662c1f40b282a
 step_weight alpha 5 checksum b40b34c9e14d32b7
@@ -2356,7 +2370,7 @@ end
 case PReLU shared_axis_1
 mode training
 output_shape "(2, 3, 4)"
-param_count trainable 4
+param_count trainable 4 non_trainable 0
 param_name alpha layer
 weight alpha 1 4 checksum 657ae2b486ecb3a5
 step_weight alpha 1 4 checksum 09d8d3182828d9d4
@@ -2475,7 +2489,7 @@ end
 case Rescaling scale_0p5
 mode training
 output_shape "Unknown"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2525,7 +2539,7 @@ end
 case Rescaling scale_neg_1p5
 mode training
 output_shape "Unknown"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2575,7 +2589,7 @@ end
 case Rescaling scale_2p0_offset_neg_1p0
 mode training
 output_shape "Unknown"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2625,7 +2639,7 @@ end
 case Rescaling rank_4_scale_0p25
 mode training
 output_shape "Unknown"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 2 3 2
   c0000000  # -2.0
   bf051eb8  # -0.52

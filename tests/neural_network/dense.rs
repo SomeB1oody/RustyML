@@ -1,6 +1,6 @@
 //! Integration tests for the Dense and Flatten layers.
 //!
-//! Covers forward values, error paths, parameter counts, and `get_weights` output shape.
+//! Covers forward values, error paths, parameter counts, and the named weight shapes.
 //! `gradient_check.rs` covers gradient values. This file does not duplicate them.
 
 use approx::assert_abs_diff_eq;
@@ -10,11 +10,10 @@ use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::activation::relu::ReLU;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::flatten::Flatten;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
-use super::common::{GateGuard, assert_allclose};
+use super::common::{GateGuard, assert_allclose, named};
 
 // helpers
 
@@ -564,10 +563,10 @@ fn dense_set_weights_wrong_bias_shape_returns_err() {
     );
 }
 
-// Dense: get_weights returns the Dense variant with correct shapes
+// Dense: the named weights carry the shapes the layer declares
 
 #[test]
-fn dense_get_weights_returns_dense_variant_with_correct_shapes() {
+fn dense_weights_carry_the_declared_shapes() {
     let mut d = Dense::new(3, 4, Linear::new()).unwrap();
     // inject known weights so exact values can be asserted too
     let w = Array2::from_shape_vec(
@@ -580,17 +579,14 @@ fn dense_get_weights_returns_dense_variant_with_correct_shapes() {
     let b = Array2::from_shape_vec((1, 4), vec![0.1, 0.2, 0.3, 0.4]).unwrap();
     d.set_weights(w.clone(), b.clone()).unwrap();
 
-    match d.get_weights() {
-        LayerWeight::Dense(lw) => {
-            assert_eq!(lw.weight.shape(), &[3, 4]);
-            assert_eq!(lw.bias.shape(), &[1, 4]);
-            // spot-check values
-            assert_abs_diff_eq!(lw.weight[[0, 0]], 1.0_f32, epsilon = 1e-6);
-            assert_abs_diff_eq!(lw.weight[[2, 3]], 12.0_f32, epsilon = 1e-6);
-            assert_abs_diff_eq!(lw.bias[[0, 1]], 0.2_f32, epsilon = 1e-6);
-        }
-        _ => panic!("expected LayerWeight::Dense, got a different variant"),
-    }
+    let kernel = named(&d, "kernel");
+    let bias = named(&d, "bias");
+    assert_eq!(kernel.shape(), &[3, 4]);
+    assert_eq!(bias.shape(), &[1, 4]);
+    // spot-check values
+    assert_abs_diff_eq!(kernel[[0, 0]], 1.0_f32, epsilon = 1e-6);
+    assert_abs_diff_eq!(kernel[[2, 3]], 12.0_f32, epsilon = 1e-6);
+    assert_abs_diff_eq!(bias[[0, 1]], 0.2_f32, epsilon = 1e-6);
 }
 
 // Dense: backward restores the correct grad shape after forward
@@ -809,15 +805,12 @@ fn flatten_predict_equals_forward() {
     assert_allclose(&fwd, &pred, 1e-6_f32);
 }
 
-// Flatten: get_weights returns the Empty variant (no trainable parameters)
+// Flatten: the named weight list is empty (no trainable parameters)
 
 #[test]
-fn flatten_get_weights_is_empty() {
+fn flatten_weights_is_empty() {
     let fl = Flatten::new(vec![2, 3, 4]).unwrap();
-    assert!(
-        matches!(fl.get_weights(), LayerWeight::Empty),
-        "Flatten must expose LayerWeight::Empty"
-    );
+    assert!(fl.weights().is_empty(), "Flatten must expose no weight");
 }
 
 // Flatten: param_count is NoTrainable

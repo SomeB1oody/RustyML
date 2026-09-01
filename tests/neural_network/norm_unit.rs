@@ -7,7 +7,6 @@
 use ndarray::{Array2, Array3, Array4, IxDyn};
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::layers::regularization::normalization::unit_normalization::{
     UnitNormalization, UnitNormalizationAxis,
 };
@@ -630,7 +629,7 @@ fn unit_normalization_holds_no_parameter() {
     let mut layer = last_axis();
     assert_eq!(layer.layer_type(), "UnitNormalization");
     assert_eq!(layer.param_count(), ParamCounts::none());
-    assert!(matches!(layer.get_weights(), LayerWeight::Empty));
+    assert!(layer.weights().is_empty());
     assert!(layer.parameters().is_empty());
 }
 

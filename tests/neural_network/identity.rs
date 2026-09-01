@@ -9,7 +9,6 @@ use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::identity::Identity;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
@@ -100,7 +99,7 @@ fn identity_holds_no_parameter() {
     let mut layer = Identity::new();
     assert_eq!(layer.layer_type(), "Identity");
     assert_eq!(layer.param_count(), ParamCounts::none());
-    assert!(matches!(layer.get_weights(), LayerWeight::Empty));
+    assert!(layer.weights().is_empty());
     assert!(layer.parameters().is_empty());
 }
 

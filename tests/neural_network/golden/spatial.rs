@@ -36,7 +36,6 @@ use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::border::{Cropping1D, Cropping2D, Cropping3D};
 use rustyml::neural_network::layers::border::{ZeroPadding1D, ZeroPadding2D, ZeroPadding3D};
 use rustyml::neural_network::layers::convolution::PaddingType;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::layers::pooling::{
     AveragePooling1D, AveragePooling2D, AveragePooling3D,
 };
@@ -50,7 +49,7 @@ use rustyml::neural_network::layers::pooling::{MaxPooling1D, MaxPooling2D, MaxPo
 use rustyml::neural_network::layers::upsampling::{
     Interpolation, UpSampling1D, UpSampling2D, UpSampling3D,
 };
-use rustyml::neural_network::traits::{Layer, ParamGrad};
+use rustyml::neural_network::traits::{Layer, ParamGrad, WeightMut, WeightRef};
 
 /// Every layer type of the spatial family, in the order the data file records them.
 fn fixtures() -> Vec<LayerFixture> {
@@ -180,8 +179,12 @@ impl Layer for HandBuiltInput {
         self.inner.parameters()
     }
 
-    fn get_weights(&self) -> LayerWeight<'_> {
-        self.inner.get_weights()
+    fn weights(&self) -> Vec<WeightRef<'_>> {
+        self.inner.weights()
+    }
+
+    fn weights_mut(&mut self) -> Vec<WeightMut<'_>> {
+        self.inner.weights_mut()
     }
 
     fn set_training_if_mode_dependent(&mut self, is_training: bool) {

@@ -11,6 +11,7 @@
 //!
 //! Gradient correctness lives in `gradient_check.rs`.
 
+use crate::common::named;
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, ArrayD};
 use rustyml::error::Error;
@@ -18,7 +19,6 @@ use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::dense::Dense;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization;
 use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
 use rustyml::neural_network::optimizers::AdaGrad;
@@ -27,7 +27,7 @@ use rustyml::neural_network::optimizers::AdamW;
 use rustyml::neural_network::optimizers::RMSprop;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
-use rustyml::neural_network::traits::{Layer, Optimizer, ParamGrad};
+use rustyml::neural_network::traits::{Layer, Optimizer, ParamGrad, WeightMut, WeightRef};
 
 // Helper: simple regression problem
 
@@ -552,10 +552,10 @@ fn sgd_one_step_weight_update_matches_hand_calculation() {
 
 /// Reads the (weight, bias) scalars of a model whose first layer is a 1x1 Dense
 fn dense_wb(model: &Sequential) -> (f32, f32) {
-    match &model.get_weights()[0] {
-        LayerWeight::Dense(d) => (d.weight[[0, 0]], d.bias[[0, 0]]),
-        _ => panic!("expected Dense layer weights"),
-    }
+    (
+        model.weight("0.kernel").expect("layer 0 must be Dense")[[0, 0]],
+        model.weight("0.bias").expect("layer 0 must be Dense")[[0, 0]],
+    )
 }
 
 /// 1 clipped SGD step on the same w=1, b=0, x=2, y=6 problem as the hand-calc test above.
@@ -729,7 +729,7 @@ fn dense_after_one_sgd_step(
     b0: &Array2<f32>,
     lr: f32,
     weight_decay: f32,
-) -> (Array2<f32>, Array2<f32>) {
+) -> (ArrayD<f32>, ArrayD<f32>) {
     let mut layer = Dense::new(2, 2, Linear::new()).unwrap();
     layer.set_weights(w0.clone(), b0.clone()).unwrap();
     let x = Array::from_shape_vec((1, 2), vec![1.0_f32, 2.0])
@@ -744,10 +744,10 @@ fn dense_after_one_sgd_step(
     let mut opt = SGD::new(lr, 0.0, false, weight_decay).unwrap();
     opt.step();
     opt.update(0, &mut layer, 1.0);
-    match layer.get_weights() {
-        LayerWeight::Dense(d) => ((*d.weight).clone(), (*d.bias).clone()),
-        _ => panic!("expected Dense weights"),
-    }
+    (
+        named(&layer, "kernel").to_owned(),
+        named(&layer, "bias").to_owned(),
+    )
 }
 
 /// Decoupled weight decay shrinks Dense weights by exactly `lr*wd*w0`, but leaves the bias
@@ -800,10 +800,10 @@ fn batchnorm_gamma_beta_after_one_sgd_step(weight_decay: f32) -> (ArrayD<f32>, A
     let mut opt = SGD::new(0.1, 0.0, false, weight_decay).unwrap();
     opt.step();
     opt.update(0, &mut bn, 1.0);
-    match bn.get_weights() {
-        LayerWeight::BatchNormalization(w) => ((*w.gamma).clone(), (*w.beta).clone()),
-        _ => panic!("expected BatchNormalization weights"),
-    }
+    (
+        named(&bn, "gamma").to_owned(),
+        named(&bn, "beta").to_owned(),
+    )
 }
 
 /// Normalization scale and shift (gamma and beta) are excluded from weight decay: a non-zero
@@ -837,7 +837,7 @@ fn dense_weights_after_one_step<O: Optimizer>(
     mut opt: O,
     w0: &Array2<f32>,
     b0: &Array2<f32>,
-) -> (Array2<f32>, Array2<f32>) {
+) -> (ArrayD<f32>, ArrayD<f32>) {
     let mut layer = Dense::new(2, 2, Linear::new()).unwrap();
     layer.set_weights(w0.clone(), b0.clone()).unwrap();
     let x = Array::from_shape_vec((1, 2), vec![1.0_f32, 2.0])
@@ -851,10 +851,10 @@ fn dense_weights_after_one_step<O: Optimizer>(
 
     opt.step();
     opt.update(0, &mut layer, 1.0);
-    match layer.get_weights() {
-        LayerWeight::Dense(d) => ((*d.weight).clone(), (*d.bias).clone()),
-        _ => panic!("expected Dense weights"),
-    }
+    (
+        named(&layer, "kernel").to_owned(),
+        named(&layer, "bias").to_owned(),
+    )
 }
 
 /// With `weight_decay == 0.0`, Adam and AdamW are the same algorithm: identical weights and bias
@@ -1028,15 +1028,12 @@ fn one_pass(layer: &mut Dense) {
 }
 
 /// The live kernel of a Dense layer
-fn dense_kernel(layer: &Dense) -> Array2<f32> {
-    match layer.get_weights() {
-        LayerWeight::Dense(d) => (*d.weight).clone(),
-        _ => panic!("expected Dense weights"),
-    }
+fn dense_kernel(layer: &Dense) -> ArrayD<f32> {
+    named(layer, "kernel").to_owned()
 }
 
 /// Asserts that 2 kernels agree element by element
-fn assert_same_kernel(got: &Array2<f32>, want: &Array2<f32>, message: &str) {
+fn assert_same_kernel(got: &ArrayD<f32>, want: &ArrayD<f32>, message: &str) {
     assert_eq!(got.shape(), want.shape());
     for (g, w) in got.iter().zip(want.iter()) {
         assert!((*g - *w).abs() <= 1e-6, "{message}: {g} != {w}");
@@ -1135,9 +1132,11 @@ fn adding_a_layer_must_not_move_an_earlier_layer_state() {
     grown.add(pass_through_dense());
     grown.train_batch(&x, &y).unwrap();
 
-    let first_of = |model: &Sequential| match &model.get_weights()[0] {
-        LayerWeight::Dense(d) => (*d.weight).clone(),
-        _ => panic!("expected Dense weights"),
+    let first_of = |model: &Sequential| {
+        model
+            .weight("0.kernel")
+            .expect("layer 0 must be Dense")
+            .to_owned()
     };
     assert_same_kernel(
         &first_of(&grown),
@@ -1201,8 +1200,12 @@ impl Layer for RosterLayer {
         params
     }
 
-    fn get_weights(&self) -> LayerWeight<'_> {
-        LayerWeight::Empty
+    fn weights(&self) -> Vec<WeightRef<'_>> {
+        Vec::new()
+    }
+
+    fn weights_mut(&mut self) -> Vec<WeightMut<'_>> {
+        Vec::new()
     }
 }
 

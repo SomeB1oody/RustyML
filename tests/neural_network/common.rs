@@ -2,9 +2,10 @@
 
 #![allow(dead_code)]
 
-use ndarray::{ArrayBase, Data, Dimension};
+use ndarray::{ArrayBase, ArrayViewD, Data, Dimension};
 use ndarray_rand::rand::SeedableRng;
 use ndarray_rand::rand::rngs::StdRng;
+use rustyml::neural_network::traits::Layer;
 use std::sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// A deterministically seeded RNG, for reproducible tests.
@@ -287,4 +288,19 @@ where
             "element mismatch: actual {a:?} vs expected {e:?} (eps {eps:?})"
         );
     }
+}
+
+/// 1 named array of a layer, or a panic that names what the layer holds instead.
+///
+/// The checkpoint format addresses every array by name, so a test that reads a weight reads it
+/// by the same name. A wrong name is a test defect, and the panic lists the names the layer
+/// gives, so the report says what to write instead.
+pub fn named<'a>(layer: &'a dyn Layer, name: &str) -> ArrayViewD<'a, f32> {
+    layer.weight(name).unwrap_or_else(|| {
+        let held: Vec<&str> = layer.weights().iter().map(|entry| entry.name).collect();
+        panic!(
+            "the layer `{}` holds no weight named `{name}`; it holds {held:?}",
+            layer.layer_type()
+        )
+    })
 }

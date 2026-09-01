@@ -13,7 +13,6 @@ use rustyml::neural_network::layers::border::{
 use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::flatten::Flatten;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
@@ -489,16 +488,16 @@ fn border_layers_have_no_trainable_parameters() {
     assert_eq!(Cropping3D::new(1).param_count(), ParamCounts::none());
 }
 
-/// No border layer has weights, so get_weights gives the Empty variant
+/// No border layer has weights, so the named weight list is empty
 #[test]
 fn border_layers_expose_empty_weights() {
     assert!(
-        matches!(ZeroPadding1D::new(1).get_weights(), LayerWeight::Empty),
-        "ZeroPadding1D must expose LayerWeight::Empty"
+        ZeroPadding1D::new(1).weights().is_empty(),
+        "ZeroPadding1D must expose no weight"
     );
     assert!(
-        matches!(Cropping1D::new(1).get_weights(), LayerWeight::Empty),
-        "Cropping1D must expose LayerWeight::Empty"
+        Cropping1D::new(1).weights().is_empty(),
+        "Cropping1D must expose no weight"
     );
 }
 

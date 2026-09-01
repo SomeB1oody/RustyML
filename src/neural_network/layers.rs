@@ -3,9 +3,10 @@
 //! Declares every layer submodule and glob-re-exports the public layer types. It also defines
 //! the shared infrastructure used across the subsystem: the
 //! [`ParamCounts`](crate::neural_network::layers::ParamCounts) report (how many parameter
-//! elements a layer holds, split into trainable and non-trainable), and the
-//! `no_trainable_parameters_layer_functions` macro. That macro emits the `param_count` and
-//! `get_weights` stubs for parameter-free layers.
+//! elements a layer holds, split into trainable and non-trainable), and the 2 macros that
+//! give a layer its weight methods. `no_trainable_parameters_layer_functions` emits the stubs
+//! of a parameter-free layer, and `named_weight_layer_functions` builds the named array list
+//! of a layer that holds arrays.
 //!
 //! The submodules fall into a few categories:
 //!
@@ -25,20 +26,18 @@
 //!   - [`rescaling`](crate::neural_network::layers::rescaling)
 //!   - [`reshape`](crate::neural_network::layers::reshape)
 //!   - [`upsampling`](crate::neural_network::layers::upsampling)
-//! - Weight containers: [`layer_weight`](crate::neural_network::layers::layer_weight)
 //! - Shared (private) helpers: `conv_op_helpers` (2D/4D convolution zero-padding) and
 //!   `shape_helpers` (pooling/convolution output-shape calculators)
 //! - Validation: `validation` (shared input/weight checks)
-//! - Serialization: [`serialize_model`](crate::neural_network::layers::serialize_model)
-//!   (model-level snapshot and load-time weight application)
+//! - Serialization: [`checkpoint`](crate::neural_network::layers::checkpoint)
+//!   (the named on-disk format, and the load that applies it)
 
 /// How many parameter elements a layer holds, split by whether training updates them
 ///
 /// The 2 counts are independent, and a layer reports both. A Dense layer holds trainable
 /// elements only. A pooling or activation layer holds none of either.
-/// [`BatchNormalization`](crate::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization)
-/// holds both: `gamma` and `beta` are trainable, and the running mean and the running variance
-/// are not. The running statistics move on every training forward pass, but no optimizer ever
+/// [`BatchNormalization`] holds both: `gamma` and `beta` are trainable, and the running mean
+/// and the running variance are not. The running statistics move on every training forward pass, but no optimizer ever
 /// sees them, so they are non-trainable exactly as Keras 3 reports them
 ///
 /// [`Sequential::summary`](crate::neural_network::sequential::Sequential::summary) adds the 2
@@ -115,6 +114,8 @@ impl ParamCounts {
 pub mod activation;
 /// Zero-padding and cropping layers that resize the spatial axes at their ends
 pub mod border;
+/// The named checkpoint format: what a saved model holds, and how a load applies it
+pub mod checkpoint;
 /// Convolution-internal helpers (output assembly, gradient accumulation, padding)
 mod conv_op_helpers;
 /// Convolutional layer for neural networks
@@ -127,8 +128,6 @@ pub mod embedding;
 pub mod flatten;
 /// A layer that passes its input through unchanged
 pub mod identity;
-/// Container for different types of neural network layer weights
-pub mod layer_weight;
 /// A layer that reorders the axes after the batch axis
 pub mod permute;
 /// Pooling layer for neural networks
@@ -143,8 +142,6 @@ pub mod repeat_vector;
 pub mod rescaling;
 /// A layer that rewrites the axes after the batch axis into a target shape
 pub mod reshape;
-/// Model-level serialization scaffolding (whole-model snapshot and load-time weight application)
-pub mod serialize_model;
 /// Output-shape calculators for pooling and convolution layers
 mod shape_helpers;
 /// Upsampling layers that enlarge the spatial axes by a whole-number factor
@@ -171,24 +168,102 @@ pub use upsampling::*;
 /// Generates the trait method stubs for layers without trainable parameters
 ///
 /// Such layers rely on the default [`Layer::parameters`] (an empty list, so the optimizer
-/// skips them). This macro supplies the remaining required `param_count` and `get_weights`
-/// methods
+/// skips them). This macro supplies the remaining required `param_count`, `weights`, and
+/// `weights_mut` methods
 ///
 /// It is path-exported via a `pub(in ...) use` re-export, so callers import it explicitly
 /// rather than depending on textual macro ordering:
 /// `use crate::neural_network::layers::no_trainable_parameters_layer_functions;`
 ///
-/// The generated `param_count` returns `ParamCounts::none()`, and `get_weights`
-/// returns `LayerWeight::Empty`
+/// The generated `param_count` returns `ParamCounts::none()`, and both weight methods return
+/// the empty vector, so such a layer contributes no path to a checkpoint
+///
+/// [`Layer::parameters`]: crate::neural_network::traits::Layer::parameters
 macro_rules! no_trainable_parameters_layer_functions {
     () => {
         fn param_count(&self) -> ParamCounts {
             ParamCounts::none()
         }
 
-        fn get_weights(&self) -> LayerWeight<'_> {
-            LayerWeight::Empty
+        fn weights(&self) -> Vec<$crate::neural_network::traits::WeightRef<'_>> {
+            Vec::new()
+        }
+
+        fn weights_mut(&mut self) -> Vec<$crate::neural_network::traits::WeightMut<'_>> {
+            Vec::new()
         }
     };
 }
 pub(in crate::neural_network::layers) use no_trainable_parameters_layer_functions;
+
+/// Generates the `weights` and `weights_mut` methods of a layer that holds arrays
+///
+/// 1 list serves both directions, so the name, the kind, and the order of an array cannot
+/// drift between the read path and the write path. The checkpoint format reads the name and
+/// the kind from it, so this list is the layer half of every checkpoint path
+///
+/// Each entry reads `trainable "<name>" => <field>` or `non_trainable "<name>" => <field>`.
+/// The name is the Keras 3 name of the array, and the field is the field of the layer struct
+/// that holds it. A field of a nested struct is written with dots, such as `gates.kernel`.
+/// The 2 halves stay next to each other, so a renamed field breaks this list instead of
+/// leaving a stale name behind
+///
+/// An entry that ends in `if <flag>` is optional. The flag is a `bool` field of the same
+/// layer, and the array reaches the list only while the flag is true. `Dense` writes
+/// `trainable "bias" => bias if use_bias`, so a layer built with `use_bias` set to false
+/// exposes the kernel alone and its checkpoint holds 1 path. An optional entry moves no other
+/// entry, because a checkpoint addresses an array by name and never by position
+///
+/// Give an array the same name that [`Layer::parameters`] gives it. Nothing in the compiler
+/// binds the 2, and the golden-fixture net asserts that a parameter and the array of the same
+/// name are 1 storage
+///
+/// It is path-exported like `no_trainable_parameters_layer_functions`:
+/// `use crate::neural_network::layers::named_weight_layer_functions;`
+///
+/// [`Layer::parameters`]: crate::neural_network::traits::Layer::parameters
+macro_rules! named_weight_layer_functions {
+    ($($kind:ident $name:literal => $($field:ident).+ $(if $flag:ident)?),+ $(,)?) => {
+        fn weights(&self) -> Vec<$crate::neural_network::traits::WeightRef<'_>> {
+            [$($crate::neural_network::layers::optional_named_weight!(
+                $crate::neural_network::traits::WeightRef::$kind(
+                    $name,
+                    self.$($field).+.view().into_dyn(),
+                )
+                $(, self.$flag)?
+            )),+]
+                .into_iter()
+                .flatten()
+                .collect()
+        }
+
+        fn weights_mut(&mut self) -> Vec<$crate::neural_network::traits::WeightMut<'_>> {
+            [$($crate::neural_network::layers::optional_named_weight!(
+                $crate::neural_network::traits::WeightMut::$kind(
+                    $name,
+                    self.$($field).+.view_mut().into_dyn(),
+                )
+                $(, self.$flag)?
+            )),+]
+                .into_iter()
+                .flatten()
+                .collect()
+        }
+    };
+}
+pub(in crate::neural_network::layers) use named_weight_layer_functions;
+
+/// Wraps 1 named array as the `Option` that `named_weight_layer_functions` collects
+///
+/// The rule with 1 argument takes an array that the layer always holds, and it is always
+/// `Some`. The rule with 2 takes an optional array and the flag that decides whether the layer
+/// holds it. Splitting the 2 rules keeps the always-present case free of any run-time test
+macro_rules! optional_named_weight {
+    ($entry:expr) => {
+        Some($entry)
+    };
+    ($entry:expr, $flag:expr) => {
+        $flag.then(|| $entry)
+    };
+}
+pub(in crate::neural_network::layers) use optional_named_weight;

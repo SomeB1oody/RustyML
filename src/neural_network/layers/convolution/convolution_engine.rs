@@ -422,13 +422,13 @@ pub(super) fn build_col_range(ctx: &ColContext, b: usize, c0: usize, c1: usize) 
     col
 }
 
-/// Runs the forward convolution. `weight_shape` is `[k..., Cin, F]`, `bias` is `[F]`, and
-/// `strides` and `dilation` have one entry per spatial axis
+/// Runs the forward convolution. `weight_shape` is `[k..., Cin, F]`, `bias` is `[F]` or `None`
+/// for a layer built without one, and `strides` and `dilation` have one entry per spatial axis
 pub(super) fn conv_forward(
     input: &Tensor,
     weights: &[f32],
     weight_shape: &[usize],
-    bias: &[f32],
+    bias: Option<&[f32]>,
     strides: &[usize],
     dilation: &[usize],
     padding: ConvPadding,
@@ -453,7 +453,7 @@ pub fn conv_forward_impl(
     input: &Tensor,
     weights: &[f32],
     weight_shape: &[usize],
-    bias: &[f32],
+    bias: Option<&[f32]>,
     strides: &[usize],
     padding: PaddingType,
     force_parallel: Option<bool>,
@@ -476,7 +476,7 @@ fn conv_forward_gated(
     input: &Tensor,
     weights: &[f32],
     weight_shape: &[usize],
-    bias: &[f32],
+    bias: Option<&[f32]>,
     strides: &[usize],
     dilation: &[usize],
     padding: ConvPadding,
@@ -539,7 +539,8 @@ fn conv_forward_gated(
         // no separate bias sweep. The per-filter bias is 1 value per column of the
         // `[positions, F]` product, so it is a `Bias::PerCol` epilogue applied after the
         // accumulation. That gives the same "bias added last" order as the elementwise pass it
-        // replaces, bit for bit. `blk` is a contiguous row block of `out3`, so the product lands
+        // replaces, bit for bit. A layer without a bias passes no epilogue, so the block holds
+        // exactly the product. `blk` is a contiguous row block of `out3`, so the product lands
         // in its final place with no scatter and no copy
         gemmkit_ndarray::gemm_fused(
             1.0,
@@ -547,7 +548,7 @@ fn conv_forward_gated(
             &w_mat,
             0.0,
             &mut blk,
-            Some(Bias::PerCol(bias)),
+            bias.map(Bias::PerCol),
             None,
             // Serial because `fill_block` already runs as 1 leaf task of the batch-by-position-
             // chunk par_iters above the gate, and as a plain loop body below it
@@ -1147,7 +1148,7 @@ mod tests {
             &input,
             &weights,
             &w_shape,
-            &bias,
+            Some(&bias),
             &[1, 1],
             &[1, 1],
             ConvPadding::Valid,
@@ -1173,7 +1174,7 @@ mod tests {
             &input,
             &weights,
             &[2, 2, 1, 2],
-            &bias,
+            Some(&bias),
             &[1, 1],
             &[1, 1],
             ConvPadding::Valid,
@@ -1198,7 +1199,7 @@ mod tests {
             &input,
             &weights,
             &[3, 1, 1],
-            &bias,
+            Some(&bias),
             &[1],
             &[1],
             ConvPadding::Same,

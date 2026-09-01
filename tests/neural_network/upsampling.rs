@@ -11,7 +11,6 @@ use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::flatten::Flatten;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::layers::pooling::max_pooling_2d::MaxPooling2D;
 use rustyml::neural_network::layers::upsampling::{
     Interpolation, UpSampling1D, UpSampling2D, UpSampling3D,
@@ -554,7 +553,7 @@ fn up_sampling_layers_hold_no_parameter() {
 
     for (layer, name) in layers.iter_mut().zip(names) {
         assert_eq!(layer.param_count(), ParamCounts::none());
-        assert!(matches!(layer.get_weights(), LayerWeight::Empty));
+        assert!(layer.weights().is_empty());
         assert!(layer.parameters().is_empty());
         // No forward pass has run, so the layer cannot know its output shape yet
         assert_eq!(layer.output_shape(), "Unknown");

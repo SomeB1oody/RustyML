@@ -5,12 +5,11 @@ use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::format_shape;
-use crate::neural_network::layers::layer_weight::{LayerWeight, PReLULayerWeight};
+use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use crate::parallel_gates::cheap_map_parallel_threshold;
 use ndarray::{ArrayD, Axis, Zip};
-use std::borrow::Cow;
 
 /// Parametric ReLU activation layer, which learns its negative-side slope
 ///
@@ -430,9 +429,7 @@ impl Layer for PReLU {
         params
     }
 
-    fn get_weights(&self) -> LayerWeight<'_> {
-        LayerWeight::PReLU(PReLULayerWeight {
-            alpha: Cow::Borrowed(&self.alpha),
-        })
-    }
+    named_weight_layer_functions!(
+        trainable "alpha" => alpha,
+    );
 }

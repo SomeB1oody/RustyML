@@ -3,7 +3,6 @@
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::layers::upsampling::Interpolation;
 use crate::neural_network::layers::upsampling::resize_engine::{

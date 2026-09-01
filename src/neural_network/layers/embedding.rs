@@ -3,14 +3,13 @@
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::layer_weight::{EmbeddingLayerWeight, LayerWeight};
+use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use crate::parallel_gates::{cheap_map_parallel_threshold, split_cap};
 use ndarray::{Array, Array2, IxDyn};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rayon::prelude::*;
-use std::borrow::Cow;
 
 /// Half-width of the uniform range that initializes the lookup table
 ///
@@ -391,7 +390,9 @@ impl Layer for Embedding {
     }
 
     fn param_count(&self) -> ParamCounts {
-        ParamCounts::trainable(self.input_dim * self.output_dim)
+        // Read the arrays the layer holds rather than the configuration, so a change to
+        // the roster corrects the count with no second formula to keep in step
+        ParamCounts::trainable(self.embeddings.len())
     }
 
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
@@ -414,9 +415,7 @@ impl Layer for Embedding {
         params
     }
 
-    fn get_weights(&self) -> LayerWeight<'_> {
-        LayerWeight::Embedding(EmbeddingLayerWeight {
-            embeddings: Cow::Borrowed(&self.embeddings),
-        })
-    }
+    named_weight_layer_functions!(
+        trainable "embeddings" => embeddings,
+    );
 }

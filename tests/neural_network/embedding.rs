@@ -15,14 +15,13 @@ use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::embedding::Embedding;
 use rustyml::neural_network::layers::flatten::Flatten;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
-use super::common::assert_allclose;
+use super::common::{assert_allclose, named};
 
 // helpers
 
@@ -433,18 +432,14 @@ fn embedding_reports_its_type_and_output_shape() {
     assert_eq!(layer.output_shape(), "(None, 3)");
 }
 
-/// `get_weights` borrows the live table
+/// The named weight borrows the live table
 #[test]
-fn embedding_get_weights_returns_the_embedding_variant() {
+fn embedding_names_its_table_embeddings() {
     let layer = embedding_with_table(4, 3, reference_table());
-    match layer.get_weights() {
-        LayerWeight::Embedding(w) => {
-            assert_eq!(w.embeddings.shape(), &[4, 3]);
-            assert_eq!(w.embeddings[[0, 0]], -0.902);
-            assert_eq!(w.embeddings[[3, 2]], 0.491);
-        }
-        other => panic!("expected the Embedding variant, got {other:?}"),
-    }
+    let table = named(&layer, "embeddings");
+    assert_eq!(table.shape(), &[4, 3]);
+    assert_eq!(table[[0, 0]], -0.902);
+    assert_eq!(table[[3, 2]], 0.491);
 }
 
 /// The layer exposes no parameter until a backward pass has produced a gradient
@@ -471,21 +466,14 @@ fn embedding_with_random_state_is_reproducible_and_bounded() {
     let second = Embedding::new(64, 8).unwrap().with_random_state(7);
     let third = Embedding::new(64, 8).unwrap().with_random_state(8);
 
-    let (LayerWeight::Embedding(a), LayerWeight::Embedding(b), LayerWeight::Embedding(c)) = (
-        first.get_weights(),
-        second.get_weights(),
-        third.get_weights(),
-    ) else {
-        panic!("every Embedding must report the Embedding variant");
-    };
+    let a = named(&first, "embeddings");
+    let b = named(&second, "embeddings");
+    let c = named(&third, "embeddings");
 
-    assert_allclose(&*a.embeddings, &*b.embeddings, 0.0_f32);
+    assert_allclose(&a, &b, 0.0_f32);
+    assert!(a != c, "a different seed must give a different table");
     assert!(
-        a.embeddings != c.embeddings,
-        "a different seed must give a different table"
-    );
-    assert!(
-        a.embeddings.iter().all(|v| v.abs() <= 0.05),
+        a.iter().all(|v| v.abs() <= 0.05),
         "the table starts inside the uniform range of the Keras default"
     );
 }
@@ -539,15 +527,15 @@ fn embedding_training_leaves_an_unselected_row_untouched() {
             MeanSquaredError::new(),
         );
 
-    let before = match model.get_weights().remove(0) {
-        LayerWeight::Embedding(w) => w.embeddings.into_owned(),
-        _ => panic!("layer 0 must be the Embedding layer"),
-    };
+    let before = model
+        .weight("0.embeddings")
+        .expect("layer 0 must be the Embedding layer")
+        .to_owned();
     model.fit(&x, &y, 5).unwrap();
-    let after = match model.get_weights().remove(0) {
-        LayerWeight::Embedding(w) => w.embeddings.into_owned(),
-        _ => panic!("layer 0 must be the Embedding layer"),
-    };
+    let after = model
+        .weight("0.embeddings")
+        .expect("layer 0 must be the Embedding layer")
+        .to_owned();
 
     // Rows 2 and 3 never appear in the batch, so plain SGD never moves them
     for row in [2usize, 3] {

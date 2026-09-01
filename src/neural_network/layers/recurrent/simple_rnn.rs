@@ -5,7 +5,7 @@ use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
-use crate::neural_network::layers::layer_weight::{LayerWeight, SimpleRNNLayerWeight};
+use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::recurrent::gate::take_cache;
 use crate::neural_network::layers::recurrent::validation::{
     split_grad_output, validate_input_3d, validate_recurrent_dimensions,
@@ -17,7 +17,6 @@ use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Activation as FusedActivation, Bias, Parallelism};
 use ndarray::{Array, Array2, Array3, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
-use std::borrow::Cow;
 
 /// Simple Recurrent Neural Network (SimpleRNN) layer
 ///
@@ -486,7 +485,9 @@ impl Layer for SimpleRNN {
     }
 
     fn param_count(&self) -> ParamCounts {
-        ParamCounts::trainable(self.input_dim * self.units + self.units * self.units + self.units)
+        // Read the arrays the layer holds rather than the configuration, so a change to
+        // the roster corrects the count with no second formula to keep in step
+        ParamCounts::trainable(self.kernel.len() + self.recurrent_kernel.len() + self.bias.len())
     }
 
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
@@ -528,11 +529,9 @@ impl Layer for SimpleRNN {
         params
     }
 
-    fn get_weights(&self) -> LayerWeight<'_> {
-        LayerWeight::SimpleRNN(SimpleRNNLayerWeight {
-            kernel: Cow::Borrowed(&self.kernel),
-            recurrent_kernel: Cow::Borrowed(&self.recurrent_kernel),
-            bias: Cow::Borrowed(&self.bias),
-        })
-    }
+    named_weight_layer_functions!(
+        trainable "kernel" => kernel,
+        trainable "recurrent_kernel" => recurrent_kernel,
+        trainable "bias" => bias,
+    );
 }

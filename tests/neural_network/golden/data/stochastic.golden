@@ -3,23 +3,37 @@
 # The harness in tests/neural_network/golden wrote this file. Do not edit it by hand.
 # Regenerate it with:
 #
-#     RUSTYML_REGEN_GOLDEN=1 cargo test --test neural_network golden
+#     RUSTYML_REGEN_GOLDEN="<reason>" cargo test --test neural_network golden
 #
 # Regeneration is an explicit claim that the behavior change was intended and reviewed.
+# The first capture of a family needs that claim alone. A run that adds, changes, or
+# removes a case of a file that exists is refused 1 time. The refusal prints every
+# difference and 1 acknowledgment token, and a second run must carry that token in
+# RUSTYML_REGEN_GOLDEN_ACCEPT. Force a rebuild of the test binary before every regeneration.
+#
+# The content_digest line below records a digest of this whole file, the number of
+# cases, and the number of recorded values. The harness verifies all 3 before it reads
+# the file. An edit by hand therefore stops every run of the net. Restore such a file
+# from version control. A deletion of this file is refused as well.
+#
+# Regeneration history, newest first. Each line holds the reason of 1 run that wrote
+# this file.
+#
+# reason the checkpoint is addressed by name, so the layer supplies every recorded parameter name and the parameter count records both halves
 #
 # Each value line holds the raw f32 bits from to_bits, in 8 lowercase hexadecimal
 # digits. The text after the "#" is the same value in decimal, and it is a comment.
 #
 # The module doc comment of tests/neural_network/golden/mod.rs holds the grammar.
 
-format 5
+format 6
 family stochastic
-content_digest 93b04b7c1c3f5ddb cases 24 values 2792
+content_digest 895f8767469c3b1b cases 24 values 2792
 
 case Dropout rate_0p5_training
 mode training
 output_shape "(2, 8)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -93,7 +107,7 @@ end
 case Dropout rate_0p5_inference
 mode inference
 output_shape "(2, 8)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -167,7 +181,7 @@ end
 case Dropout rate_0p0_training
 mode training
 output_shape "(2, 8)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -241,7 +255,7 @@ end
 case Dropout rate_1p0_training
 mode training
 output_shape "(2, 8)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -315,7 +329,7 @@ end
 case Dropout noise_shape_shared_batch_training
 mode training
 output_shape "(2, 8)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -389,7 +403,7 @@ end
 case Dropout noise_shape_shared_batch_inference
 mode inference
 output_shape "(2, 8)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -463,7 +477,7 @@ end
 case SpatialDropout1D rate_0p5_training
 mode training
 output_shape "(2, 4, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 4 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -633,7 +647,7 @@ end
 case SpatialDropout1D rate_0p5_inference
 mode inference
 output_shape "(2, 4, 5)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 4 5
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -803,7 +817,7 @@ end
 case SpatialDropout2D rate_0p5_training
 mode training
 output_shape "(2, 3, 3, 4)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 3 3 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1101,7 +1115,7 @@ end
 case SpatialDropout2D rate_0p5_inference
 mode inference
 output_shape "(2, 3, 3, 4)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 3 3 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1399,7 +1413,7 @@ end
 case SpatialDropout3D rate_0p5_training
 mode training
 output_shape "(2, 2, 2, 3, 4)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 2 2 3 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -1793,7 +1807,7 @@ end
 case SpatialDropout3D rate_0p5_inference
 mode inference
 output_shape "(2, 2, 2, 3, 4)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 2 2 3 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2187,7 +2201,7 @@ end
 case GaussianNoise stddev_0p5_training
 mode training
 output_shape "(2, 8)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2261,7 +2275,7 @@ end
 case GaussianNoise stddev_0p5_inference
 mode inference
 output_shape "(2, 8)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2335,7 +2349,7 @@ end
 case GaussianNoise stddev_0p0_training
 mode training
 output_shape "(2, 8)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2409,7 +2423,7 @@ end
 case GaussianDropout rate_0p3_training
 mode training
 output_shape "(2, 8)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2483,7 +2497,7 @@ end
 case GaussianDropout rate_0p3_inference
 mode inference
 output_shape "(2, 8)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2557,7 +2571,7 @@ end
 case GaussianDropout rate_0p0_training
 mode training
 output_shape "(2, 8)"
-param_count none
+param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2631,17 +2645,17 @@ end
 case BatchNormalization channels_4_training
 mode training
 output_shape "(2, 4)"
-param_count trainable 8
+param_count trainable 8 non_trainable 8
 param_name gamma layer
 param_name beta layer
 weight gamma 4 checksum 657ae2b486ecb3a5
 weight beta 4 checksum 956f95fd52284d8f
-weight running_mean 4 checksum 51f05b78ae07c9cc
-weight running_var 4 checksum 2b13f8605e2f3b32
+weight moving_mean 4 checksum 51f05b78ae07c9cc
+weight moving_variance 4 checksum 2b13f8605e2f3b32
 step_weight gamma 4 checksum dd6b156f612f6bd8
 step_weight beta 4 checksum 322716b39aeea922
-step_weight running_mean 4 checksum 51f05b78ae07c9cc
-step_weight running_var 4 checksum 2b13f8605e2f3b32
+step_weight moving_mean 4 checksum 51f05b78ae07c9cc
+step_weight moving_variance 4 checksum 2b13f8605e2f3b32
 tensor input 2 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2703,17 +2717,17 @@ end
 case BatchNormalization spatial_channels_3_training
 mode training
 output_shape "(2, 3, 3, 3)"
-param_count trainable 6
+param_count trainable 6 non_trainable 6
 param_name gamma layer
 param_name beta layer
 weight gamma 3 checksum 31f54272e7718862
 weight beta 3 checksum 01ed4e8099afea06
-weight running_mean 3 checksum c5cee1e7158d5984
-weight running_var 3 checksum 9e758ff03b8b7532
+weight moving_mean 3 checksum c5cee1e7158d5984
+weight moving_variance 3 checksum 9e758ff03b8b7532
 step_weight gamma 3 checksum 5eda9bf9285bbe95
 step_weight beta 3 checksum ab20a177636535d8
-step_weight running_mean 3 checksum c5cee1e7158d5984
-step_weight running_var 3 checksum 9e758ff03b8b7532
+step_weight moving_mean 3 checksum c5cee1e7158d5984
+step_weight moving_variance 3 checksum 9e758ff03b8b7532
 tensor input 2 3 3 3
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2955,17 +2969,17 @@ end
 case BatchNormalization rank_1_training
 mode training
 output_shape "(4)"
-param_count trainable 2
+param_count trainable 2 non_trainable 2
 param_name gamma layer
 param_name beta layer
 weight gamma 1 checksum 85484e9e313709e1
 weight beta 1 checksum b4b0f7b16f30f8ab
-weight running_mean 1 checksum dd5445d4753231ab
-weight running_var 1 checksum 41987a08b8b6ad1e
+weight moving_mean 1 checksum dd5445d4753231ab
+weight moving_variance 1 checksum 41987a08b8b6ad1e
 step_weight gamma 1 checksum 82ceb1f960f97140
 step_weight beta 1 checksum 3332580f5543e941
-step_weight running_mean 1 checksum dd5445d4753231ab
-step_weight running_var 1 checksum 41987a08b8b6ad1e
+step_weight moving_mean 1 checksum dd5445d4753231ab
+step_weight moving_variance 1 checksum 41987a08b8b6ad1e
 tensor input 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -2999,15 +3013,15 @@ end
 case BatchNormalization channels_4_inference
 mode inference
 output_shape "(2, 4)"
-param_count trainable 8
+param_count trainable 8 non_trainable 8
 weight gamma 4 checksum 657ae2b486ecb3a5
 weight beta 4 checksum 956f95fd52284d8f
-weight running_mean 4 checksum c94389815f03acdf
-weight running_var 4 checksum 7b2395545fda0915
+weight moving_mean 4 checksum c94389815f03acdf
+weight moving_variance 4 checksum 7b2395545fda0915
 step_weight gamma 4 checksum 657ae2b486ecb3a5
 step_weight beta 4 checksum 956f95fd52284d8f
-step_weight running_mean 4 checksum c94389815f03acdf
-step_weight running_var 4 checksum 7b2395545fda0915
+step_weight moving_mean 4 checksum c94389815f03acdf
+step_weight moving_variance 4 checksum 7b2395545fda0915
 tensor input 2 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -3049,15 +3063,15 @@ end
 case BatchNormalization running_mean_after_1_step
 mode inference
 output_shape "(1, 4)"
-param_count trainable 8
+param_count trainable 8 non_trainable 8
 weight gamma 4 checksum 05e723b2d47efa81
 weight beta 4 checksum 51f05b78ae07c9cc
-weight running_mean 4 checksum 05e723b2d47efa81
-weight running_var 4 checksum 5ac8747c953648e1
+weight moving_mean 4 checksum 05e723b2d47efa81
+weight moving_variance 4 checksum 5ac8747c953648e1
 step_weight gamma 4 checksum 05e723b2d47efa81
 step_weight beta 4 checksum 51f05b78ae07c9cc
-step_weight running_mean 4 checksum 05e723b2d47efa81
-step_weight running_var 4 checksum 5ac8747c953648e1
+step_weight moving_mean 4 checksum 05e723b2d47efa81
+step_weight moving_variance 4 checksum 5ac8747c953648e1
 tensor input 1 4
   c0000000  # -2.0
   bf051eb8  # -0.52
@@ -3083,15 +3097,15 @@ end
 case BatchNormalization running_var_after_1_step
 mode inference
 output_shape "(1, 4)"
-param_count trainable 8
+param_count trainable 8 non_trainable 8
 weight gamma 4 checksum 05e723b2d47efa81
 weight beta 4 checksum 2b13f8605e2f3b32
-weight running_mean 4 checksum 05e723b2d47efa81
-weight running_var 4 checksum 5ac8747c953648e1
+weight moving_mean 4 checksum 05e723b2d47efa81
+weight moving_variance 4 checksum 5ac8747c953648e1
 step_weight gamma 4 checksum 05e723b2d47efa81
 step_weight beta 4 checksum 2b13f8605e2f3b32
-step_weight running_mean 4 checksum 05e723b2d47efa81
-step_weight running_var 4 checksum 5ac8747c953648e1
+step_weight moving_mean 4 checksum 05e723b2d47efa81
+step_weight moving_variance 4 checksum 5ac8747c953648e1
 tensor input 1 4
   c0000000  # -2.0
   bf051eb8  # -0.52

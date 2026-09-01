@@ -14,19 +14,18 @@ use super::folds::{par_col_dot, par_col_sum, rows_per_block};
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::layer_weight::{BatchNormalizationLayerWeight, LayerWeight};
+use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape;
 use crate::neural_network::layers::regularization::validation::{
     validate_epsilon, validate_input_shape, validate_input_shape_not_empty, validate_momentum,
 };
-use crate::neural_network::layers::validation::validate_weight_shape;
+use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::Axis;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
-use std::borrow::Cow;
 
 tunable_gate! {
     /// Total-element count above which forward and backward switch from sequential to parallel
@@ -68,13 +67,21 @@ pub struct BatchNormalization {
     /// Shape of the input tensor
     input_shape: Vec<usize>,
     /// Scale parameter (trainable)
+    ///
+    /// The array stays allocated and holds every element at 1 when `scale` is false. A scale of
+    /// 1 changes no value, so the forward pass reads it and gives the same result that dropping
+    /// the multiply gives. `weights` hides the array and `parameters` never yields it
     gamma: Tensor,
     /// Shift parameter (trainable)
+    ///
+    /// The array stays allocated and holds every element at 0 when `center` is false. A shift
+    /// of 0 changes every value except a negative zero, which it turns into a positive zero.
+    /// `weights` hides the array and `parameters` never yields it
     beta: Tensor,
     /// Running mean for inference
-    running_mean: Tensor,
+    moving_mean: Tensor,
     /// Running variance for inference
-    running_var: Tensor,
+    moving_variance: Tensor,
     /// Whether the layer is in training mode or inference mode
     training: bool,
     /// Mean computed during forward pass (used in backward pass)
@@ -89,6 +96,10 @@ pub struct BatchNormalization {
     grad_gamma: Option<Tensor>,
     /// Gradient for beta parameter
     grad_beta: Option<Tensor>,
+    /// Whether the layer adds the shift `beta`
+    center: bool,
+    /// Whether the layer applies the scale `gamma`
+    scale: bool,
 }
 
 impl BatchNormalization {
@@ -137,8 +148,8 @@ impl BatchNormalization {
             input_shape,
             gamma: Tensor::ones(param_shape_ndarray),
             beta: Tensor::zeros(param_shape_ndarray),
-            running_mean: Tensor::zeros(param_shape_ndarray),
-            running_var: Tensor::ones(param_shape_ndarray),
+            moving_mean: Tensor::zeros(param_shape_ndarray),
+            moving_variance: Tensor::ones(param_shape_ndarray),
             training: true,
             batch_mean: None,
             batch_var: None,
@@ -146,19 +157,73 @@ impl BatchNormalization {
             x_centered: None,
             grad_gamma: None,
             grad_beta: None,
+            center: true,
+            scale: true,
         })
     }
 
     mode_dependent_layer_set_training!();
 
+    /// Sets whether the layer adds the shift `beta` (defaults to `true`)
+    ///
+    /// With `center` set to false the layer holds no `beta`: `param_count` counts none for it,
+    /// `parameters` yields none for it, and a checkpoint of the layer holds no
+    /// `<position>.beta` path. The moving mean and the moving variance stay, because they are
+    /// state that the layer keeps and not parameters that an optimizer updates
+    ///
+    /// # Parameters
+    ///
+    /// - `center` - `true` to add `beta`, `false` to leave it out
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_center(mut self, center: bool) -> Self {
+        self.center = center;
+        if !center {
+            // Put the array back at the identity shift and drop any gradient a previous
+            // backward pass left, so nothing the layer no longer holds can reach a result
+            self.beta = Tensor::zeros(self.beta.shape());
+            self.grad_beta = None;
+        }
+        self
+    }
+
+    /// Sets whether the layer applies the scale `gamma` (defaults to `true`)
+    ///
+    /// With `scale` set to false the layer holds no `gamma`: `param_count` counts none for it,
+    /// `parameters` yields none for it, and a checkpoint of the layer holds no
+    /// `<position>.gamma` path. `beta` keeps its own name and its own optimizer state, because
+    /// a checkpoint and an optimizer both address an array by name and never by position
+    ///
+    /// # Parameters
+    ///
+    /// - `scale` - `true` to apply `gamma`, `false` to leave it out
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_scale(mut self, scale: bool) -> Self {
+        self.scale = scale;
+        if !scale {
+            // Put the array back at the identity scale and drop any gradient a previous
+            // backward pass left, so nothing the layer no longer holds can reach a result
+            self.gamma = Tensor::ones(self.gamma.shape());
+            self.grad_gamma = None;
+        }
+        self
+    }
+
     /// Sets the weights for the BatchNormalization layer
     ///
     /// # Parameters
     ///
-    /// - `gamma` - Scale parameter (trainable)
-    /// - `beta` - Shift parameter (trainable)
-    /// - `running_mean` - Running mean for inference
-    /// - `running_var` - Running variance for inference
+    /// - `gamma` - Scale parameter (trainable), or `None` for a layer built with
+    ///   [`with_scale(false)`](Self::with_scale)
+    /// - `beta` - Shift parameter (trainable), or `None` for a layer built with
+    ///   [`with_center(false)`](Self::with_center)
+    /// - `moving_mean` - Running mean for inference
+    /// - `moving_variance` - Running variance for inference
     ///
     /// # Errors
     ///
@@ -166,23 +231,33 @@ impl BatchNormalization {
     ///   layer's expected shape
     pub fn set_weights(
         &mut self,
-        gamma: Tensor,
-        beta: Tensor,
-        running_mean: Tensor,
-        running_var: Tensor,
+        gamma: impl Into<Option<Tensor>>,
+        beta: impl Into<Option<Tensor>>,
+        moving_mean: Tensor,
+        moving_variance: Tensor,
     ) -> Result<(), Error> {
-        validate_weight_shape("gamma", self.gamma.shape(), gamma.shape())?;
-        validate_weight_shape("beta", self.beta.shape(), beta.shape())?;
+        let gamma = validate_optional_weight("gamma", "scale", self.scale, gamma.into())?;
+        let beta = validate_optional_weight("beta", "center", self.center, beta.into())?;
+        if let Some(gamma) = gamma.as_ref() {
+            validate_weight_shape("gamma", self.gamma.shape(), gamma.shape())?;
+        }
+        if let Some(beta) = beta.as_ref() {
+            validate_weight_shape("beta", self.beta.shape(), beta.shape())?;
+        }
+        validate_weight_shape("moving_mean", self.moving_mean.shape(), moving_mean.shape())?;
         validate_weight_shape(
-            "running_mean",
-            self.running_mean.shape(),
-            running_mean.shape(),
+            "moving_variance",
+            self.moving_variance.shape(),
+            moving_variance.shape(),
         )?;
-        validate_weight_shape("running_var", self.running_var.shape(), running_var.shape())?;
-        self.gamma = gamma;
-        self.beta = beta;
-        self.running_mean = running_mean;
-        self.running_var = running_var;
+        if let Some(gamma) = gamma {
+            self.gamma = gamma;
+        }
+        if let Some(beta) = beta {
+            self.beta = beta;
+        }
+        self.moving_mean = moving_mean;
+        self.moving_variance = moving_variance;
         Ok(())
     }
 }
@@ -327,10 +402,10 @@ impl Layer for BatchNormalization {
             };
 
             // Update running statistics
-            self.running_mean =
-                &self.running_mean * self.momentum + &batch_mean * (1.0 - self.momentum);
-            self.running_var =
-                &self.running_var * self.momentum + &batch_var * (1.0 - self.momentum);
+            self.moving_mean =
+                &self.moving_mean * self.momentum + &batch_mean * (1.0 - self.momentum);
+            self.moving_variance =
+                &self.moving_variance * self.momentum + &batch_var * (1.0 - self.momentum);
 
             // Cache values for backward pass
             self.batch_mean = Some(batch_mean);
@@ -341,8 +416,8 @@ impl Layer for BatchNormalization {
             Ok(output)
         } else {
             // Inference mode: use running statistics
-            let std_dev = (&self.running_var + self.epsilon).mapv(|x| x.sqrt());
-            let x_normalized = (input - &self.running_mean) / &std_dev;
+            let std_dev = (&self.moving_variance + self.epsilon).mapv(|x| x.sqrt());
+            let x_normalized = (input - &self.moving_mean) / &std_dev;
             let output = &x_normalized * &self.gamma + &self.beta;
 
             Ok(output)
@@ -355,8 +430,8 @@ impl Layer for BatchNormalization {
 
         // The per-channel statistics are `[C]` and the channel axis is innermost. This lets
         // ndarray's trailing-axis broadcast line them up against an input of any rank on its own
-        let std_dev = (&self.running_var + self.epsilon).mapv(|x| x.sqrt());
-        let x_normalized = (input - &self.running_mean) / &std_dev;
+        let std_dev = (&self.moving_variance + self.epsilon).mapv(|x| x.sqrt());
+        let x_normalized = (input - &self.moving_mean) / &std_dev;
         let output = &x_normalized * &self.gamma + &self.beta;
 
         Ok(output)
@@ -429,8 +504,10 @@ impl Layer for BatchNormalization {
             )
         };
 
-        self.grad_gamma = Some(grad_gamma);
-        self.grad_beta = Some(grad_beta);
+        // An array the layer does not hold keeps no gradient, so `parameters` yields
+        // none for it and no optimizer state is ever keyed on it
+        self.grad_gamma = self.scale.then_some(grad_gamma);
+        self.grad_beta = self.center.then_some(grad_beta);
 
         // Compute gradient with respect to normalized input
         let grad_x_normalized = if total_elements >= batch_norm_parallel_threshold() {
@@ -555,9 +632,13 @@ impl Layer for BatchNormalization {
     fn param_count(&self) -> ParamCounts {
         // The running statistics are parameters of the layer, and no optimizer updates them.
         // They move only in the training forward pass, so they are non-trainable
+        // Read the arrays the layer holds rather than the configuration, so dropping
+        // `gamma` or `beta` corrects the count with no second formula to keep in step
+        let gamma = if self.scale { self.gamma.len() } else { 0 };
+        let beta = if self.center { self.beta.len() } else { 0 };
         ParamCounts::new(
-            self.gamma.len() + self.beta.len(),
-            self.running_mean.len() + self.running_var.len(),
+            gamma + beta,
+            self.moving_mean.len() + self.moving_variance.len(),
         )
     }
 
@@ -588,14 +669,12 @@ impl Layer for BatchNormalization {
         params
     }
 
-    fn get_weights(&self) -> LayerWeight<'_> {
-        LayerWeight::BatchNormalization(BatchNormalizationLayerWeight {
-            gamma: Cow::Borrowed(&self.gamma),
-            beta: Cow::Borrowed(&self.beta),
-            running_mean: Cow::Borrowed(&self.running_mean),
-            running_var: Cow::Borrowed(&self.running_var),
-        })
-    }
+    named_weight_layer_functions!(
+        trainable "gamma" => gamma if scale,
+        trainable "beta" => beta if center,
+        non_trainable "moving_mean" => moving_mean,
+        non_trainable "moving_variance" => moving_variance,
+    );
 
     mode_dependent_layer_trait!();
 }
@@ -766,7 +845,7 @@ mod tests {
             out4.iter().copied().collect::<Vec<f32>>(),
             out2.iter().copied().collect::<Vec<f32>>()
         );
-        assert_eq!(spatial.running_mean, folded.running_mean);
-        assert_eq!(spatial.running_var, folded.running_var);
+        assert_eq!(spatial.moving_mean, folded.moving_mean);
+        assert_eq!(spatial.moving_variance, folded.moving_variance);
     }
 }

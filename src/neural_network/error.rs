@@ -23,7 +23,7 @@ pub enum NnError {
     /// A weight array assigned to a layer did not match the shape the layer expects
     #[error("weight shape mismatch for `{name}`: layer expects {expected:?}, got {found:?}")]
     WeightShape {
-        /// The parameter being set (e.g. `"weight"`, `"bias"`)
+        /// The parameter being set (e.g. `"kernel"`, `"bias"`)
         name: String,
         /// The shape the layer requires
         expected: Vec<usize>,

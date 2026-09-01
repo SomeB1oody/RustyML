@@ -4,7 +4,7 @@ use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
-use crate::neural_network::layers::layer_weight::{LSTMLayerWeight, LayerWeight};
+use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::recurrent::gate::{FusedGates, project_input, take_cache};
 use crate::neural_network::layers::recurrent::validation::{
     split_grad_output, validate_input_3d, validate_recurrent_dimensions,
@@ -15,7 +15,6 @@ use crate::neural_network::traits::{Layer, ParamGrad};
 use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Bias, Parallelism};
 use ndarray::{Array2, Array3, ArrayView3, Axis, Ix2, Ix3, concatenate, s};
-use std::borrow::Cow;
 
 /// Long Short-Term Memory (LSTM) neural network layer
 ///
@@ -647,8 +646,10 @@ impl Layer for LSTM {
     }
 
     fn param_count(&self) -> ParamCounts {
+        // Read the arrays the layer holds rather than the configuration, so a change to
+        // the roster corrects the count with no second formula to keep in step
         ParamCounts::trainable(
-            4 * (self.input_dim * self.units + self.units * self.units + self.units),
+            self.gates.kernel.len() + self.gates.recurrent_kernel.len() + self.gates.bias.len(),
         )
     }
 
@@ -656,11 +657,9 @@ impl Layer for LSTM {
         self.gates.parameters()
     }
 
-    fn get_weights(&self) -> LayerWeight<'_> {
-        LayerWeight::LSTM(LSTMLayerWeight {
-            kernel: Cow::Borrowed(&self.gates.kernel),
-            recurrent_kernel: Cow::Borrowed(&self.gates.recurrent_kernel),
-            bias: Cow::Borrowed(&self.gates.bias),
-        })
-    }
+    named_weight_layer_functions!(
+        trainable "kernel" => gates.kernel,
+        trainable "recurrent_kernel" => gates.recurrent_kernel,
+        trainable "bias" => gates.bias,
+    );
 }

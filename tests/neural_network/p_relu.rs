@@ -18,14 +18,13 @@ use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::activation::p_relu::PReLU;
 use rustyml::neural_network::layers::activation::relu::ReLU;
 use rustyml::neural_network::layers::dense::Dense;
-use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
-use super::common::assert_allclose;
+use super::common::{assert_allclose, named};
 
 // helpers
 
@@ -47,10 +46,7 @@ fn p_relu_with(input_shape: Vec<usize>, shared_axes: Vec<usize>, slopes: Vec<f32
 
 /// Read the slope array back out of a layer
 fn slopes_of(layer: &PReLU) -> ArrayD<f32> {
-    match layer.get_weights() {
-        LayerWeight::PReLU(w) => w.alpha.into_owned(),
-        other => panic!("PReLU must report LayerWeight::PReLU, got {other:?}"),
-    }
+    named(layer, "alpha").to_owned()
 }
 
 /// Read the slope gradient the last backward pass wrote
@@ -650,11 +646,12 @@ fn p_relu_trains_its_slopes() {
 
     model.fit(&x, &y, 20).unwrap();
 
-    let weights = model.get_weights();
-    let LayerWeight::PReLU(w) = &weights[1] else {
-        panic!("layer 1 must be the PReLU layer");
-    };
-    let trained: Vec<f32> = w.alpha.iter().cloned().collect();
+    let trained: Vec<f32> = model
+        .weight("1.alpha")
+        .expect("layer 1 must be the PReLU layer")
+        .iter()
+        .cloned()
+        .collect();
     assert_eq!(trained.len(), 3);
     assert!(
         trained.iter().any(|&v| (v - 0.25).abs() > 1e-4),
@@ -689,35 +686,30 @@ fn p_relu_trains_with_shared_spatial_axes() {
     assert_eq!(slope_gradient(&mut layer).len(), 2);
 }
 
-/// A 1-D slope array assigned through the container reaches the live layer
+/// A 1-D slope array assigned to the layer reaches the named weight
 #[test]
-fn p_relu_get_weights_borrows_the_live_slopes() {
+fn p_relu_names_its_live_slopes_alpha() {
     let mut layer = PReLU::new(vec![2, 3], 0.25).unwrap();
     layer
         .set_weights(Array1::from_vec(vec![0.1f32, 0.2, 0.3]).into_dyn())
         .unwrap();
 
-    let LayerWeight::PReLU(w) = layer.get_weights() else {
-        panic!("PReLU must report LayerWeight::PReLU");
-    };
-    assert_eq!(w.alpha.shape(), &[3]);
+    let alpha = named(&layer, "alpha");
+    assert_eq!(alpha.shape(), &[3]);
     assert_eq!(
-        w.alpha.iter().cloned().collect::<Vec<_>>(),
+        alpha.iter().cloned().collect::<Vec<_>>(),
         vec![0.1, 0.2, 0.3]
     );
 }
 
-/// A 4-D per-channel slope array keeps its rank through the container
+/// A 4-D per-channel slope array keeps its rank in the named weight
 #[test]
-fn p_relu_get_weights_keeps_a_shared_axis_at_extent_1() {
+fn p_relu_weights_keep_a_shared_axis_at_extent_1() {
     let layer = PReLU::new(vec![2, 4, 4, 3], 0.25)
         .unwrap()
         .with_shared_axes(vec![1, 2])
         .unwrap();
-    let LayerWeight::PReLU(w) = layer.get_weights() else {
-        panic!("PReLU must report LayerWeight::PReLU");
-    };
-    assert_eq!(w.alpha.shape(), &[1, 1, 3]);
+    assert_eq!(named(&layer, "alpha").shape(), &[1, 1, 3]);
 
     // The same slopes as a plain 3-element array do not fit
     let mut layer = layer;
