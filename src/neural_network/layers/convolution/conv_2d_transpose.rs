@@ -17,9 +17,8 @@ use crate::neural_network::layers::convolution::validation::{
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::{Fans, Initializer, Shape, Tensor};
 use ndarray::{Array1, Array4};
-use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 /// A 2D transposed convolutional layer for neural networks
 ///
@@ -270,22 +269,19 @@ impl Conv2DTranspose {
     }
 
     /// Xavier/Glorot uniform initialization of the \[kh, kw, filters, channels\] weight tensor
+    ///
+    /// The stored kernel puts the filter axes before the channel axis, and the fan pair does
+    /// not follow that order. The layer names the 2 counts, so `fan_in` stays the channel side
     fn init_weights_array(
         filters: usize,
         channels: usize,
         kernel_size: (usize, usize),
         random_state: Option<u64>,
     ) -> Array4<f32> {
-        // Xavier init: bound = sqrt(6 / (fan_in + fan_out)). The transposed kernel swaps the 2
-        // channel axes against the plain one, which swaps the 2 fans. Their sum, and so the
-        // bound, is unchanged
-        let fan_in = channels * kernel_size.0 * kernel_size.1;
-        let fan_out = filters * kernel_size.0 * kernel_size.1;
-        let weight_bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
         let mut rng = crate::random::make_rng(random_state);
-        Array4::random_using(
+        Initializer::GlorotUniform.draw(
             (kernel_size.0, kernel_size.1, filters, channels),
-            Uniform::new(-weight_bound, weight_bound).unwrap(),
+            Fans::conv(channels, filters, kernel_size.0 * kernel_size.1),
             &mut rng,
         )
     }

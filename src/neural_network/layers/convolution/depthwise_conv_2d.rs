@@ -16,9 +16,8 @@ use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_2d;
 use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::{Fans, Initializer, Shape, Tensor};
 use ndarray::{Array1, Array4};
-use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 /// A 2D depthwise convolutional layer
 ///
@@ -288,6 +287,10 @@ impl DepthwiseConv2D {
     }
 
     /// Xavier/Glorot uniform initialization of the \[kh, kw, channels, depth_multiplier\] tensor
+    ///
+    /// The depth multiplier takes the place of the filter count in the fan pair, so `fan_in`
+    /// counts every input channel although a depthwise unit reads only 1 of them. See
+    /// [`Fans::conv`]
     fn init_weights_array(
         channels: usize,
         depth_multiplier: usize,
@@ -295,19 +298,10 @@ impl DepthwiseConv2D {
         random_state: Option<u64>,
     ) -> Array4<f32> {
         let (kernel_height, kernel_width) = kernel_size;
-        // Keras' `compute_fans` reads only the kernel tensor's last 2 axes. For shape
-        // [kh, kw, channels, depth_multiplier] this gives `fan_in = channels * kh * kw` and
-        // `fan_out = depth_multiplier * kh * kw`. A depthwise unit sees only 1 input channel.
-        // This fan_in is therefore `channels` times the true receptive field. The resulting
-        // bound is narrower by about sqrt(channels) than a per-channel count would give. This
-        // matches `Conv2D` and Keras rather than a depthwise-specific formula
-        let fan_in = channels * kernel_height * kernel_width;
-        let fan_out = depth_multiplier * kernel_height * kernel_width;
-        let weight_bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
         let mut rng = crate::random::make_rng(random_state);
-        Array4::random_using(
+        Initializer::GlorotUniform.draw(
             (kernel_height, kernel_width, channels, depth_multiplier),
-            Uniform::new(-weight_bound, weight_bound).unwrap(),
+            Fans::conv(channels, depth_multiplier, kernel_height * kernel_width),
             &mut rng,
         )
     }

@@ -5,10 +5,9 @@ use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::{Fans, Initializer, Shape, Tensor};
 use crate::parallel_gates::{cheap_map_parallel_threshold, split_cap};
-use ndarray::{Array, Array2, IxDyn};
-use ndarray_rand::{RandomExt, rand_distr::Uniform};
+use ndarray::{Array2, IxDyn};
 use rayon::prelude::*;
 
 /// Half-width of the uniform range that initializes the lookup table
@@ -191,11 +190,13 @@ impl Embedding {
     }
 
     /// Uniform table initialization over `[-INIT_LIMIT, INIT_LIMIT]` for the given seed
+    ///
+    /// The table reads no fan, so the draw takes [`Fans::NONE`]
     fn init_table(input_dim: usize, output_dim: usize, random_state: Option<u64>) -> Array2<f32> {
         let mut rng = crate::random::make_rng(random_state);
-        Array::random_using(
+        Initializer::Uniform { limit: INIT_LIMIT }.draw(
             (input_dim, output_dim),
-            Uniform::new(-INIT_LIMIT, INIT_LIMIT).unwrap(),
+            Fans::NONE,
             &mut rng,
         )
     }

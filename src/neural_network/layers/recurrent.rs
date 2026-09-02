@@ -1,12 +1,11 @@
 //! Recurrent layers (SimpleRNN, GRU, LSTM) and their shared helpers
 //!
-//! Re-exports the 3 layer types and provides 3 shared helpers. A numerically stable sigmoid
-//! serves the GRU and LSTM gates, Gram-Schmidt orthogonal initialization serves all 3 layers'
-//! recurrent kernels, and 1 index map serves the `go_backwards` option of all 3 layers.
+//! Re-exports the 3 layer types and provides 2 shared helpers. A numerically stable sigmoid
+//! serves the GRU and LSTM gates, and 1 index map serves the `go_backwards` option of all 3
+//! layers. All 3 layers draw their recurrent kernels from
+//! [`Initializer::Orthogonal`](crate::neural_network::Initializer::Orthogonal).
 
-use ndarray::{Array, Array2};
-use ndarray_rand::rand::rngs::StdRng;
-use ndarray_rand::{RandomExt, rand_distr::Uniform};
+use ndarray::Array2;
 
 /// Applies the logistic sigmoid to an array
 ///
@@ -48,51 +47,6 @@ fn input_step(step: usize, timesteps: usize, go_backwards: bool) -> usize {
     }
 }
 
-/// Generates a square orthogonal matrix via Gram-Schmidt orthonormalization of a random matrix
-///
-/// Independently normalizing each column only yields unit-norm columns. This process instead
-/// makes the columns mutually orthonormal, which keeps the hidden state transition
-/// norm-preserving and reduces vanishing or exploding gradients. SimpleRNN and the GRU and LSTM
-/// gates use this function to initialize their recurrent kernels.
-fn orthogonal_init(size: usize, rng: &mut StdRng) -> Array2<f32> {
-    // Random starting matrix
-    let mut matrix = Array::random_using((size, size), Uniform::new(-1.0, 1.0).unwrap(), rng);
-
-    const EPSILON: f32 = 1e-8;
-
-    for i in 0..size {
-        // Orthogonalize column i against every already-normalized column before it
-        for j in 0..i {
-            let mut projection = 0.0;
-            for k in 0..size {
-                projection += matrix[[k, i]] * matrix[[k, j]];
-            }
-            for k in 0..size {
-                matrix[[k, i]] -= projection * matrix[[k, j]];
-            }
-        }
-
-        // Normalize column i. Fall back to a standard basis vector if it collapsed
-        let mut norm = 0.0f32;
-        for k in 0..size {
-            norm += matrix[[k, i]] * matrix[[k, i]];
-        }
-        norm = norm.sqrt();
-
-        if norm > EPSILON {
-            for k in 0..size {
-                matrix[[k, i]] /= norm;
-            }
-        } else {
-            for k in 0..size {
-                matrix[[k, i]] = if k == i { 1.0 } else { 0.0 };
-            }
-        }
-    }
-
-    matrix
-}
-
 /// Shared gate parameters and helpers for the GRU and LSTM cells
 pub mod gate;
 /// The GRU (Gated Recurrent Unit) layer
@@ -113,34 +67,6 @@ mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
     use ndarray::array;
-    use ndarray_rand::rand::SeedableRng;
-
-    // orthogonal_init
-
-    /// For size 3, M^T M equals the 3x3 identity within 1e-5
-    #[test]
-    fn orthogonal_init_size3_columns_are_orthonormal() {
-        let m = orthogonal_init(3, &mut StdRng::seed_from_u64(0));
-
-        // Compute M^T M (should equal I_3)
-        let mt_m = m.t().dot(&m);
-
-        // Seed 0 is deterministic, so Gram-Schmidt keeps the f32 round-off within 1e-5
-        for row in 0..3 {
-            for col in 0..3 {
-                let expected = if row == col { 1.0_f32 } else { 0.0_f32 };
-                assert_abs_diff_eq!(mt_m[[row, col]], expected, epsilon = 1e-5);
-            }
-        }
-    }
-
-    /// For size 1, the single entry has absolute value 1.0 after normalization
-    #[test]
-    fn orthogonal_init_size1_abs_is_one() {
-        let m = orthogonal_init(1, &mut StdRng::seed_from_u64(0));
-        assert_eq!(m.shape(), &[1, 1]);
-        assert_abs_diff_eq!(m[[0, 0]].abs(), 1.0_f32, epsilon = 1e-6);
-    }
 
     // input_step
 

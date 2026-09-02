@@ -15,9 +15,8 @@ use crate::neural_network::layers::convolution::validation::{
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::{Fans, Initializer, Shape, Tensor};
 use ndarray::{Array1, Array3};
-use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 /// A 1D convolutional layer for neural networks
 ///
@@ -252,20 +251,19 @@ impl Conv1D {
     }
 
     /// Xavier/Glorot uniform initialization of the \[kernel_size, channels, filters\] weight tensor
+    ///
+    /// The layer names its own channel count and filter count, so the fan pair does not depend
+    /// on the order of the 2 channel axes in the stored kernel
     fn init_weights_array(
         filters: usize,
         input_channels: usize,
         kernel_size: usize,
         random_state: Option<u64>,
     ) -> Array3<f32> {
-        // Xavier initialization: weight_bound = sqrt(6 / (fan_in + fan_out))
-        let fan_in = input_channels * kernel_size;
-        let fan_out = filters * kernel_size;
-        let weight_bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
         let mut rng = crate::random::make_rng(random_state);
-        Array3::random_using(
+        Initializer::GlorotUniform.draw(
             (kernel_size, input_channels, filters),
-            Uniform::new(-weight_bound, weight_bound).unwrap(),
+            Fans::conv(input_channels, filters, kernel_size),
             &mut rng,
         )
     }

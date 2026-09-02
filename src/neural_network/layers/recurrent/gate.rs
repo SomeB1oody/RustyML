@@ -5,12 +5,11 @@
 //! used by the GRU and LSTM cells.
 
 use crate::error::Error;
-use crate::neural_network::layers::recurrent::orthogonal_init;
 use crate::neural_network::layers::recurrent::validation::validate_dimension_greater_than_zero;
 use crate::neural_network::traits::ParamGrad;
-use ndarray::{Array, Array2, Array3, ArrayView3, s};
+use crate::neural_network::{Fans, Initializer};
+use ndarray::{Array2, Array3, ArrayView3, s};
 use ndarray_rand::rand::rngs::StdRng;
-use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 /// Fused gate parameters and gradients for recurrent cells
 ///
@@ -47,6 +46,10 @@ impl FusedGates {
     /// `input_dim + n_gates * units`. Each gate's recurrent block is an independent Gram-Schmidt
     /// orthogonal `[units, units]` matrix, and each gate's bias block is a per-gate constant
     ///
+    /// The draw order is part of the contract: the fused input kernel first, then 1 orthogonal
+    /// block per gate in gate order, all against the 1 generator the caller supplies. A second
+    /// generator, or a different order, changes every value from the second draw onward
+    ///
     /// # Parameters
     ///
     /// - `input_dim` - Dimensionality of the input features
@@ -75,20 +78,16 @@ impl FusedGates {
         let n_gates = bias_init.len();
         let width = n_gates * units;
 
-        // Xavier/Glorot with the per-gate fan
-        let limit = (6.0 / (input_dim + units) as f32).sqrt();
-        let kernel = Array::random_using(
-            (input_dim, width),
-            Uniform::new(-limit, limit).unwrap(),
-            rng,
-        );
+        // The fan pair is the per-gate pair, not the fused width
+        let kernel =
+            Initializer::GlorotUniform.draw((input_dim, width), Fans::new(input_dim, units), rng);
 
         // A single orthogonal [units, units] block per gate
         let mut recurrent_kernel = Array2::<f32>::zeros((units, width));
         for g in 0..n_gates {
             recurrent_kernel
                 .slice_mut(s![.., g * units..(g + 1) * units])
-                .assign(&orthogonal_init(units, rng));
+                .assign(&Initializer::Orthogonal.draw_orthogonal(units, Fans::NONE, rng));
         }
 
         let mut bias = Array2::<f32>::zeros((1, width));

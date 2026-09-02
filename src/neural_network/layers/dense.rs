@@ -6,11 +6,10 @@ use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::{Fans, Initializer, Shape, Tensor};
 use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Activation as FusedActivation, Bias, Parallelism};
 use ndarray::{Array, Array2, ArrayView2, Axis, CowArray, Ix2};
-use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 /// Dense (fully connected) layer for neural networks
 ///
@@ -208,18 +207,16 @@ impl Dense {
     }
 
     /// Xavier/Glorot uniform weight initialization for the given dimensions and seed
+    ///
+    /// The layer reports its own 2 fans. The kernel holds 1 weight per input and unit pair, so
+    /// `fan_in` is the input width and `fan_out` is the unit count
     fn init_weights_array(
         input_dim: usize,
         units: usize,
         random_state: Option<u64>,
     ) -> Array2<f32> {
-        let limit = (6.0 / (input_dim + units) as f32).sqrt();
         let mut rng = crate::random::make_rng(random_state);
-        Array::random_using(
-            (input_dim, units),
-            Uniform::new(-limit, limit).unwrap(),
-            &mut rng,
-        )
+        Initializer::GlorotUniform.draw((input_dim, units), Fans::new(input_dim, units), &mut rng)
     }
 
     /// Sets the weights and bias for this layer

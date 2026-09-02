@@ -54,6 +54,12 @@
 //!   [`Layer::compute_output_shape`](crate::neural_network::traits::Layer::compute_output_shape),
 //!   which reads the layer configuration alone and answers before any tensor exists
 //!
+//! ## Weight initialization
+//! - [`Initializer`](crate::neural_network::Initializer): how a layer draws the starting values
+//!   of a weight array. Every drawn array of the module comes from this closed set of 3 rules.
+//!   The layer supplies the [`Fans`](crate::neural_network::Fans) pair, because a kernel shape
+//!   alone cannot tell a plain convolution from a transposed one
+//!
 //! ## Model
 //! - [`Sequential`](crate::neural_network::sequential::Sequential): a linear stack of layers with
 //!   an integrated training loop, prediction, and weight save and load. `fit` and
@@ -102,6 +108,8 @@ pub type Tensor = ArrayD<f32>;
 
 /// Neural-network error type, aggregated into the crate-wide [`Error`](crate::error::Error)
 pub mod error;
+/// How a layer draws the starting values of a weight array
+pub mod initializer;
 /// Neural network layer implementations
 pub mod layers;
 /// Loss function implementations
@@ -116,4 +124,5 @@ pub mod shape;
 pub mod traits;
 
 pub use error::NnError;
+pub use initializer::{Fans, Initializer};
 pub use shape::Shape;

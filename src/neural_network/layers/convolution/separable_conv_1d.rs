@@ -18,9 +18,8 @@ use crate::neural_network::layers::convolution::validation::{
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::{Fans, Initializer, Shape, Tensor};
 use ndarray::{Array1, Array3};
-use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 /// A 1D separable convolutional layer
 ///
@@ -281,29 +280,20 @@ impl SeparableConv1D {
         depth_multiplier: usize,
         random_state: Option<u64>,
     ) -> (Array3<f32>, Array3<f32>) {
-        // Xavier init for the depthwise weights. The fan calculation derives both fans from the
-        // kernel tensor's last 2 axes. For shape [kernel_size, channels, dm] this makes the
-        // depthwise kernel count `channels` in its fan_in, even though a depthwise unit sees only
-        // 1 channel
-        let depthwise_fan_in = channels * kernel_size;
-        let depthwise_fan_out = depth_multiplier * kernel_size;
-        let depthwise_bound = (6.0 / (depthwise_fan_in + depthwise_fan_out) as f32).sqrt();
-
         let mut rng = crate::random::make_rng(random_state);
-        let depthwise_weights = Array3::random_using(
+
+        // The depth multiplier takes the place of the filter count. See `Fans::conv`
+        let depthwise_weights = Initializer::GlorotUniform.draw(
             (kernel_size, channels, depth_multiplier),
-            Uniform::new(-depthwise_bound, depthwise_bound).unwrap(),
+            Fans::conv(channels, depth_multiplier, kernel_size),
             &mut rng,
         );
 
-        // Xavier init for the pointwise weights. The 1-tap kernel length is 1
-        let pointwise_fan_in = channels * depth_multiplier;
-        let pointwise_fan_out = filters;
-        let pointwise_bound = (6.0 / (pointwise_fan_in + pointwise_fan_out) as f32).sqrt();
-
-        let pointwise_weights = Array3::random_using(
+        // The stored width of the pointwise kernel is already the fan-in, and its 1 tap adds no
+        // factor to the fan-out
+        let pointwise_weights = Initializer::GlorotUniform.draw(
             (1, channels * depth_multiplier, filters),
-            Uniform::new(-pointwise_bound, pointwise_bound).unwrap(),
+            Fans::new(channels * depth_multiplier, filters),
             &mut rng,
         );
 

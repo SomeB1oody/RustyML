@@ -6,17 +6,16 @@ use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::recurrent::gate::take_cache;
+use crate::neural_network::layers::recurrent::input_step;
 use crate::neural_network::layers::recurrent::validation::{
     split_grad_output, validate_input_3d, validate_recurrent_dimensions,
 };
-use crate::neural_network::layers::recurrent::{input_step, orthogonal_init};
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::{Fans, Initializer, Shape, Tensor};
 use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Activation as FusedActivation, Bias, Parallelism};
 use ndarray::{Array, Array2, Array3, Axis};
-use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 /// Simple Recurrent Neural Network (SimpleRNN) layer
 ///
@@ -208,7 +207,8 @@ impl SimpleRNN {
     /// Initializes the input kernel (Xavier/Glorot) and recurrent kernel (orthogonal) from a seed
     ///
     /// Both draws share a single RNG, kernel first and then recurrent kernel, so a given seed
-    /// reproduces the exact same pair of matrices.
+    /// reproduces the exact same pair of matrices. The order is part of the contract of this
+    /// layer. A second generator, or the reverse order, changes the recurrent kernel
     fn init_weights_arrays(
         input_dim: usize,
         units: usize,
@@ -216,16 +216,14 @@ impl SimpleRNN {
     ) -> (Array2<f32>, Array2<f32>) {
         let mut rng = crate::random::make_rng(random_state);
 
-        // Xavier/Glorot initialization for input kernel
-        let limit = (6.0_f32 / (input_dim + units) as f32).sqrt();
-        let kernel = Array::random_using(
+        let kernel = Initializer::GlorotUniform.draw(
             (input_dim, units),
-            Uniform::new(-limit, limit).unwrap(),
+            Fans::new(input_dim, units),
             &mut rng,
         );
 
-        // Orthogonal initialization for recurrent kernel to maintain gradient flow
-        let recurrent_kernel = orthogonal_init(units, &mut rng);
+        // Orthonormal columns keep the hidden-state transition norm-preserving
+        let recurrent_kernel = Initializer::Orthogonal.draw_orthogonal(units, Fans::NONE, &mut rng);
 
         (kernel, recurrent_kernel)
     }
