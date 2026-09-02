@@ -9,7 +9,7 @@
 //! border layer never changes them
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
+use crate::neural_network::{Shape, Tensor};
 use ndarray::{IxDyn, Slice};
 
 /// Shape a padded output takes, given the shape that enters the layer
@@ -98,7 +98,7 @@ fn validate_input(input: &Tensor, rank: usize, layer: &'static str) -> Result<()
 fn validate_crop_fits(
     input_shape: &[usize],
     borders: &[(usize, usize)],
-    layer: &'static str,
+    layer: &str,
 ) -> Result<(), Error> {
     for (spatial, &(before, after)) in borders.iter().enumerate() {
         let axis = spatial + 1;
@@ -114,20 +114,6 @@ fn validate_crop_fits(
         }
     }
     Ok(())
-}
-
-/// Formats a shape the way `summary()` prints it, with the batch axis as "None"
-///
-/// An input shape of `None` means no forward pass has run, so the layer cannot know its output
-/// shape yet
-fn format_shape(shape: Option<Vec<usize>>) -> String {
-    match shape {
-        Some(shape) => {
-            let axes: Vec<String> = shape[1..].iter().map(|e| e.to_string()).collect();
-            format!("(None, {})", axes.join(", "))
-        }
-        None => "Unknown".to_string(),
-    }
 }
 
 /// Runs the forward pass of a zero-padding layer
@@ -195,9 +181,33 @@ pub(super) fn pad_backward(
     Ok(crop_out(grad_output, borders))
 }
 
-/// Formats the output shape of a zero-padding layer for `summary()`
-pub(super) fn pad_summary(input_shape: Option<&[usize]>, borders: &[(usize, usize)]) -> String {
-    format_shape(input_shape.map(|shape| padded_shape(shape, borders)))
+/// The shape a zero-padding layer gives for an input of the given shape
+///
+/// # Parameters
+///
+/// - `input` - Shape of the tensor entering the layer, batch axis first
+/// - `borders` - Zero positions the layer adds at each end of each spatial axis
+/// - `layer` - Layer name, used in error messages
+///
+/// # Returns
+///
+/// - `Result<Shape, Error>` - Shape of the padded tensor
+///
+/// # Errors
+///
+/// - `Error::InvalidInput` - If the rank is not `borders.len() + 2`, or if a spatial axis has
+///   no fixed extent
+pub(super) fn pad_output_shape(
+    input: &Shape,
+    borders: &[(usize, usize)],
+    layer: &str,
+) -> Result<Shape, Error> {
+    input.check_rank(layer, borders.len() + 2)?;
+    let (batch, tail) = input.split_batch(layer)?;
+    // `padded_shape` indexes by spatial axis, so it needs the batch axis in front of the list
+    let mut dims = vec![0];
+    dims.extend(tail);
+    Ok(Shape::from_batch(batch, &padded_shape(&dims, borders)[1..]))
 }
 
 /// Runs the forward pass of a cropping layer
@@ -267,7 +277,35 @@ pub(super) fn crop_backward(
     Ok(pad_into(grad_output, borders))
 }
 
-/// Formats the output shape of a cropping layer for `summary()`
-pub(super) fn crop_summary(input_shape: Option<&[usize]>, borders: &[(usize, usize)]) -> String {
-    format_shape(input_shape.map(|shape| cropped_shape(shape, borders)))
+/// The shape a cropping layer gives for an input of the given shape
+///
+/// # Parameters
+///
+/// - `input` - Shape of the tensor entering the layer, batch axis first
+/// - `borders` - Positions the layer removes at each end of each spatial axis
+/// - `layer` - Layer name, used in error messages
+///
+/// # Returns
+///
+/// - `Result<Shape, Error>` - Shape of the cropped tensor
+///
+/// # Errors
+///
+/// - `Error::InvalidInput` - If the rank is not `borders.len() + 2`, if a spatial axis has no
+///   fixed extent, or if a border leaves an axis with no position
+pub(super) fn crop_output_shape(
+    input: &Shape,
+    borders: &[(usize, usize)],
+    layer: &str,
+) -> Result<Shape, Error> {
+    input.check_rank(layer, borders.len() + 2)?;
+    let (batch, tail) = input.split_batch(layer)?;
+    // `cropped_shape` indexes by spatial axis, so it needs the batch axis in front of the list
+    let mut dims = vec![0];
+    dims.extend(tail);
+    validate_crop_fits(&dims, borders, layer)?;
+    Ok(Shape::from_batch(
+        batch,
+        &cropped_shape(&dims, borders)[1..],
+    ))
 }

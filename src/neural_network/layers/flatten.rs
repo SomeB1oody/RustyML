@@ -1,10 +1,10 @@
 //! Flatten layer that reshapes a 3D, 4D, or 5D tensor into a 2D tensor for dense layers
 
 use crate::error::{Context, Error};
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 use ndarray::IxDyn;
 
 /// Flattens a 3D, 4D, or 5D tensor into a 2D tensor
@@ -55,8 +55,11 @@ use ndarray::IxDyn;
 /// ```
 #[derive(Debug)]
 pub struct Flatten {
-    /// Number of features after flattening (product of all dimensions except batch)
-    flattened_features: usize,
+    /// Input shape the constructor declared, batch axis first
+    ///
+    /// The layer reports its output shape from this, and not from the tensors it sees. See
+    /// [`Layer::known_input_shape`]
+    declared_shape: Vec<usize>,
     /// Shape of the most recent forward input. The backward pass restores it
     ///
     /// A flatten moves no data, so the backward pass needs the shape alone
@@ -96,10 +99,8 @@ impl Flatten {
             }
         }
 
-        let flattened_features = input_shape[1..].iter().product();
-
         Ok(Flatten {
-            flattened_features,
+            declared_shape: input_shape,
             input_shape: None,
         })
     }
@@ -171,8 +172,15 @@ impl Layer for Flatten {
         "Flatten"
     }
 
-    fn output_shape(&self) -> String {
-        format!("(None, {})", self.flattened_features)
+    fn known_input_shape(&self) -> Option<Shape> {
+        Some(Shape::with_free_batch(&self.declared_shape))
+    }
+
+    /// Every axis after the batch axis folds into 1 feature axis
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        input.check_min_rank("Flatten", 2)?;
+        let (batch, tail) = input.split_batch("Flatten")?;
+        Ok(Shape::from_batch(batch, &[tail.iter().product()]))
     }
 
     no_trainable_parameters_layer_functions!();

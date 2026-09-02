@@ -2,10 +2,10 @@
 //! the input shape for backpropagation
 
 use crate::error::{Context, Error};
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 use ndarray::IxDyn;
 
 /// Rewrites the axes after the batch axis into a target shape
@@ -228,29 +228,27 @@ impl Layer for Reshape {
         "Reshape"
     }
 
-    fn output_shape(&self) -> String {
-        let resolved = match &self.input_shape {
-            Some(shape) => self.resolve(shape).ok(),
+    fn known_input_shape(&self) -> Option<Shape> {
+        match &self.input_shape {
+            Some(shape) => Some(Shape::with_free_batch(shape)),
+            // A target that holds a -1 fixes no element count, so the layer knows nothing yet
             None if self.target_shape.contains(&-1) => None,
-            None => Some(
-                std::iter::once(0)
-                    .chain(self.target_shape.iter().map(|&e| e as usize))
-                    .collect(),
-            ),
-        };
-
-        match resolved {
-            // Element 0 is the batch axis, which `summary()` prints as "None"
-            Some(shape) => {
-                let axes: Vec<String> = shape[1..].iter().map(|d| d.to_string()).collect();
-                if axes.is_empty() {
-                    "(None,)".to_string()
-                } else {
-                    format!("(None, {})", axes.join(", "))
-                }
-            }
-            None => "Unknown".to_string(),
+            // A target with no -1 fixes the element count an input must carry, so the layer
+            // describes its own output before any tensor arrives
+            None => Some(Shape::new(vec![
+                None,
+                Some(self.target_shape.iter().map(|&e| e as usize).product()),
+            ])),
         }
+    }
+
+    /// The batch axis passes through, and the target rewrites every later axis
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        let (batch, tail) = input.split_batch("Reshape")?;
+        // `resolve` reads the batch axis, so the list it takes starts with one
+        let mut dims = vec![0];
+        dims.extend(tail);
+        Ok(Shape::from_batch(batch, &self.resolve(&dims)?[1..]))
     }
 
     no_trainable_parameters_layer_functions!();

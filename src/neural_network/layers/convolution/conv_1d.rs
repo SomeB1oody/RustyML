@@ -1,7 +1,6 @@
 //! 1D convolutional layer for sequential data such as time series, audio, or text
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
 #[doc(inline)]
@@ -16,6 +15,7 @@ use crate::neural_network::layers::convolution::validation::{
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
+use crate::neural_network::{Shape, Tensor};
 use ndarray::{Array1, Array3};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
@@ -426,13 +426,17 @@ impl Layer for Conv1D {
         "Conv1D"
     }
 
-    fn output_shape(&self) -> String {
-        let input_length = self.input_shape[1];
-        let output_length = self.calculate_output_length(input_length);
-        format!(
-            "({}, {}, {})",
-            self.input_shape[0], output_length, self.filters
-        )
+    fn known_input_shape(&self) -> Option<Shape> {
+        Some(Shape::known(&self.input_shape))
+    }
+
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        input.check_rank("Conv1D", 3)?;
+        let (batch, tail) = input.split_batch("Conv1D")?;
+        Ok(Shape::from_batch(
+            batch,
+            &[self.calculate_output_length(tail[0]), self.filters],
+        ))
     }
 
     fn param_count(&self) -> ParamCounts {

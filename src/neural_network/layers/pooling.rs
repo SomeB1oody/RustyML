@@ -54,27 +54,38 @@ pub use max_pooling_3d::MaxPooling3D;
 ///
 /// # Generated Functions
 ///
-/// - `output_shape()` - returns a formatted string of the output dimensions. If the input shape
-///   is known, it returns the batch size and the trailing channel count as
-///   `"(batch_size, channels)"`. Otherwise it returns `"Unknown"`
+/// - `known_input_shape()` - the shape of the last input the forward pass saw, or `None` before
+///   the first pass
+/// - `compute_output_shape()` - drops every spatial axis and keeps the batch axis and the
+///   channel axis
 /// - all functions from the `no_trainable_parameters_layer_functions!()` macro
 ///
 /// # Requirements
 ///
 /// The implementing struct must have the field:
 /// - `input_shape: Vec<usize>` - shape of the input tensor
+///
+/// The macro takes the layer name and the rank the layer accepts, both of which reach the
+/// error messages
 macro_rules! layer_functions_global_pooling {
-    () => {
-        fn output_shape(&self) -> String {
-            if !self.input_shape.is_empty() {
-                format!(
-                    "({}, {})",
-                    self.input_shape[0],
-                    self.input_shape[self.input_shape.len() - 1]
-                )
-            } else {
-                String::from("Unknown")
-            }
+    ($layer:literal, $rank:literal) => {
+        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
+            (!self.input_shape.is_empty())
+                .then(|| $crate::neural_network::Shape::known(&self.input_shape))
+        }
+
+        fn compute_output_shape(
+            &self,
+            input: &$crate::neural_network::Shape,
+        ) -> Result<$crate::neural_network::Shape, $crate::error::Error> {
+            input.check_rank($layer, $rank)?;
+            let (batch, tail) = input.split_batch($layer)?;
+            // Global pooling reduces every spatial axis to 1 value, so the batch axis and the
+            // channel axis are all that is left
+            Ok($crate::neural_network::Shape::from_batch(
+                batch,
+                &[tail[tail.len() - 1]],
+            ))
         }
 
         $crate::neural_network::layers::no_trainable_parameters_layer_functions!();
@@ -89,9 +100,9 @@ macro_rules! layer_functions_global_pooling {
 ///
 /// # Generated Functions
 ///
-/// - `output_shape()` - returns a formatted string of the output dimensions. If the input shape
-///   is known, it computes the dimensions from the pooling parameters. Otherwise it returns
-///   `"Unknown"`
+/// - `known_input_shape()` - the shape the constructor declared
+/// - `compute_output_shape()` - applies the pooling window to every spatial axis, and keeps the
+///   batch axis and the channel axis
 /// - all functions from the `no_trainable_parameters_layer_functions!()` macro
 ///
 /// # Requirements
@@ -100,23 +111,31 @@ macro_rules! layer_functions_global_pooling {
 /// - `input_shape: Vec<usize>` - shape of the input tensor
 /// - `pool_size: usize` - size of the pooling window
 /// - `stride: usize` - step size for the pooling operation
+///
+/// The macro takes the layer name, which reaches the error messages
 macro_rules! layer_functions_1d_pooling {
-    () => {
-        fn output_shape(&self) -> String {
-            if !self.input_shape.is_empty() {
-                let output_shape = calculate_output_shape_1d_pooling(
-                    &self.input_shape,
-                    self.pool_size,
-                    self.stride,
-                    self.padding,
-                );
-                format!(
-                    "({}, {}, {})",
-                    output_shape[0], output_shape[1], output_shape[2]
-                )
-            } else {
-                String::from("Unknown")
-            }
+    ($layer:literal) => {
+        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
+            (!self.input_shape.is_empty())
+                .then(|| $crate::neural_network::Shape::known(&self.input_shape))
+        }
+
+        fn compute_output_shape(
+            &self,
+            input: &$crate::neural_network::Shape,
+        ) -> Result<$crate::neural_network::Shape, $crate::error::Error> {
+            input.check_rank($layer, 3)?;
+            let (batch, tail) = input.split_batch($layer)?;
+            validate_pool_size_1d(self.pool_size, tail[0])?;
+            // The calculator reads the batch axis, so the list it takes starts with one
+            let mut dims = vec![0];
+            dims.extend(tail);
+            let output_shape =
+                calculate_output_shape_1d_pooling(&dims, self.pool_size, self.stride, self.padding);
+            Ok($crate::neural_network::Shape::from_batch(
+                batch,
+                &output_shape[1..],
+            ))
         }
 
         $crate::neural_network::layers::no_trainable_parameters_layer_functions!();
@@ -131,9 +150,9 @@ macro_rules! layer_functions_1d_pooling {
 ///
 /// # Generated Functions
 ///
-/// - `output_shape()` - returns a formatted string of the output dimensions. If the input shape
-///   is known, it computes the dimensions from the pooling parameters. Otherwise it returns
-///   `"Unknown"`
+/// - `known_input_shape()` - the shape the constructor declared
+/// - `compute_output_shape()` - applies the pooling window to every spatial axis, and keeps the
+///   batch axis and the channel axis
 /// - all functions from the `no_trainable_parameters_layer_functions!()` macro
 ///
 /// # Requirements
@@ -142,23 +161,35 @@ macro_rules! layer_functions_1d_pooling {
 /// - `input_shape: Vec<usize>` - shape of the input tensor
 /// - `pool_size: (usize, usize)` - size of the pooling window as (height, width)
 /// - `strides: (usize, usize)` - step size for the pooling operation as (height_step, width_step)
+///
+/// The macro takes the layer name, which reaches the error messages
 macro_rules! layer_functions_2d_pooling {
-    () => {
-        fn output_shape(&self) -> String {
-            if !self.input_shape.is_empty() {
-                let output_shape = calculate_output_shape_2d_pooling(
-                    &self.input_shape,
-                    self.pool_size,
-                    self.strides,
-                    self.padding,
-                );
-                format!(
-                    "({}, {}, {}, {})",
-                    output_shape[0], output_shape[1], output_shape[2], output_shape[3]
-                )
-            } else {
-                String::from("Unknown")
-            }
+    ($layer:literal) => {
+        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
+            (!self.input_shape.is_empty())
+                .then(|| $crate::neural_network::Shape::known(&self.input_shape))
+        }
+
+        fn compute_output_shape(
+            &self,
+            input: &$crate::neural_network::Shape,
+        ) -> Result<$crate::neural_network::Shape, $crate::error::Error> {
+            input.check_rank($layer, 4)?;
+            let (batch, tail) = input.split_batch($layer)?;
+            validate_pool_size_2d(self.pool_size, tail[0], tail[1])?;
+            // The calculator reads the batch axis, so the list it takes starts with one
+            let mut dims = vec![0];
+            dims.extend(tail);
+            let output_shape = calculate_output_shape_2d_pooling(
+                &dims,
+                self.pool_size,
+                self.strides,
+                self.padding,
+            );
+            Ok($crate::neural_network::Shape::from_batch(
+                batch,
+                &output_shape[1..],
+            ))
         }
 
         $crate::neural_network::layers::no_trainable_parameters_layer_functions!();
@@ -173,9 +204,9 @@ macro_rules! layer_functions_2d_pooling {
 ///
 /// # Generated Functions
 ///
-/// - `output_shape()` - returns a formatted string of the output dimensions. If the input shape
-///   is known, it computes the dimensions from the pooling parameters. Otherwise it returns
-///   `"Unknown"`
+/// - `known_input_shape()` - the shape the constructor declared
+/// - `compute_output_shape()` - applies the pooling window to every spatial axis, and keeps the
+///   batch axis and the channel axis
 /// - all functions from the `no_trainable_parameters_layer_functions!()` macro
 ///
 /// # Requirements
@@ -185,27 +216,35 @@ macro_rules! layer_functions_2d_pooling {
 /// - `pool_size: (usize, usize, usize)` - size of the pooling window as (depth, height, width)
 /// - `strides: (usize, usize, usize)` - step size for the pooling operation as
 ///   (depth_step, height_step, width_step)
+///
+/// The macro takes the layer name, which reaches the error messages
 macro_rules! layer_functions_3d_pooling {
-    () => {
-        fn output_shape(&self) -> String {
-            if !self.input_shape.is_empty() {
-                let output_shape = calculate_output_shape_3d_pooling(
-                    &self.input_shape,
-                    self.pool_size,
-                    self.strides,
-                    self.padding,
-                );
-                format!(
-                    "({}, {}, {}, {}, {})",
-                    output_shape[0],
-                    output_shape[1],
-                    output_shape[2],
-                    output_shape[3],
-                    output_shape[4]
-                )
-            } else {
-                String::from("Unknown")
-            }
+    ($layer:literal) => {
+        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
+            (!self.input_shape.is_empty())
+                .then(|| $crate::neural_network::Shape::known(&self.input_shape))
+        }
+
+        fn compute_output_shape(
+            &self,
+            input: &$crate::neural_network::Shape,
+        ) -> Result<$crate::neural_network::Shape, $crate::error::Error> {
+            input.check_rank($layer, 5)?;
+            let (batch, tail) = input.split_batch($layer)?;
+            validate_pool_size_3d(self.pool_size, tail[0], tail[1], tail[2])?;
+            // The calculator reads the batch axis, so the list it takes starts with one
+            let mut dims = vec![0];
+            dims.extend(tail);
+            let output_shape = calculate_output_shape_3d_pooling(
+                &dims,
+                self.pool_size,
+                self.strides,
+                self.padding,
+            );
+            Ok($crate::neural_network::Shape::from_batch(
+                batch,
+                &output_shape[1..],
+            ))
         }
 
         $crate::neural_network::layers::no_trainable_parameters_layer_functions!();

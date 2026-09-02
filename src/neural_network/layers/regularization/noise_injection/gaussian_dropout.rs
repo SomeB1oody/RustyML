@@ -1,15 +1,15 @@
 //! Gaussian Dropout layer that applies multiplicative Gaussian noise during training
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::validation::{
-    validate_input_shape, validate_rate_exclusive,
+    shape_preserving_output, validate_input_shape, validate_rate_exclusive,
 };
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand_distr::Normal;
@@ -159,19 +159,12 @@ impl Layer for GaussianDropout {
         "GaussianDropout"
     }
 
-    fn output_shape(&self) -> String {
-        if self.input_shape.is_empty() {
-            String::from("Unknown")
-        } else {
-            format!(
-                "({})",
-                self.input_shape
-                    .iter()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        }
+    fn known_input_shape(&self) -> Option<Shape> {
+        (!self.input_shape.is_empty()).then(|| Shape::known(&self.input_shape))
+    }
+
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        shape_preserving_output(input, &self.input_shape, "GaussianDropout")
     }
 
     no_trainable_parameters_layer_functions!();

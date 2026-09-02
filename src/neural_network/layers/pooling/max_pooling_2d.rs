@@ -221,5 +221,5 @@ impl Layer for MaxPooling2D {
         "MaxPooling2D"
     }
 
-    layer_functions_2d_pooling!();
+    layer_functions_2d_pooling!("MaxPooling2D");
 }

@@ -29,8 +29,10 @@ use ndarray::Zip;
 /// # Notes
 ///
 /// The layer stores no cache, not even the shape of the last input. Nothing in the forward
-/// pass or the backward pass needs one. `output_shape` therefore keeps the default answer of
-/// "Unknown", and `backward` runs correctly before any forward pass
+/// pass or the backward pass needs one. `known_input_shape` therefore reports `None` and
+/// `output_shape` reads "Unknown", and `backward` runs correctly before any forward pass.
+/// `compute_output_shape` still answers for any shape a caller passes, because the layer
+/// changes values and not extents
 ///
 /// # Examples
 ///

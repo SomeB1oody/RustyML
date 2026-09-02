@@ -1,14 +1,14 @@
 //! 2D zero-padding layer that adds zero rows and columns at the edges of an image
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::border::Border2D;
 use crate::neural_network::layers::border::pad_crop_engine::{
-    pad_backward, pad_forward, pad_summary,
+    pad_backward, pad_forward, pad_output_shape,
 };
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 
 /// Adds zero rows and columns at the edges of a rank-4 tensor
 ///
@@ -102,8 +102,12 @@ impl Layer for ZeroPadding2D {
         "ZeroPadding2D"
     }
 
-    fn output_shape(&self) -> String {
-        pad_summary(self.input_shape.as_deref(), &self.padding.0)
+    fn known_input_shape(&self) -> Option<Shape> {
+        self.input_shape.as_deref().map(Shape::with_free_batch)
+    }
+
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        pad_output_shape(input, &self.padding.0, "ZeroPadding2D")
     }
 
     no_trainable_parameters_layer_functions!();

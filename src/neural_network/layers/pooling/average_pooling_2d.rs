@@ -221,5 +221,5 @@ impl Layer for AveragePooling2D {
         "AveragePooling2D"
     }
 
-    layer_functions_2d_pooling!();
+    layer_functions_2d_pooling!("AveragePooling2D");
 }

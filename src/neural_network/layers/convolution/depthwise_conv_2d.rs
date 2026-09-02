@@ -1,7 +1,6 @@
 //! 2D depthwise convolution layer that gives each input channel its own kernel or kernels
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::conv_op_helpers::{
@@ -17,6 +16,7 @@ use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_2d;
 use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
+use crate::neural_network::{Shape, Tensor};
 use ndarray::{Array1, Array4};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
@@ -529,11 +529,17 @@ impl Layer for DepthwiseConv2D {
         "DepthwiseConv2D"
     }
 
-    fn output_shape(&self) -> String {
-        if self.input_shape.is_empty() {
-            return String::from("Unknown");
+    fn known_input_shape(&self) -> Option<Shape> {
+        (!self.input_shape.is_empty()).then(|| Shape::known(&self.input_shape))
+    }
+
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        input.check_rank("DepthwiseConv2D", 4)?;
+        let (batch, tail) = input.split_batch("DepthwiseConv2D")?;
+        let (height, width) = (tail[0], tail[1]);
+        if tail[2] != self.channels {
+            return Err(Error::dimension_mismatch(self.channels, tail[2]));
         }
-        let (height, width) = (self.input_shape[1], self.input_shape[2]);
         let (keff_h, keff_w) = self.effective_kernel_size();
         // A `Valid` layer whose effective kernel is longer than an input axis is legal until the
         // forward pass rejects it. `valid_output_size` reports 0 positions there instead of
@@ -549,13 +555,10 @@ impl Layer for DepthwiseConv2D {
             ),
         };
         // A depthwise convolution emits `channels * depth_multiplier` channels
-        format!(
-            "({}, {}, {}, {})",
-            self.input_shape[0],
-            out_height,
-            out_width,
-            self.channels * self.depth_multiplier
-        )
+        Ok(Shape::from_batch(
+            batch,
+            &[out_height, out_width, self.channels * self.depth_multiplier],
+        ))
     }
 
     fn param_count(&self) -> ParamCounts {

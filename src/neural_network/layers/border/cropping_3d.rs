@@ -1,14 +1,14 @@
 //! 3D cropping layer that removes planes at the 6 faces of a volume
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::border::Border3D;
 use crate::neural_network::layers::border::pad_crop_engine::{
-    crop_backward, crop_forward, crop_summary,
+    crop_backward, crop_forward, crop_output_shape,
 };
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 
 /// Removes planes at the 6 faces of a rank-5 tensor
 ///
@@ -99,8 +99,12 @@ impl Layer for Cropping3D {
         "Cropping3D"
     }
 
-    fn output_shape(&self) -> String {
-        crop_summary(self.input_shape.as_deref(), &self.cropping.0)
+    fn known_input_shape(&self) -> Option<Shape> {
+        self.input_shape.as_deref().map(Shape::with_free_batch)
+    }
+
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        crop_output_shape(input, &self.cropping.0, "Cropping3D")
     }
 
     no_trainable_parameters_layer_functions!();

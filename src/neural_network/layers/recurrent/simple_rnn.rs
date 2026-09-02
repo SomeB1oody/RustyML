@@ -2,7 +2,6 @@
 //! timestep's hidden state
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::named_weight_layer_functions;
@@ -13,6 +12,7 @@ use crate::neural_network::layers::recurrent::validation::{
 use crate::neural_network::layers::recurrent::{input_step, orthogonal_init};
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
+use crate::neural_network::{Shape, Tensor};
 use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Activation as FusedActivation, Bias, Parallelism};
 use ndarray::{Array, Array2, Array3, Axis};
@@ -474,14 +474,29 @@ impl Layer for SimpleRNN {
         "SimpleRNN"
     }
 
-    fn output_shape(&self) -> String {
-        // The layer keeps no input shape, so the time axis of a returned sequence prints as
-        // "None", the same as the batch axis
-        if self.return_sequences {
-            format!("(None, None, {})", self.units)
-        } else {
-            format!("(None, {})", self.units)
+    fn known_input_shape(&self) -> Option<Shape> {
+        // The layer keeps no input shape. It knows the feature count of 1 timestep, and it
+        // serves every batch size and every sequence length, so both of those axes are free
+        Some(Shape::new(vec![None, None, Some(self.input_dim)]))
+    }
+
+    /// A returned sequence keeps the time axis, and a returned final state drops it
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        input.check_rank("SimpleRNN", 3)?;
+        let axes = input.axes();
+        if let Some(features) = axes[2]
+            && features != self.input_dim
+        {
+            return Err(Error::invalid_input(format!(
+                "SimpleRNN expects {} features per timestep, got {features}",
+                self.input_dim
+            )));
         }
+        Ok(if self.return_sequences {
+            Shape::new(vec![axes[0], axes[1], Some(self.units)])
+        } else {
+            Shape::new(vec![axes[0], Some(self.units)])
+        })
     }
 
     fn param_count(&self) -> ParamCounts {

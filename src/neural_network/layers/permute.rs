@@ -2,10 +2,10 @@
 //! backpropagation
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 use ndarray::IxDyn;
 
 /// Reorders the axes after the batch axis
@@ -208,18 +208,18 @@ impl Layer for Permute {
         "Permute"
     }
 
-    fn output_shape(&self) -> String {
-        match &self.input_shape {
-            // Element 0 is the batch axis, which `summary()` prints as "None"
-            Some(shape) => {
-                let axes: Vec<String> = self.permuted_shape(shape)[1..]
-                    .iter()
-                    .map(|e| e.to_string())
-                    .collect();
-                format!("(None, {})", axes.join(", "))
-            }
-            None => "Unknown".to_string(),
-        }
+    fn known_input_shape(&self) -> Option<Shape> {
+        self.input_shape.as_deref().map(Shape::with_free_batch)
+    }
+
+    /// The layer moves axes and changes no extent, so the output axes are the input axes in
+    /// the configured order. Element 0 of that order is always the batch axis
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        input.check_rank("Permute", self.forward_axes.len())?;
+        let axes = input.axes();
+        Ok(Shape::new(
+            self.forward_axes.iter().map(|&axis| axes[axis]).collect(),
+        ))
     }
 
     no_trainable_parameters_layer_functions!();

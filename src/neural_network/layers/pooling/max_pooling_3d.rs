@@ -220,5 +220,5 @@ impl Layer for MaxPooling3D {
         "MaxPooling3D"
     }
 
-    layer_functions_3d_pooling!();
+    layer_functions_3d_pooling!("MaxPooling3D");
 }

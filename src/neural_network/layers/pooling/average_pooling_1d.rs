@@ -217,5 +217,5 @@ impl Layer for AveragePooling1D {
         "AveragePooling1D"
     }
 
-    layer_functions_1d_pooling!();
+    layer_functions_1d_pooling!("AveragePooling1D");
 }

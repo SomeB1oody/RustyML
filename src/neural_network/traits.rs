@@ -2,6 +2,7 @@
 //! parameter and weight views shared between them
 
 use crate::error::Error;
+use crate::neural_network::Shape;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::checkpoint::BuildConfig;
@@ -328,13 +329,77 @@ pub trait Layer: std::any::Any + Send + Sync {
         "Unknown"
     }
 
+    /// The output shape the layer gives for an input of the given shape
+    ///
+    /// The answer is a pure function of the layer configuration and of `input`. The method
+    /// reads no cache that a forward pass wrote, so it gives the same answer before any tensor
+    /// reaches the layer and after any number of passes. A free axis of the input stays free
+    /// in the output wherever the layer passes it through, which is how 1 layer describes
+    /// itself for every batch size
+    ///
+    /// The method refuses an input the layer cannot accept, and the message names the layer
+    /// and the axis at fault. That refusal is the point of the method. A shape error shows
+    /// itself today in the middle of a forward pass, deep inside a model, with no layer named.
+    /// A pure shape function is what lets a later change walk a model at build time, thread
+    /// each output shape into the next layer, and reject a bad stack before any data arrives,
+    /// naming the position of the layer and its type
+    ///
+    /// The default passes the input through unchanged, which is right for every layer that
+    /// changes values and not extents
+    ///
+    /// # Parameters
+    ///
+    /// - `input` - Shape of the tensor that enters the layer, batch axis first
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Shape, Error>` - Shape of the tensor the layer gives back
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the layer cannot accept an input of that shape
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        Ok(input.clone())
+    }
+
+    /// The input shape the layer holds, or `None` while it holds none
+    ///
+    /// A layer whose constructor takes an input shape reports that shape, batch extent
+    /// included. A layer that learns its input shape from the first forward pass reports the
+    /// shape of the last input it saw, with the batch axis freed, because the layer serves
+    /// every batch size. A layer that needs no input shape at all, such as
+    /// [`Rescaling`](crate::neural_network::layers::rescaling::Rescaling), always reports
+    /// `None`
+    ///
+    /// [`output_shape`](Layer::output_shape) runs
+    /// [`compute_output_shape`](Layer::compute_output_shape) against this shape. The method is
+    /// therefore the 1 place where the display value reads state, and
+    /// [`compute_output_shape`](Layer::compute_output_shape) stays pure
+    ///
+    /// # Returns
+    ///
+    /// - `Option<Shape>` - The input shape the layer holds
+    fn known_input_shape(&self) -> Option<Shape> {
+        None
+    }
+
     /// Returns a description of the output shape of the layer
+    ///
+    /// The value is [`compute_output_shape`](Layer::compute_output_shape) run against
+    /// [`known_input_shape`](Layer::known_input_shape). A layer that holds no input shape, and
+    /// a layer whose held shape the shape algebra refuses, both report `"Unknown"`
     ///
     /// # Returns
     ///
     /// - `String` - A string describing the output dimensions
     fn output_shape(&self) -> String {
-        "Unknown".to_string()
+        match self.known_input_shape() {
+            Some(input) => match self.compute_output_shape(&input) {
+                Ok(output) => output.to_string(),
+                Err(_) => "Unknown".to_string(),
+            },
+            None => "Unknown".to_string(),
+        }
     }
 
     /// Returns how many parameters the layer holds, split by whether training updates them

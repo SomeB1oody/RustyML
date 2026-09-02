@@ -1,12 +1,12 @@
 //! Dense (fully connected) layer: a linear transform followed by an optional activation
 
 use crate::error::{Context, Error};
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
+use crate::neural_network::{Shape, Tensor};
 use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Activation as FusedActivation, Bias, Parallelism};
 use ndarray::{Array, Array2, ArrayView2, Axis, CowArray, Ix2};
@@ -473,21 +473,37 @@ impl Layer for Dense {
         "Dense"
     }
 
-    fn output_shape(&self) -> String {
-        // The last axis becomes the unit count, and the axes between the batch axis and the
-        // last axis pass through. Before the first forward pass, only the unit count is known
-        match &self.input_shape {
-            Some(shape) => {
-                // Element 0 is the batch axis, which `summary()` prints as "None"
-                let mut axes: Vec<String> = shape[1..shape.len() - 1]
-                    .iter()
-                    .map(|e| e.to_string())
-                    .collect();
-                axes.push(self.output_dim.to_string());
-                format!("(None, {})", axes.join(", "))
+    fn known_input_shape(&self) -> Option<Shape> {
+        Some(match &self.input_shape {
+            Some(shape) => Shape::with_free_batch(shape),
+            // Before the first forward pass the layer knows the feature count it folds to, and
+            // nothing about the axes between the batch axis and the last axis
+            None => Shape::new(vec![None, Some(self.input_dim)]),
+        })
+    }
+
+    /// The last axis becomes the unit count, and every axis before it passes through
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        input.check_min_rank("Dense", 2)?;
+        let mut axes = input.axes().to_vec();
+        let last = axes.len() - 1;
+        match axes[last] {
+            Some(extent) if extent == self.input_dim => {}
+            Some(extent) => {
+                return Err(Error::invalid_input(format!(
+                    "Dense input must have {} elements on the last axis, got {extent}",
+                    self.input_dim
+                )));
             }
-            None => format!("(None, {})", self.output_dim),
+            None => {
+                return Err(Error::invalid_input(format!(
+                    "Dense input must have {} elements on the last axis, and that axis is free",
+                    self.input_dim
+                )));
+            }
         }
+        axes[last] = Some(self.output_dim);
+        Ok(Shape::new(axes))
     }
 
     fn param_count(&self) -> ParamCounts {

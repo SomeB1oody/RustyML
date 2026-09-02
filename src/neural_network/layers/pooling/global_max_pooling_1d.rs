@@ -120,5 +120,5 @@ impl Layer for GlobalMaxPooling1D {
         "GlobalMaxPooling1D"
     }
 
-    layer_functions_global_pooling!();
+    layer_functions_global_pooling!("GlobalMaxPooling1D", 3);
 }

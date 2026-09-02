@@ -1,14 +1,14 @@
 //! 1D upsampling layer that repeats each step of the step axis
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::layers::upsampling::Interpolation;
 use crate::neural_network::layers::upsampling::resize_engine::{
-    upsample_backward, upsample_forward, upsample_summary, validate_factors,
+    upsample_backward, upsample_forward, upsample_output_shape, validate_factors,
 };
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 
 /// Repeats each step of the step axis of a rank-3 tensor
 ///
@@ -124,8 +124,12 @@ impl Layer for UpSampling1D {
         "UpSampling1D"
     }
 
-    fn output_shape(&self) -> String {
-        upsample_summary(self.input_shape.as_deref(), &[self.size])
+    fn known_input_shape(&self) -> Option<Shape> {
+        self.input_shape.as_deref().map(Shape::with_free_batch)
+    }
+
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        upsample_output_shape(input, &[self.size], "UpSampling1D")
     }
 
     no_trainable_parameters_layer_functions!();

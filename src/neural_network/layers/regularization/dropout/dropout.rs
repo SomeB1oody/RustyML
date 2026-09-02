@@ -1,18 +1,18 @@
 //! Dropout layer that randomly zeroes input units during training to reduce overfitting
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::layers::regularization::dropout::{
-    broadcast_dropout_scale, dropout_backward, dropout_output_shape,
+    broadcast_dropout_scale, dropout_backward,
 };
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::validation::{
-    validate_input_shape, validate_rate,
+    shape_preserving_output, validate_input_shape, validate_rate,
 };
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 use crate::parallel_gates::cheap_map_parallel_threshold;
 use ndarray::IxDyn;
 use ndarray_rand::rand::rngs::StdRng;
@@ -279,8 +279,12 @@ impl Layer for Dropout {
         "Dropout"
     }
 
-    fn output_shape(&self) -> String {
-        dropout_output_shape(&self.input_shape)
+    fn known_input_shape(&self) -> Option<Shape> {
+        (!self.input_shape.is_empty()).then(|| Shape::known(&self.input_shape))
+    }
+
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        shape_preserving_output(input, &self.input_shape, "Dropout")
     }
 
     no_trainable_parameters_layer_functions!();

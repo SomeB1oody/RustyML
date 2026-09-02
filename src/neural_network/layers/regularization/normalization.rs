@@ -443,26 +443,41 @@ pub use unit_normalization::{UnitNormalization, UnitNormalizationAxis};
 // Macros are defined after the `mod` declarations and path-exported via a `pub(in ...) use`
 // re-export. Callers therefore import them explicitly instead of relying on textual macro
 // ordering
-/// Common implementation for `output_shape` method in normalization layers
-macro_rules! normalization_layer_output_shape {
-    ($self:expr) => {
-        if !$self.input_shape.is_empty() {
-            format!(
-                "({})",
-                $self
-                    .input_shape
-                    .iter()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+/// Common implementation of the 2 shape methods of a normalization layer
+///
+/// A normalization layer changes values and not extents, so its output shape repeats its input
+/// shape. The macro takes the layer name, which reaches the error messages
+///
+/// # Generated Functions
+///
+/// - `known_input_shape()` - the shape the constructor declared, or `None` when it is empty
+/// - `compute_output_shape()` - the input shape, checked against the declared one
+///
+/// # Requirements
+///
+/// The implementing struct must have the field:
+/// - `input_shape: Vec<usize>` - shape the constructor declared
+macro_rules! normalization_layer_shape_functions {
+    ($layer:literal) => {
+        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
+            (!self.input_shape.is_empty())
+                .then(|| $crate::neural_network::Shape::known(&self.input_shape))
+        }
+
+        fn compute_output_shape(
+            &self,
+            input: &$crate::neural_network::Shape,
+        ) -> Result<$crate::neural_network::Shape, $crate::error::Error> {
+            $crate::neural_network::layers::regularization::validation::shape_preserving_output(
+                input,
+                &self.input_shape,
+                $layer,
             )
-        } else {
-            String::from("Unknown")
         }
     };
 }
 
-pub(in crate::neural_network::layers::regularization::normalization) use normalization_layer_output_shape;
+pub(in crate::neural_network::layers::regularization::normalization) use normalization_layer_shape_functions;
 
 /// Unit tests for the group-normalization core and its deterministic fold kernels
 #[cfg(test)]

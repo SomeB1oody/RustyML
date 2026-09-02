@@ -1,7 +1,6 @@
 //! 2D depthwise separable convolution layer (depthwise stage followed by a pointwise 1x1 stage)
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::conv_op_helpers::{
@@ -20,6 +19,7 @@ use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::shape_helpers::calculate_output_height_and_weight;
 use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
+use crate::neural_network::{Shape, Tensor};
 use ndarray::{Array1, Array4};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
@@ -667,12 +667,20 @@ impl Layer for SeparableConv2D {
         "SeparableConv2D"
     }
 
-    fn output_shape(&self) -> String {
-        let output_shape = self.calculate_output_shape(&self.input_shape);
-        format!(
-            "({}, {}, {}, {})",
-            output_shape[0], output_shape[1], output_shape[2], output_shape[3]
-        )
+    fn known_input_shape(&self) -> Option<Shape> {
+        Some(Shape::known(&self.input_shape))
+    }
+
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        input.check_rank("SeparableConv2D", 4)?;
+        let (batch, tail) = input.split_batch("SeparableConv2D")?;
+        // `calculate_output_shape` reads the batch axis, so the list it takes starts with one
+        let mut dims = vec![0];
+        dims.extend(tail);
+        Ok(Shape::from_batch(
+            batch,
+            &self.calculate_output_shape(&dims)[1..],
+        ))
     }
 
     fn param_count(&self) -> ParamCounts {

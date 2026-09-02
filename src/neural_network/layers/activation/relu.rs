@@ -2,11 +2,11 @@
 //! backpropagation
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::{Activation, format_output_shape};
+use crate::neural_network::layers::activation::{Activation, cached_shape};
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 
 /// ReLU (Rectified Linear Unit) activation layer
 ///
@@ -105,8 +105,8 @@ impl Layer for ReLU {
         "ReLU"
     }
 
-    fn output_shape(&self) -> String {
-        format_output_shape(&self.output_cache)
+    fn known_input_shape(&self) -> Option<Shape> {
+        cached_shape(&self.output_cache)
     }
 
     no_trainable_parameters_layer_functions!();

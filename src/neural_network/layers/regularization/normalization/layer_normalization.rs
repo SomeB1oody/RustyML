@@ -12,7 +12,7 @@ use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
-use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape;
+use crate::neural_network::layers::regularization::normalization::normalization_layer_shape_functions;
 use crate::neural_network::layers::regularization::validation::{
     validate_epsilon, validate_input_shape,
 };
@@ -811,9 +811,7 @@ impl Layer for LayerNormalization {
         "LayerNormalization"
     }
 
-    fn output_shape(&self) -> String {
-        normalization_layer_output_shape!(self)
-    }
+    normalization_layer_shape_functions!("LayerNormalization");
 
     fn param_count(&self) -> ParamCounts {
         // Read the arrays the layer holds rather than the configuration, so dropping

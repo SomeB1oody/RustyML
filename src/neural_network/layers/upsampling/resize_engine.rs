@@ -12,8 +12,8 @@
 //! upsampling layer never changes them
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::upsampling::Interpolation;
+use crate::neural_network::{Shape, Tensor};
 use crate::parallel_gates::split_cap;
 use ndarray::IxDyn;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
@@ -472,21 +472,36 @@ pub(super) fn upsample_backward(
     Ok(run_bands(grad_output, &bands))
 }
 
-/// Formats the output shape of an upsampling layer for `summary()`
+/// The shape an upsampling layer gives for an input of the given shape
 ///
-/// An input shape of `None` means no forward pass has run, so the layer cannot know its output
-/// shape yet
-pub(super) fn upsample_summary(input_shape: Option<&[usize]>, factors: &[usize]) -> String {
-    match input_shape {
-        Some(shape) => {
-            let axes: Vec<String> = upsampled_shape(shape, factors)[1..]
-                .iter()
-                .map(|extent| extent.to_string())
-                .collect();
-            format!("(None, {})", axes.join(", "))
-        }
-        None => "Unknown".to_string(),
-    }
+/// # Parameters
+///
+/// - `input` - Shape of the tensor entering the layer, batch axis first
+/// - `factors` - Factor each spatial axis grows by
+/// - `layer` - Layer name, used in error messages
+///
+/// # Returns
+///
+/// - `Result<Shape, Error>` - Shape of the enlarged tensor
+///
+/// # Errors
+///
+/// - `Error::InvalidInput` - If the rank is not `factors.len() + 2`, or if a spatial axis has
+///   no fixed extent
+pub(super) fn upsample_output_shape(
+    input: &Shape,
+    factors: &[usize],
+    layer: &str,
+) -> Result<Shape, Error> {
+    input.check_rank(layer, factors.len() + 2)?;
+    let (batch, tail) = input.split_batch(layer)?;
+    // `upsampled_shape` indexes by spatial axis, so it needs the batch axis in front of the list
+    let mut dims = vec![0];
+    dims.extend(tail);
+    Ok(Shape::from_batch(
+        batch,
+        &upsampled_shape(&dims, factors)[1..],
+    ))
 }
 
 /// Checks that every upsampling factor is at least 1

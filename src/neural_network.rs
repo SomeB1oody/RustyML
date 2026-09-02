@@ -14,7 +14,7 @@
 //! ## Layers
 //! - **Dense**: fully connected layer with a configurable activation
 //! - **Embedding**: trainable lookup table that turns whole-number indices into dense vectors
-//! - **Shape**: `Flatten` collapses to rank 2, and `Reshape` rewrites the non-batch axes
+//! - **Reshaping**: `Flatten` collapses to rank 2, and `Reshape` rewrites the non-batch axes
 //! - **Border**: `ZeroPadding1D/2D/3D` and `Cropping1D/2D/3D` resize the spatial axes at
 //!   their ends
 //! - **Upsampling**: `UpSampling1D/2D/3D` enlarge the spatial axes by a whole-number factor,
@@ -46,6 +46,13 @@
 //! - **MeanSquaredError** / **MeanAbsoluteError**: regression
 //! - **BinaryCrossEntropy**: binary classification
 //! - **CategoricalCrossEntropy** / **SparseCategoricalCrossEntropy**: multi-class classification
+//!
+//! ## Shapes
+//! - [`Shape`](crate::neural_network::Shape): the shape of a tensor as a layer describes it,
+//!   with a free axis for an extent that no configuration fixes. Every layer maps an input
+//!   shape to an output shape through
+//!   [`Layer::compute_output_shape`](crate::neural_network::traits::Layer::compute_output_shape),
+//!   which reads the layer configuration alone and answers before any tensor exists
 //!
 //! ## Model
 //! - [`Sequential`](crate::neural_network::sequential::Sequential): a linear stack of layers with
@@ -103,7 +110,10 @@ pub mod losses;
 pub mod optimizers;
 /// Sequential model architecture
 pub mod sequential;
+/// The tensor shape a layer computes, with a free axis for an extent no configuration fixes
+pub mod shape;
 /// Trait interfaces for neural network models
 pub mod traits;
 
 pub use error::NnError;
+pub use shape::Shape;

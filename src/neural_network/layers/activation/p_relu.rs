@@ -2,12 +2,11 @@
 //! shared-axes rule that decides how many slopes it holds
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::format_shape;
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
+use crate::neural_network::{Shape, Tensor};
 use crate::parallel_gates::cheap_map_parallel_threshold;
 use ndarray::{ArrayD, Axis, Zip};
 
@@ -398,13 +397,41 @@ impl Layer for PReLU {
         "PReLU"
     }
 
-    fn output_shape(&self) -> String {
+    fn known_input_shape(&self) -> Option<Shape> {
         // A shared axis accepts any extent, so the observed shape can differ from the
         // configured one
-        match &self.input_cache {
-            Some(input) => format_shape(input.shape()),
-            None => format_shape(&self.input_shape),
+        Some(match &self.input_cache {
+            Some(input) => Shape::known(input.shape()),
+            None => Shape::known(&self.input_shape),
+        })
+    }
+
+    /// The layer keeps every extent, and it refuses a shape its slope array cannot cover
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        input.check_rank("PReLU", self.input_shape.len())?;
+        for (axis, extent) in input.axes().iter().enumerate().skip(1) {
+            if self.shared_axes.contains(&axis) {
+                continue;
+            }
+            let wanted = self.input_shape[axis];
+            match extent {
+                Some(extent) if *extent == wanted => {}
+                Some(extent) => {
+                    return Err(Error::invalid_input(format!(
+                        "PReLU layer holds 1 slope per position of axis {axis}, so that axis \
+                         must have extent {wanted}, got {extent}. Add the axis to shared_axes \
+                         to accept any extent"
+                    )));
+                }
+                None => {
+                    return Err(Error::invalid_input(format!(
+                        "PReLU layer holds 1 slope per position of axis {axis}, so that axis \
+                         needs a fixed extent. Add the axis to shared_axes to accept any extent"
+                    )));
+                }
+            }
         }
+        Ok(input.clone())
     }
 
     fn param_count(&self) -> ParamCounts {

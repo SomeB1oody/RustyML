@@ -1,11 +1,11 @@
 //! Embedding layer: a trainable lookup table that turns whole-number indices into dense vectors
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
+use crate::neural_network::{Shape, Tensor};
 use crate::parallel_gates::{cheap_map_parallel_threshold, split_cap};
 use ndarray::{Array, Array2, IxDyn};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
@@ -377,16 +377,16 @@ impl Layer for Embedding {
         "Embedding"
     }
 
-    fn output_shape(&self) -> String {
-        match &self.input_shape {
-            // Element 0 is the batch axis, which `summary()` prints as "None"
-            Some(shape) => {
-                let mut axes: Vec<String> = shape[1..].iter().map(|e| e.to_string()).collect();
-                axes.push(self.output_dim.to_string());
-                format!("(None, {})", axes.join(", "))
-            }
-            None => "Unknown".to_string(),
-        }
+    fn known_input_shape(&self) -> Option<Shape> {
+        self.input_shape.as_deref().map(Shape::with_free_batch)
+    }
+
+    /// Every index becomes 1 row of the table, so the output gains a trailing width axis
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        input.check_min_rank("Embedding", 1)?;
+        let mut axes = input.axes().to_vec();
+        axes.push(Some(self.output_dim));
+        Ok(Shape::new(axes))
     }
 
     fn param_count(&self) -> ParamCounts {

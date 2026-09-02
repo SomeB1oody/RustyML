@@ -1,7 +1,6 @@
 //! 1D depthwise convolution layer that gives each input channel its own kernel or kernels
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::conv_op_helpers::{
@@ -16,6 +15,7 @@ use crate::neural_network::layers::convolution::validation::{
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
+use crate::neural_network::{Shape, Tensor};
 use ndarray::{Array1, Array3};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
@@ -496,14 +496,24 @@ impl Layer for DepthwiseConv1D {
         "DepthwiseConv1D"
     }
 
-    fn output_shape(&self) -> String {
-        let output_length = self.calculate_output_length(self.input_shape[1]);
-        format!(
-            "({}, {}, {})",
-            self.input_shape[0],
-            output_length,
-            self.channels * self.depth_multiplier
-        )
+    fn known_input_shape(&self) -> Option<Shape> {
+        Some(Shape::known(&self.input_shape))
+    }
+
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        input.check_rank("DepthwiseConv1D", 3)?;
+        let (batch, tail) = input.split_batch("DepthwiseConv1D")?;
+        if tail[1] != self.channels {
+            return Err(Error::dimension_mismatch(self.channels, tail[1]));
+        }
+        // A depthwise convolution emits `channels * depth_multiplier` channels
+        Ok(Shape::from_batch(
+            batch,
+            &[
+                self.calculate_output_length(tail[0]),
+                self.channels * self.depth_multiplier,
+            ],
+        ))
     }
 
     fn param_count(&self) -> ParamCounts {

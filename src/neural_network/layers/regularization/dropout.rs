@@ -17,8 +17,6 @@
 //!   stored mask)
 //! - `broadcast_dropout_scale` - applies the inverted-dropout scale of a mask that broadcasts
 //!   up to the tensor, so a `noise_shape` mask stays at its own small shape
-//! - `dropout_output_shape` - formats the (unchanged) output shape, since dropout preserves the
-//!   input shape
 //! - `spatial_dropout_scale` and `spatial_dropout_backward` - apply the per-channel
 //!   inverted-dropout scale to a `[batch, *spatial, channels]` tensor from a small
 //!   `[batch, channels]` mask without building a full-size mask
@@ -113,33 +111,6 @@ fn broadcast_dropout_scale(t: &Tensor, mask: &Tensor, rate: f32) -> Result<Tenso
         .and(&broadcast)
         .for_each(|o, &x, &m| *o = (x * m) * scale);
     Ok(out)
-}
-
-/// Common output-shape formatting shared by all dropout layers
-///
-/// The output shape equals the input shape for every dropout variant, so this formats
-/// the input shape into a string representation
-///
-/// # Parameters
-///
-/// - `input_shape` - The input shape vector
-///
-/// # Returns
-///
-/// - `String` - Formatted output shape string
-fn dropout_output_shape(input_shape: &[usize]) -> String {
-    if !input_shape.is_empty() {
-        format!(
-            "({})",
-            input_shape
-                .iter()
-                .map(|x| x.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    } else {
-        String::from("Unknown")
-    }
 }
 
 /// Applies the per-channel inverted-dropout scale to a `[batch, *spatial, channels]` tensor

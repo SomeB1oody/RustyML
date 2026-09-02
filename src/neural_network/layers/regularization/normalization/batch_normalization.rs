@@ -17,7 +17,7 @@ use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
-use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape;
+use crate::neural_network::layers::regularization::normalization::normalization_layer_shape_functions;
 use crate::neural_network::layers::regularization::validation::{
     validate_epsilon, validate_input_shape, validate_input_shape_not_empty, validate_momentum,
 };
@@ -625,9 +625,7 @@ impl Layer for BatchNormalization {
         "BatchNormalization"
     }
 
-    fn output_shape(&self) -> String {
-        normalization_layer_output_shape!(self)
-    }
+    normalization_layer_shape_functions!("BatchNormalization");
 
     fn param_count(&self) -> ParamCounts {
         // The running statistics are parameters of the layer, and no optimizer updates them.

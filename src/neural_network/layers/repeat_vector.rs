@@ -2,10 +2,10 @@
 //! for backpropagation
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 use ndarray::{Axis, IxDyn};
 
 /// Repeats each feature vector `n` times along a new step axis
@@ -144,12 +144,15 @@ impl Layer for RepeatVector {
         "RepeatVector"
     }
 
-    fn output_shape(&self) -> String {
-        match &self.input_shape {
-            // Element 0 is the batch axis, which `summary()` prints as "None"
-            Some(shape) => format!("(None, {}, {})", self.n, shape[1]),
-            None => "Unknown".to_string(),
-        }
+    fn known_input_shape(&self) -> Option<Shape> {
+        self.input_shape.as_deref().map(Shape::with_free_batch)
+    }
+
+    /// The layer inserts a step axis of `n` copies between the batch axis and the features
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        input.check_rank("RepeatVector", 2)?;
+        let (batch, tail) = input.split_batch("RepeatVector")?;
+        Ok(Shape::from_batch(batch, &[self.n, tail[0]]))
     }
 
     no_trainable_parameters_layer_functions!();

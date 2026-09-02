@@ -1,14 +1,14 @@
 //! 3D upsampling layer that enlarges a volume by a whole-number factor per axis
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::layers::upsampling::resize_engine::{
-    upsample_backward, upsample_forward, upsample_summary, validate_factors,
+    upsample_backward, upsample_forward, upsample_output_shape, validate_factors,
 };
 use crate::neural_network::layers::upsampling::{Factor3D, Interpolation};
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 
 /// Enlarges the 3 spatial axes of a rank-5 tensor
 ///
@@ -125,8 +125,12 @@ impl Layer for UpSampling3D {
         "UpSampling3D"
     }
 
-    fn output_shape(&self) -> String {
-        upsample_summary(self.input_shape.as_deref(), &self.size.0)
+    fn known_input_shape(&self) -> Option<Shape> {
+        self.input_shape.as_deref().map(Shape::with_free_batch)
+    }
+
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        upsample_output_shape(input, &self.size.0, "UpSampling3D")
     }
 
     no_trainable_parameters_layer_functions!();

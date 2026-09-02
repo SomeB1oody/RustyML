@@ -7,7 +7,7 @@ use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
-use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape;
+use crate::neural_network::layers::regularization::normalization::normalization_layer_shape_functions;
 use crate::neural_network::layers::regularization::normalization::{
     group_norm_backward_core, group_norm_forward_core,
 };
@@ -290,9 +290,7 @@ impl Layer for GroupNormalization {
         "GroupNormalization"
     }
 
-    fn output_shape(&self) -> String {
-        normalization_layer_output_shape!(self)
-    }
+    normalization_layer_shape_functions!("GroupNormalization");
 
     fn param_count(&self) -> ParamCounts {
         // Read the arrays the layer holds rather than the configuration, so dropping

@@ -1,6 +1,7 @@
 //! Shared parameter and shape validation helpers for regularization layers
 
 use crate::error::Error;
+use crate::neural_network::Shape;
 
 /// Validates that a rate parameter is between 0.0 and 1.0 (inclusive)
 pub(super) fn validate_rate(rate: f32, param_name: &str) -> Result<(), Error> {
@@ -52,6 +53,49 @@ pub(super) fn validate_input_shape(
         return Err(Error::shape_mismatch(reported, input_shape));
     }
     Ok(())
+}
+
+/// The shape a value-preserving regularization layer gives, checked against its declared shape
+///
+/// The layer changes values and not extents, so the output shape repeats the input shape. The
+/// check follows the rule of [`validate_input_shape`]: it compares the rank and every axis
+/// after the batch axis, and never the batch axis itself. A free axis passes, because no
+/// declared extent can disprove it. An empty `expected` disables the comparison
+///
+/// # Parameters
+///
+/// - `input` - Shape of the tensor entering the layer, batch axis first
+/// - `expected` - Shape the constructor declared, batch axis first
+/// - `layer` - Layer name, used in error messages
+///
+/// # Returns
+///
+/// - `Result<Shape, Error>` - The input shape, unchanged
+///
+/// # Errors
+///
+/// - `Error::InvalidInput` - If the rank differs, or if an axis after the batch axis has a
+///   fixed extent that the declared shape does not hold
+pub(super) fn shape_preserving_output(
+    input: &Shape,
+    expected: &[usize],
+    layer: &str,
+) -> Result<Shape, Error> {
+    if expected.is_empty() {
+        return Ok(input.clone());
+    }
+    input.check_rank(layer, expected.len())?;
+    for (axis, extent) in input.axes().iter().enumerate().skip(1) {
+        if let Some(extent) = extent
+            && *extent != expected[axis]
+        {
+            return Err(Error::invalid_input(format!(
+                "{layer} was declared for extent {} on axis {axis}, got {extent}",
+                expected[axis]
+            )));
+        }
+    }
+    Ok(input.clone())
 }
 
 /// Validates that input has the expected number of dimensions

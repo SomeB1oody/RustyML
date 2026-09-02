@@ -3,10 +3,10 @@
 
 use super::folds::{rows_per_block, segment_dot};
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 use crate::parallel_gates::cheap_map_parallel_threshold;
 use ndarray::{Axis, IxDyn, Zip};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
@@ -528,15 +528,8 @@ impl Layer for UnitNormalization {
         "UnitNormalization"
     }
 
-    fn output_shape(&self) -> String {
-        match &self.input_shape {
-            // Element 0 is the batch axis, which `summary()` prints as "None"
-            Some(shape) => {
-                let axes: Vec<String> = shape[1..].iter().map(|e| e.to_string()).collect();
-                format!("(None, {})", axes.join(", "))
-            }
-            None => "Unknown".to_string(),
-        }
+    fn known_input_shape(&self) -> Option<Shape> {
+        self.input_shape.as_deref().map(Shape::with_free_batch)
     }
 
     no_trainable_parameters_layer_functions!();

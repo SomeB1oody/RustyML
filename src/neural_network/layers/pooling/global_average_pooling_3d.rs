@@ -119,5 +119,5 @@ impl Layer for GlobalAveragePooling3D {
         "GlobalAveragePooling3D"
     }
 
-    layer_functions_global_pooling!();
+    layer_functions_global_pooling!("GlobalAveragePooling3D", 5);
 }

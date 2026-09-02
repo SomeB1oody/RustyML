@@ -1,18 +1,18 @@
 //! 1D spatial dropout layer that drops whole channels of `(batch_size, length, channels)` inputs
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::layers::regularization::dropout::{
-    dropout_output_shape, spatial_dropout_backward, spatial_dropout_scale,
+    spatial_dropout_backward, spatial_dropout_scale,
 };
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::validation::{
-    validate_input_ndim, validate_input_shape, validate_rate,
+    shape_preserving_output, validate_input_ndim, validate_input_shape, validate_rate,
 };
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 use crate::parallel_gates::spatial_dropout_scale_parallel_min_elems;
 use ndarray::IxDyn;
 use ndarray_rand::rand::rngs::StdRng;
@@ -189,8 +189,12 @@ impl Layer for SpatialDropout1D {
         "SpatialDropout1D"
     }
 
-    fn output_shape(&self) -> String {
-        dropout_output_shape(&self.input_shape)
+    fn known_input_shape(&self) -> Option<Shape> {
+        (!self.input_shape.is_empty()).then(|| Shape::known(&self.input_shape))
+    }
+
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        shape_preserving_output(input, &self.input_shape, "SpatialDropout1D")
     }
 
     no_trainable_parameters_layer_functions!();

@@ -2,10 +2,10 @@
 //! backpropagation
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 
 /// Passes its input through unchanged
 ///
@@ -125,19 +125,8 @@ impl Layer for Identity {
         "Identity"
     }
 
-    fn output_shape(&self) -> String {
-        match &self.input_shape {
-            // Element 0 is the batch axis, which `summary()` prints as "None"
-            Some(shape) => {
-                let axes: Vec<String> = shape[1..].iter().map(|e| e.to_string()).collect();
-                if axes.is_empty() {
-                    "(None,)".to_string()
-                } else {
-                    format!("(None, {})", axes.join(", "))
-                }
-            }
-            None => "Unknown".to_string(),
-        }
+    fn known_input_shape(&self) -> Option<Shape> {
+        self.input_shape.as_deref().map(Shape::with_free_batch)
     }
 
     no_trainable_parameters_layer_functions!();

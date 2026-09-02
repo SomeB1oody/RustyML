@@ -1,14 +1,14 @@
 //! 1D zero-padding layer that adds zero steps at each end of the step axis
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::border::Border1D;
 use crate::neural_network::layers::border::pad_crop_engine::{
-    pad_backward, pad_forward, pad_summary,
+    pad_backward, pad_forward, pad_output_shape,
 };
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 
 /// Adds zero steps at each end of the step axis of a rank-3 tensor
 ///
@@ -100,8 +100,12 @@ impl Layer for ZeroPadding1D {
         "ZeroPadding1D"
     }
 
-    fn output_shape(&self) -> String {
-        pad_summary(self.input_shape.as_deref(), &self.padding.0)
+    fn known_input_shape(&self) -> Option<Shape> {
+        self.input_shape.as_deref().map(Shape::with_free_batch)
+    }
+
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        pad_output_shape(input, &self.padding.0, "ZeroPadding1D")
     }
 
     no_trainable_parameters_layer_functions!();

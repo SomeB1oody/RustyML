@@ -1,11 +1,10 @@
 //! Linear (identity) activation layer
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::format_shape;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
+use crate::neural_network::{Shape, Tensor};
 
 /// Linear (identity) activation layer
 ///
@@ -103,11 +102,10 @@ impl Layer for Linear {
         "Linear"
     }
 
-    fn output_shape(&self) -> String {
-        match &self.input_shape {
-            Some(shape) => format_shape(shape),
-            None => "Unknown".to_string(),
-        }
+    fn known_input_shape(&self) -> Option<Shape> {
+        self.input_shape
+            .as_ref()
+            .map(|shape| Shape::known(shape.as_slice()))
     }
 
     no_trainable_parameters_layer_functions!();
