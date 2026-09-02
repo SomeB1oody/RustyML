@@ -14,7 +14,8 @@
 //! - **Utilities**: preprocessing (standardize, StandardScaler, normalize, label encoding) and
 //!   dataset splitting (train_test_split)
 //! - **Metrics**: regression, classification, and clustering evaluation metrics
-//! - **Neural network**: layers, optimizers, loss functions, and the Sequential model
+//! - **Neural network**: layers, optimizers, loss functions, and the `SequentialBuilder` that
+//!   makes a `Sequential` model
 //!
 //! # Examples
 //!

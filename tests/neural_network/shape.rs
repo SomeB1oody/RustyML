@@ -12,6 +12,7 @@
 use ndarray::{Array, ArrayD, IxDyn};
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::layers::*;
+use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::Layer;
 use std::collections::BTreeSet;
 
@@ -262,6 +263,214 @@ fn a_cropping_layer_refuses_a_border_that_removes_everything() {
 
     assert!(message.contains("Cropping2D"), "{message}");
     assert!(message.contains("at least 1 must remain"), "{message}");
+}
+
+// The `Valid` convolution family: an oversized kernel is refused, and not reported as 0
+
+/// 1 unbuilt convolution of every type that bounds its input, with a shape too small for it
+///
+/// Every entry carries a kernel of 3 taps on each spatial axis and an input of 2 positions on
+/// each spatial axis, so no complete window fits under `Valid` padding
+fn valid_convolutions_that_cannot_fit() -> Vec<(Box<dyn Layer>, Shape, &'static str)> {
+    vec![
+        (
+            Box::new(Conv1D::new(1, 3, 1, Linear::new()).unwrap()),
+            Shape::with_free_batch(&[1, 2, 1]),
+            "Conv1D",
+        ),
+        (
+            Box::new(Conv2D::new(1, (3, 3), (1, 1), Linear::new()).unwrap()),
+            Shape::with_free_batch(&[1, 2, 2, 1]),
+            "Conv2D",
+        ),
+        (
+            Box::new(Conv3D::new(1, (3, 3, 3), (1, 1, 1), Linear::new()).unwrap()),
+            Shape::with_free_batch(&[1, 2, 2, 2, 1]),
+            "Conv3D",
+        ),
+        (
+            Box::new(DepthwiseConv1D::new(3, 1, Linear::new()).unwrap()),
+            Shape::with_free_batch(&[1, 2, 1]),
+            "DepthwiseConv1D",
+        ),
+        (
+            Box::new(DepthwiseConv2D::new((3, 3), (1, 1), Linear::new()).unwrap()),
+            Shape::with_free_batch(&[1, 2, 2, 1]),
+            "DepthwiseConv2D",
+        ),
+        (
+            Box::new(SeparableConv1D::new(1, 3, 1, 1, Linear::new()).unwrap()),
+            Shape::with_free_batch(&[1, 2, 1]),
+            "SeparableConv1D",
+        ),
+        (
+            Box::new(SeparableConv2D::new(1, (3, 3), (1, 1), 1, Linear::new()).unwrap()),
+            Shape::with_free_batch(&[1, 2, 2, 1]),
+            "SeparableConv2D",
+        ),
+    ]
+}
+
+/// Every `Valid` convolution refuses an input axis shorter than its effective kernel
+///
+/// A kernel that does not fit leaves no complete window, so the axis would carry 0 positions.
+/// A 0 extent is not an answer. It passes through every later layer of the stack and turns up
+/// far from the layer that made it. The refusal names the layer, the axis, and the effective
+/// kernel extent that the axis must reach
+#[test]
+fn every_valid_convolution_refuses_a_kernel_larger_than_the_input() {
+    for (layer, input, name) in valid_convolutions_that_cannot_fit() {
+        let message = match layer.compute_output_shape(&input) {
+            Ok(answer) => panic!("{name} answered {answer}, and it must refuse the shape {input}"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(message.contains(name), "{name}: {message}");
+        assert!(
+            message.contains("effective kernel extent, which is 3"),
+            "{name}: {message}"
+        );
+        assert!(message.contains("is 2."), "{name}: {message}");
+    }
+}
+
+/// The same refusal reaches the build, so no oversized layer ever holds a weight
+///
+/// [`Layer::build`] is the step that allocates. It applies the same shape algebra first, so a
+/// layer that cannot run draws nothing at all
+#[test]
+fn every_valid_convolution_refuses_the_build_as_well() {
+    for (mut layer, input, name) in valid_convolutions_that_cannot_fit() {
+        let message = layer.build(&input).unwrap_err().to_string();
+
+        assert!(message.contains(name), "{name}: {message}");
+        assert!(
+            message.contains("effective kernel extent, which is 3"),
+            "{name}: {message}"
+        );
+        assert!(message.contains("is 2."), "{name}: {message}");
+        assert_eq!(layer.param_count().total(), 0, "{name} drew a weight");
+    }
+}
+
+/// `Same` and `Causal` padding accept the kernel that `Valid` refuses
+///
+/// The padding supplies the cells the window reaches past, so the same geometry runs. This is
+/// why the rule belongs to `Valid` alone, and why no constructor can hold it
+#[test]
+fn same_and_causal_padding_accept_an_oversized_kernel() {
+    let mut same = Conv2D::new(1, (3, 3), (1, 1), Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
+    same.build(&Shape::with_free_batch(&[1, 2, 2, 1])).unwrap();
+    let computed = same
+        .compute_output_shape(&Shape::with_free_batch(&[1, 2, 2, 1]))
+        .unwrap();
+    assert_eq!(computed.to_string(), "(None, 2, 2, 1)");
+
+    let mut causal = Conv1D::new(1, 3, 1, Linear::new())
+        .unwrap()
+        .with_padding(ConvPadding::Causal);
+    causal.build(&Shape::with_free_batch(&[1, 2, 1])).unwrap();
+    let computed = causal
+        .compute_output_shape(&Shape::with_free_batch(&[1, 2, 1]))
+        .unwrap();
+    assert_eq!(computed.to_string(), "(None, 2, 1)");
+}
+
+/// The rule measures the dilated extent, not the tap count
+///
+/// 2 taps spaced 3 apart span `(2 - 1) * 3 + 1 = 4` cells. An input of 3 positions holds the 2
+/// taps and not the extent they span, so the layer refuses it
+#[test]
+fn the_valid_rule_reads_the_dilated_extent() {
+    let layer = Conv2D::new(1, (2, 2), (1, 1), Linear::new())
+        .unwrap()
+        .with_dilation_rate((3, 3))
+        .unwrap();
+
+    let message = layer
+        .compute_output_shape(&Shape::with_free_batch(&[1, 3, 3, 1]))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        message.contains("effective kernel extent, which is 4"),
+        "{message}"
+    );
+
+    // 4 positions hold the dilated extent exactly, and give 1 output position
+    let computed = layer
+        .compute_output_shape(&Shape::with_free_batch(&[1, 4, 4, 1]))
+        .unwrap();
+    assert_eq!(computed.to_string(), "(None, 1, 1, 1)");
+}
+
+/// A transposed convolution puts no lower bound on its input
+///
+/// It grows its input instead of shrinking it, so a 1-position axis under a 3-tap kernel is a
+/// normal first decoder step. The rule above must not reach these 3 layers
+#[test]
+fn the_transposed_convolutions_accept_a_single_position() {
+    let mut conv_1d = Conv1DTranspose::new(1, 3, 1, Linear::new()).unwrap();
+    conv_1d.build(&Shape::with_free_batch(&[1, 1, 1])).unwrap();
+    assert_eq!(
+        conv_1d
+            .compute_output_shape(&Shape::with_free_batch(&[1, 1, 1]))
+            .unwrap()
+            .to_string(),
+        "(None, 3, 1)"
+    );
+
+    let mut conv_2d = Conv2DTranspose::new(1, (3, 3), (1, 1), Linear::new()).unwrap();
+    conv_2d
+        .build(&Shape::with_free_batch(&[1, 1, 1, 1]))
+        .unwrap();
+    assert_eq!(
+        conv_2d
+            .compute_output_shape(&Shape::with_free_batch(&[1, 1, 1, 1]))
+            .unwrap()
+            .to_string(),
+        "(None, 3, 3, 1)"
+    );
+
+    let mut conv_3d = Conv3DTranspose::new(1, (3, 3, 3), (1, 1, 1), Linear::new()).unwrap();
+    conv_3d
+        .build(&Shape::with_free_batch(&[1, 1, 1, 1, 1]))
+        .unwrap();
+    assert_eq!(
+        conv_3d
+            .compute_output_shape(&Shape::with_free_batch(&[1, 1, 1, 1, 1]))
+            .unwrap()
+            .to_string(),
+        "(None, 3, 3, 3, 1)"
+    );
+}
+
+/// A model build refuses the oversized kernel, and the message names the layer position
+///
+/// The first convolution takes an 8 by 8 input down to 4 by 4, and the second one takes that
+/// to 2 by 2. The third one cannot run, and the build says so before it allocates. Nothing
+/// past that position is built
+#[test]
+fn a_model_build_refuses_an_oversized_valid_kernel() {
+    let refused = SequentialBuilder::new()
+        .add(Conv2D::new(2, (5, 5), (1, 1), ReLU::new()).unwrap())
+        .add(Conv2D::new(2, (3, 3), (1, 1), ReLU::new()).unwrap())
+        .add(Conv2D::new(2, (3, 3), (1, 1), ReLU::new()).unwrap())
+        .add(Flatten::new())
+        .build(&Shape::known(&[2, 8, 8, 1]));
+
+    let message = match refused {
+        Ok(_) => panic!("a 3 by 3 Valid kernel does not fit a 2 by 2 input"),
+        Err(error) => error.to_string(),
+    };
+    assert!(message.contains("layer 2"), "{message}");
+    assert!(message.contains("Conv2D"), "{message}");
+    assert!(message.contains("(2, 2, 2, 2)"), "{message}");
+    assert!(
+        message.contains("effective kernel extent, which is 3"),
+        "{message}"
+    );
 }
 
 // The destination: a whole stack checked with no data
@@ -766,4 +975,30 @@ fn a_build_changes_no_answer() {
         assert_eq!(before, after, "{name}");
         assert_eq!(after.to_string(), expected, "{name}");
     }
+}
+
+/// A model input with an empty feature axis is refused, and the refusal names the axis
+///
+/// An axis of 0 elements carries no data. Many layers pass an extent through unchanged, so
+/// without this rule a whole stack builds and then produces empty tensors, and the emptiness
+/// only shows itself in the output. The batch axis is exempt, because a batch of 0 is an empty
+/// dataset that `fit` and `predict` already refuse when the data arrives
+#[test]
+fn a_model_refuses_an_input_shape_with_an_empty_feature_axis() {
+    let error = SequentialBuilder::new()
+        .add(Flatten::new())
+        .build(&Shape::known(&[1, 0, 4]))
+        .err()
+        .expect("a 0 extent must not build");
+    let text = error.to_string();
+    assert!(
+        text.contains("axis 1") && text.contains("0 elements"),
+        "the refusal must name the empty axis, got {text}"
+    );
+
+    // The same stack with a free batch axis and no empty extent builds
+    SequentialBuilder::new()
+        .add(Flatten::new())
+        .build(&Shape::with_free_batch(&[1, 3, 4]))
+        .expect("a free batch axis is not an empty axis");
 }

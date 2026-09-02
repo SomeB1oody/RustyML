@@ -1,5 +1,5 @@
-//! Prelude re-exports for the neural network module: tensors, shapes, layers, losses, and
-//! optimizers
+//! Prelude re-exports for the neural network module: tensors, shapes, layers, losses,
+//! optimizers, and the model builder
 
 pub use crate::neural_network::Shape;
 pub use crate::neural_network::Tensor;
@@ -15,4 +15,4 @@ pub use crate::neural_network::layers::{
 };
 pub use crate::neural_network::losses::*;
 pub use crate::neural_network::optimizers::*;
-pub use crate::neural_network::sequential::{History, Sequential};
+pub use crate::neural_network::sequential::{History, Sequential, SequentialBuilder};

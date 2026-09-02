@@ -138,8 +138,8 @@ impl Conv1D {
     /// [`Conv1D::with_random_state`].
     ///
     /// The kernel is not bounded by the input length here. Only [`ConvPadding::Valid`] needs the
-    /// effective kernel to fit. The padding mode is not final until the layer runs, so the
-    /// forward pass applies that rule.
+    /// effective kernel to fit. The padding mode is not final until the build, so the build
+    /// applies that rule.
     ///
     /// # Errors
     ///
@@ -214,7 +214,7 @@ impl Conv1D {
     /// # Notes
     ///
     /// The effective kernel is not bounded by the input length here. Only [`ConvPadding::Valid`]
-    /// needs it to fit, and the forward pass applies that rule
+    /// needs it to fit, and the build applies that rule
     ///
     /// # Errors
     ///
@@ -266,16 +266,24 @@ impl Conv1D {
 
     /// Calculates the output length after convolution
     ///
-    /// The `Valid` rule reads the dilated extent of the kernel. `Causal` gives the same length
-    /// as `Same`, because both rules round the input length up by the stride
-    fn calculate_output_length(&self, input_length: usize) -> usize {
+    /// The `Valid` rule reads the dilated extent of the kernel, and it refuses an extent longer
+    /// than the input length. `Causal` gives the same length as `Same`, because both rules round
+    /// the input length up by the stride, and both accept every kernel
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the padding is `Valid` and the effective kernel is longer than
+    ///   the input length
+    fn calculate_output_length(&self, input_length: usize) -> Result<usize, Error> {
         match self.padding {
             ConvPadding::Valid => valid_output_size(
+                "Conv1D",
+                "length",
                 input_length,
                 effective_kernel(self.kernel_size, self.dilation_rate),
                 self.stride,
             ),
-            ConvPadding::Same | ConvPadding::Causal => input_length.div_ceil(self.stride),
+            ConvPadding::Same | ConvPadding::Causal => Ok(input_length.div_ceil(self.stride)),
         }
     }
 
@@ -349,6 +357,9 @@ impl Layer for Conv1D {
         let mut dims = vec![batch.unwrap_or(1)];
         dims.extend(tail);
         validate_input_shape_1d(&dims)?;
+        // The shape algebra holds every rule the geometry has, so a stack that cannot run is
+        // refused here, before the layer draws a single weight
+        self.compute_output_shape(&built)?;
         self.channels = dims[2];
         self.built = Some(built);
         self.draw_parameters();
@@ -445,7 +456,7 @@ impl Layer for Conv1D {
         let (batch, tail) = input.split_batch("Conv1D")?;
         Ok(Shape::from_batch(
             batch,
-            &[self.calculate_output_length(tail[0]), self.filters],
+            &[self.calculate_output_length(tail[0])?, self.filters],
         ))
     }
 

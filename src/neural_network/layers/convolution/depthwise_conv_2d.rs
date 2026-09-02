@@ -223,7 +223,7 @@ impl DepthwiseConv2D {
     /// plain and the transposed convolutions reject that pair
     ///
     /// The effective kernel is not bounded by the input axis here. Only [`PaddingType::Valid`]
-    /// needs it to fit, and the forward pass applies that rule
+    /// needs it to fit, and the build applies that rule
     ///
     /// # Errors
     ///
@@ -475,6 +475,9 @@ impl Layer for DepthwiseConv2D {
         let mut dims = vec![batch.unwrap_or(1)];
         dims.extend(tail);
         validate_input_shape_2d(&dims)?;
+        // The shape algebra holds every rule the geometry has, so a stack that cannot run is
+        // refused here, before the layer draws a single weight
+        self.compute_output_shape(&built)?;
         self.channels = dims[3];
         self.built = Some(built);
         self.draw_parameters();
@@ -555,13 +558,12 @@ impl Layer for DepthwiseConv2D {
             return Err(Error::dimension_mismatch(self.channels, channels));
         }
         let (keff_h, keff_w) = self.effective_kernel_size();
-        // A `Valid` layer whose effective kernel is longer than an input axis is legal until the
-        // forward pass rejects it. `valid_output_size` reports 0 positions there instead of
-        // subtracting past 0, which `calculate_output_shape_2d` would do
+        // A `Valid` layer whose effective kernel is longer than an input axis is refused here,
+        // rather than reported as an axis of 0 positions that every later layer would carry
         let (out_height, out_width) = match self.padding {
             PaddingType::Valid => (
-                valid_output_size(height, keff_h, self.strides.0),
-                valid_output_size(width, keff_w, self.strides.1),
+                valid_output_size("DepthwiseConv2D", "height", height, keff_h, self.strides.0)?,
+                valid_output_size("DepthwiseConv2D", "width", width, keff_w, self.strides.1)?,
             ),
             PaddingType::Same => (
                 height.div_ceil(self.strides.0),

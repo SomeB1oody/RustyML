@@ -207,7 +207,7 @@ impl Conv3D {
     /// # Notes
     ///
     /// The effective kernel is not bounded by the input axis here. Only [`PaddingType::Valid`]
-    /// needs it to fit, and the forward pass applies that rule
+    /// needs it to fit, and the build applies that rule
     ///
     /// # Errors
     ///
@@ -266,7 +266,12 @@ impl Conv3D {
     }
 
     /// Calculates the output shape for 3D convolution
-    fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the padding is `Valid` and an effective kernel is longer than
+    ///   the input axis it runs on
+    fn calculate_output_shape(&self, input_shape: &[usize]) -> Result<Vec<usize>, Error> {
         let (batch_size, depth, height, width) = (
             input_shape[0],
             input_shape[1],
@@ -281,20 +286,20 @@ impl Conv3D {
         let (output_depth, output_height, output_width) = match self.padding {
             // The `Valid` rule reads the extent the dilated taps span, not the tap count
             PaddingType::Valid => (
-                valid_output_size(depth, effective_kernel(kd, dd), sd),
-                valid_output_size(height, effective_kernel(kh, dh), sh),
-                valid_output_size(width, effective_kernel(kw, dw), sw),
+                valid_output_size("Conv3D", "depth", depth, effective_kernel(kd, dd), sd)?,
+                valid_output_size("Conv3D", "height", height, effective_kernel(kh, dh), sh)?,
+                valid_output_size("Conv3D", "width", width, effective_kernel(kw, dw), sw)?,
             ),
             PaddingType::Same => (depth.div_ceil(sd), height.div_ceil(sh), width.div_ceil(sw)),
         };
 
-        vec![
+        Ok(vec![
             batch_size,
             output_depth,
             output_height,
             output_width,
             self.filters,
-        ]
+        ])
     }
 
     /// Sets whether the layer adds a bias to the convolution output (defaults to `true`)
@@ -368,6 +373,9 @@ impl Layer for Conv3D {
         let mut dims = vec![batch.unwrap_or(1)];
         dims.extend(tail);
         validate_input_shape_3d(&dims)?;
+        // The shape algebra holds every rule the geometry has, so a stack that cannot run is
+        // refused here, before the layer draws a single weight
+        self.compute_output_shape(&built)?;
         self.channels = dims[4];
         self.built = Some(built);
         self.draw_parameters();
@@ -478,7 +486,7 @@ impl Layer for Conv3D {
         dims.extend(tail);
         Ok(Shape::from_batch(
             batch,
-            &self.calculate_output_shape(&dims)[1..],
+            &self.calculate_output_shape(&dims)?[1..],
         ))
     }
 

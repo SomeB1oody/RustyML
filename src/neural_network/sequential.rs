@@ -252,6 +252,27 @@ impl SequentialBuilder {
             return Err(Error::NeuralNetwork(NnError::EmptyModel));
         }
 
+        // A feature axis of 0 elements carries no data, and many layers pass an extent through
+        // unchanged, so a whole stack would build and then produce empty tensors. The model
+        // input is the 1 place that can refuse it for every layer at once. A free axis stays
+        // free, because only a fixed extent of 0 is empty.
+        //
+        // The batch axis is exempt. A batch of 0 is an empty dataset rather than an empty
+        // layout, and `fit` and `predict` already answer it with `Error::EmptyInput` when the
+        // data arrives. Every other validator in this module skips axis 0 for the same reason
+        if let Some(axis) = input_shape
+            .axes()
+            .iter()
+            .skip(1)
+            .position(|extent| *extent == Some(0))
+        {
+            return Err(Error::invalid_input(format!(
+                "the model input shape {input_shape} holds 0 elements on axis {}. A model \
+                 cannot take an input with an empty feature axis",
+                axis + 1
+            )));
+        }
+
         let mut input_shapes = Vec::with_capacity(self.layers.len());
         let mut shape = input_shape.clone();
         for (index, layer) in self.layers.iter_mut().enumerate() {

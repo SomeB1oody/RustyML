@@ -115,8 +115,8 @@ pub(super) fn validate_strides_3d(strides: (usize, usize, usize)) -> Result<(), 
 /// # Notes
 ///
 /// The kernel size is not part of this rule. A kernel longer than the input axis stays legal
-/// under `Same` and `Causal` padding. The padding mode is not yet final at construction. See
-/// [`validate_valid_kernel_fits`], which applies that rule at the forward pass
+/// under `Same` and `Causal` padding. See [`valid_output_size`], which applies that rule at the
+/// build, under `Valid` padding alone
 ///
 /// # Errors
 ///
@@ -191,8 +191,8 @@ pub(super) fn validate_input_shape_3d(input_shape: &[usize]) -> Result<(), Error
 ///
 /// A transposed convolution grows its input, so it puts no lower bound on the input spatial
 /// size. A 1x1 input under a 3x3 kernel is a normal decoder step. A plain convolution bounds the
-/// input only under `Valid` padding, and it applies that rule at the forward pass. See
-/// [`validate_valid_kernel_fits`]
+/// input only under `Valid` padding, and it applies that rule at the build. See
+/// [`valid_output_size`]
 ///
 /// # Parameters
 ///
@@ -249,8 +249,11 @@ pub(super) fn validate_dilation(dilation: &[usize]) -> Result<(), Error> {
 /// missing cells on the borders, so every extent stays legal and this rule does not apply. A
 /// transposed convolution grows its input and puts no such bound on it, so it does not call this
 ///
-/// The padding mode is not final until the layer runs, because the builder methods can set it in
-/// any order. The rule therefore belongs to the forward pass and not to a constructor
+/// This is the guard of the free functions that carry no layer name, such as
+/// [`conv_forward_impl`](super::convolution_engine::conv_forward_impl). Every layer applies the
+/// same rule at its build through [`valid_output_size`], which names the layer and the axis. A
+/// layer therefore refuses an oversized kernel before it allocates, and this guard never fires
+/// through a layer
 ///
 /// # Parameters
 ///
@@ -285,23 +288,46 @@ pub(super) fn validate_valid_kernel_fits(
     Ok(())
 }
 
-/// Output size of 1 spatial axis under `Valid` padding
+/// Output size of 1 spatial axis under `Valid` padding, or the refusal of an oversized kernel
 ///
-/// Returns 0 when the effective kernel is longer than the input axis, because no complete window
-/// fits. A layer in that state rejects the input at the forward pass (see
-/// [`validate_valid_kernel_fits`]). This keeps the shape it reports before then defined
+/// Under `Valid` padding the layer reads only complete windows. An effective kernel longer than
+/// the input axis leaves no complete window, so the axis would carry 0 positions. The shape
+/// algebra refuses that configuration rather than report a 0 extent, because a build must not
+/// hand an empty axis to the next layer of the stack
+///
+/// The rule belongs to `Valid` padding alone. `Same` and `Causal` padding add the missing cells on
+/// the borders, so an oversized kernel stays legal there, and those branches never call this
 ///
 /// # Parameters
 ///
+/// - `layer` - Layer name, which the message names
+/// - `axis` - Name of the spatial axis, such as `"length"`, `"height"`, `"width"`, or `"depth"`
 /// - `input` - Input size of the axis
-/// - `keff` - Effective kernel extent of the axis
+/// - `keff` - Effective kernel extent of the axis, which is `(k - 1) * dilation + 1`
 /// - `stride` - Stride of the axis
 ///
 /// # Returns
 ///
-/// - `usize` - Number of output positions on the axis
-pub(super) fn valid_output_size(input: usize, keff: usize, stride: usize) -> usize {
-    input.checked_sub(keff).map_or(0, |rest| rest / stride + 1)
+/// - `Result<usize, Error>` - Number of output positions on the axis
+///
+/// # Errors
+///
+/// - `Error::InvalidInput` - If the effective kernel is longer than the input axis
+pub(super) fn valid_output_size(
+    layer: &str,
+    axis: &str,
+    input: usize,
+    keff: usize,
+    stride: usize,
+) -> Result<usize, Error> {
+    let Some(rest) = input.checked_sub(keff) else {
+        return Err(Error::invalid_input(format!(
+            "{layer} under Valid padding needs an input {axis} of at least the effective kernel \
+             extent, which is {keff}. This input {axis} is {input}. Use Same padding, a smaller \
+             kernel, a smaller dilation rate, or a larger input"
+        )));
+    };
+    Ok(rest / stride + 1)
 }
 
 /// Rejects a stride above 1 together with a dilation above 1

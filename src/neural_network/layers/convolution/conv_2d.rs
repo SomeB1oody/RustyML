@@ -212,7 +212,7 @@ impl Conv2D {
     /// # Notes
     ///
     /// The effective kernel is not bounded by the input axis here. Only [`PaddingType::Valid`]
-    /// needs it to fit, and the forward pass applies that rule
+    /// needs it to fit, and the build applies that rule
     ///
     /// # Errors
     ///
@@ -273,7 +273,12 @@ impl Conv2D {
     }
 
     /// Calculates the output shape of the convolutional layer based on input dimensions
-    fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the padding is `Valid` and an effective kernel is longer than
+    ///   the input axis it runs on
+    fn calculate_output_shape(&self, input_shape: &[usize]) -> Result<Vec<usize>, Error> {
         let batch_size = input_shape[0];
         let input_height = input_shape[1];
         let input_width = input_shape[2];
@@ -283,8 +288,10 @@ impl Conv2D {
                 // The `Valid` rule reads the extent the dilated taps span, not the tap count
                 let keff_h = effective_kernel(self.kernel_size.0, self.dilation_rate.0);
                 let keff_w = effective_kernel(self.kernel_size.1, self.dilation_rate.1);
-                let out_height = valid_output_size(input_height, keff_h, self.strides.0);
-                let out_width = valid_output_size(input_width, keff_w, self.strides.1);
+                let out_height =
+                    valid_output_size("Conv2D", "height", input_height, keff_h, self.strides.0)?;
+                let out_width =
+                    valid_output_size("Conv2D", "width", input_width, keff_w, self.strides.1)?;
                 (out_height, out_width)
             }
             PaddingType::Same => {
@@ -294,7 +301,7 @@ impl Conv2D {
             }
         };
 
-        vec![batch_size, output_height, output_width, self.filters]
+        Ok(vec![batch_size, output_height, output_width, self.filters])
     }
 
     /// Sets whether the layer adds a bias to the convolution output (defaults to `true`)
@@ -368,6 +375,9 @@ impl Layer for Conv2D {
         let mut dims = vec![batch.unwrap_or(1)];
         dims.extend(tail);
         validate_input_shape_2d(&dims)?;
+        // The shape algebra holds every rule the geometry has, so a stack that cannot run is
+        // refused here, before the layer draws a single weight
+        self.compute_output_shape(&built)?;
         self.channels = dims[3];
         self.built = Some(built);
         self.draw_parameters();
@@ -467,7 +477,7 @@ impl Layer for Conv2D {
         dims.extend(tail);
         Ok(Shape::from_batch(
             batch,
-            &self.calculate_output_shape(&dims)[1..],
+            &self.calculate_output_shape(&dims)?[1..],
         ))
     }
 

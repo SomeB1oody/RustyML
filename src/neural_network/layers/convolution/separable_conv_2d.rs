@@ -230,7 +230,7 @@ impl SeparableConv2D {
     /// plain and the transposed convolutions reject that pair
     ///
     /// The effective kernel is not bounded by the input axis here. Only [`PaddingType::Valid`]
-    /// needs it to fit, and the forward pass applies that rule
+    /// needs it to fit, and the build applies that rule
     ///
     /// # Errors
     ///
@@ -312,19 +312,35 @@ impl SeparableConv2D {
     }
 
     /// Calculates the output shape of the separable convolutional layer
-    fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the padding is `Valid` and an effective kernel is longer than
+    ///   the input axis it runs on
+    fn calculate_output_shape(&self, input_shape: &[usize]) -> Result<Vec<usize>, Error> {
         let batch_size = input_shape[0];
         let input_height = input_shape[1];
         let input_width = input_shape[2];
 
         let (keff_h, keff_w) = self.effective_kernel_size();
-        // A `Valid` layer whose effective kernel is longer than an input axis is legal until the
-        // forward pass rejects it. `valid_output_size` reports 0 positions there instead of
-        // subtracting past 0, which `calculate_output_height_and_weight` would do
+        // A `Valid` layer whose effective kernel is longer than an input axis is refused here,
+        // rather than reported as an axis of 0 positions that every later layer would carry
         let (output_height, output_width) = match self.padding {
             PaddingType::Valid => (
-                valid_output_size(input_height, keff_h, self.strides.0),
-                valid_output_size(input_width, keff_w, self.strides.1),
+                valid_output_size(
+                    "SeparableConv2D",
+                    "height",
+                    input_height,
+                    keff_h,
+                    self.strides.0,
+                )?,
+                valid_output_size(
+                    "SeparableConv2D",
+                    "width",
+                    input_width,
+                    keff_w,
+                    self.strides.1,
+                )?,
             ),
             PaddingType::Same => (
                 input_height.div_ceil(self.strides.0),
@@ -332,7 +348,7 @@ impl SeparableConv2D {
             ),
         };
 
-        vec![batch_size, output_height, output_width, self.filters]
+        Ok(vec![batch_size, output_height, output_width, self.filters])
     }
 
     /// The depthwise stage's geometry for a given input, as the shared kernel wants it
@@ -564,6 +580,9 @@ impl Layer for SeparableConv2D {
         let mut dims = vec![batch.unwrap_or(1)];
         dims.extend(tail);
         validate_input_shape_2d(&dims)?;
+        // The shape algebra holds every rule the geometry has, so a stack that cannot run is
+        // refused here, before the layer draws a single weight
+        self.compute_output_shape(&built)?;
         self.channels = dims[3];
         self.built = Some(built);
         self.draw_parameters();
@@ -687,7 +706,7 @@ impl Layer for SeparableConv2D {
         dims.extend(tail);
         Ok(Shape::from_batch(
             batch,
-            &self.calculate_output_shape(&dims)[1..],
+            &self.calculate_output_shape(&dims)?[1..],
         ))
     }
 

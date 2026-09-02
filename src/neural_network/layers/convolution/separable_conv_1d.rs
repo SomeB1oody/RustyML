@@ -230,7 +230,7 @@ impl SeparableConv1D {
     /// plain and the transposed convolutions reject that pair
     ///
     /// The effective kernel is not bounded by the input length here. Only [`PaddingType::Valid`]
-    /// needs it to fit, and the forward pass applies that rule
+    /// needs it to fit, and the build applies that rule
     ///
     /// # Errors
     ///
@@ -293,15 +293,22 @@ impl SeparableConv1D {
     ///
     /// The pointwise stage has a 1-tap kernel under `Valid` padding, so it leaves the length
     /// unchanged. The depthwise stage alone therefore sets the output length
-    fn calculate_output_length(&self, input_length: usize) -> usize {
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the padding is `Valid` and the effective kernel is longer than
+    ///   the input length
+    fn calculate_output_length(&self, input_length: usize) -> Result<usize, Error> {
         match self.padding {
             // The `Valid` rule reads the extent the dilated taps span, not the tap count
             PaddingType::Valid => valid_output_size(
+                "SeparableConv1D",
+                "length",
                 input_length,
                 effective_kernel(self.kernel_size, self.dilation_rate),
                 self.stride,
             ),
-            PaddingType::Same => input_length.div_ceil(self.stride),
+            PaddingType::Same => Ok(input_length.div_ceil(self.stride)),
         }
     }
 
@@ -311,15 +318,20 @@ impl SeparableConv1D {
     /// on the width axis. A `[batch, length, channels]` tensor and a
     /// `[kernel_size, channels, depth_multiplier]` weight already hold the values in that order,
     /// so neither one needs a copy
-    fn depthwise_geometry(&self, input_shape: &[usize]) -> DepthwiseGeometry {
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the padding is `Valid` and the effective kernel is longer than
+    ///   the input length. The build applies the same rule, so a built layer never meets it
+    fn depthwise_geometry(&self, input_shape: &[usize]) -> Result<DepthwiseGeometry, Error> {
         let length = input_shape[1];
-        let out_length = self.calculate_output_length(length);
+        let out_length = self.calculate_output_length(length)?;
         let keff = effective_kernel(self.kernel_size, self.dilation_rate);
         let pad = match self.padding {
             PaddingType::Valid => 0,
             PaddingType::Same => ((out_length - 1) * self.stride + keff).saturating_sub(length),
         };
-        DepthwiseGeometry {
+        Ok(DepthwiseGeometry {
             input: (1, length),
             output: (1, out_length),
             channels: input_shape[2],
@@ -329,7 +341,7 @@ impl SeparableConv1D {
             // The height axis is the placeholder axis, so it stays solid at 1
             dilation: (1, self.dilation_rate),
             pad_before: (0, pad / 2),
-        }
+        })
     }
 
     /// Checks a runtime input against the rank, the channel count, and the padding rule the
@@ -354,8 +366,13 @@ impl SeparableConv1D {
     ///
     /// Carries no bias and no activation. Both belong to the pointwise stage that follows, so
     /// this passes `None` for the bias to the shared kernel
-    fn depthwise_convolve(&self, input: &Tensor) -> Tensor {
-        let g = self.depthwise_geometry(input.shape());
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the padding is `Valid` and the effective kernel is longer than
+    ///   the input length. The build applies the same rule, so a built layer never meets it
+    fn depthwise_convolve(&self, input: &Tensor) -> Result<Tensor, Error> {
+        let g = self.depthwise_geometry(input.shape())?;
         let batch_size = input.shape()[0];
 
         let input_std = input.as_standard_layout();
@@ -376,7 +393,7 @@ impl SeparableConv1D {
             output.as_slice_mut().expect("output is contiguous"),
         );
 
-        output.into_dyn()
+        Ok(output.into_dyn())
     }
 
     /// Performs the pointwise (1-tap) convolution stage
@@ -493,6 +510,9 @@ impl Layer for SeparableConv1D {
         let mut dims = vec![batch.unwrap_or(1)];
         dims.extend(tail);
         validate_input_shape_1d(&dims)?;
+        // The shape algebra holds every rule the geometry has, so a stack that cannot run is
+        // refused here, before the layer draws a single weight
+        self.compute_output_shape(&built)?;
         self.channels = dims[2];
         self.built = Some(built);
         self.draw_parameters();
@@ -507,7 +527,7 @@ impl Layer for SeparableConv1D {
         self.input_cache = Some(input.clone());
 
         // Depthwise convolution (each channel independently), then pointwise to combine
-        let depthwise_output = self.depthwise_convolve(input);
+        let depthwise_output = self.depthwise_convolve(input)?;
         let output = self.pointwise_convolve(&depthwise_output);
 
         // Cache the depthwise output. Only backward needs it
@@ -523,7 +543,7 @@ impl Layer for SeparableConv1D {
         self.validate_input(input)?;
 
         // Depthwise convolution (each channel independently), then pointwise to combine
-        let depthwise_output = self.depthwise_convolve(input);
+        let depthwise_output = self.depthwise_convolve(input)?;
         let output = self.pointwise_convolve(&depthwise_output);
 
         self.activation.forward(&output)
@@ -544,7 +564,7 @@ impl Layer for SeparableConv1D {
         };
 
         let batch_size = input.shape()[0];
-        let g = self.depthwise_geometry(input.shape());
+        let g = self.depthwise_geometry(input.shape())?;
 
         // Pointwise (1-tap) backward via the shared engine (im2col + gemm). Its input gradient is
         // the gradient with respect to the depthwise output, with shape [batch, L', C*dm]
@@ -611,7 +631,7 @@ impl Layer for SeparableConv1D {
         let (batch, tail) = input.split_batch("SeparableConv1D")?;
         Ok(Shape::from_batch(
             batch,
-            &[self.calculate_output_length(tail[0]), self.filters],
+            &[self.calculate_output_length(tail[0])?, self.filters],
         ))
     }
 

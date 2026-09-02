@@ -315,9 +315,9 @@ fn conv2d_transpose_grows_a_single_pixel_into_the_whole_kernel() {
     assert_allclose(&output, &expected, 1e-6f32);
 
     // A plain Conv2D has no valid output position on this input. The refusal belongs to the
-    // forward pass and not to the constructor, because `Same` padding makes the same geometry
-    // legal and the padding mode is chosen after construction. Keras accepts the construction
-    // and refuses the call in the same way
+    // build and not to the constructor, because `Same` padding makes the same geometry legal
+    // and the padding mode is chosen after construction. The build is the first step that sees
+    // both the padding mode and the input shape
     let mut plain = rustyml::neural_network::layers::convolution::conv_2d::Conv2D::new(
         1,
         (3, 3),
@@ -325,8 +325,7 @@ fn conv2d_transpose_grows_a_single_pixel_into_the_whole_kernel() {
         Linear::new(),
     )
     .expect("construction succeeds because the padding mode is not yet fixed");
-    plain.build(&Shape::known(&[1, 1, 1, 1])).unwrap();
-    let refused = plain.predict(&t4((1, 1, 1, 1), vec![1.0f32]));
+    let refused = plain.build(&Shape::known(&[1, 1, 1, 1]));
     assert!(
         matches!(refused, Err(Error::InvalidInput(_))),
         "a plain Conv2D under Valid must refuse an input below its kernel size, got {refused:?}"

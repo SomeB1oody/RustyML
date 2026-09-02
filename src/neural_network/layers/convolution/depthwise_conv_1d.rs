@@ -206,7 +206,7 @@ impl DepthwiseConv1D {
     /// plain and the transposed convolutions reject that pair
     ///
     /// The effective kernel is not bounded by the input length here. Only [`PaddingType::Valid`]
-    /// needs it to fit, and the forward pass applies that rule
+    /// needs it to fit, and the build applies that rule
     ///
     /// # Errors
     ///
@@ -284,15 +284,23 @@ impl DepthwiseConv1D {
 
     /// Calculates the output length after convolution
     ///
-    /// The `Valid` rule reads the extent the dilated taps span, not the tap count
-    fn calculate_output_length(&self, input_length: usize) -> usize {
+    /// The `Valid` rule reads the extent the dilated taps span, not the tap count, and it refuses
+    /// an extent longer than the input length
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the padding is `Valid` and the effective kernel is longer than
+    ///   the input length
+    fn calculate_output_length(&self, input_length: usize) -> Result<usize, Error> {
         match self.padding {
             PaddingType::Valid => valid_output_size(
+                "DepthwiseConv1D",
+                "length",
                 input_length,
                 effective_kernel(self.kernel_size, self.dilation_rate),
                 self.stride,
             ),
-            PaddingType::Same => input_length.div_ceil(self.stride),
+            PaddingType::Same => Ok(input_length.div_ceil(self.stride)),
         }
     }
 
@@ -361,15 +369,20 @@ impl DepthwiseConv1D {
     /// on the width axis. A `[batch, length, channels]` tensor and a
     /// `[kernel_size, channels, depth_multiplier]` weight already hold the values in that order,
     /// so neither one needs a copy
-    fn geometry(&self, input_shape: &[usize]) -> DepthwiseGeometry {
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the padding is `Valid` and the effective kernel is longer than
+    ///   the input length. The build applies the same rule, so a built layer never meets it
+    fn geometry(&self, input_shape: &[usize]) -> Result<DepthwiseGeometry, Error> {
         let length = input_shape[1];
-        let out_length = self.calculate_output_length(length);
+        let out_length = self.calculate_output_length(length)?;
         let keff = effective_kernel(self.kernel_size, self.dilation_rate);
         let pad = match self.padding {
             PaddingType::Valid => 0,
             PaddingType::Same => ((out_length - 1) * self.stride + keff).saturating_sub(length),
         };
-        DepthwiseGeometry {
+        Ok(DepthwiseGeometry {
             input: (1, length),
             output: (1, out_length),
             channels: self.channels,
@@ -379,7 +392,7 @@ impl DepthwiseConv1D {
             // The height axis is the placeholder axis, so it stays solid at 1
             dilation: (1, self.dilation_rate),
             pad_before: (0, pad / 2),
-        }
+        })
     }
 
     /// Depthwise convolution over a channels-last sequence, followed by the activation
@@ -395,7 +408,7 @@ impl DepthwiseConv1D {
             &input.shape()[1..2],
         )?;
 
-        let g = self.geometry(input.shape());
+        let g = self.geometry(input.shape())?;
         let batch_size = input.shape()[0];
 
         let input_std = input.as_standard_layout();
@@ -433,6 +446,9 @@ impl Layer for DepthwiseConv1D {
         let mut dims = vec![batch.unwrap_or(1)];
         dims.extend(tail);
         validate_input_shape_1d(&dims)?;
+        // The shape algebra holds every rule the geometry has, so a stack that cannot run is
+        // refused here, before the layer draws a single weight
+        self.compute_output_shape(&built)?;
         self.channels = dims[2];
         self.built = Some(built);
         self.draw_parameters();
@@ -466,7 +482,7 @@ impl Layer for DepthwiseConv1D {
             .ok_or_else(|| Error::forward_pass_not_run("DepthwiseConv1D"))?;
 
         let batch_size = input.shape()[0];
-        let g = self.geometry(input.shape());
+        let g = self.geometry(input.shape())?;
 
         let input_std = input.as_standard_layout();
         let src = input_std
@@ -515,7 +531,7 @@ impl Layer for DepthwiseConv1D {
         Ok(Shape::from_batch(
             batch,
             &[
-                self.calculate_output_length(tail[0]),
+                self.calculate_output_length(tail[0])?,
                 channels * self.depth_multiplier,
             ],
         ))
