@@ -2,14 +2,15 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::layers::regularization::dropout::{
     broadcast_dropout_scale, dropout_backward,
 };
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
-use crate::neural_network::layers::regularization::validation::{
-    shape_preserving_output, validate_input_shape, validate_rate,
+use crate::neural_network::layers::regularization::validation::validate_rate;
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    build_on_forward, built_layer_shape_functions, no_trainable_parameters_layer_functions,
 };
 use crate::neural_network::traits::Layer;
 use crate::neural_network::{Shape, Tensor};
@@ -27,6 +28,19 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// changes the shape of the drawn mask, so an axis can carry 1 shared draw instead of 1 draw per
 /// position
 ///
+/// # Shape freedom
+///
+/// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of
+/// any shape and of any rank, and 1 layer serves a rank-2 batch of feature vectors and a
+/// rank-4 batch of images alike. [`Layer::build`] records the shape it is given, and
+/// [`Layer::output_shape`] reports it, but no later input is checked against it. The 2 noise
+/// layers,
+/// [`GaussianNoise`](crate::neural_network::layers::regularization::noise_injection::gaussian_noise::GaussianNoise)
+/// and
+/// [`GaussianDropout`](crate::neural_network::layers::regularization::noise_injection::gaussian_dropout::GaussianDropout),
+/// take the same freedom. The 3 spatial dropout layers do not, because each of them reads a
+/// channel axis at a fixed position and needs the rank that puts it there
+///
 /// # Examples
 ///
 /// ```rust
@@ -35,7 +49,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// use ndarray::Array2;
 ///
 /// // Create a Dropout layer with 50% dropout rate
-/// let mut dropout = Dropout::new(0.5, vec![32, 128]).unwrap();
+/// let mut dropout = Dropout::new(0.5).unwrap();
 ///
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
@@ -46,8 +60,8 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 pub struct Dropout {
     /// Fraction of input units to drop (between 0 and 1)
     rate: f32,
-    /// Expected shape of the input tensor
-    input_shape: Vec<usize>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
     /// Shape of the random mask, or `None` for 1 independent draw per input element
     ///
     /// An entry of `None` takes the extent of the input on that axis, and an entry of 1 makes
@@ -70,7 +84,6 @@ impl Dropout {
     /// # Parameters
     ///
     /// - `rate` - Fraction of the input units to drop (between 0 and 1)
-    /// - `input_shape` - Shape of the input tensor
     ///
     /// # Returns
     ///
@@ -84,12 +97,12 @@ impl Dropout {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `rate` is not between 0 and 1
-    pub fn new(rate: f32, input_shape: Vec<usize>) -> Result<Self, Error> {
+    pub fn new(rate: f32) -> Result<Self, Error> {
         validate_rate(rate, "Dropout rate")?;
 
         Ok(Dropout {
             rate,
-            input_shape,
+            built: None,
             noise_shape: None,
             mask: None,
             training: true,
@@ -216,9 +229,25 @@ impl Dropout {
 }
 
 impl Layer for Dropout {
+    /// Records the shape the layer serves. The layer holds no array, so nothing is
+    /// allocated
+    ///
+    /// The recorded shape is what [`Layer::output_shape`] reports, and no more. The layer owns
+    /// no array and reads no extent, so it checks no later input against it. See the
+    /// "Shape freedom" section of the type
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "Dropout", input)? else {
+            return Ok(());
+        };
+        input.check_min_rank("Dropout", 1)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    /// Drops units of a tensor of any shape. See the "Shape freedom" section of the type
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // `rate` was validated in `new()`
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        build_on_forward!(self, input);
 
         if !self.training {
             // Inference passes the input through unchanged
@@ -263,9 +292,14 @@ impl Layer for Dropout {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
+    ///
+    /// The input needs no check, and the layer takes a tensor of any shape. `predict` cannot
+    /// build, so it still refuses a layer that holds no build
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // `rate` was validated in `new()`
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        if self.built.is_none() {
+            return Err(Error::not_built("Dropout"));
+        }
 
         // Inverted dropout passes the input through unchanged during inference
         Ok(input.clone())
@@ -279,13 +313,7 @@ impl Layer for Dropout {
         "Dropout"
     }
 
-    fn known_input_shape(&self) -> Option<Shape> {
-        (!self.input_shape.is_empty()).then(|| Shape::known(&self.input_shape))
-    }
-
-    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
-        shape_preserving_output(input, &self.input_shape, "Dropout")
-    }
+    built_layer_shape_functions!();
 
     no_trainable_parameters_layer_functions!();
 

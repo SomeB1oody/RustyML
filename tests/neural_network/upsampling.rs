@@ -5,6 +5,7 @@
 //! values against finite differences. This file does not duplicate them.
 
 use ndarray::{Array3, Array4, Array5, IxDyn};
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
@@ -17,7 +18,7 @@ use rustyml::neural_network::layers::upsampling::{
 };
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
-use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
@@ -580,14 +581,15 @@ fn up_sampling_output_shape_reports_the_enlarged_shape() {
 fn up_sampling_2d_undoes_the_shape_change_of_pooling() {
     let x = ramp_of(&[2, 8, 8, 3]);
 
-    let mut model = Sequential::new();
-    model
-        .add(MaxPooling2D::new((2, 2), vec![2, 8, 8, 3]).unwrap())
+    let mut model = SequentialBuilder::new()
+        .add(MaxPooling2D::new((2, 2)))
         .add(UpSampling2D::new(2, Interpolation::Nearest).unwrap())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let out = model.predict(&x).unwrap();
     assert_eq!(out.shape(), x.shape());
@@ -606,13 +608,13 @@ fn up_sampling_2d_survives_a_save_and_load_round_trip() {
     .unwrap();
 
     let build = || {
-        let mut model = Sequential::new();
-        model
+        SequentialBuilder::new()
             .add(UpSampling2D::new(2, Interpolation::Lanczos3).unwrap())
-            .add(Conv2D::new(2, (3, 3), vec![2, 6, 6, 1], (1, 1), Linear::new()).unwrap())
-            .add(Flatten::new(vec![2, 4, 4, 2]).unwrap())
-            .add(Dense::new(32, 2, Linear::new()).unwrap());
-        model
+            .add(Conv2D::new(2, (3, 3), (1, 1), Linear::new()).unwrap())
+            .add(Flatten::new())
+            .add(Dense::new(2, Linear::new()).unwrap())
+            .build(&Shape::known(x.shape()))
+            .unwrap()
     };
 
     let mut model = build();
@@ -648,14 +650,15 @@ fn up_sampling_2d_trains_inside_a_decoder() {
     )
     .unwrap();
 
-    let mut model = Sequential::new();
-    model
+    let mut model = SequentialBuilder::new()
         .add(UpSampling2D::new(2, Interpolation::Bilinear).unwrap())
-        .add(Conv2D::new(2, (3, 3), vec![2, 8, 8, 1], (1, 1), Linear::new()).unwrap())
-        .compile(
-            SGD::new(0.05, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+        .add(Conv2D::new(2, (3, 3), (1, 1), Linear::new()).unwrap())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.05, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let history = model.fit(&x, &y, 6).unwrap();
     let losses = history.loss();

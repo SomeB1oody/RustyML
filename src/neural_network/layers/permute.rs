@@ -26,7 +26,8 @@ use ndarray::IxDyn;
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::*;
@@ -36,10 +37,11 @@ use ndarray::IxDyn;
 /// let x = Array3::ones((2, 5, 3)).into_dyn();
 ///
 /// // Swap the step axis and the feature axis
-/// let mut model = Sequential::new();
-/// model
+/// let mut model = SequentialBuilder::new()
 ///     .add(Permute::new(vec![2, 1]).unwrap())
-///     .compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+///     .build(&Shape::known(x.shape()))
+///     .unwrap();
+/// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // View model structure
 /// model.summary();

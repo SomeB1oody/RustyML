@@ -3,8 +3,12 @@
 use crate::error::{Context, Error};
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
-use crate::neural_network::layers::named_weight_layer_functions;
-use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
+use crate::neural_network::layers::validation::{
+    start_build, validate_optional_weight, validate_weight_shape,
+};
+use crate::neural_network::layers::{
+    build_config_function, build_on_forward, named_weight_layer_functions,
+};
 use crate::neural_network::traits::{Layer, ParamGrad};
 use crate::neural_network::{Fans, Initializer, Shape, Tensor};
 use gemmkit_ndarray::dot;
@@ -32,8 +36,9 @@ use ndarray::{Array, Array2, ArrayView2, Axis, CowArray, Ix2};
 ///
 /// ```rust
 /// use ndarray::Array;
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::layers::{Activation, Dense};
+/// use rustyml::neural_network::Shape;
 /// use rustyml::neural_network::optimizers::SGD;
 /// use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
 ///
@@ -42,9 +47,11 @@ use ndarray::{Array, Array2, ArrayView2, Axis, CowArray, Ix2};
 /// let y = Array::ones((2, 1)).into_dyn();
 ///
 /// // Build the model
-/// let mut model = Sequential::new();
-/// model.add(Dense::new(4, 3, Activation::ReLU).unwrap())
-///     .add(Dense::new(3, 1, Activation::ReLU).unwrap());
+/// let mut model = SequentialBuilder::new()
+///     .add(Dense::new(3, Activation::ReLU).unwrap())
+///     .add(Dense::new(1, Activation::ReLU).unwrap())
+///     .build(&Shape::known(&[2, 4]))
+///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Print model structure
@@ -67,15 +74,19 @@ use ndarray::{Array, Array2, ArrayView2, Axis, CowArray, Ix2};
 ///
 /// // 2 sequences of 5 timesteps, and 7 features for each timestep
 /// let x = Array::ones((2, 5, 7)).into_dyn();
-/// let mut layer = Dense::new(7, 4, Activation::ReLU).unwrap();
+/// let mut layer = Dense::new(4, Activation::ReLU).unwrap();
 ///
 /// let output = layer.forward(&x).unwrap();
 /// assert_eq!(output.shape(), &[2, 5, 4]);
 /// ```
 #[derive(Debug)]
 pub struct Dense {
-    /// Input dimension size
+    /// Feature count of the last axis, which [`Layer::build`] reads from the input shape
     input_dim: usize,
+    /// Shape the kernel depends on, which is `(None, input_dim)`. `None` before the build
+    built: Option<Shape>,
+    /// Seed of the weight draw, or `None` to take the global seed or entropy
+    random_state: Option<u64>,
     /// Output dimension size
     output_dim: usize,
     /// Weight matrix with shape (input_dim, output_dim)
@@ -110,7 +121,6 @@ impl Dense {
     ///
     /// # Parameters
     ///
-    /// - `input_dim` - Dimensionality of input features (number of features per timestep)
     /// - `units` - Number of units/neurons in the layer (determines output dimensionality)
     /// - `activation` - Activation applied to the linear output (any value convertible into
     ///   [`Activation`], e.g. `Activation::ReLU` or a standalone activation layer)
@@ -121,26 +131,17 @@ impl Dense {
     ///
     /// # Notes
     ///
-    /// Weights are seeded from the global seed or entropy by default. For reproducible
-    /// initialization, set a seed with [`Dense::with_random_state`]
+    /// The constructor draws nothing. [`Layer::build`] reads the feature count from the input
+    /// shape and draws the kernel then. The draw takes the global seed or entropy by default.
+    /// For reproducible initialization, set a seed with [`Dense::with_random_state`]
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `input_dim` or `units` is zero
+    /// - `Error::InvalidParameter` - If `units` is zero
     /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
-    pub fn new(
-        input_dim: usize,
-        units: usize,
-        activation: impl Into<Activation>,
-    ) -> Result<Self, Error> {
+    pub fn new(units: usize, activation: impl Into<Activation>) -> Result<Self, Error> {
         // Validate that dimensions are greater than zero
-        if input_dim == 0 {
-            return Err(Error::invalid_parameter(
-                "input_dim",
-                "must be greater than 0",
-            ));
-        }
         if units == 0 {
             return Err(Error::invalid_parameter("units", "must be greater than 0"));
         }
@@ -148,10 +149,12 @@ impl Dense {
         activation.validate()?;
 
         Ok(Self {
-            input_dim,
+            input_dim: 0,
+            built: None,
+            random_state: None,
             output_dim: units,
-            weights: Self::init_weights_array(input_dim, units, None),
-            bias: Array::zeros((1, units)),
+            weights: Array::zeros((0, 0)),
+            bias: Array::zeros((0, 0)),
             input_cache: None,
             input_shape: None,
             output_cache: None,
@@ -162,11 +165,26 @@ impl Dense {
         })
     }
 
-    /// Sets the seed used to initialize the weights and re-initializes them deterministically
+    /// Draws the kernel and zeroes the bias, at the extents the build settled
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
-    /// This re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
-    /// assigning custom weights or training. The bias stays zero-initialized
+    /// The layer reports its own 2 fans. The kernel holds 1 weight per input and unit pair, so
+    /// `fan_in` is the input width and `fan_out` is the unit count
+    fn draw_parameters(&mut self) {
+        let mut rng = crate::random::make_rng(self.random_state);
+        self.weights = Initializer::GlorotUniform.draw(
+            (self.input_dim, self.output_dim),
+            Fans::new(self.input_dim, self.output_dim),
+            &mut rng,
+        );
+        self.bias = Array::zeros((1, self.output_dim));
+    }
+
+    /// Sets the seed that the weight draw of [`Layer::build`] uses
+    ///
+    /// By default the draw takes the global seed or entropy (see [`crate::random`]). An unbuilt
+    /// layer holds no kernel, so this records the seed and draws nothing. A layer that is
+    /// already built draws its kernel again from the new seed, so the order of the 2 calls does
+    /// not matter. The bias stays zero-initialized
     ///
     /// # Parameters
     ///
@@ -176,8 +194,10 @@ impl Dense {
     ///
     /// - `Self` - The updated layer
     pub fn with_random_state(mut self, random_state: u64) -> Self {
-        self.weights =
-            Self::init_weights_array(self.input_dim, self.output_dim, Some(random_state));
+        self.random_state = Some(random_state);
+        if self.built.is_some() {
+            self.draw_parameters();
+        }
         self
     }
 
@@ -206,19 +226,6 @@ impl Dense {
         self
     }
 
-    /// Xavier/Glorot uniform weight initialization for the given dimensions and seed
-    ///
-    /// The layer reports its own 2 fans. The kernel holds 1 weight per input and unit pair, so
-    /// `fan_in` is the input width and `fan_out` is the unit count
-    fn init_weights_array(
-        input_dim: usize,
-        units: usize,
-        random_state: Option<u64>,
-    ) -> Array2<f32> {
-        let mut rng = crate::random::make_rng(random_state);
-        Initializer::GlorotUniform.draw((input_dim, units), Fans::new(input_dim, units), &mut rng)
-    }
-
     /// Sets the weights and bias for this layer
     ///
     /// # Parameters
@@ -233,6 +240,7 @@ impl Dense {
     ///
     /// # Errors
     ///
+    /// - `Error::NeuralNetwork(NnError::NotBuilt)` - If the layer holds no array yet
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` do not match the
     ///   layer's configured shape
     /// - `Error::InvalidParameter` - If a bias is given to a layer that holds none, or none is
@@ -242,6 +250,9 @@ impl Dense {
         weights: Array2<f32>,
         bias: impl Into<Option<Array2<f32>>>,
     ) -> Result<(), Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("Dense"));
+        }
         validate_weight_shape("kernel", self.weights.shape(), weights.shape())?;
         let bias = validate_optional_weight("bias", "use_bias", self.use_bias, bias.into())?;
         if let Some(bias) = bias.as_ref() {
@@ -387,6 +398,34 @@ impl Dense {
 }
 
 impl Layer for Dense {
+    /// Reads the feature count from the last axis, and draws the kernel and the bias
+    ///
+    /// The kernel is `(input_dim, units)` for every input rank, and every leading position
+    /// shares it. The build shape therefore records the last axis alone, and the layer accepts
+    /// any rank of 2 or more whose last axis matches
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        input.check_min_rank("Dense", 2)?;
+        let Some(input_dim) = input.axes()[input.rank() - 1] else {
+            return Err(Error::invalid_input(format!(
+                "Dense needs a fixed extent on the last axis, and the shape {input} leaves that \
+                 axis free"
+            )));
+        };
+        if input_dim == 0 {
+            return Err(Error::invalid_input(
+                "Dense needs a positive extent on the last axis, got 0",
+            ));
+        }
+        let canonical = Shape::new(vec![None, Some(input_dim)]);
+        let Some(built) = start_build(&self.built, "Dense", &canonical)? else {
+            return Ok(());
+        };
+        self.input_dim = input_dim;
+        self.built = Some(built);
+        self.draw_parameters();
+        Ok(())
+    }
+
     /// Training forward: caches the input and the activated output for the backward pass
     ///
     /// Fuses the linear product, bias add, and (for `ReLU`) the activation into one gemmkit
@@ -395,6 +434,7 @@ impl Layer for Dense {
     /// The input has rank 2 or more. The leading axes fold into 1 row axis, so a rank-3 input
     /// costs the same 1 matrix product as a rank-2 input with the same number of rows
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+        build_on_forward!(self, input);
         let input_2d = Self::fold(input, self.input_dim, "input")?;
 
         // Fused linear + bias + activation, then cache the activated output for backpropagation
@@ -411,6 +451,9 @@ impl Layer for Dense {
     /// Inference forward (eval mode, writes no caches). Same fused projection as
     /// [`forward`](Layer::forward). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("Dense"));
+        }
         let input_2d = Self::fold(input, self.input_dim, "input")?;
 
         self.project(&input_2d.view(), input.shape())
@@ -471,32 +514,41 @@ impl Layer for Dense {
     }
 
     fn known_input_shape(&self) -> Option<Shape> {
-        Some(match &self.input_shape {
-            Some(shape) => Shape::with_free_batch(shape),
+        match &self.input_shape {
+            Some(shape) => Some(Shape::with_free_batch(shape)),
             // Before the first forward pass the layer knows the feature count it folds to, and
             // nothing about the axes between the batch axis and the last axis
-            None => Shape::new(vec![None, Some(self.input_dim)]),
-        })
+            None => self.built.clone(),
+        }
     }
 
+    build_config_function!();
+
     /// The last axis becomes the unit count, and every axis before it passes through
+    ///
+    /// The answer needs the unit count alone, so an unbuilt layer gives it. A built layer
+    /// holds a kernel of a fixed width, and it refuses a last axis that the kernel cannot
+    /// contract
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         input.check_min_rank("Dense", 2)?;
         let mut axes = input.axes().to_vec();
         let last = axes.len() - 1;
-        match axes[last] {
-            Some(extent) if extent == self.input_dim => {}
-            Some(extent) => {
-                return Err(Error::invalid_input(format!(
-                    "Dense input must have {} elements on the last axis, got {extent}",
-                    self.input_dim
-                )));
-            }
-            None => {
-                return Err(Error::invalid_input(format!(
-                    "Dense input must have {} elements on the last axis, and that axis is free",
-                    self.input_dim
-                )));
+        if self.built.is_some() {
+            match axes[last] {
+                Some(extent) if extent == self.input_dim => {}
+                Some(extent) => {
+                    return Err(Error::invalid_input(format!(
+                        "Dense input must have {} elements on the last axis, got {extent}",
+                        self.input_dim
+                    )));
+                }
+                None => {
+                    return Err(Error::invalid_input(format!(
+                        "Dense input must have {} elements on the last axis, and that axis is \
+                         free",
+                        self.input_dim
+                    )));
+                }
             }
         }
         axes[last] = Some(self.output_dim);

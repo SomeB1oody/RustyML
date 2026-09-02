@@ -6,6 +6,7 @@
 //! configuration alone, so a caller gets the answer before any tensor exists
 
 use crate::error::Error;
+use crate::{Deserialize, Serialize};
 use std::fmt;
 
 /// Shape of a tensor, with 1 entry per axis
@@ -34,7 +35,7 @@ use std::fmt;
 /// // The same layer, described for every batch size
 /// assert_eq!(Shape::with_free_batch(&[3, 4]).to_string(), "(None, 4)");
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Shape(Vec<Option<usize>>);
 
 impl Shape {
@@ -101,6 +102,23 @@ impl Shape {
         let mut axes = Vec::with_capacity(tail.len() + 1);
         axes.push(batch);
         axes.extend(tail.iter().map(|&extent| Some(extent)));
+        Self(axes)
+    }
+
+    /// The same shape with axis 0 made free
+    ///
+    /// A layer serves every batch size, so the batch extent is not part of what a layer was
+    /// built for. A checkpoint records this form, and a load compares this form, so a model
+    /// built for 32 samples and a model built for 1 sample carry the same build shape
+    ///
+    /// # Returns
+    ///
+    /// - `Shape` - The shape with a free batch axis. A rank-0 shape comes back unchanged
+    pub fn free_batch(&self) -> Self {
+        let mut axes = self.0.clone();
+        if let Some(batch) = axes.first_mut() {
+            *batch = None;
+        }
         Self(axes)
     }
 
@@ -305,6 +323,14 @@ mod tests {
         let shape = Shape::with_free_batch(&[9, 3, 4]);
         assert_eq!(shape.axes(), &[None, Some(3), Some(4)]);
         assert_eq!(shape.rank(), 3);
+    }
+
+    /// `free_batch` frees axis 0 and leaves every other axis alone
+    #[test]
+    fn free_batch_frees_only_axis_0() {
+        let shape = Shape::known(&[9, 3, 4]);
+        assert_eq!(shape.free_batch().axes(), &[None, Some(3), Some(4)]);
+        assert_eq!(Shape::new(Vec::new()).free_batch(), Shape::new(Vec::new()));
     }
 
     /// `with_free_batch` on an empty extent list gives an empty shape

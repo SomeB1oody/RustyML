@@ -15,8 +15,12 @@ use crate::neural_network::layers::convolution::validation::{
     validate_input_shape_1d, validate_kernel_size_1d, validate_strides_1d,
     validate_valid_kernel_fits,
 };
-use crate::neural_network::layers::named_weight_layer_functions;
-use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
+use crate::neural_network::layers::validation::{
+    start_build, validate_built_input, validate_optional_weight, validate_weight_shape,
+};
+use crate::neural_network::layers::{
+    build_on_forward, built_layer_shape_functions, named_weight_layer_functions,
+};
 use crate::neural_network::traits::{Layer, ParamGrad};
 use crate::neural_network::{Fans, Initializer, Shape, Tensor};
 use ndarray::{Array1, Array3};
@@ -43,7 +47,8 @@ use ndarray::{Array1, Array3};
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::*;
@@ -55,17 +60,17 @@ use ndarray::{Array1, Array3};
 /// // target tensor
 /// let y = Array3::ones((2, 32, 16)).into_dyn();
 ///
-/// let mut model = Sequential::new();
-/// model
+/// let mut model = SequentialBuilder::new()
 ///     .add(SeparableConv1D::new(
 ///         16,                          // filters
 ///         3,                           // kernel_size
-///         vec![2, 32, 3],              // input_shape
 ///         1,                           // stride
 ///         1,                           // depth_multiplier
 ///         Activation::ReLU,            // activation
 ///     ).unwrap().with_padding(PaddingType::Same))
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
+///     .build(&Shape::known(x.shape()))
+///     .unwrap();
+/// model.compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// model.summary();
 /// model.fit(&x, &y, 3).unwrap();
@@ -74,7 +79,7 @@ use ndarray::{Array1, Array3};
 pub struct SeparableConv1D {
     /// Number of output channels from the pointwise convolution
     filters: usize,
-    /// Number of input channels, read from the declared input shape
+    /// Number of input channels, which [`Layer::build`] reads from the input shape
     channels: usize,
     /// Depthwise convolution kernel size along the length axis
     kernel_size: usize,
@@ -104,8 +109,10 @@ pub struct SeparableConv1D {
     input_cache: Option<Tensor>,
     /// Cached depthwise output, used during backpropagation
     depthwise_output_cache: Option<Tensor>,
-    /// Shape of the input tensor
-    input_shape: Vec<usize>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
+    /// Seed of the weight draw, or `None` to take the global seed or entropy
+    random_state: Option<u64>,
     /// Gradients for the depthwise weights
     depthwise_weight_gradients: Option<Array3<f32>>,
     /// Gradients for the pointwise weights
@@ -126,7 +133,6 @@ impl SeparableConv1D {
     ///
     /// - `filters` - Number of output channels from the pointwise convolution
     /// - `kernel_size` - Size of the depthwise convolution kernel along the length axis
-    /// - `input_shape` - Shape of the input tensor as \[batch_size, length, channels\]
     /// - `stride` - Stride of the convolution along the length axis
     /// - `depth_multiplier` - Number of depthwise convolution filters per input channel
     /// - `activation` - Activation applied to the output
@@ -151,11 +157,9 @@ impl SeparableConv1D {
     /// - `Error::InvalidParameter` - If `depth_multiplier` is 0
     /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
-    /// - `Error::InvalidInput` - If `input_shape` is not 3D or has 0 channels
     pub fn new(
         filters: usize,
         kernel_size: usize,
-        input_shape: Vec<usize>,
         stride: usize,
         depth_multiplier: usize,
         activation: impl Into<Activation>,
@@ -164,31 +168,26 @@ impl SeparableConv1D {
         validate_kernel_size_1d(kernel_size)?;
         validate_strides_1d(stride)?;
         validate_depth_multiplier(depth_multiplier)?;
-        validate_input_shape_1d(&input_shape)?;
         let activation = activation.into();
         activation.validate()?;
 
-        let channels = input_shape[2];
-        let (depthwise_weights, pointwise_weights) =
-            Self::init_weights_arrays(filters, channels, kernel_size, depth_multiplier, None);
-        let bias = Array1::zeros(filters);
-
         Ok(SeparableConv1D {
             filters,
-            channels,
+            channels: 0,
             kernel_size,
             stride,
             dilation_rate: 1,
             padding: PaddingType::Valid,
             depth_multiplier,
-            depthwise_weights,
-            pointwise_weights,
-            bias,
+            depthwise_weights: Array3::zeros((0, 0, 0)),
+            pointwise_weights: Array3::zeros((0, 0, 0)),
+            bias: Array1::zeros(0),
             activation,
             output_cache: None,
             input_cache: None,
             depthwise_output_cache: None,
-            input_shape,
+            built: None,
+            random_state: None,
             depthwise_weight_gradients: None,
             pointwise_weight_gradients: None,
             bias_gradients: None,
@@ -257,15 +256,10 @@ impl SeparableConv1D {
     ///
     /// - `Self` - The updated layer
     pub fn with_random_state(mut self, random_state: u64) -> Self {
-        let (depthwise_weights, pointwise_weights) = Self::init_weights_arrays(
-            self.filters,
-            self.channels,
-            self.kernel_size,
-            self.depth_multiplier,
-            Some(random_state),
-        );
-        self.depthwise_weights = depthwise_weights;
-        self.pointwise_weights = pointwise_weights;
+        self.random_state = Some(random_state);
+        if self.built.is_some() {
+            self.draw_parameters();
+        }
         self
     }
 
@@ -273,31 +267,26 @@ impl SeparableConv1D {
     ///
     /// Both draws share 1 RNG (threaded depthwise-then-pointwise) so a given seed reproduces the
     /// exact same pair of tensors
-    fn init_weights_arrays(
-        filters: usize,
-        channels: usize,
-        kernel_size: usize,
-        depth_multiplier: usize,
-        random_state: Option<u64>,
-    ) -> (Array3<f32>, Array3<f32>) {
-        let mut rng = crate::random::make_rng(random_state);
+    fn draw_parameters(&mut self) {
+        let mut rng = crate::random::make_rng(self.random_state);
 
         // The depth multiplier takes the place of the filter count. See `Fans::conv`
-        let depthwise_weights = Initializer::GlorotUniform.draw(
-            (kernel_size, channels, depth_multiplier),
-            Fans::conv(channels, depth_multiplier, kernel_size),
+        self.depthwise_weights = Initializer::GlorotUniform.draw(
+            (self.kernel_size, self.channels, self.depth_multiplier),
+            Fans::conv(self.channels, self.depth_multiplier, self.kernel_size),
             &mut rng,
         );
 
         // The stored width of the pointwise kernel is already the fan-in, and its 1 tap adds no
         // factor to the fan-out
-        let pointwise_weights = Initializer::GlorotUniform.draw(
-            (1, channels * depth_multiplier, filters),
-            Fans::new(channels * depth_multiplier, filters),
+        let width = self.channels * self.depth_multiplier;
+        self.pointwise_weights = Initializer::GlorotUniform.draw(
+            (1, width, self.filters),
+            Fans::new(width, self.filters),
             &mut rng,
         );
 
-        (depthwise_weights, pointwise_weights)
+        self.bias = Array1::zeros(self.filters);
     }
 
     /// Calculates the output length of both stages, which share 1 length
@@ -351,13 +340,7 @@ impl SeparableConv1D {
     /// boundary. It also applies the `Valid` fit rule, because a `Valid` window that is longer
     /// than the input length gives no complete window
     fn validate_input(&self, input: &Tensor) -> Result<(), Error> {
-        if input.ndim() != 3 {
-            return Err(Error::invalid_input("input tensor is not 3D"));
-        }
-        let channels = input.shape()[2];
-        if channels != self.channels {
-            return Err(Error::dimension_mismatch(self.channels, channels));
-        }
+        validate_built_input(&self.built, "SeparableConv1D", input.shape())?;
         validate_valid_kernel_fits(
             self.padding.into(),
             &[self.kernel_size],
@@ -468,6 +451,9 @@ impl SeparableConv1D {
         pointwise_weights: Array3<f32>,
         bias: impl Into<Option<Array1<f32>>>,
     ) -> Result<(), Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("SeparableConv1D"));
+        }
         validate_weight_shape(
             "depthwise_kernel",
             self.depthwise_weights.shape(),
@@ -492,7 +478,29 @@ impl SeparableConv1D {
 }
 
 impl Layer for SeparableConv1D {
+    /// Reads the channel count from the input shape, and draws both kernels and the bias
+    ///
+    /// 1 generator threads the depthwise draw and then the pointwise draw, in that order. A
+    /// second generator, or the other order, changes every value of the second draw
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "SeparableConv1D", input)? else {
+            return Ok(());
+        };
+        built.check_rank("SeparableConv1D", 3)?;
+        let (batch, tail) = built.split_batch("SeparableConv1D")?;
+        // The family validators read a full extent list, and the batch extent is not part of
+        // what they check
+        let mut dims = vec![batch.unwrap_or(1)];
+        dims.extend(tail);
+        validate_input_shape_1d(&dims)?;
+        self.channels = dims[2];
+        self.built = Some(built);
+        self.draw_parameters();
+        Ok(())
+    }
+
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+        build_on_forward!(self, input);
         self.validate_input(input)?;
 
         // Cache input for backpropagation
@@ -596,9 +604,7 @@ impl Layer for SeparableConv1D {
         "SeparableConv1D"
     }
 
-    fn known_input_shape(&self) -> Option<Shape> {
-        Some(Shape::known(&self.input_shape))
-    }
+    built_layer_shape_functions!();
 
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         input.check_rank("SeparableConv1D", 3)?;
@@ -682,7 +688,8 @@ mod tests {
     /// same order. Any transposition of either would change the total
     #[test]
     fn separable_1d_stage_channel_order_hand_derived() {
-        let mut layer = SeparableConv1D::new(1, 1, vec![1, 1, 2], 1, 2, Linear::new()).unwrap();
+        let mut layer = SeparableConv1D::new(1, 1, 1, 2, Linear::new()).unwrap();
+        layer.build(&Shape::known(&[1, 1, 2])).unwrap();
         assert_eq!(layer.depthwise_weights.shape(), &[1, 2, 2]);
         assert_eq!(layer.pointwise_weights.shape(), &[1, 4, 1]);
 
@@ -709,7 +716,8 @@ mod tests {
     /// reduces to the 3 window sums, scaled by the pointwise weight
     #[test]
     fn separable_1d_length_pass_hand_derived() {
-        let mut layer = SeparableConv1D::new(1, 2, vec![1, 4, 1], 1, 1, Linear::new()).unwrap();
+        let mut layer = SeparableConv1D::new(1, 2, 1, 1, Linear::new()).unwrap();
+        layer.build(&Shape::known(&[1, 4, 1])).unwrap();
 
         // Single channel, all-ones depthwise kernel. Pointwise scales by 3
         let depthwise = Array3::from_shape_vec((2, 1, 1), vec![1.0, 1.0]).unwrap();

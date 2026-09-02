@@ -39,6 +39,25 @@ pub struct FusedGates {
 }
 
 impl FusedGates {
+    /// Fused gates that hold no weight at all
+    ///
+    /// A layer holds this until [`Layer::build`](crate::neural_network::traits::Layer::build)
+    /// reads the feature count from the input shape and replaces it with a drawn set
+    ///
+    /// # Returns
+    ///
+    /// - `FusedGates` - Gates whose 3 matrices are empty
+    pub fn empty() -> Self {
+        Self {
+            kernel: Array2::zeros((0, 0)),
+            recurrent_kernel: Array2::zeros((0, 0)),
+            bias: Array2::zeros((0, 0)),
+            grad_kernel: None,
+            grad_recurrent_kernel: None,
+            grad_bias: None,
+        }
+    }
+
     /// Creates fused gates with randomly initialized weights
     ///
     /// Initialization keeps the per-gate semantics of separate gates. The input kernel uses

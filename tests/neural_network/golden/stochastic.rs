@@ -21,6 +21,7 @@
 
 use super::{GoldenCase, LayerFixture, golden_input, golden_weights, golden_weights_from};
 use ndarray::IxDyn;
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::regularization::dropout::{
     Dropout, SpatialDropout1D, SpatialDropout2D, SpatialDropout3D,
@@ -102,22 +103,26 @@ const SPATIAL_3D_SHAPE: [usize; 5] = [2, 2, 2, 3, 4];
 fn dropout_cases() -> Vec<GoldenCase> {
     /// Builds a Dropout layer with a pinned mask seed.
     fn build(rate: f32) -> Box<dyn Layer> {
-        Box::new(
-            Dropout::new(rate, ELEMENTWISE_SHAPE.to_vec())
-                .expect("a rate between 0 and 1")
-                .with_random_state(GOLDEN_SEED),
-        )
+        let mut layer = Dropout::new(rate)
+            .expect("a rate between 0 and 1")
+            .with_random_state(GOLDEN_SEED);
+        layer
+            .build(&Shape::known(&ELEMENTWISE_SHAPE))
+            .expect("the layer accepts the shape of the case");
+        Box::new(layer)
     }
 
     /// Builds a Dropout layer whose mask shares 1 draw over the whole batch axis.
     fn build_shared_batch() -> Box<dyn Layer> {
-        Box::new(
-            Dropout::new(0.5, ELEMENTWISE_SHAPE.to_vec())
-                .expect("a rate between 0 and 1")
-                .with_random_state(GOLDEN_SEED)
-                .with_noise_shape(vec![Some(1), None])
-                .expect("the noise shape has the rank of the input"),
-        )
+        let mut layer = Dropout::new(0.5)
+            .expect("a rate between 0 and 1")
+            .with_random_state(GOLDEN_SEED)
+            .with_noise_shape(vec![Some(1), None])
+            .expect("the noise shape has the rank of the input");
+        layer
+            .build(&Shape::known(&ELEMENTWISE_SHAPE))
+            .expect("the layer accepts the shape of the case");
+        Box::new(layer)
     }
 
     vec![
@@ -153,11 +158,13 @@ fn dropout_cases() -> Vec<GoldenCase> {
 fn spatial_dropout_1d_cases() -> Vec<GoldenCase> {
     /// Builds a SpatialDropout1D layer with a pinned mask seed.
     fn build() -> Box<dyn Layer> {
-        Box::new(
-            SpatialDropout1D::new(0.5, SPATIAL_1D_SHAPE.to_vec())
-                .expect("a rate between 0 and 1")
-                .with_random_state(GOLDEN_SEED),
-        )
+        let mut layer = SpatialDropout1D::new(0.5)
+            .expect("a rate between 0 and 1")
+            .with_random_state(GOLDEN_SEED);
+        layer
+            .build(&Shape::known(&SPATIAL_1D_SHAPE))
+            .expect("the layer accepts the shape of the case");
+        Box::new(layer)
     }
 
     vec![
@@ -170,11 +177,13 @@ fn spatial_dropout_1d_cases() -> Vec<GoldenCase> {
 fn spatial_dropout_2d_cases() -> Vec<GoldenCase> {
     /// Builds a SpatialDropout2D layer with a pinned mask seed.
     fn build() -> Box<dyn Layer> {
-        Box::new(
-            SpatialDropout2D::new(0.5, SPATIAL_2D_SHAPE.to_vec())
-                .expect("a rate between 0 and 1")
-                .with_random_state(GOLDEN_SEED),
-        )
+        let mut layer = SpatialDropout2D::new(0.5)
+            .expect("a rate between 0 and 1")
+            .with_random_state(GOLDEN_SEED);
+        layer
+            .build(&Shape::known(&SPATIAL_2D_SHAPE))
+            .expect("the layer accepts the shape of the case");
+        Box::new(layer)
     }
 
     vec![
@@ -187,11 +196,13 @@ fn spatial_dropout_2d_cases() -> Vec<GoldenCase> {
 fn spatial_dropout_3d_cases() -> Vec<GoldenCase> {
     /// Builds a SpatialDropout3D layer with a pinned mask seed.
     fn build() -> Box<dyn Layer> {
-        Box::new(
-            SpatialDropout3D::new(0.5, SPATIAL_3D_SHAPE.to_vec())
-                .expect("a rate between 0 and 1")
-                .with_random_state(GOLDEN_SEED),
-        )
+        let mut layer = SpatialDropout3D::new(0.5)
+            .expect("a rate between 0 and 1")
+            .with_random_state(GOLDEN_SEED);
+        layer
+            .build(&Shape::known(&SPATIAL_3D_SHAPE))
+            .expect("the layer accepts the shape of the case");
+        Box::new(layer)
     }
 
     vec![
@@ -212,11 +223,13 @@ fn spatial_dropout_3d_cases() -> Vec<GoldenCase> {
 fn gaussian_noise_cases() -> Vec<GoldenCase> {
     /// Builds a GaussianNoise layer with a pinned noise seed.
     fn build(stddev: f32) -> Box<dyn Layer> {
-        Box::new(
-            GaussianNoise::new(stddev, ELEMENTWISE_SHAPE.to_vec())
-                .expect("a finite non-negative standard deviation")
-                .with_random_state(GOLDEN_SEED),
-        )
+        let mut layer = GaussianNoise::new(stddev)
+            .expect("a finite non-negative standard deviation")
+            .with_random_state(GOLDEN_SEED);
+        layer
+            .build(&Shape::known(&ELEMENTWISE_SHAPE))
+            .expect("the layer accepts the shape of the case");
+        Box::new(layer)
     }
 
     vec![
@@ -237,11 +250,13 @@ fn gaussian_noise_cases() -> Vec<GoldenCase> {
 fn gaussian_dropout_cases() -> Vec<GoldenCase> {
     /// Builds a GaussianDropout layer with a pinned noise seed.
     fn build(rate: f32) -> Box<dyn Layer> {
-        Box::new(
-            GaussianDropout::new(rate, ELEMENTWISE_SHAPE.to_vec())
-                .expect("a rate in the range 0 through 1, with 1 excluded")
-                .with_random_state(GOLDEN_SEED),
-        )
+        let mut layer = GaussianDropout::new(rate)
+            .expect("a rate in the range 0 through 1, with 1 excluded")
+            .with_random_state(GOLDEN_SEED);
+        layer
+            .build(&Shape::known(&ELEMENTWISE_SHAPE))
+            .expect("the layer accepts the shape of the case");
+        Box::new(layer)
     }
 
     vec![
@@ -304,12 +319,11 @@ fn batch_norm_layer(input_shape: &[usize]) -> BatchNormalization {
     } else {
         1
     };
-    let mut layer = BatchNormalization::new(
-        input_shape.to_vec(),
-        BATCH_NORM_MOMENTUM,
-        BATCH_NORM_EPSILON,
-    )
-    .expect("a non-empty shape, a momentum in range, and a positive epsilon");
+    let mut layer = BatchNormalization::new(BATCH_NORM_MOMENTUM, BATCH_NORM_EPSILON)
+        .expect("a non-empty shape, a momentum in range, and a positive epsilon");
+    layer
+        .build(&Shape::known(input_shape))
+        .expect("the layer accepts the shape of the case");
     layer
         .set_weights(
             golden_weights(&[channels]),
@@ -368,9 +382,11 @@ fn batch_norm_running_statistics() -> (Tensor, Tensor) {
 /// - `Box<dyn Layer>` - A BatchNormalization layer whose inference output is `statistic`
 fn batch_norm_statistic_readout(statistic: Tensor) -> Box<dyn Layer> {
     let channels = statistic.len();
-    let mut layer =
-        BatchNormalization::new(vec![1, channels], BATCH_NORM_MOMENTUM, BATCH_NORM_EPSILON)
-            .expect("a non-empty shape, a momentum in range, and a positive epsilon");
+    let mut layer = BatchNormalization::new(BATCH_NORM_MOMENTUM, BATCH_NORM_EPSILON)
+        .expect("a momentum in range and a positive epsilon");
+    layer
+        .build(&Shape::known(&[1, channels]))
+        .expect("the layer accepts the shape of the case");
     layer
         .set_weights(
             Tensor::zeros(IxDyn(&[channels])),

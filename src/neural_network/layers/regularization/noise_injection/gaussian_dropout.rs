@@ -2,11 +2,12 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
-use crate::neural_network::layers::regularization::validation::{
-    shape_preserving_output, validate_input_shape, validate_rate_exclusive,
+use crate::neural_network::layers::regularization::validation::validate_rate_exclusive;
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    build_on_forward, built_layer_shape_functions, no_trainable_parameters_layer_functions,
 };
 use crate::neural_network::traits::Layer;
 use crate::neural_network::{Shape, Tensor};
@@ -21,6 +22,14 @@ use ndarray_rand::rand_distr::Normal;
 /// standard deviation is sqrt(rate / (1 - rate)). During inference, inputs pass through
 /// unchanged
 ///
+/// # Shape freedom
+///
+/// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of
+/// any shape and of any rank. [`Layer::build`] records the shape it is given, and
+/// [`Layer::output_shape`] reports it, but no later input is checked against it. See the
+/// "Shape freedom" section of
+/// [`Dropout`](crate::neural_network::layers::regularization::dropout::dropout::Dropout)
+///
 /// # Examples
 ///
 /// ```rust
@@ -29,7 +38,7 @@ use ndarray_rand::rand_distr::Normal;
 /// use ndarray::Array2;
 ///
 /// // Create a GaussianDropout layer with dropout rate of 0.3
-/// let mut gaussian_dropout = GaussianDropout::new(0.3, vec![32, 128]).unwrap();
+/// let mut gaussian_dropout = GaussianDropout::new(0.3).unwrap();
 ///
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
@@ -40,8 +49,8 @@ use ndarray_rand::rand_distr::Normal;
 pub struct GaussianDropout {
     /// Dropout rate used to compute the noise standard deviation
     rate: f32,
-    /// Expected shape of the input tensor
-    input_shape: Vec<usize>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
     /// Whether the layer is in training mode or inference mode
     training: bool,
     /// Random number generator used to sample the multiplicative Gaussian noise
@@ -57,7 +66,6 @@ impl GaussianDropout {
     /// # Parameters
     ///
     /// - `rate` - Dropout rate, must be in range [0, 1)
-    /// - `input_shape` - Shape of the input tensor
     ///
     /// # Returns
     ///
@@ -71,14 +79,14 @@ impl GaussianDropout {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `rate` is not in range [0, 1)
-    pub fn new(rate: f32, input_shape: Vec<usize>) -> Result<Self, Error> {
+    pub fn new(rate: f32) -> Result<Self, Error> {
         validate_rate_exclusive(rate, "Dropout rate")?;
 
         let rng = crate::random::make_rng(None);
 
         Ok(GaussianDropout {
             rate,
-            input_shape,
+            built: None,
             training: true,
             rng,
             noise_cache: None,
@@ -106,9 +114,25 @@ impl GaussianDropout {
 }
 
 impl Layer for GaussianDropout {
+    /// Records the shape the layer serves. The layer holds no array, so nothing is
+    /// allocated
+    ///
+    /// The recorded shape is what [`Layer::output_shape`] reports, and no more. The layer owns
+    /// no array and reads no extent, so it checks no later input against it. See the
+    /// "Shape freedom" section of the type
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "GaussianDropout", input)? else {
+            return Ok(());
+        };
+        input.check_min_rank("GaussianDropout", 1)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    /// Scales a tensor of any shape by the drawn noise. See the "Shape freedom" section of the type
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` was already validated in `new()`
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        // `rate` was already validated in `new()`, and the input needs no check
+        build_on_forward!(self, input);
 
         // During inference or when rate is 0, pass input through unchanged
         if !self.training || self.rate == 0.0 {
@@ -134,9 +158,14 @@ impl Layer for GaussianDropout {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
+    ///
+    /// The input needs no check, and the layer takes a tensor of any shape. `predict` cannot
+    /// build, so it still refuses a layer that holds no build
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` was already validated in `new()`
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        // `rate` was already validated in `new()`, and the input needs no check
+        if self.built.is_none() {
+            return Err(Error::not_built("GaussianDropout"));
+        }
 
         // Inference is identity: pass input through unchanged (no noise sampling)
         Ok(input.clone())
@@ -159,13 +188,7 @@ impl Layer for GaussianDropout {
         "GaussianDropout"
     }
 
-    fn known_input_shape(&self) -> Option<Shape> {
-        (!self.input_shape.is_empty()).then(|| Shape::known(&self.input_shape))
-    }
-
-    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
-        shape_preserving_output(input, &self.input_shape, "GaussianDropout")
-    }
+    built_layer_shape_functions!();
 
     no_trainable_parameters_layer_functions!();
 

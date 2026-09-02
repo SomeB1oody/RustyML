@@ -1226,7 +1226,6 @@ fn elu_default_matches_explicit_alpha() {
 fn dense_rejects_unusable_leaky_relu_slope() {
     let result = Dense::new(
         2,
-        2,
         Activation::LeakyReLU {
             negative_slope: -0.1,
         },
@@ -1241,7 +1240,7 @@ fn dense_rejects_unusable_leaky_relu_slope() {
 /// A trainable layer rejects an unusable ELU alpha where the model is built
 #[test]
 fn dense_rejects_unusable_elu_alpha() {
-    let result = Dense::new(2, 2, Activation::ELU { alpha: 0.0 });
+    let result = Dense::new(2, Activation::ELU { alpha: 0.0 });
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -1522,11 +1521,11 @@ fn softmax_axis_validity_follows_the_rank_of_the_input() {
 #[test]
 fn dense_rejects_an_embedded_softmax_over_another_axis() {
     assert!(
-        Dense::new(2, 3, Activation::Softmax { axis: -1 }).is_ok(),
+        Dense::new(3, Activation::Softmax { axis: -1 }).is_ok(),
         "the default axis is the only axis a trainable layer accepts"
     );
     for axis in [0, 1, 2, -2] {
-        let result = Dense::new(2, 3, Activation::Softmax { axis });
+        let result = Dense::new(3, Activation::Softmax { axis });
         assert!(
             matches!(result, Err(Error::InvalidParameter { .. })),
             "axis {axis}: expected InvalidParameter, got {:?}",
@@ -1534,7 +1533,7 @@ fn dense_rejects_an_embedded_softmax_over_another_axis() {
         );
     }
     assert!(
-        Dense::new(2, 3, Softmax::new().with_axis(1)).is_err(),
+        Dense::new(3, Softmax::new().with_axis(1)).is_err(),
         "the layer conversion carries the axis, so it is rejected the same way"
     );
 }

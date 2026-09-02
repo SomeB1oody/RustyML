@@ -52,6 +52,7 @@
 use super::{GoldenCase, LayerFixture, golden_weights, golden_weights_from};
 use ndarray::{Array2, ArrayD, Ix2};
 use rustyml::error::Error;
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::Activation;
@@ -203,10 +204,13 @@ const NORMALIZATION_PARAMS: [&str; 2] = ["gamma", "beta"];
 fn simple_rnn_cases() -> Vec<GoldenCase> {
     /// Builds a SimpleRNN layer with fixed weights, the given activation, and the 2 flags.
     fn build(activation: Activation, return_sequences: bool, go_backwards: bool) -> Box<dyn Layer> {
-        let mut layer = SimpleRNN::new(RNN_INPUT_DIM, RNN_UNITS, activation)
-            .expect("4 features into 3 units")
+        let mut layer = SimpleRNN::new(RNN_UNITS, activation)
+            .expect("3 units")
             .with_return_sequences(return_sequences)
             .with_go_backwards(go_backwards);
+        layer
+            .build(&Shape::known(&RNN_SHAPE))
+            .expect("the layer accepts the shape of the case");
         let (kernel, recurrent_kernel, bias) = gate_block(0);
         layer
             .set_weights(kernel, recurrent_kernel, bias)
@@ -251,10 +255,13 @@ fn lstm_cases() -> Vec<GoldenCase> {
 
     /// Builds an LSTM layer whose fused matrices come straight from the weight formula.
     fn build_fused(return_sequences: bool, go_backwards: bool) -> Box<dyn Layer> {
-        let mut layer = LSTM::new(RNN_INPUT_DIM, RNN_UNITS, Activation::Tanh)
-            .expect("4 features into 3 units")
+        let mut layer = LSTM::new(RNN_UNITS, Activation::Tanh)
+            .expect("3 units")
             .with_return_sequences(return_sequences)
             .with_go_backwards(go_backwards);
+        layer
+            .build(&Shape::known(&RNN_SHAPE))
+            .expect("the layer accepts the shape of the case");
         let width = GATES * RNN_UNITS;
         let kernel_size = RNN_INPUT_DIM * width;
         let recurrent_size = RNN_UNITS * width;
@@ -273,8 +280,10 @@ fn lstm_cases() -> Vec<GoldenCase> {
 
     /// Builds an LSTM layer gate by gate, in input, forget, cell, output argument order.
     fn build_per_gate() -> Box<dyn Layer> {
-        let mut layer =
-            LSTM::new(RNN_INPUT_DIM, RNN_UNITS, Activation::Tanh).expect("4 features into 3 units");
+        let mut layer = LSTM::new(RNN_UNITS, Activation::Tanh).expect("3 units");
+        layer
+            .build(&Shape::known(&RNN_SHAPE))
+            .expect("the layer accepts the shape of the case");
         let (input_kernel, input_recurrent, input_bias) = gate_block(0);
         let (forget_kernel, forget_recurrent, forget_bias) = gate_block(GATE_STRIDE);
         let (cell_kernel, cell_recurrent, cell_bias) = gate_block(2 * GATE_STRIDE);
@@ -322,10 +331,13 @@ fn gru_cases() -> Vec<GoldenCase> {
 
     /// Builds a GRU layer whose fused matrices come straight from the weight formula.
     fn build_fused(return_sequences: bool, go_backwards: bool) -> Box<dyn Layer> {
-        let mut layer = GRU::new(RNN_INPUT_DIM, RNN_UNITS, Activation::Tanh)
-            .expect("4 features into 3 units")
+        let mut layer = GRU::new(RNN_UNITS, Activation::Tanh)
+            .expect("3 units")
             .with_return_sequences(return_sequences)
             .with_go_backwards(go_backwards);
+        layer
+            .build(&Shape::known(&RNN_SHAPE))
+            .expect("the layer accepts the shape of the case");
         let width = GATES * RNN_UNITS;
         let kernel_size = RNN_INPUT_DIM * width;
         let recurrent_size = RNN_UNITS * width;
@@ -344,8 +356,10 @@ fn gru_cases() -> Vec<GoldenCase> {
 
     /// Builds a GRU layer gate by gate, in reset, update, candidate argument order.
     fn build_per_gate() -> Box<dyn Layer> {
-        let mut layer =
-            GRU::new(RNN_INPUT_DIM, RNN_UNITS, Activation::Tanh).expect("4 features into 3 units");
+        let mut layer = GRU::new(RNN_UNITS, Activation::Tanh).expect("3 units");
+        layer
+            .build(&Shape::known(&RNN_SHAPE))
+            .expect("the layer accepts the shape of the case");
         let (reset_kernel, reset_recurrent, reset_bias) = gate_block(0);
         let (update_kernel, update_recurrent, update_bias) = gate_block(GATE_STRIDE);
         let (candidate_kernel, candidate_recurrent, candidate_bias) = gate_block(2 * GATE_STRIDE);
@@ -414,6 +428,9 @@ impl IndexedEmbedding {
     fn new(fraction: f32) -> Self {
         let mut inner =
             Embedding::new(EMBEDDING_ROWS, EMBEDDING_WIDTH).expect("6 rows of 3 values each");
+        inner
+            .build(&Shape::known(&EMBEDDING_SHAPE))
+            .expect("the layer accepts the shape of the case");
         inner
             .set_weights(as_2d(golden_weights(&[EMBEDDING_ROWS, EMBEDDING_WIDTH])))
             .expect("the table shape matches the layer");
@@ -531,11 +548,14 @@ fn layer_normalization_cases() -> Vec<GoldenCase> {
         axis: Option<LayerNormalizationAxis>,
         size: usize,
     ) -> Box<dyn Layer> {
-        let base = LayerNormalization::new(input_shape, EPSILON).expect("a positive epsilon");
+        let base = LayerNormalization::new(EPSILON).expect("a positive epsilon");
         let mut layer = match axis {
             Some(axis) => base.with_normalized_axis(axis).expect("a usable axis list"),
             None => base,
         };
+        layer
+            .build(&Shape::known(&input_shape))
+            .expect("the layer accepts the shape of the case");
         let (gamma, beta) = scale_and_shift(size);
         layer
             .set_weights(gamma, beta)
@@ -592,8 +612,10 @@ fn layer_normalization_cases() -> Vec<GoldenCase> {
 fn instance_normalization_cases() -> Vec<GoldenCase> {
     /// Builds an InstanceNormalization layer with fixed weights over `channels` channels.
     fn build(input_shape: Vec<usize>, channels: usize) -> Box<dyn Layer> {
-        let mut layer =
-            InstanceNormalization::new(input_shape, EPSILON).expect("a positive epsilon");
+        let mut layer = InstanceNormalization::new(EPSILON).expect("a positive epsilon");
+        layer
+            .build(&Shape::known(&input_shape))
+            .expect("the layer accepts the shape of the case");
         let (gamma, beta) = scale_and_shift(channels);
         layer
             .set_weights(gamma, beta)
@@ -620,8 +642,11 @@ fn instance_normalization_cases() -> Vec<GoldenCase> {
 fn group_normalization_cases() -> Vec<GoldenCase> {
     /// Builds a GroupNormalization layer with fixed weights over `channels` channels.
     fn build(input_shape: Vec<usize>, groups: usize, channels: usize) -> Box<dyn Layer> {
-        let mut layer = GroupNormalization::new(input_shape, groups, EPSILON)
-            .expect("a positive group count and epsilon");
+        let mut layer =
+            GroupNormalization::new(groups, EPSILON).expect("a positive group count and epsilon");
+        layer
+            .build(&Shape::known(&input_shape))
+            .expect("the layer accepts the shape of the case");
         let (gamma, beta) = scale_and_shift(channels);
         layer
             .set_weights(gamma, beta)

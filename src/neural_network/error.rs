@@ -40,6 +40,21 @@ pub enum NnError {
     /// An operation was attempted on a model that contains no layers
     #[error("model has no layers")]
     EmptyModel,
+
+    /// A layer was used before `build` gave it the arrays it holds
+    ///
+    /// A layer allocates every array it owns in
+    /// [`Layer::build`](crate::neural_network::traits::Layer::build), from the shape of the
+    /// input. Until then it holds no kernel, no bias, and no shape to check an input against.
+    /// [`Layer::forward`](crate::neural_network::traits::Layer::forward) builds the layer from
+    /// the tensor it receives, so only the paths that take `&self` can report this
+    ///
+    /// The payload is the layer's name (e.g. `"Dense"`, `"Conv2D"`)
+    #[error(
+        "layer `{0}` is not built; build it with `Layer::build`, or add it to a \
+         `SequentialBuilder` and build the model"
+    )]
+    NotBuilt(&'static str),
 }
 
 impl Error {
@@ -47,6 +62,12 @@ impl Error {
     #[cold]
     pub fn forward_pass_not_run(layer: &'static str) -> Self {
         Self::NeuralNetwork(NnError::ForwardPassNotRun(layer))
+    }
+
+    /// Builds [`Error::NeuralNetwork`]`(`[`NnError::NotBuilt`]`)` for the named layer
+    #[cold]
+    pub fn not_built(layer: &'static str) -> Self {
+        Self::NeuralNetwork(NnError::NotBuilt(layer))
     }
 }
 

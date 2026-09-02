@@ -6,10 +6,13 @@ use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::recurrent::gate::{FusedGates, project_input, take_cache};
 use crate::neural_network::layers::recurrent::validation::{
-    split_grad_output, validate_input_3d, validate_recurrent_dimensions,
+    split_grad_output, validate_dimension_greater_than_zero, validate_input_3d,
+    validate_recurrent_dimensions,
 };
 use crate::neural_network::layers::recurrent::{apply_sigmoid, input_step};
+use crate::neural_network::layers::validation::start_build;
 use crate::neural_network::layers::validation::validate_weight_shape;
+use crate::neural_network::layers::{build_config_function, build_on_forward};
 use crate::neural_network::traits::{Layer, ParamGrad};
 use crate::neural_network::{Shape, Tensor};
 use gemmkit_ndarray::dot;
@@ -33,7 +36,8 @@ use ndarray::{Array2, Array3, ArrayView3, Axis, Ix2, Ix3, concatenate, s};
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::*;
@@ -44,9 +48,11 @@ use ndarray::{Array2, Array3, ArrayView3, Axis, Ix2, Ix3, concatenate, s};
 /// let target = Array::ones((2, 3)).into_dyn(); // batch_size=2, units=3
 ///
 /// // Create LSTM layer with 4 input features, 3 units, Tanh activation
-/// let mut model = Sequential::new();
-/// model.add(LSTM::new(4, 3, Activation::Tanh).unwrap())
-///      .compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
+/// let mut model = SequentialBuilder::new()
+///     .add(LSTM::new(3, Activation::Tanh).unwrap())
+///     .build(&Shape::known(input.shape()))
+///     .unwrap();
+/// model.compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Train the model
 /// model.fit(&input, &target, 10).unwrap();
@@ -58,8 +64,12 @@ use ndarray::{Array2, Array3, ArrayView3, Axis, Ix2, Ix3, concatenate, s};
 /// ```
 #[derive(Debug)]
 pub struct LSTM {
-    /// Dimensionality of input features
+    /// Feature count per timestep, which [`Layer::build`] reads from the input shape
     input_dim: usize,
+    /// Shape the gates depend on, which is `(None, None, input_dim)`. `None` before the build
+    built: Option<Shape>,
+    /// Seed of the weight draw, or `None` to take the global seed or entropy
+    random_state: Option<u64>,
     /// Number of LSTM units (neurons) in the layer
     units: usize,
 
@@ -105,7 +115,6 @@ impl LSTM {
     ///
     /// # Parameters
     ///
-    /// - `input_dim` - Dimensionality of input features (number of features per timestep)
     /// - `units` - Number of LSTM units/neurons in the layer (determines output dimensionality)
     /// - `activation` - Activation from the activation module (any [`Activation`] variant, or
     ///   any standalone activation layer)
@@ -116,27 +125,26 @@ impl LSTM {
     ///
     /// # Notes
     ///
-    /// Weights are seeded from the global seed or entropy by default. For reproducible
-    /// initialization, set a seed with [`LSTM::with_random_state`].
+    /// The constructor draws nothing. [`Layer::build`] reads the feature count from the input
+    /// shape and draws the gates then. The draw takes the global seed or entropy by default.
+    /// For reproducible initialization, set a seed with [`LSTM::with_random_state`].
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `input_dim` or `units` is 0
+    /// - `Error::InvalidParameter` - If `units` is 0
     /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
-    pub fn new(
-        input_dim: usize,
-        units: usize,
-        activation: impl Into<Activation>,
-    ) -> Result<Self, Error> {
-        validate_recurrent_dimensions(input_dim, units)?;
+    pub fn new(units: usize, activation: impl Into<Activation>) -> Result<Self, Error> {
+        validate_dimension_greater_than_zero(units, "units")?;
         let activation = activation.into();
         activation.validate()?;
 
         Ok(Self {
-            input_dim,
+            input_dim: 0,
+            built: None,
+            random_state: None,
             units,
-            gates: Self::init_gates(input_dim, units, None)?,
+            gates: FusedGates::empty(),
             input_cache: None,
             caches: None,
             activation,
@@ -147,9 +155,10 @@ impl LSTM {
 
     /// Sets the seed used to initialize the gate weights and re-initializes them deterministically.
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
-    /// This re-runs the gate initialization with `random_state`. Call it before assigning custom
-    /// weights or training.
+    /// By default the draw takes the global seed or entropy (see [`crate::random`]). An unbuilt
+    /// layer holds no gate weight, so this records the seed and draws nothing. A layer that is
+    /// already built draws its gates again from the new seed, so the order of the 2 calls does
+    /// not matter.
     ///
     /// # Parameters
     ///
@@ -159,10 +168,21 @@ impl LSTM {
     ///
     /// - `Self` - The updated layer
     pub fn with_random_state(mut self, random_state: u64) -> Self {
-        // Dimensions were validated in `new`, so re-initialization cannot fail
-        self.gates = Self::init_gates(self.input_dim, self.units, Some(random_state))
-            .expect("LSTM dimensions were validated in new()");
+        self.random_state = Some(random_state);
+        if self.built.is_some() {
+            self.draw_parameters();
+        }
         self
+    }
+
+    /// Draws the fused gates at the extents the build settled
+    ///
+    /// 1 generator threads the fused input kernel and then 1 orthogonal block per gate, in gate
+    /// order. See [`FusedGates::new`]
+    fn draw_parameters(&mut self) {
+        // The build validated both dimensions, so the draw cannot fail
+        self.gates = Self::init_gates(self.input_dim, self.units, self.random_state)
+            .expect("the build validated both dimensions");
     }
 
     /// Sets whether the layer returns every timestep's hidden state
@@ -240,6 +260,9 @@ impl LSTM {
         recurrent_kernel: Array2<f32>,
         bias: Array2<f32>,
     ) -> Result<(), Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("LSTM"));
+        }
         validate_weight_shape("kernel", self.gates.kernel.shape(), kernel.shape())?;
         validate_weight_shape(
             "recurrent_kernel",
@@ -472,8 +495,33 @@ impl LSTM {
 }
 
 impl Layer for LSTM {
+    /// Reads the feature count from the last axis, and draws the fused gates
+    ///
+    /// The gates depend on the feature count and on the unit count, and on no other extent. The
+    /// build shape therefore fixes the last axis alone, and the layer takes a batch of any size
+    /// and a sequence of any length
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        input.check_rank("LSTM", 3)?;
+        let Some(input_dim) = input.axes()[2] else {
+            return Err(Error::invalid_input(format!(
+                "LSTM needs a fixed feature count on axis 2, and the shape {input} leaves \
+                 that axis free"
+            )));
+        };
+        validate_recurrent_dimensions(input_dim, self.units)?;
+        let canonical = Shape::new(vec![None, None, Some(input_dim)]);
+        let Some(built) = start_build(&self.built, "LSTM", &canonical)? else {
+            return Ok(());
+        };
+        self.input_dim = input_dim;
+        self.built = Some(built);
+        self.draw_parameters();
+        Ok(())
+    }
+
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_3d(input)?;
+        build_on_forward!(self, input);
         let x3 = input.view().into_dimensionality::<Ix3>().unwrap();
         let timesteps = x3.shape()[1];
         self.input_cache = Some(x3.to_owned());
@@ -494,6 +542,9 @@ impl Layer for LSTM {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("LSTM"));
+        }
         validate_input_3d(input)?;
         let x3 = input.view().into_dimensionality::<Ix3>().unwrap();
         self.run(&x3, None)
@@ -635,17 +686,22 @@ impl Layer for LSTM {
         "LSTM"
     }
 
+    build_config_function!();
+
     fn known_input_shape(&self) -> Option<Shape> {
         // The layer keeps no input shape. It knows the feature count of 1 timestep, and it
         // serves every batch size and every sequence length, so both of those axes are free
-        Some(Shape::new(vec![None, None, Some(self.input_dim)]))
+        self.built.clone()
     }
 
     /// A returned sequence keeps the time axis, and a returned final state drops it
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         input.check_rank("LSTM", 3)?;
         let axes = input.axes();
-        if let Some(features) = axes[2]
+        // The unit count settles the answer, so an unbuilt layer gives it. A built layer holds
+        // a kernel of a fixed width, and it refuses a feature count that the kernel cannot take
+        if self.built.is_some()
+            && let Some(features) = axes[2]
             && features != self.input_dim
         {
             return Err(Error::invalid_input(format!(

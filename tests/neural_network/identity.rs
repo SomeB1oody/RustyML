@@ -4,6 +4,7 @@
 //! carrying the layer trains exactly as one without it.
 
 use ndarray::{Array2, IxDyn};
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
@@ -11,7 +12,7 @@ use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::identity::Identity;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
-use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
@@ -132,14 +133,15 @@ fn identity_does_not_change_what_a_model_learns() {
     let _guard = GlobalSeedGuard::set(7);
     let build = |with_identity: bool| {
         rustyml::set_global_seed(7);
-        let mut model = Sequential::new();
+        let mut builder = SequentialBuilder::new();
         if with_identity {
-            model.add(Identity::new());
+            builder = builder.add(Identity::new());
         }
-        model.add(Dense::new(3, 2, Linear::new()).unwrap());
+        builder = builder.add(Dense::new(2, Linear::new()).unwrap());
         if with_identity {
-            model.add(Identity::new());
+            builder = builder.add(Identity::new());
         }
+        let mut model = builder.build(&Shape::known(x.shape())).unwrap();
         model.compile(
             SGD::new(0.05, 0.0, false, 0.0).unwrap(),
             MeanSquaredError::new(),

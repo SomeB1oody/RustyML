@@ -63,7 +63,7 @@ pub use max_pooling_3d::MaxPooling3D;
 /// # Requirements
 ///
 /// The implementing struct must have the field:
-/// - `input_shape: Vec<usize>` - shape of the input tensor
+/// - `input_shape: Vec<usize>` - shape of the last input the forward pass saw
 ///
 /// The macro takes the layer name and the rank the layer accepts, both of which reach the
 /// error messages
@@ -100,7 +100,10 @@ macro_rules! layer_functions_global_pooling {
 ///
 /// # Generated Functions
 ///
-/// - `known_input_shape()` - the shape the constructor declared
+/// - `build()` - records the shape the layer serves, and refuses a shape the window
+///   does not fit
+/// - `known_input_shape()` - the shape the layer was built for
+/// - `build_config()` - the same shape with the batch axis freed, for a checkpoint
 /// - `compute_output_shape()` - applies the pooling window to every spatial axis, and keeps the
 ///   batch axis and the channel axis
 /// - all functions from the `no_trainable_parameters_layer_functions!()` macro
@@ -108,17 +111,37 @@ macro_rules! layer_functions_global_pooling {
 /// # Requirements
 ///
 /// The implementing struct must have the fields:
-/// - `input_shape: Vec<usize>` - shape of the input tensor
+/// - `built: Option<Shape>` - the shape the layer was built for
 /// - `pool_size: usize` - size of the pooling window
 /// - `stride: usize` - step size for the pooling operation
 ///
 /// The macro takes the layer name, which reaches the error messages
 macro_rules! layer_functions_1d_pooling {
     ($layer:literal) => {
-        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
-            (!self.input_shape.is_empty())
-                .then(|| $crate::neural_network::Shape::known(&self.input_shape))
+        /// Records the shape the window runs over. The layer holds no array, so nothing is
+        /// allocated. The shape algebra checks the rank, the extents, and the window
+        fn build(
+            &mut self,
+            input: &$crate::neural_network::Shape,
+        ) -> Result<(), $crate::error::Error> {
+            let Some(built) = $crate::neural_network::layers::validation::start_build(
+                &self.built,
+                $layer,
+                input,
+            )?
+            else {
+                return Ok(());
+            };
+            self.compute_output_shape(&built)?;
+            self.built = Some(built);
+            Ok(())
         }
+
+        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
+            self.built.clone()
+        }
+
+        $crate::neural_network::layers::build_config_function!();
 
         fn compute_output_shape(
             &self,
@@ -150,7 +173,10 @@ macro_rules! layer_functions_1d_pooling {
 ///
 /// # Generated Functions
 ///
-/// - `known_input_shape()` - the shape the constructor declared
+/// - `build()` - records the shape the layer serves, and refuses a shape the window
+///   does not fit
+/// - `known_input_shape()` - the shape the layer was built for
+/// - `build_config()` - the same shape with the batch axis freed, for a checkpoint
 /// - `compute_output_shape()` - applies the pooling window to every spatial axis, and keeps the
 ///   batch axis and the channel axis
 /// - all functions from the `no_trainable_parameters_layer_functions!()` macro
@@ -158,17 +184,37 @@ macro_rules! layer_functions_1d_pooling {
 /// # Requirements
 ///
 /// The implementing struct must have the fields:
-/// - `input_shape: Vec<usize>` - shape of the input tensor
+/// - `built: Option<Shape>` - the shape the layer was built for
 /// - `pool_size: (usize, usize)` - size of the pooling window as (height, width)
 /// - `strides: (usize, usize)` - step size for the pooling operation as (height_step, width_step)
 ///
 /// The macro takes the layer name, which reaches the error messages
 macro_rules! layer_functions_2d_pooling {
     ($layer:literal) => {
-        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
-            (!self.input_shape.is_empty())
-                .then(|| $crate::neural_network::Shape::known(&self.input_shape))
+        /// Records the shape the window runs over. The layer holds no array, so nothing is
+        /// allocated. The shape algebra checks the rank, the extents, and the window
+        fn build(
+            &mut self,
+            input: &$crate::neural_network::Shape,
+        ) -> Result<(), $crate::error::Error> {
+            let Some(built) = $crate::neural_network::layers::validation::start_build(
+                &self.built,
+                $layer,
+                input,
+            )?
+            else {
+                return Ok(());
+            };
+            self.compute_output_shape(&built)?;
+            self.built = Some(built);
+            Ok(())
         }
+
+        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
+            self.built.clone()
+        }
+
+        $crate::neural_network::layers::build_config_function!();
 
         fn compute_output_shape(
             &self,
@@ -204,7 +250,10 @@ macro_rules! layer_functions_2d_pooling {
 ///
 /// # Generated Functions
 ///
-/// - `known_input_shape()` - the shape the constructor declared
+/// - `build()` - records the shape the layer serves, and refuses a shape the window
+///   does not fit
+/// - `known_input_shape()` - the shape the layer was built for
+/// - `build_config()` - the same shape with the batch axis freed, for a checkpoint
 /// - `compute_output_shape()` - applies the pooling window to every spatial axis, and keeps the
 ///   batch axis and the channel axis
 /// - all functions from the `no_trainable_parameters_layer_functions!()` macro
@@ -212,7 +261,7 @@ macro_rules! layer_functions_2d_pooling {
 /// # Requirements
 ///
 /// The implementing struct must have the fields:
-/// - `input_shape: Vec<usize>` - shape of the input tensor
+/// - `built: Option<Shape>` - the shape the layer was built for
 /// - `pool_size: (usize, usize, usize)` - size of the pooling window as (depth, height, width)
 /// - `strides: (usize, usize, usize)` - step size for the pooling operation as
 ///   (depth_step, height_step, width_step)
@@ -220,10 +269,30 @@ macro_rules! layer_functions_2d_pooling {
 /// The macro takes the layer name, which reaches the error messages
 macro_rules! layer_functions_3d_pooling {
     ($layer:literal) => {
-        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
-            (!self.input_shape.is_empty())
-                .then(|| $crate::neural_network::Shape::known(&self.input_shape))
+        /// Records the shape the window runs over. The layer holds no array, so nothing is
+        /// allocated. The shape algebra checks the rank, the extents, and the window
+        fn build(
+            &mut self,
+            input: &$crate::neural_network::Shape,
+        ) -> Result<(), $crate::error::Error> {
+            let Some(built) = $crate::neural_network::layers::validation::start_build(
+                &self.built,
+                $layer,
+                input,
+            )?
+            else {
+                return Ok(());
+            };
+            self.compute_output_shape(&built)?;
+            self.built = Some(built);
+            Ok(())
         }
+
+        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
+            self.built.clone()
+        }
+
+        $crate::neural_network::layers::build_config_function!();
 
         fn compute_output_shape(
             &self,

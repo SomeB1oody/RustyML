@@ -18,21 +18,22 @@ use crate::neural_network::traits::Layer;
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::{Array, IxDyn};
 /// use approx::assert_relative_eq;
 ///
-/// // Create a Sequential model containing multiple layers
-/// let mut model = Sequential::new();
-///
-/// // Add a GlobalMaxPooling2D layer
-/// model.add(GlobalMaxPooling2D::new());
-///
 /// // Create a test input tensor: [batch_size, height, width, channels]
 /// let input_data = Array::from_elem(IxDyn(&[3, 5, 5, 4]), 1.0);
+///
+/// // Build a model that holds 1 GlobalMaxPooling2D layer
+/// let model = SequentialBuilder::new()
+///     .add(GlobalMaxPooling2D::new())
+///     .build(&Shape::known(input_data.shape()))
+///     .unwrap();
 ///
 /// // Forward propagation
 /// let output = model.predict(&input_data).unwrap();

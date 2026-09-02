@@ -5,6 +5,7 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, Array3, Array4, IxDyn};
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
@@ -13,7 +14,7 @@ use rustyml::neural_network::layers::flatten::Flatten;
 use rustyml::neural_network::layers::reshape::Reshape;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
-use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
@@ -345,7 +346,7 @@ fn reshape_single_inferred_axis_equals_flatten() {
     let x = t4(2, 2, 3, 4, ramp(48));
 
     let mut r = Reshape::new(vec![-1]).unwrap();
-    let mut fl = Flatten::new(vec![2, 2, 3, 4]).unwrap();
+    let mut fl = Flatten::new();
 
     let reshaped = r.forward(&x).unwrap();
     let flattened = fl.forward(&x).unwrap();
@@ -414,14 +415,15 @@ fn reshape_inside_sequential_model_trains() {
     let x = t3(4, 2, 3, ramp(24).into_iter().map(|v| v * 0.1).collect());
     let y = t2(4, 1, vec![0.0, 1.0, 0.5, -0.5]);
 
-    let mut model = Sequential::new();
-    model
+    let mut model = SequentialBuilder::new()
         .add(Reshape::new(vec![-1]).unwrap())
-        .add(Dense::new(6, 1, Linear::new()).unwrap())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+        .add(Dense::new(1, Linear::new()).unwrap())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let history = model.fit(&x, &y, 5).unwrap();
     assert_eq!(history.loss().len(), 5);

@@ -450,29 +450,28 @@ pub use unit_normalization::{UnitNormalization, UnitNormalizationAxis};
 ///
 /// # Generated Functions
 ///
-/// - `known_input_shape()` - the shape the constructor declared, or `None` when it is empty
-/// - `compute_output_shape()` - the input shape, checked against the declared one
+/// - `known_input_shape()` - the shape the layer was built for, or `None` before the build
+/// - `build_config()` - the same shape with the batch axis freed, for a checkpoint
+/// - `compute_output_shape()` - the input shape, unchanged
 ///
 /// # Requirements
 ///
 /// The implementing struct must have the field:
-/// - `input_shape: Vec<usize>` - shape the constructor declared
+/// - `built: Option<Shape>` - the shape the layer was built for
 macro_rules! normalization_layer_shape_functions {
     ($layer:literal) => {
         fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
-            (!self.input_shape.is_empty())
-                .then(|| $crate::neural_network::Shape::known(&self.input_shape))
+            self.built.clone()
         }
+
+        $crate::neural_network::layers::build_config_function!();
 
         fn compute_output_shape(
             &self,
             input: &$crate::neural_network::Shape,
         ) -> Result<$crate::neural_network::Shape, $crate::error::Error> {
-            $crate::neural_network::layers::regularization::validation::shape_preserving_output(
-                input,
-                &self.input_shape,
-                $layer,
-            )
+            input.check_min_rank($layer, 1)?;
+            Ok(input.clone())
         }
     };
 }

@@ -11,6 +11,7 @@
 //! The derivative there is 0, and not 1 and not `alpha`.
 
 use ndarray::{Array, Array1, Array2, Array4, ArrayD, IxDyn};
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::leaky_relu::LeakyReLU;
@@ -20,7 +21,7 @@ use rustyml::neural_network::layers::activation::relu::ReLU;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
-use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
@@ -35,10 +36,11 @@ fn tensor(shape: &[usize], data: Vec<f32>) -> Tensor {
 
 /// Build a `PReLU` whose slopes hold the given row-major values
 fn p_relu_with(input_shape: Vec<usize>, shared_axes: Vec<usize>, slopes: Vec<f32>) -> PReLU {
-    let mut layer = PReLU::new(input_shape, 0.0).unwrap();
+    let mut layer = PReLU::new(0.0).unwrap();
     if !shared_axes.is_empty() {
         layer = layer.with_shared_axes(shared_axes).unwrap();
     }
+    layer.build(&Shape::known(&input_shape)).unwrap();
     let shape = slopes_of(&layer).shape().to_vec();
     layer.set_weights(tensor(&shape, slopes)).unwrap();
     layer
@@ -66,7 +68,8 @@ fn slope_gradient(layer: &mut PReLU) -> Vec<f32> {
 #[test]
 fn p_relu_rejects_an_input_shape_of_rank_below_2() {
     for shape in [vec![], vec![4]] {
-        let err = PReLU::new(shape.clone(), 0.0).unwrap_err();
+        let mut layer = PReLU::new(0.0).unwrap();
+        let err = layer.build(&Shape::known(&shape)).unwrap_err();
         assert!(
             matches!(err, Error::InvalidInput(_)),
             "rank {} must be rejected, got {err:?}",
@@ -75,11 +78,14 @@ fn p_relu_rejects_an_input_shape_of_rank_below_2() {
     }
 }
 
-/// A 0 anywhere leaves an axis with no position, so no slope array exists
+/// A 0 on an axis after the batch axis leaves that axis with no position, so no slope array
+/// exists. The batch axis itself is never checked, so a batch extent of 0 is not part of this
+/// rule
 #[test]
 fn p_relu_rejects_a_zero_dimension_on_any_axis() {
-    for shape in [vec![0, 3], vec![2, 0], vec![2, 3, 0, 4], vec![2, 3, 4, 0]] {
-        let err = PReLU::new(shape.clone(), 0.0).unwrap_err();
+    for shape in [vec![2, 0], vec![2, 3, 0, 4], vec![2, 3, 4, 0]] {
+        let mut layer = PReLU::new(0.0).unwrap();
+        let err = layer.build(&Shape::known(&shape)).unwrap_err();
         assert!(
             matches!(err, Error::InvalidInput(_)),
             "{shape:?} must be rejected, got {err:?}"
@@ -91,7 +97,7 @@ fn p_relu_rejects_a_zero_dimension_on_any_axis() {
 #[test]
 fn p_relu_rejects_a_non_finite_alpha() {
     for alpha in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-        let err = PReLU::new(vec![2, 3], alpha).unwrap_err();
+        let err = PReLU::new(alpha).unwrap_err();
         assert!(
             matches!(err, Error::InvalidParameter { .. }),
             "alpha {alpha} must be rejected, got {err:?}"
@@ -103,7 +109,7 @@ fn p_relu_rejects_a_non_finite_alpha() {
 #[test]
 fn p_relu_accepts_a_zero_or_negative_alpha() {
     for alpha in [0.0f32, -0.5, -3.0] {
-        let layer = PReLU::new(vec![2, 3], alpha).unwrap();
+        let layer = PReLU::new(alpha).unwrap();
         assert!(slopes_of(&layer).iter().all(|&v| v == alpha));
     }
 }
@@ -117,7 +123,8 @@ fn p_relu_holds_1_slope_per_position_without_shared_axes() {
         (vec![2, 3, 4, 5], 60),
         (vec![2, 2, 3, 4, 3], 72),
     ] {
-        let layer = PReLU::new(shape.clone(), 0.25).unwrap();
+        let mut layer = PReLU::new(0.25).unwrap();
+        layer.build(&Shape::known(&shape)).unwrap();
         assert_eq!(
             layer.param_count(),
             ParamCounts::trainable(count),
@@ -132,21 +139,24 @@ fn p_relu_holds_1_slope_per_position_without_shared_axes() {
 /// Axis 0 is the batch axis. Every slope already covers the whole batch
 #[test]
 fn p_relu_rejects_the_batch_axis_in_shared_axes() {
-    let err = PReLU::new(vec![2, 3, 4], 0.0)
+    let err = PReLU::new(0.0)
         .unwrap()
         .with_shared_axes(vec![0])
         .unwrap_err();
     assert!(matches!(err, Error::InvalidParameter { .. }), "{err:?}");
 }
 
-/// An axis at or above the rank names no axis of the input
+/// An axis at or above the rank names no axis of the input. `with_shared_axes` accepts any
+/// axis number, because it does not yet know the rank; `build` is where the rank is known and
+/// the axis is checked against it
 #[test]
 fn p_relu_rejects_a_shared_axis_at_or_above_the_rank() {
     for axis in [3usize, 4, 99] {
-        let err = PReLU::new(vec![2, 3, 4], 0.0)
+        let mut layer = PReLU::new(0.0)
             .unwrap()
             .with_shared_axes(vec![axis])
-            .unwrap_err();
+            .unwrap();
+        let err = layer.build(&Shape::known(&[2, 3])).unwrap_err();
         assert!(
             matches!(err, Error::InvalidParameter { .. }),
             "axis {axis} must be rejected, got {err:?}"
@@ -157,7 +167,7 @@ fn p_relu_rejects_a_shared_axis_at_or_above_the_rank() {
 /// A repeated axis is a caller mistake, not a second reduction
 #[test]
 fn p_relu_rejects_a_repeated_shared_axis() {
-    let err = PReLU::new(vec![2, 3, 4], 0.0)
+    let err = PReLU::new(0.0)
         .unwrap()
         .with_shared_axes(vec![1, 2, 1])
         .unwrap_err();
@@ -176,10 +186,11 @@ fn p_relu_shared_axes_set_the_slope_shape() {
         (vec![2, 3, 4, 5], vec![1, 2, 3], vec![1, 1, 1]),
         (vec![2, 2, 3, 4, 3], vec![4], vec![2, 3, 4, 1]),
     ] {
-        let layer = PReLU::new(shape.clone(), 0.25)
+        let mut layer = PReLU::new(0.25)
             .unwrap()
             .with_shared_axes(shared.clone())
             .unwrap();
+        layer.build(&Shape::known(&shape)).unwrap();
         assert_eq!(
             slopes_of(&layer).shape(),
             want.as_slice(),
@@ -193,24 +204,24 @@ fn p_relu_shared_axes_set_the_slope_shape() {
 /// The axes name a set, so the caller does not have to sort them
 #[test]
 fn p_relu_shared_axes_ignores_the_order_given() {
-    let ordered = PReLU::new(vec![2, 3, 4, 5], 0.25)
+    let mut ordered = PReLU::new(0.25)
         .unwrap()
         .with_shared_axes(vec![1, 3])
         .unwrap();
-    let reversed = PReLU::new(vec![2, 3, 4, 5], 0.25)
+    ordered.build(&Shape::known(&[2, 3, 4, 5])).unwrap();
+    let mut reversed = PReLU::new(0.25)
         .unwrap()
         .with_shared_axes(vec![3, 1])
         .unwrap();
+    reversed.build(&Shape::known(&[2, 3, 4, 5])).unwrap();
     assert_eq!(slopes_of(&ordered).shape(), slopes_of(&reversed).shape());
 }
 
-/// The starting slope survives the resize, so the 2 builder steps commute
+/// The starting slope survives the resize, so `with_shared_axes` and `build` commute
 #[test]
 fn p_relu_shared_axes_keeps_the_starting_slope() {
-    let layer = PReLU::new(vec![2, 3, 4], 0.25)
-        .unwrap()
-        .with_shared_axes(vec![1])
-        .unwrap();
+    let mut layer = PReLU::new(0.25).unwrap().with_shared_axes(vec![1]).unwrap();
+    layer.build(&Shape::known(&[2, 3, 4])).unwrap();
     let slopes = slopes_of(&layer);
     assert_eq!(slopes.shape(), &[1, 4]);
     assert!(slopes.iter().all(|&v| v == 0.25), "{slopes:?}");
@@ -250,7 +261,7 @@ fn p_relu_forward_broadcasts_a_channel_slope_over_space() {
 #[test]
 fn p_relu_forward_leaves_0_alone_whatever_the_slope() {
     for alpha in [0.0f32, 0.25, -2.0, 100.0] {
-        let mut layer = PReLU::new(vec![1, 2], alpha).unwrap();
+        let mut layer = PReLU::new(alpha).unwrap();
         let got = layer.forward(&tensor(&[1, 2], vec![0.0, -0.0])).unwrap();
         assert_eq!(got[[0, 0]], 0.0, "alpha {alpha}");
         assert_eq!(got[[0, 1]], 0.0, "alpha {alpha}");
@@ -263,7 +274,7 @@ fn p_relu_with_a_zero_slope_matches_relu() {
     let x = tensor(&[2, 4], vec![-1.5, 0.0, 2.0, -0.25, 3.0, -4.0, 0.0, 0.75]);
     let g = tensor(&[2, 4], vec![1.0, 2.0, -3.0, 4.0, 0.5, -0.5, 6.0, -7.0]);
 
-    let mut learned = PReLU::new(vec![2, 4], 0.0).unwrap();
+    let mut learned = PReLU::new(0.0).unwrap();
     let mut fixed = ReLU::new();
 
     assert_allclose(
@@ -285,7 +296,7 @@ fn p_relu_with_a_uniform_slope_matches_leaky_relu_away_from_0() {
     let x = tensor(&[2, 4], vec![-1.5, 0.5, 2.0, -0.25, 3.0, -4.0, 1.0, 0.75]);
     let g = tensor(&[2, 4], vec![1.0, 2.0, -3.0, 4.0, 0.5, -0.5, 6.0, -7.0]);
 
-    let mut learned = PReLU::new(vec![2, 4], 0.2).unwrap();
+    let mut learned = PReLU::new(0.2).unwrap();
     let mut fixed = LeakyReLU::new(0.2).unwrap();
     assert_allclose(
         &learned.forward(&x).unwrap(),
@@ -300,7 +311,7 @@ fn p_relu_with_a_uniform_slope_matches_leaky_relu_away_from_0() {
 
     let zero = tensor(&[1, 1], vec![0.0]);
     let ones = tensor(&[1, 1], vec![1.0]);
-    let mut learned = PReLU::new(vec![1, 1], 0.2).unwrap();
+    let mut learned = PReLU::new(0.2).unwrap();
     let mut fixed = LeakyReLU::new(0.2).unwrap();
     learned.forward(&zero).unwrap();
     fixed.forward(&zero).unwrap();
@@ -364,7 +375,7 @@ fn p_relu_slope_gradient_weights_by_the_upstream_gradient() {
 /// A gradient exists only after a backward pass, so the optimizer skips a fresh layer
 #[test]
 fn p_relu_exposes_no_parameter_before_the_first_backward() {
-    let mut layer = PReLU::new(vec![2, 3], 0.25).unwrap();
+    let mut layer = PReLU::new(0.25).unwrap();
     assert!(layer.parameters().is_empty());
     layer.forward(&Tensor::zeros(IxDyn(&[2, 3]))).unwrap();
     assert!(layer.parameters().is_empty());
@@ -375,7 +386,7 @@ fn p_relu_exposes_no_parameter_before_the_first_backward() {
 /// Resizing the slope array drops a gradient that no longer matches it
 #[test]
 fn p_relu_shared_axes_drops_a_stale_gradient() {
-    let mut layer = PReLU::new(vec![2, 3, 4], 0.25).unwrap();
+    let mut layer = PReLU::new(0.25).unwrap();
     layer.forward(&Tensor::zeros(IxDyn(&[2, 3, 4]))).unwrap();
     layer.backward(&Tensor::ones(IxDyn(&[2, 3, 4]))).unwrap();
     assert_eq!(layer.parameters().len(), 1);
@@ -398,7 +409,7 @@ fn p_relu_emits_c_order_tensors_from_a_strided_input() {
         .into_dyn();
     assert!(!strided.is_standard_layout(), "the fixture must be strided");
 
-    let mut layer = PReLU::new(vec![4, 3], 0.25).unwrap();
+    let mut layer = PReLU::new(0.25).unwrap();
     let out = layer.forward(&strided).unwrap();
     assert!(out.is_standard_layout(), "forward output must be C order");
 
@@ -407,7 +418,7 @@ fn p_relu_emits_c_order_tensors_from_a_strided_input() {
 
     // The values must not depend on the layout either
     let packed = strided.as_standard_layout().into_owned();
-    let mut twin = PReLU::new(vec![4, 3], 0.25).unwrap();
+    let mut twin = PReLU::new(0.25).unwrap();
     assert_allclose(&twin.forward(&packed).unwrap(), &out, 0.0_f32);
     assert_allclose(&twin.backward(&packed).unwrap(), &grad, 0.0_f32);
     assert_eq!(slope_gradient(&mut twin), slope_gradient(&mut layer));
@@ -422,7 +433,8 @@ fn p_relu_set_weights_repacks_a_strided_array() {
         .into_dyn();
     assert!(!strided.is_standard_layout(), "the fixture must be strided");
 
-    let mut layer = PReLU::new(vec![5, 2, 3], 0.0).unwrap();
+    let mut layer = PReLU::new(0.0).unwrap();
+    layer.build(&Shape::known(&[5, 2, 3])).unwrap();
     layer.set_weights(strided.clone()).unwrap();
     assert_allclose(&slopes_of(&layer), &strided, 0.0_f32);
 
@@ -455,10 +467,7 @@ fn p_relu_parallel_path_matches_the_serial_path() {
         data.iter().map(|v| v * 0.5).collect(),
     );
 
-    let mut layer = PReLU::new(vec![samples, rows, cols], 0.25)
-        .unwrap()
-        .with_shared_axes(vec![1])
-        .unwrap();
+    let mut layer = PReLU::new(0.25).unwrap().with_shared_axes(vec![1]).unwrap();
     let parallel_out = layer.forward(&x).unwrap();
     let parallel_grad = layer.backward(&g).unwrap();
 
@@ -491,7 +500,8 @@ fn p_relu_parallel_path_matches_the_serial_path() {
 /// The rank is fixed by the slope array, so a tensor of another rank cannot broadcast
 #[test]
 fn p_relu_rejects_an_input_of_the_wrong_rank() {
-    let mut layer = PReLU::new(vec![2, 3, 4], 0.25).unwrap();
+    let mut layer = PReLU::new(0.25).unwrap();
+    layer.build(&Shape::known(&[2, 3, 4])).unwrap();
     for shape in [vec![2usize, 3], vec![2, 3, 4, 1], vec![24]] {
         let err = layer.forward(&Tensor::ones(IxDyn(&shape))).unwrap_err();
         assert!(
@@ -504,7 +514,8 @@ fn p_relu_rejects_an_input_of_the_wrong_rank() {
 /// An axis that is not shared holds 1 slope per position, so its extent is fixed
 #[test]
 fn p_relu_rejects_a_mismatched_extent_on_an_axis_that_is_not_shared() {
-    let mut layer = PReLU::new(vec![2, 3, 4], 0.25).unwrap();
+    let mut layer = PReLU::new(0.25).unwrap();
+    layer.build(&Shape::known(&[2, 3, 4])).unwrap();
     for shape in [vec![2usize, 5, 4], vec![2, 3, 7]] {
         let err = layer.forward(&Tensor::ones(IxDyn(&shape))).unwrap_err();
         assert!(
@@ -530,7 +541,7 @@ fn p_relu_accepts_any_extent_on_a_shared_axis() {
 /// The layer never checks the batch axis, so a partial final mini-batch still passes
 #[test]
 fn p_relu_accepts_any_batch_size() {
-    let mut layer = PReLU::new(vec![8, 3], 0.25).unwrap();
+    let mut layer = PReLU::new(0.25).unwrap();
     for batch in [1usize, 3, 8, 40] {
         let out = layer
             .forward(&Tensor::from_elem(IxDyn(&[batch, 3]), -4.0))
@@ -543,7 +554,7 @@ fn p_relu_accepts_any_batch_size() {
 /// An input with no element has nothing to activate
 #[test]
 fn p_relu_rejects_an_empty_input() {
-    let mut layer = PReLU::new(vec![2, 3], 0.25).unwrap();
+    let mut layer = PReLU::new(0.25).unwrap();
     let err = layer.forward(&Tensor::zeros(IxDyn(&[0, 3]))).unwrap_err();
     assert!(matches!(err, Error::EmptyInput(_)), "{err:?}");
 }
@@ -553,7 +564,7 @@ fn p_relu_rejects_an_empty_input() {
 /// Backward needs the cached input, and the message names the layer
 #[test]
 fn p_relu_rejects_backward_before_forward() {
-    let mut layer = PReLU::new(vec![2, 3], 0.25).unwrap();
+    let mut layer = PReLU::new(0.25).unwrap();
     let err = layer.backward(&Tensor::ones(IxDyn(&[2, 3]))).unwrap_err();
     let text = err.to_string();
     assert!(text.contains("PReLU"), "{text}");
@@ -562,7 +573,7 @@ fn p_relu_rejects_backward_before_forward() {
 /// The layer keeps the shape, so the upstream gradient must match the cached input
 #[test]
 fn p_relu_rejects_a_gradient_of_the_wrong_shape() {
-    let mut layer = PReLU::new(vec![2, 3], 0.25).unwrap();
+    let mut layer = PReLU::new(0.25).unwrap();
     layer.forward(&Tensor::ones(IxDyn(&[2, 3]))).unwrap();
     let err = layer.backward(&Tensor::ones(IxDyn(&[2, 4]))).unwrap_err();
     assert!(matches!(err, Error::ShapeMismatch { .. }), "{err:?}");
@@ -573,10 +584,8 @@ fn p_relu_rejects_a_gradient_of_the_wrong_shape() {
 /// `set_weights` guards the slope shape, which a shared axis changes
 #[test]
 fn p_relu_set_weights_rejects_a_mismatched_shape() {
-    let mut layer = PReLU::new(vec![2, 3, 4], 0.25)
-        .unwrap()
-        .with_shared_axes(vec![1])
-        .unwrap();
+    let mut layer = PReLU::new(0.25).unwrap().with_shared_axes(vec![1]).unwrap();
+    layer.build(&Shape::known(&[2, 3, 4])).unwrap();
     // The layer holds [1, 4]. The unshared shape [3, 4] is what a caller reaches for first
     for shape in [vec![3usize, 4], vec![4], vec![1, 5]] {
         let err = layer.set_weights(Tensor::zeros(IxDyn(&shape))).unwrap_err();
@@ -594,9 +603,10 @@ fn p_relu_set_weights_rejects_a_mismatched_shape() {
 /// The reported type name and output shape are what `summary()` prints
 #[test]
 fn p_relu_reports_its_type_and_output_shape() {
-    let mut layer = PReLU::new(vec![2, 3, 4], 0.25).unwrap();
+    let mut layer = PReLU::new(0.25).unwrap();
+    layer.build(&Shape::known(&[2, 3, 4])).unwrap();
     assert_eq!(layer.layer_type(), "PReLU");
-    // Before the first forward pass the configured shape is all the layer knows
+    // Before the first forward pass the build shape is all the layer knows
     assert_eq!(layer.output_shape(), "(2, 3, 4)");
 
     layer.forward(&Tensor::ones(IxDyn(&[7, 3, 4]))).unwrap();
@@ -634,15 +644,16 @@ fn p_relu_trains_its_slopes() {
         .unwrap()
         .into_dyn();
 
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(3, 3, Linear::new()).unwrap())
-        .add(PReLU::new(vec![4, 3], 0.25).unwrap())
-        .add(Dense::new(3, 1, Linear::new()).unwrap())
-        .compile(
-            SGD::new(0.05, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(3, Linear::new()).unwrap())
+        .add(PReLU::new(0.25).unwrap())
+        .add(Dense::new(1, Linear::new()).unwrap())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.05, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     model.fit(&x, &y, 20).unwrap();
 
@@ -673,10 +684,11 @@ fn p_relu_trains_with_shared_spatial_axes() {
     .unwrap()
     .into_dyn();
 
-    let mut layer = PReLU::new(vec![2, 3, 3, 2], 0.25)
+    let mut layer = PReLU::new(0.25)
         .unwrap()
         .with_shared_axes(vec![1, 2])
         .unwrap();
+    layer.build(&Shape::known(x.shape())).unwrap();
     assert_eq!(layer.param_count(), ParamCounts::trainable(2));
 
     let out = layer.forward(&x).unwrap();
@@ -689,7 +701,8 @@ fn p_relu_trains_with_shared_spatial_axes() {
 /// A 1-D slope array assigned to the layer reaches the named weight
 #[test]
 fn p_relu_names_its_live_slopes_alpha() {
-    let mut layer = PReLU::new(vec![2, 3], 0.25).unwrap();
+    let mut layer = PReLU::new(0.25).unwrap();
+    layer.build(&Shape::known(&[2, 3])).unwrap();
     layer
         .set_weights(Array1::from_vec(vec![0.1f32, 0.2, 0.3]).into_dyn())
         .unwrap();
@@ -705,14 +718,14 @@ fn p_relu_names_its_live_slopes_alpha() {
 /// A 4-D per-channel slope array keeps its rank in the named weight
 #[test]
 fn p_relu_weights_keep_a_shared_axis_at_extent_1() {
-    let layer = PReLU::new(vec![2, 4, 4, 3], 0.25)
+    let mut layer = PReLU::new(0.25)
         .unwrap()
         .with_shared_axes(vec![1, 2])
         .unwrap();
+    layer.build(&Shape::known(&[2, 4, 4, 3])).unwrap();
     assert_eq!(named(&layer, "alpha").shape(), &[1, 1, 3]);
 
     // The same slopes as a plain 3-element array do not fit
-    let mut layer = layer;
     assert!(layer.set_weights(Array1::zeros(3).into_dyn()).is_err());
     assert!(
         layer

@@ -4,6 +4,7 @@
 //! `gradient_check.rs` covers gradient values. This file does not duplicate them.
 
 use ndarray::{Array3, Array4, Array5, IxDyn};
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
@@ -15,7 +16,7 @@ use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::flatten::Flatten;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
-use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
@@ -557,19 +558,20 @@ fn border_layers_inside_sequential_model_train() {
         .unwrap()
         .to_owned();
 
-    let mut model = Sequential::new();
-    model
+    let mut model = SequentialBuilder::new()
         // 4x4 grows to 6x6, the 3x3 valid convolution restores it to 4x4, and the crop
         // trims it to 2x2
         .add(ZeroPadding2D::new(1))
-        .add(Conv2D::new(2, (3, 3), vec![4, 6, 6, 1], (1, 1), Linear::new()).unwrap())
+        .add(Conv2D::new(2, (3, 3), (1, 1), Linear::new()).unwrap())
         .add(Cropping2D::new(1))
-        .add(Flatten::new(vec![4, 2, 2, 2]).unwrap())
-        .add(Dense::new(8, 1, Linear::new()).unwrap())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+        .add(Flatten::new())
+        .add(Dense::new(1, Linear::new()).unwrap())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let history = model.fit(&x, &y, 5).unwrap();
     assert_eq!(history.loss().len(), 5);

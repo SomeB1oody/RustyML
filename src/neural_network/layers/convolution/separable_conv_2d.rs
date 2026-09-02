@@ -15,9 +15,13 @@ use crate::neural_network::layers::convolution::validation::{
     validate_input_shape_2d, validate_kernel_size_2d, validate_strides_2d,
     validate_valid_kernel_fits,
 };
-use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::shape_helpers::calculate_output_height_and_weight;
-use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
+use crate::neural_network::layers::validation::{
+    start_build, validate_built_input, validate_optional_weight, validate_weight_shape,
+};
+use crate::neural_network::layers::{
+    build_on_forward, built_layer_shape_functions, named_weight_layer_functions,
+};
 use crate::neural_network::traits::{Layer, ParamGrad};
 use crate::neural_network::{Fans, Initializer, Shape, Tensor};
 use ndarray::{Array1, Array4};
@@ -42,7 +46,8 @@ use ndarray::{Array1, Array4};
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::*;
@@ -54,17 +59,17 @@ use ndarray::{Array1, Array4};
 /// // target tensor
 /// let y = Array4::ones((2, 32, 32, 64)).into_dyn();
 ///
-/// let mut model = Sequential::new();
-/// model
+/// let mut model = SequentialBuilder::new()
 ///     .add(SeparableConv2D::new(
 ///         64,                          // filters
 ///         (3, 3),                      // kernel_size
-///         vec![2, 32, 32, 3],          // input_shape
 ///         (1, 1),                      // strides
 ///         1,                           // depth_multiplier
 ///         Activation::ReLU,            // activation
 ///     ).unwrap().with_padding(PaddingType::Same))
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
+///     .build(&Shape::known(x.shape()))
+///     .unwrap();
+/// model.compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// model.summary();
 /// model.fit(&x, &y, 3).unwrap();
@@ -101,8 +106,12 @@ pub struct SeparableConv2D {
     input_cache: Option<Tensor>,
     /// Cached depthwise output, used during backpropagation
     depthwise_output_cache: Option<Tensor>,
-    /// Shape of the input tensor
-    input_shape: Vec<usize>,
+    /// Number of input channels, which [`Layer::build`] reads from the input shape
+    channels: usize,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
+    /// Seed of the weight draw, or `None` to take the global seed or entropy
+    random_state: Option<u64>,
     /// Gradients for the depthwise weights
     depthwise_weight_gradients: Option<Array4<f32>>,
     /// Gradients for the pointwise weights
@@ -123,7 +132,6 @@ impl SeparableConv2D {
     ///
     /// - `filters` - Number of output channels from the pointwise convolution
     /// - `kernel_size` - Size of the depthwise convolution kernel as (height, width)
-    /// - `input_shape` - Shape of the input tensor as \[batch_size, height, width, channels\]
     /// - `strides` - Stride values for the convolution as (vertical, horizontal)
     /// - `depth_multiplier` - Number of depthwise convolution filters per input channel
     /// - `activation` - Activation applied to the output
@@ -149,11 +157,9 @@ impl SeparableConv2D {
     /// - `Error::InvalidParameter` - If `depth_multiplier` is 0
     /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
-    /// - `Error::InvalidInput` - If `input_shape` is not 4D or has 0 channels
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize),
-        input_shape: Vec<usize>,
         strides: (usize, usize),
         depth_multiplier: usize,
         activation: impl Into<Activation>,
@@ -162,14 +168,8 @@ impl SeparableConv2D {
         validate_kernel_size_2d(kernel_size)?;
         validate_strides_2d(strides)?;
         validate_depth_multiplier(depth_multiplier)?;
-        validate_input_shape_2d(&input_shape)?;
         let activation = activation.into();
         activation.validate()?;
-
-        let channels = input_shape[3];
-        let (depthwise_weights, pointwise_weights) =
-            Self::init_weights_arrays(filters, channels, kernel_size, depth_multiplier, None);
-        let bias = Array1::zeros(filters);
 
         Ok(SeparableConv2D {
             filters,
@@ -178,14 +178,16 @@ impl SeparableConv2D {
             dilation_rate: (1, 1),
             padding: PaddingType::Valid,
             depth_multiplier,
-            depthwise_weights,
-            pointwise_weights,
-            bias,
+            depthwise_weights: Array4::zeros((0, 0, 0, 0)),
+            pointwise_weights: Array4::zeros((0, 0, 0, 0)),
+            bias: Array1::zeros(0),
             activation,
             output_cache: None,
             input_cache: None,
             depthwise_output_cache: None,
-            input_shape,
+            channels: 0,
+            built: None,
+            random_state: None,
             depthwise_weight_gradients: None,
             pointwise_weight_gradients: None,
             bias_gradients: None,
@@ -266,16 +268,10 @@ impl SeparableConv2D {
     ///
     /// - `Self` - The updated layer
     pub fn with_random_state(mut self, random_state: u64) -> Self {
-        let channels = self.input_shape[3];
-        let (depthwise_weights, pointwise_weights) = Self::init_weights_arrays(
-            self.filters,
-            channels,
-            self.kernel_size,
-            self.depth_multiplier,
-            Some(random_state),
-        );
-        self.depthwise_weights = depthwise_weights;
-        self.pointwise_weights = pointwise_weights;
+        self.random_state = Some(random_state);
+        if self.built.is_some() {
+            self.draw_parameters();
+        }
         self
     }
 
@@ -283,31 +279,36 @@ impl SeparableConv2D {
     ///
     /// Both draws share 1 RNG (threaded depthwise-then-pointwise) so a given seed reproduces the
     /// exact same pair of tensors
-    fn init_weights_arrays(
-        filters: usize,
-        channels: usize,
-        kernel_size: (usize, usize),
-        depth_multiplier: usize,
-        random_state: Option<u64>,
-    ) -> (Array4<f32>, Array4<f32>) {
-        let mut rng = crate::random::make_rng(random_state);
+    fn draw_parameters(&mut self) {
+        let (kernel_height, kernel_width) = self.kernel_size;
+        let mut rng = crate::random::make_rng(self.random_state);
 
         // The depth multiplier takes the place of the filter count. See `Fans::conv`
-        let depthwise_weights = Initializer::GlorotUniform.draw(
-            (kernel_size.0, kernel_size.1, channels, depth_multiplier),
-            Fans::conv(channels, depth_multiplier, kernel_size.0 * kernel_size.1),
+        self.depthwise_weights = Initializer::GlorotUniform.draw(
+            (
+                kernel_height,
+                kernel_width,
+                self.channels,
+                self.depth_multiplier,
+            ),
+            Fans::conv(
+                self.channels,
+                self.depth_multiplier,
+                kernel_height * kernel_width,
+            ),
             &mut rng,
         );
 
         // The stored width of the pointwise kernel is already the fan-in, and its 1 tap adds no
         // factor to the fan-out
-        let pointwise_weights = Initializer::GlorotUniform.draw(
-            (1, 1, channels * depth_multiplier, filters),
-            Fans::new(channels * depth_multiplier, filters),
+        let width = self.channels * self.depth_multiplier;
+        self.pointwise_weights = Initializer::GlorotUniform.draw(
+            (1, 1, width, self.filters),
+            Fans::new(width, self.filters),
             &mut rng,
         );
 
-        (depthwise_weights, pointwise_weights)
+        self.bias = Array1::zeros(self.filters);
     }
 
     /// Calculates the output shape of the separable convolutional layer
@@ -360,14 +361,7 @@ impl SeparableConv2D {
     /// boundary. It also applies the `Valid` fit rule, because a `Valid` window that is longer
     /// than the input spatial gives no complete window
     fn validate_input(&self, input: &Tensor) -> Result<(), Error> {
-        if input.ndim() != 4 {
-            return Err(Error::invalid_input("input tensor is not 4D"));
-        }
-        let channels = input.shape()[3];
-        let expected = self.input_shape[3];
-        if channels != expected {
-            return Err(Error::dimension_mismatch(expected, channels));
-        }
+        validate_built_input(&self.built, "SeparableConv2D", input.shape())?;
         validate_valid_kernel_fits(
             self.padding.into(),
             &[self.kernel_size.0, self.kernel_size.1],
@@ -528,6 +522,9 @@ impl SeparableConv2D {
         pointwise_weights: Array4<f32>,
         bias: impl Into<Option<Array1<f32>>>,
     ) -> Result<(), Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("SeparableConv2D"));
+        }
         validate_weight_shape(
             "depthwise_kernel",
             self.depthwise_weights.shape(),
@@ -552,7 +549,29 @@ impl SeparableConv2D {
 }
 
 impl Layer for SeparableConv2D {
+    /// Reads the channel count from the input shape, and draws both kernels and the bias
+    ///
+    /// 1 generator threads the depthwise draw and then the pointwise draw, in that order. A
+    /// second generator, or the other order, changes every value of the second draw
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "SeparableConv2D", input)? else {
+            return Ok(());
+        };
+        built.check_rank("SeparableConv2D", 4)?;
+        let (batch, tail) = built.split_batch("SeparableConv2D")?;
+        // The family validators read a full extent list, and the batch extent is not part of
+        // what they check
+        let mut dims = vec![batch.unwrap_or(1)];
+        dims.extend(tail);
+        validate_input_shape_2d(&dims)?;
+        self.channels = dims[3];
+        self.built = Some(built);
+        self.draw_parameters();
+        Ok(())
+    }
+
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+        build_on_forward!(self, input);
         self.validate_input(input)?;
 
         // Cache input for backpropagation
@@ -658,9 +677,7 @@ impl Layer for SeparableConv2D {
         "SeparableConv2D"
     }
 
-    fn known_input_shape(&self) -> Option<Shape> {
-        Some(Shape::known(&self.input_shape))
-    }
+    built_layer_shape_functions!();
 
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         input.check_rank("SeparableConv2D", 4)?;
@@ -748,8 +765,8 @@ mod tests {
     /// indexed in that same order. Any transposition of either would change the total
     #[test]
     fn separable_stage_channel_order_hand_derived() {
-        let mut layer =
-            SeparableConv2D::new(1, (1, 1), vec![1, 1, 1, 2], (1, 1), 2, Linear::new()).unwrap();
+        let mut layer = SeparableConv2D::new(1, (1, 1), (1, 1), 2, Linear::new()).unwrap();
+        layer.build(&Shape::known(&[1, 1, 1, 2])).unwrap();
         assert_eq!(layer.depthwise_weights.shape(), &[1, 1, 2, 2]);
         assert_eq!(layer.pointwise_weights.shape(), &[1, 1, 4, 1]);
 
@@ -777,8 +794,8 @@ mod tests {
     /// sums, scaled by the pointwise weight
     #[test]
     fn separable_spatial_pass_hand_derived() {
-        let mut layer =
-            SeparableConv2D::new(1, (2, 2), vec![1, 3, 3, 1], (1, 1), 1, Linear::new()).unwrap();
+        let mut layer = SeparableConv2D::new(1, (2, 2), (1, 1), 1, Linear::new()).unwrap();
+        layer.build(&Shape::known(&[1, 3, 3, 1])).unwrap();
 
         // Single channel, all-ones depthwise kernel. Pointwise scales by 3
         let depthwise = Array4::from_shape_vec((2, 2, 1, 1), vec![1.0, 1.0, 1.0, 1.0]).unwrap();

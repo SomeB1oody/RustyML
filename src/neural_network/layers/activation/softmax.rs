@@ -22,7 +22,8 @@ use crate::neural_network::{Shape, Tensor};
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::layers::activation::softmax::Softmax;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::*;
@@ -34,10 +35,11 @@ use crate::neural_network::{Shape, Tensor};
 ///     .into_dyn();
 ///
 /// // Build a model with Softmax activation
-/// let mut model = Sequential::new();
-/// model
+/// let mut model = SequentialBuilder::new()
 ///     .add(Softmax::new())
-///     .compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
+///     .build(&Shape::known(x.shape()))
+///     .unwrap();
+/// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 ///
 /// // Forward propagation
 /// let output = model.predict(&x);

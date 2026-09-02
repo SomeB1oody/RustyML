@@ -315,6 +315,16 @@ mod tests {
     /// Seed of every layer that a layout case builds
     const SEED: u64 = 12345;
 
+    /// Builds 1 layer for the given input shape, and gives it back
+    ///
+    /// A constructor draws nothing, so every case here builds before it reads an array
+    fn built<L: Layer>(mut layer: L, input_shape: &[usize]) -> L {
+        layer
+            .build(&crate::neural_network::Shape::known(input_shape))
+            .expect("the layer accepts the shape of the case");
+        layer
+    }
+
     /// Reads 1 named array of a layer and returns it as a dynamic-rank copy
     fn weight_of(layer: &dyn Layer, name: &str) -> ArrayD<f32> {
         let weights = layer.weights();
@@ -437,42 +447,48 @@ mod tests {
     /// Layout 1: `Dense` stores `(input_dim, units)` and reports `(input_dim, units)`
     #[test]
     fn dense_draws_the_dense_layout() {
-        let layer = Dense::new(3, 5, Activation::Linear)
-            .unwrap()
-            .with_random_state(SEED);
+        let layer = built(
+            Dense::new(5, Activation::Linear)
+                .unwrap()
+                .with_random_state(SEED),
+            &[2, 3],
+        );
         assert_glorot(&layer, "kernel", (3, 5), Fans::new(3, 5));
     }
 
     /// Layout 2: `Conv1D` stores `(k, channels, filters)`
     #[test]
     fn conv_1d_draws_the_plain_layout() {
-        let layer = Conv1D::new(4, 3, vec![1, 10, 2], 1, Activation::Linear)
-            .unwrap()
-            .with_random_state(SEED);
+        let layer = built(
+            Conv1D::new(4, 3, 1, Activation::Linear)
+                .unwrap()
+                .with_random_state(SEED),
+            &[1, 10, 2],
+        );
         assert_glorot(&layer, "kernel", (3, 2, 4), Fans::conv(2, 4, 3));
     }
 
     /// Layout 3: `Conv2D` stores `(kh, kw, channels, filters)`
     #[test]
     fn conv_2d_draws_the_plain_layout() {
-        let layer = Conv2D::new(4, (2, 3), vec![1, 8, 8, 2], (1, 1), Activation::Linear)
-            .unwrap()
-            .with_random_state(SEED);
+        let layer = built(
+            Conv2D::new(4, (2, 3), (1, 1), Activation::Linear)
+                .unwrap()
+                .with_random_state(SEED),
+            &[1, 8, 8, 2],
+        );
         assert_glorot(&layer, "kernel", (2, 3, 2, 4), Fans::conv(2, 4, 2 * 3));
     }
 
     /// Layout 4: `Conv3D` stores `(kd, kh, kw, channels, filters)`
     #[test]
     fn conv_3d_draws_the_plain_layout() {
-        let layer = Conv3D::new(
-            4,
-            (2, 3, 4),
-            vec![1, 8, 8, 8, 2],
-            (1, 1, 1),
-            Activation::Linear,
-        )
-        .unwrap()
-        .with_random_state(SEED);
+        let layer = built(
+            Conv3D::new(4, (2, 3, 4), (1, 1, 1), Activation::Linear)
+                .unwrap()
+                .with_random_state(SEED),
+            &[1, 8, 8, 8, 2],
+        );
         assert_glorot(
             &layer,
             "kernel",
@@ -484,9 +500,12 @@ mod tests {
     /// Layout 5: `Conv1DTranspose` stores `(k, filters, channels)` and keeps the plain fan pair
     #[test]
     fn conv_1d_transpose_draws_the_transposed_layout() {
-        let layer = Conv1DTranspose::new(4, 3, vec![1, 10, 2], 1, Activation::Linear)
-            .unwrap()
-            .with_random_state(SEED);
+        let layer = built(
+            Conv1DTranspose::new(4, 3, 1, Activation::Linear)
+                .unwrap()
+                .with_random_state(SEED),
+            &[1, 10, 2],
+        );
         let kernel = weight_of(&layer, "kernel");
         assert_eq!(kernel.shape(), &[3, 4, 2]);
         assert_glorot(&layer, "kernel", (3, 4, 2), Fans::conv(2, 4, 3));
@@ -495,9 +514,12 @@ mod tests {
     /// Layout 5: `Conv2DTranspose` stores `(kh, kw, filters, channels)`
     #[test]
     fn conv_2d_transpose_draws_the_transposed_layout() {
-        let layer = Conv2DTranspose::new(4, (2, 3), vec![1, 8, 8, 2], (1, 1), Activation::Linear)
-            .unwrap()
-            .with_random_state(SEED);
+        let layer = built(
+            Conv2DTranspose::new(4, (2, 3), (1, 1), Activation::Linear)
+                .unwrap()
+                .with_random_state(SEED),
+            &[1, 8, 8, 2],
+        );
         let kernel = weight_of(&layer, "kernel");
         assert_eq!(kernel.shape(), &[2, 3, 4, 2]);
         assert_glorot(&layer, "kernel", (2, 3, 4, 2), Fans::conv(2, 4, 2 * 3));
@@ -506,15 +528,12 @@ mod tests {
     /// Layout 5: `Conv3DTranspose` stores `(kd, kh, kw, filters, channels)`
     #[test]
     fn conv_3d_transpose_draws_the_transposed_layout() {
-        let layer = Conv3DTranspose::new(
-            4,
-            (2, 3, 4),
-            vec![1, 8, 8, 8, 2],
-            (1, 1, 1),
-            Activation::Linear,
-        )
-        .unwrap()
-        .with_random_state(SEED);
+        let layer = built(
+            Conv3DTranspose::new(4, (2, 3, 4), (1, 1, 1), Activation::Linear)
+                .unwrap()
+                .with_random_state(SEED),
+            &[1, 8, 8, 8, 2],
+        );
         let kernel = weight_of(&layer, "kernel");
         assert_eq!(kernel.shape(), &[2, 3, 4, 4, 2]);
         assert_glorot(
@@ -528,31 +547,40 @@ mod tests {
     /// Layout 6: `DepthwiseConv1D` stores `(k, channels, depth_multiplier)`
     #[test]
     fn depthwise_conv_1d_draws_the_depthwise_layout() {
-        let layer = DepthwiseConv1D::new(3, vec![1, 10, 4], 1, Activation::Linear)
-            .unwrap()
-            .with_depth_multiplier(2)
-            .unwrap()
-            .with_random_state(SEED);
+        let layer = built(
+            DepthwiseConv1D::new(3, 1, Activation::Linear)
+                .unwrap()
+                .with_depth_multiplier(2)
+                .unwrap()
+                .with_random_state(SEED),
+            &[1, 10, 4],
+        );
         assert_glorot(&layer, "kernel", (3, 4, 2), Fans::conv(4, 2, 3));
     }
 
     /// Layout 6: `DepthwiseConv2D` stores `(kh, kw, channels, depth_multiplier)`
     #[test]
     fn depthwise_conv_2d_draws_the_depthwise_layout() {
-        let layer = DepthwiseConv2D::new((2, 3), vec![1, 8, 8, 4], (1, 1), Activation::Linear)
-            .unwrap()
-            .with_depth_multiplier(2)
-            .unwrap()
-            .with_random_state(SEED);
+        let layer = built(
+            DepthwiseConv2D::new((2, 3), (1, 1), Activation::Linear)
+                .unwrap()
+                .with_depth_multiplier(2)
+                .unwrap()
+                .with_random_state(SEED),
+            &[1, 8, 8, 4],
+        );
         assert_glorot(&layer, "kernel", (2, 3, 4, 2), Fans::conv(4, 2, 2 * 3));
     }
 
     /// Layouts 7 and 8: `SeparableConv1D` draws the depthwise kernel and then the pointwise one
     #[test]
     fn separable_conv_1d_draws_both_layouts_from_1_stream() {
-        let layer = SeparableConv1D::new(5, 3, vec![1, 10, 4], 1, 2, Activation::Linear)
-            .unwrap()
-            .with_random_state(SEED);
+        let layer = built(
+            SeparableConv1D::new(5, 3, 1, 2, Activation::Linear)
+                .unwrap()
+                .with_random_state(SEED),
+            &[1, 10, 4],
+        );
 
         let mut rng = make_rng(Some(SEED));
         let depthwise: Array3<f32> =
@@ -567,10 +595,12 @@ mod tests {
     /// Layouts 7 and 8: `SeparableConv2D` draws the depthwise kernel and then the pointwise one
     #[test]
     fn separable_conv_2d_draws_both_layouts_from_1_stream() {
-        let layer =
-            SeparableConv2D::new(5, (2, 3), vec![1, 8, 8, 4], (1, 1), 2, Activation::Linear)
+        let layer = built(
+            SeparableConv2D::new(5, (2, 3), (1, 1), 2, Activation::Linear)
                 .unwrap()
-                .with_random_state(SEED);
+                .with_random_state(SEED),
+            &[1, 8, 8, 4],
+        );
 
         let mut rng = make_rng(Some(SEED));
         let depthwise: Array4<f32> =
@@ -585,7 +615,10 @@ mod tests {
     /// Layout 9: `Embedding` draws a fixed range and reads no fan
     #[test]
     fn embedding_draws_the_fixed_range() {
-        let layer = Embedding::new(7, 3).unwrap().with_random_state(SEED);
+        let layer = built(
+            Embedding::new(7, 3).unwrap().with_random_state(SEED),
+            &[2, 4],
+        );
         let mut rng = make_rng(Some(SEED));
         let expected: Array2<f32> =
             Initializer::Uniform { limit: 0.05 }.draw((7, 3), Fans::NONE, &mut rng);
@@ -595,9 +628,12 @@ mod tests {
     /// Layouts 10 and 11: `SimpleRNN` draws the input kernel and then the recurrent kernel
     #[test]
     fn simple_rnn_draws_both_layouts_from_1_stream() {
-        let layer = SimpleRNN::new(3, 5, Activation::Tanh)
-            .unwrap()
-            .with_random_state(SEED);
+        let layer = built(
+            SimpleRNN::new(5, Activation::Tanh)
+                .unwrap()
+                .with_random_state(SEED),
+            &[2, 6, 3],
+        );
 
         let mut rng = make_rng(Some(SEED));
         let kernel: Array2<f32> =
@@ -620,9 +656,12 @@ mod tests {
         let input_dim = 3;
         let units = 4;
         let gates = 4;
-        let layer = LSTM::new(input_dim, units, Activation::Tanh)
-            .unwrap()
-            .with_random_state(SEED);
+        let layer = built(
+            LSTM::new(units, Activation::Tanh)
+                .unwrap()
+                .with_random_state(SEED),
+            &[2, 6, input_dim],
+        );
 
         let mut rng = make_rng(Some(SEED));
         let kernel: Array2<f32> = Initializer::GlorotUniform.draw(
@@ -652,9 +691,12 @@ mod tests {
         let input_dim = 3;
         let units = 4;
         let gates = 3;
-        let layer = GRU::new(input_dim, units, Activation::Tanh)
-            .unwrap()
-            .with_random_state(SEED);
+        let layer = built(
+            GRU::new(units, Activation::Tanh)
+                .unwrap()
+                .with_random_state(SEED),
+            &[2, 6, input_dim],
+        );
 
         let mut rng = make_rng(Some(SEED));
         let kernel: Array2<f32> = Initializer::GlorotUniform.draw(

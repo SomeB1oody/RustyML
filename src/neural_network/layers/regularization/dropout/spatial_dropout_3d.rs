@@ -2,14 +2,17 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::layers::regularization::dropout::{
     spatial_dropout_backward, spatial_dropout_scale,
 };
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::validation::{
-    shape_preserving_output, validate_input_ndim, validate_input_shape, validate_rate,
+    validate_input_ndim, validate_rate,
+};
+use crate::neural_network::layers::validation::{start_build, validate_built_input};
+use crate::neural_network::layers::{
+    build_on_forward, built_layer_shape_functions, no_trainable_parameters_layer_functions,
 };
 use crate::neural_network::traits::Layer;
 use crate::neural_network::{Shape, Tensor};
@@ -32,7 +35,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// use ndarray::Array5;
 ///
 /// // Create a SpatialDropout3D layer with 20% dropout rate
-/// let mut spatial_dropout = SpatialDropout3D::new(0.2, vec![32, 16, 28, 28, 64]).unwrap();
+/// let mut spatial_dropout = SpatialDropout3D::new(0.2).unwrap();
 ///
 /// // Create input tensor (batch_size=32, depth=16, height=28, width=28, channels=64)
 /// let input = Array5::ones((32, 16, 28, 28, 64)).into_dyn();
@@ -44,8 +47,8 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 pub struct SpatialDropout3D {
     /// Dropout rate, fraction of channels to drop (between 0 and 1)
     rate: f32,
-    /// Expected shape of the input tensor
-    input_shape: Vec<usize>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
     /// Binary mask used during training to determine which channels to drop
     mask: Option<Tensor>,
     /// Whether the layer is in training mode or inference mode
@@ -60,7 +63,6 @@ impl SpatialDropout3D {
     /// # Parameters
     ///
     /// - `rate` - Dropout rate, fraction of channels to drop (between 0 and 1)
-    /// - `input_shape` - Shape of the input tensor `(batch_size, depth, height, width, channels)`
     ///
     /// # Returns
     ///
@@ -74,12 +76,12 @@ impl SpatialDropout3D {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `rate` is not between 0 and 1
-    pub fn new(rate: f32, input_shape: Vec<usize>) -> Result<Self, Error> {
+    pub fn new(rate: f32) -> Result<Self, Error> {
         validate_rate(rate, "Dropout rate")?;
 
         Ok(SpatialDropout3D {
             rate,
-            input_shape,
+            built: None,
             mask: None,
             training: true,
             rng: crate::random::make_rng(None),
@@ -107,9 +109,21 @@ impl SpatialDropout3D {
 }
 
 impl Layer for SpatialDropout3D {
+    /// Records the shape the layer serves. The layer holds no array, so nothing is
+    /// allocated
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "SpatialDropout3D", input)? else {
+            return Ok(());
+        };
+        input.check_rank("SpatialDropout3D", 5)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // `rate` was validated in `new()`
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        build_on_forward!(self, input);
+        validate_built_input(&self.built, "SpatialDropout3D", input.shape())?;
         validate_input_ndim(
             input.ndim(),
             5,
@@ -163,7 +177,7 @@ impl Layer for SpatialDropout3D {
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // `rate` was validated in `new()`. Only the runtime input needs a check.
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        validate_built_input(&self.built, "SpatialDropout3D", input.shape())?;
         validate_input_ndim(
             input.ndim(),
             5,
@@ -189,12 +203,12 @@ impl Layer for SpatialDropout3D {
         "SpatialDropout3D"
     }
 
-    fn known_input_shape(&self) -> Option<Shape> {
-        (!self.input_shape.is_empty()).then(|| Shape::known(&self.input_shape))
-    }
+    built_layer_shape_functions!();
 
+    /// The layer changes values and not extents
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
-        shape_preserving_output(input, &self.input_shape, "SpatialDropout3D")
+        input.check_rank("SpatialDropout3D", 5)?;
+        Ok(input.clone())
     }
 
     no_trainable_parameters_layer_functions!();

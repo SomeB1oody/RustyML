@@ -14,6 +14,7 @@
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array3, Array4, Array5, IxDyn};
 use rustyml::error::Error;
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::convolution::conv_1d_transpose::Conv1DTranspose;
@@ -22,7 +23,7 @@ use rustyml::neural_network::layers::convolution::conv_3d_transpose::Conv3DTrans
 use rustyml::neural_network::layers::{Dense, Flatten, ParamCounts};
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
-use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::Layer;
 use rustyml::neural_network::{NnError, Tensor};
 
@@ -53,7 +54,8 @@ fn ramp_of(shape: &[usize]) -> Tensor {
 /// they overlap
 #[test]
 fn conv1d_transpose_scatters_each_input_across_the_kernel() {
-    let mut layer = Conv1DTranspose::new(1, 2, vec![1, 2, 1], 1, Linear::new()).unwrap();
+    let mut layer = Conv1DTranspose::new(1, 2, 1, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 2, 1])).unwrap();
     // Weight shape [kernel=2, filters=1, channels=1]. The 2 taps in order are 2 and 3
     let weights = Array3::from_shape_vec((2, 1, 1), vec![2.0f32, 3.0]).unwrap();
     let bias = Array1::from_vec(vec![0.5f32]);
@@ -73,7 +75,8 @@ fn conv1d_transpose_scatters_each_input_across_the_kernel() {
 /// exactly the bias
 #[test]
 fn conv1d_transpose_gap_positions_hold_only_the_bias() {
-    let mut layer = Conv1DTranspose::new(1, 1, vec![1, 2, 1], 3, Linear::new()).unwrap();
+    let mut layer = Conv1DTranspose::new(1, 1, 3, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 2, 1])).unwrap();
     let weights = Array3::from_shape_vec((1, 1, 1), vec![10.0f32]).unwrap();
     let bias = Array1::from_vec(vec![0.25f32]);
     layer.set_weights(weights, bias).unwrap();
@@ -91,9 +94,10 @@ fn conv1d_transpose_gap_positions_hold_only_the_bias() {
 /// `Same` padding at stride 1 keeps the length and drops the writes that fall past both ends
 #[test]
 fn conv1d_transpose_same_padding_keeps_the_length() {
-    let mut layer = Conv1DTranspose::new(1, 3, vec![1, 3, 1], 1, Linear::new())
+    let mut layer = Conv1DTranspose::new(1, 3, 1, Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
+    layer.build(&Shape::known(&[1, 3, 1])).unwrap();
     // Taps in order are 2, 3, 5
     let weights = Array3::from_shape_vec((3, 1, 1), vec![2.0f32, 3.0, 5.0]).unwrap();
     layer.set_weights(weights, Array1::zeros(1)).unwrap();
@@ -112,9 +116,10 @@ fn conv1d_transpose_same_padding_keeps_the_length() {
 /// `Same` padding at stride 2 doubles the length and crops only the trailing overhang
 #[test]
 fn conv1d_transpose_same_padding_at_stride_2_crops_the_tail() {
-    let mut layer = Conv1DTranspose::new(1, 3, vec![1, 2, 1], 2, Linear::new())
+    let mut layer = Conv1DTranspose::new(1, 3, 2, Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
+    layer.build(&Shape::known(&[1, 2, 1])).unwrap();
     let weights = Array3::from_shape_vec((3, 1, 1), vec![2.0f32, 3.0, 5.0]).unwrap();
     layer.set_weights(weights, Array1::zeros(1)).unwrap();
 
@@ -133,7 +138,8 @@ fn conv1d_transpose_same_padding_at_stride_2_crops_the_tail() {
 /// but last
 #[test]
 fn conv1d_transpose_two_input_channels_cross_channel_sum() {
-    let mut layer = Conv1DTranspose::new(1, 2, vec![1, 2, 2], 1, Linear::new()).unwrap();
+    let mut layer = Conv1DTranspose::new(1, 2, 1, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 2, 2])).unwrap();
     // [kernel=2, filters=1, channels=2]: tap 0 weighs the 2 channels 1 and 2, tap 1 weighs them
     // 3 and 4. The per-channel weights and the per-channel data both differ, so reading the
     // channel axis anywhere but last changes every value
@@ -154,7 +160,8 @@ fn conv1d_transpose_two_input_channels_cross_channel_sum() {
 /// the first and not in a separate plane
 #[test]
 fn conv1d_transpose_filter_axis_is_innermost() {
-    let mut layer = Conv1DTranspose::new(2, 1, vec![1, 1, 1], 1, Linear::new()).unwrap();
+    let mut layer = Conv1DTranspose::new(2, 1, 1, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 1, 1])).unwrap();
     // [kernel=1, filters=2, channels=1]: filter 0 weighs 1 and filter 1 weighs 2
     let weights = Array3::from_shape_vec((1, 2, 1), vec![1.0f32, 2.0]).unwrap();
     layer.set_weights(weights, Array1::zeros(2)).unwrap();
@@ -181,8 +188,7 @@ fn conv1d_transpose_valid_output_length_cases() {
         (3, 4, 4, 12),
     ];
     for (len, kernel, stride, expected) in cases {
-        let mut layer =
-            Conv1DTranspose::new(1, kernel, vec![1, len, 1], stride, Linear::new()).unwrap();
+        let mut layer = Conv1DTranspose::new(1, kernel, stride, Linear::new()).unwrap();
         let x = Array::ones((1, len, 1)).into_dyn();
         let out = layer.forward(&x).unwrap();
         assert_eq!(
@@ -205,7 +211,7 @@ fn conv1d_transpose_same_output_length_cases() {
         (1, 4, 1, 1),
     ];
     for (len, kernel, stride, expected) in cases {
-        let mut layer = Conv1DTranspose::new(1, kernel, vec![1, len, 1], stride, Linear::new())
+        let mut layer = Conv1DTranspose::new(1, kernel, stride, Linear::new())
             .unwrap()
             .with_padding(PaddingType::Same);
         let x = Array::ones((1, len, 1)).into_dyn();
@@ -223,7 +229,8 @@ fn conv1d_transpose_same_output_length_cases() {
 /// param_count is `kernel * filters * channels + filters`
 #[test]
 fn conv1d_transpose_param_count_formula() {
-    let layer = Conv1DTranspose::new(4, 3, vec![1, 5, 2], 1, Linear::new()).unwrap();
+    let mut layer = Conv1DTranspose::new(4, 3, 1, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 5, 2])).unwrap();
     // 3 * 4 * 2 kernel values plus 4 biases
     assert_eq!(layer.param_count(), ParamCounts::trainable(28));
 }
@@ -231,7 +238,8 @@ fn conv1d_transpose_param_count_formula() {
 /// The named weights carry the filter axis before the channel axis
 #[test]
 fn conv1d_transpose_weights_correct_shapes() {
-    let layer = Conv1DTranspose::new(4, 3, vec![1, 5, 2], 1, Linear::new()).unwrap();
+    let mut layer = Conv1DTranspose::new(4, 3, 1, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 5, 2])).unwrap();
     assert_eq!(named(&layer, "kernel").shape(), &[3, 4, 2]);
     assert_eq!(named(&layer, "bias").shape(), &[4]);
 }
@@ -239,7 +247,8 @@ fn conv1d_transpose_weights_correct_shapes() {
 /// layer_type and output_shape report the transposed geometry
 #[test]
 fn conv1d_transpose_reports_its_type_and_output_shape() {
-    let layer = Conv1DTranspose::new(3, 3, vec![2, 5, 1], 2, Linear::new()).unwrap();
+    let mut layer = Conv1DTranspose::new(3, 3, 2, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[2, 5, 1])).unwrap();
     assert_eq!(layer.layer_type(), "Conv1DTranspose");
     // Valid: 5 * 2 + (3 - 2) = 11
     assert_eq!(layer.output_shape(), "(2, 11, 3)");
@@ -252,7 +261,7 @@ fn conv1d_transpose_reports_its_type_and_output_shape() {
 /// predict returns the same values as forward for a deterministic layer
 #[test]
 fn conv1d_transpose_predict_equals_forward() {
-    let mut layer = Conv1DTranspose::new(2, 3, vec![1, 4, 2], 2, Linear::new())
+    let mut layer = Conv1DTranspose::new(2, 3, 2, Linear::new())
         .unwrap()
         .with_random_state(7);
     let x = ramp_of(&[1, 4, 2]);
@@ -267,8 +276,8 @@ fn conv1d_transpose_predict_equals_forward() {
 /// middle
 #[test]
 fn conv2d_transpose_overlapping_windows_add_up() {
-    let mut layer =
-        Conv2DTranspose::new(1, (2, 2), vec![1, 2, 2, 1], (1, 1), Linear::new()).unwrap();
+    let mut layer = Conv2DTranspose::new(1, (2, 2), (1, 1), Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 2, 2, 1])).unwrap();
     // [kh=2, kw=2, filters=1, channels=1]: taps in (kh, kw) order are 1, 2, 3, 4
     let weights = Array4::from_shape_vec((2, 2, 1, 1), vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
     layer.set_weights(weights, Array1::zeros(1)).unwrap();
@@ -292,8 +301,8 @@ fn conv2d_transpose_overlapping_windows_add_up() {
 /// exactly this shape
 #[test]
 fn conv2d_transpose_grows_a_single_pixel_into_the_whole_kernel() {
-    let mut layer =
-        Conv2DTranspose::new(1, (3, 3), vec![1, 1, 1, 1], (2, 2), Linear::new()).unwrap();
+    let mut layer = Conv2DTranspose::new(1, (3, 3), (2, 2), Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 1, 1, 1])).unwrap();
     let taps: Vec<f32> = (1..=9).map(|v| v as f32).collect();
     let weights = Array4::from_shape_vec((3, 3, 1, 1), taps.clone()).unwrap();
     layer.set_weights(weights, Array1::zeros(1)).unwrap();
@@ -309,14 +318,14 @@ fn conv2d_transpose_grows_a_single_pixel_into_the_whole_kernel() {
     // forward pass and not to the constructor, because `Same` padding makes the same geometry
     // legal and the padding mode is chosen after construction. Keras accepts the construction
     // and refuses the call in the same way
-    let plain = rustyml::neural_network::layers::convolution::conv_2d::Conv2D::new(
+    let mut plain = rustyml::neural_network::layers::convolution::conv_2d::Conv2D::new(
         1,
         (3, 3),
-        vec![1, 1, 1, 1],
         (1, 1),
         Linear::new(),
     )
     .expect("construction succeeds because the padding mode is not yet fixed");
+    plain.build(&Shape::known(&[1, 1, 1, 1])).unwrap();
     let refused = plain.predict(&t4((1, 1, 1, 1), vec![1.0f32]));
     assert!(
         matches!(refused, Err(Error::InvalidInput(_))),
@@ -327,9 +336,10 @@ fn conv2d_transpose_grows_a_single_pixel_into_the_whole_kernel() {
 /// `Same` padding at stride 2 doubles both axes and crops the overhang off the trailing edges
 #[test]
 fn conv2d_transpose_same_padding_doubles_both_axes() {
-    let mut layer = Conv2DTranspose::new(1, (3, 3), vec![1, 2, 2, 1], (2, 2), Linear::new())
+    let mut layer = Conv2DTranspose::new(1, (3, 3), (2, 2), Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
+    layer.build(&Shape::known(&[1, 2, 2, 1])).unwrap();
     let taps: Vec<f32> = (1..=9).map(|v| v as f32).collect();
     let weights = Array4::from_shape_vec((3, 3, 1, 1), taps).unwrap();
     layer.set_weights(weights, Array1::zeros(1)).unwrap();
@@ -374,8 +384,7 @@ fn conv2d_transpose_output_shape_cases() {
         (3, 4, 1, 1, 2, 2, true, 6, 8),
     ];
     for (h, w, kh, kw, sh, sw, same, out_h, out_w) in cases {
-        let mut layer =
-            Conv2DTranspose::new(2, (kh, kw), vec![1, h, w, 1], (sh, sw), Linear::new()).unwrap();
+        let mut layer = Conv2DTranspose::new(2, (kh, kw), (sh, sw), Linear::new()).unwrap();
         if same {
             layer = layer.with_padding(PaddingType::Same);
         }
@@ -395,7 +404,8 @@ fn conv2d_transpose_output_shape_cases() {
 /// param_count is `kh * kw * filters * channels + filters`
 #[test]
 fn conv2d_transpose_param_count_formula() {
-    let layer = Conv2DTranspose::new(2, (3, 3), vec![1, 5, 5, 3], (1, 1), Linear::new()).unwrap();
+    let mut layer = Conv2DTranspose::new(2, (3, 3), (1, 1), Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 5, 5, 3])).unwrap();
     // 3 * 3 * 2 * 3 kernel values plus 2 biases
     assert_eq!(layer.param_count(), ParamCounts::trainable(56));
 }
@@ -403,7 +413,8 @@ fn conv2d_transpose_param_count_formula() {
 /// The named kernel has shape \[kh, kw, filters, channels\]
 #[test]
 fn conv2d_transpose_weights_correct_shapes() {
-    let layer = Conv2DTranspose::new(4, (3, 3), vec![1, 8, 8, 2], (1, 1), Linear::new()).unwrap();
+    let mut layer = Conv2DTranspose::new(4, (3, 3), (1, 1), Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 8, 8, 2])).unwrap();
     assert_eq!(named(&layer, "kernel").shape(), &[3, 3, 4, 2]);
     assert_eq!(named(&layer, "bias").shape(), &[4]);
 }
@@ -411,7 +422,8 @@ fn conv2d_transpose_weights_correct_shapes() {
 /// layer_type and output_shape report the transposed geometry
 #[test]
 fn conv2d_transpose_reports_its_type_and_output_shape() {
-    let layer = Conv2DTranspose::new(3, (3, 2), vec![2, 5, 5, 1], (2, 1), Linear::new()).unwrap();
+    let mut layer = Conv2DTranspose::new(3, (3, 2), (2, 1), Linear::new()).unwrap();
+    layer.build(&Shape::known(&[2, 5, 5, 1])).unwrap();
     assert_eq!(layer.layer_type(), "Conv2DTranspose");
     // Valid: 5 * 2 + (3 - 2) = 11 on the height. 5 * 1 + (2 - 1) = 6 on the width.
     assert_eq!(layer.output_shape(), "(2, 11, 6, 3)");
@@ -420,10 +432,10 @@ fn conv2d_transpose_reports_its_type_and_output_shape() {
 /// with_random_state makes the initial kernel reproducible and leaves the bias at 0
 #[test]
 fn conv2d_transpose_with_random_state_is_reproducible() {
-    let first = Conv2DTranspose::new(2, (3, 3), vec![1, 4, 4, 2], (1, 1), Linear::new())
+    let first = Conv2DTranspose::new(2, (3, 3), (1, 1), Linear::new())
         .unwrap()
         .with_random_state(19);
-    let second = Conv2DTranspose::new(2, (3, 3), vec![1, 4, 4, 2], (1, 1), Linear::new())
+    let second = Conv2DTranspose::new(2, (3, 3), (1, 1), Linear::new())
         .unwrap()
         .with_random_state(19);
 
@@ -446,8 +458,8 @@ fn conv2d_transpose_with_random_state_is_reproducible() {
 /// A single voxel under a 2x2x2 kernel scales the whole kernel into a 2x2x2 block
 #[test]
 fn conv3d_transpose_grows_a_single_voxel_into_the_whole_kernel() {
-    let mut layer =
-        Conv3DTranspose::new(1, (2, 2, 2), vec![1, 1, 1, 1, 1], (1, 1, 1), Linear::new()).unwrap();
+    let mut layer = Conv3DTranspose::new(1, (2, 2, 2), (1, 1, 1), Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 1, 1, 1, 1])).unwrap();
     let taps: Vec<f32> = (1..=8).map(|v| v as f32).collect();
     let weights = Array5::from_shape_vec((2, 2, 2, 1, 1), taps.clone()).unwrap();
     layer.set_weights(weights, Array1::zeros(1)).unwrap();
@@ -484,14 +496,7 @@ fn conv3d_transpose_output_shape_cases() {
         (2, 3, 2, 3, 2, 4, 2, 1, 2, true, 4, 3, 4),
     ];
     for (d, h, w, kd, kh, kw, sd, sh, sw, same, od, oh, ow) in cases {
-        let mut layer = Conv3DTranspose::new(
-            2,
-            (kd, kh, kw),
-            vec![1, d, h, w, 1],
-            (sd, sh, sw),
-            Linear::new(),
-        )
-        .unwrap();
+        let mut layer = Conv3DTranspose::new(2, (kd, kh, kw), (sd, sh, sw), Linear::new()).unwrap();
         if same {
             layer = layer.with_padding(PaddingType::Same);
         }
@@ -509,8 +514,8 @@ fn conv3d_transpose_output_shape_cases() {
 /// The named weights carry the transposed geometry, and param_count matches their extent
 #[test]
 fn conv3d_transpose_weights_and_param_count() {
-    let layer =
-        Conv3DTranspose::new(2, (2, 3, 2), vec![1, 3, 3, 3, 2], (1, 1, 1), Linear::new()).unwrap();
+    let mut layer = Conv3DTranspose::new(2, (2, 3, 2), (1, 1, 1), Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 3, 3, 3, 2])).unwrap();
     assert_eq!(layer.layer_type(), "Conv3DTranspose");
     // 2 * 3 * 2 taps at 2 filters and 2 channels, plus 2 biases
     assert_eq!(layer.param_count(), ParamCounts::trainable(50));
@@ -545,15 +550,14 @@ fn conv2d_transpose_returns_to_the_shape_the_convolution_consumed() {
         } else {
             PaddingType::Valid
         };
-        let mut down = Conv2D::new(2, (kh, kw), vec![1, h, w, 1], (sh, sw), Linear::new())
+        let mut down = Conv2D::new(2, (kh, kw), (sh, sw), Linear::new())
             .unwrap()
             .with_padding(padding);
         let small = down.forward(&Array::ones((1, h, w, 1)).into_dyn()).unwrap();
 
-        let mut up =
-            Conv2DTranspose::new(1, (kh, kw), small.shape().to_vec(), (sh, sw), Linear::new())
-                .unwrap()
-                .with_padding(padding);
+        let mut up = Conv2DTranspose::new(1, (kh, kw), (sh, sw), Linear::new())
+            .unwrap()
+            .with_padding(padding);
         let back = up.forward(&small).unwrap();
 
         assert_eq!(
@@ -574,12 +578,11 @@ fn conv2d_transpose_returns_to_the_shape_the_convolution_consumed() {
 fn conv2d_transpose_falls_short_when_the_stride_does_not_divide() {
     use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
 
-    let mut down = Conv2D::new(1, (3, 3), vec![1, 8, 8, 1], (2, 2), Linear::new()).unwrap();
+    let mut down = Conv2D::new(1, (3, 3), (2, 2), Linear::new()).unwrap();
     let small = down.forward(&Array::ones((1, 8, 8, 1)).into_dyn()).unwrap();
     assert_eq!(small.shape(), &[1, 3, 3, 1]);
 
-    let mut up =
-        Conv2DTranspose::new(1, (3, 3), small.shape().to_vec(), (2, 2), Linear::new()).unwrap();
+    let mut up = Conv2DTranspose::new(1, (3, 3), (2, 2), Linear::new()).unwrap();
     let back = up.forward(&small).unwrap();
     assert_eq!(back.shape(), &[1, 7, 7, 1]);
 }
@@ -623,9 +626,10 @@ fn conv2d_transpose_forward_equals_the_convolution_input_gradient() {
             .map(|v| v as f32 * 0.0625 - 1.5)
             .collect();
 
-        let mut down = Conv2D::new(f, (kh, kw), vec![1, h, w, cin], (sh, sw), Linear::new())
+        let mut down = Conv2D::new(f, (kh, kw), (sh, sw), Linear::new())
             .unwrap()
             .with_padding(padding);
+        down.build(&Shape::known(&[1, h, w, cin])).unwrap();
         down.set_weights(
             Array4::from_shape_vec((kh, kw, cin, f), taps.clone()).unwrap(),
             Array1::zeros(f),
@@ -638,15 +642,10 @@ fn conv2d_transpose_forward_equals_the_convolution_input_gradient() {
 
         // The transposed layer reads `f` channels and writes `cin` filters, so its kernel is the
         // very same flat block
-        let mut up = Conv2DTranspose::new(
-            cin,
-            (kh, kw),
-            small.shape().to_vec(),
-            (sh, sw),
-            Linear::new(),
-        )
-        .unwrap()
-        .with_padding(padding);
+        let mut up = Conv2DTranspose::new(cin, (kh, kw), (sh, sw), Linear::new())
+            .unwrap()
+            .with_padding(padding);
+        up.build(&Shape::known(grad.shape())).unwrap();
         up.set_weights(
             Array4::from_shape_vec((kh, kw, cin, f), taps).unwrap(),
             Array1::zeros(cin),
@@ -677,8 +676,7 @@ fn conv2d_transpose_invalid_scalar_param_errors() {
         (1, (3, 3), (1, 0), "stride width=0"),
     ];
     for (filters, kernel, strides, label) in cases {
-        let result =
-            Conv2DTranspose::new(filters, kernel, vec![1, 5, 5, 1], strides, Linear::new());
+        let result = Conv2DTranspose::new(filters, kernel, strides, Linear::new());
         assert!(
             matches!(result, Err(Error::InvalidParameter { .. })),
             "expected InvalidParameter for {label}, got {result:?}"
@@ -686,7 +684,7 @@ fn conv2d_transpose_invalid_scalar_param_errors() {
     }
 }
 
-/// A wrong rank, or a 0 anywhere in the shape, makes the constructor return InvalidInput
+/// A wrong rank, or a 0 anywhere in the shape, makes the build step return InvalidInput
 #[test]
 fn conv2d_transpose_invalid_input_shape_errors() {
     let cases = [
@@ -696,7 +694,8 @@ fn conv2d_transpose_invalid_input_shape_errors() {
         (vec![1, 0, 5, 1], "0 height"),
     ];
     for (shape, label) in cases {
-        let result = Conv2DTranspose::new(1, (3, 3), shape, (1, 1), Linear::new());
+        let mut layer = Conv2DTranspose::new(1, (3, 3), (1, 1), Linear::new()).unwrap();
+        let result = layer.build(&Shape::known(&shape));
         assert!(
             matches!(result, Err(Error::InvalidInput(_))),
             "expected InvalidInput for {label}, got {result:?}"
@@ -707,7 +706,7 @@ fn conv2d_transpose_invalid_input_shape_errors() {
 /// An input smaller than the kernel is accepted, unlike a plain convolution
 #[test]
 fn conv2d_transpose_accepts_an_input_below_the_kernel_size() {
-    let result = Conv2DTranspose::new(1, (5, 5), vec![1, 1, 1, 1], (1, 1), Linear::new());
+    let result = Conv2DTranspose::new(1, (5, 5), (1, 1), Linear::new());
     assert!(
         result.is_ok(),
         "a transposed convolution must accept an input below its kernel size, got {result:?}"
@@ -717,8 +716,7 @@ fn conv2d_transpose_accepts_an_input_below_the_kernel_size() {
 /// forward with a tensor of the wrong rank returns InvalidInput
 #[test]
 fn conv2d_transpose_forward_wrong_ndim_errors() {
-    let mut layer =
-        Conv2DTranspose::new(1, (3, 3), vec![1, 4, 4, 1], (1, 1), Linear::new()).unwrap();
+    let mut layer = Conv2DTranspose::new(1, (3, 3), (1, 1), Linear::new()).unwrap();
     let result = layer.forward(&t3((1, 4, 4), vec![0.0; 16]));
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
@@ -729,8 +727,8 @@ fn conv2d_transpose_forward_wrong_ndim_errors() {
 /// forward with a channel count the kernel was not built for returns InvalidInput
 #[test]
 fn conv2d_transpose_forward_wrong_channel_count_errors() {
-    let mut layer =
-        Conv2DTranspose::new(1, (3, 3), vec![1, 4, 4, 2], (1, 1), Linear::new()).unwrap();
+    let mut layer = Conv2DTranspose::new(1, (3, 3), (1, 1), Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 4, 4, 2])).unwrap();
     let result = layer.forward(&Array::ones((1, 4, 4, 3)).into_dyn());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
@@ -742,7 +740,7 @@ fn conv2d_transpose_forward_wrong_channel_count_errors() {
 /// math
 #[test]
 fn conv2d_transpose_forward_empty_spatial_axis_errors() {
-    let mut layer = Conv2DTranspose::new(1, (3, 3), vec![1, 4, 4, 1], (1, 1), Linear::new())
+    let mut layer = Conv2DTranspose::new(1, (3, 3), (1, 1), Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
     let result = layer.forward(&Tensor::zeros(IxDyn(&[1, 0, 4, 1])));
@@ -755,8 +753,7 @@ fn conv2d_transpose_forward_empty_spatial_axis_errors() {
 /// backward before forward returns ForwardPassNotRun
 #[test]
 fn conv2d_transpose_backward_before_forward_errors() {
-    let mut layer =
-        Conv2DTranspose::new(1, (3, 3), vec![1, 4, 4, 1], (1, 1), Linear::new()).unwrap();
+    let mut layer = Conv2DTranspose::new(1, (3, 3), (1, 1), Linear::new()).unwrap();
     let result = layer.backward(&Array::ones((1, 6, 6, 1)).into_dyn());
     assert!(
         matches!(
@@ -770,8 +767,7 @@ fn conv2d_transpose_backward_before_forward_errors() {
 /// backward with a gradient of the wrong shape returns ShapeMismatch
 #[test]
 fn conv2d_transpose_backward_checks_the_gradient_shape() {
-    let mut layer =
-        Conv2DTranspose::new(1, (3, 3), vec![1, 4, 4, 1], (1, 1), Linear::new()).unwrap();
+    let mut layer = Conv2DTranspose::new(1, (3, 3), (1, 1), Linear::new()).unwrap();
     layer
         .forward(&Array::ones((1, 4, 4, 1)).into_dyn())
         .unwrap();
@@ -786,8 +782,8 @@ fn conv2d_transpose_backward_checks_the_gradient_shape() {
 /// set_weights rejects a kernel or a bias of the wrong shape
 #[test]
 fn conv2d_transpose_set_weights_shape_errors() {
-    let mut layer =
-        Conv2DTranspose::new(2, (3, 3), vec![1, 4, 4, 2], (1, 1), Linear::new()).unwrap();
+    let mut layer = Conv2DTranspose::new(2, (3, 3), (1, 1), Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 4, 4, 2])).unwrap();
 
     // The kernel is [3, 3, filters=2, channels=2]. The plain Conv2D order would be [3, 3, 2, 2]
     // too, so this case uses a shape that neither order accepts
@@ -818,8 +814,8 @@ fn conv2d_transpose_set_weights_shape_errors() {
 /// the counts differ, so an accidental swap is caught instead of silently transposing the map
 #[test]
 fn conv2d_transpose_set_weights_refuses_the_plain_kernel_order() {
-    let mut layer =
-        Conv2DTranspose::new(2, (3, 3), vec![1, 4, 4, 3], (1, 1), Linear::new()).unwrap();
+    let mut layer = Conv2DTranspose::new(2, (3, 3), (1, 1), Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 4, 4, 3])).unwrap();
 
     // The plain Conv2D order is [kh, kw, channels, filters]
     let plain_order = Array4::zeros((3, 3, 3, 2));
@@ -844,8 +840,7 @@ fn conv2d_transpose_set_weights_refuses_the_plain_kernel_order() {
 /// The layer exposes no parameter before a backward pass has produced a gradient
 #[test]
 fn conv2d_transpose_exposes_no_parameters_before_backward() {
-    let mut layer =
-        Conv2DTranspose::new(2, (2, 2), vec![1, 3, 3, 1], (1, 1), Linear::new()).unwrap();
+    let mut layer = Conv2DTranspose::new(2, (2, 2), (1, 1), Linear::new()).unwrap();
     assert!(
         layer.parameters().is_empty(),
         "a fresh layer has no gradient"
@@ -872,10 +867,12 @@ fn conv2d_transpose_exposes_no_parameters_before_backward() {
 /// guards unpinned
 #[test]
 fn conv_transpose_layers_reject_a_tensor_of_the_wrong_rank() {
-    let mut one = Conv1DTranspose::new(1, 2, vec![1, 3, 1], 1, Linear::new()).unwrap();
-    let mut two = Conv2DTranspose::new(1, (2, 2), vec![1, 3, 3, 1], (1, 1), Linear::new()).unwrap();
-    let mut three =
-        Conv3DTranspose::new(1, (2, 2, 2), vec![1, 3, 3, 3, 1], (1, 1, 1), Linear::new()).unwrap();
+    let mut one = Conv1DTranspose::new(1, 2, 1, Linear::new()).unwrap();
+    one.build(&Shape::known(&[1, 3, 1])).unwrap();
+    let mut two = Conv2DTranspose::new(1, (2, 2), (1, 1), Linear::new()).unwrap();
+    two.build(&Shape::known(&[1, 3, 3, 1])).unwrap();
+    let mut three = Conv3DTranspose::new(1, (2, 2, 2), (1, 1, 1), Linear::new()).unwrap();
+    three.build(&Shape::known(&[1, 3, 3, 3, 1])).unwrap();
 
     // Every layer gets a tensor of a rank it does not accept
     let rank_4 = ramp_of(&[1, 3, 3, 3]);
@@ -911,9 +908,8 @@ fn conv_transpose_layers_reject_a_tensor_of_the_wrong_rank() {
 /// Every rank reports ForwardPassNotRun, and names itself
 #[test]
 fn conv_transpose_layers_reject_backward_before_forward() {
-    let mut one = Conv1DTranspose::new(1, 2, vec![1, 3, 1], 1, Linear::new()).unwrap();
-    let mut three =
-        Conv3DTranspose::new(1, (2, 2, 2), vec![1, 3, 3, 3, 1], (1, 1, 1), Linear::new()).unwrap();
+    let mut one = Conv1DTranspose::new(1, 2, 1, Linear::new()).unwrap();
+    let mut three = Conv3DTranspose::new(1, (2, 2, 2), (1, 1, 1), Linear::new()).unwrap();
 
     for (expected, result) in [
         ("Conv1DTranspose", one.backward(&ramp_of(&[1, 4, 1]))),
@@ -939,16 +935,17 @@ fn conv_transpose_layers_reject_backward_before_forward() {
 /// A save and load round trip cannot pin this, because both of its sides use `predict`
 #[test]
 fn conv_transpose_layers_predict_equals_forward() {
-    let mut two = Conv2DTranspose::new(2, (3, 2), vec![1, 3, 4, 2], (2, 1), Linear::new())
+    let mut two = Conv2DTranspose::new(2, (3, 2), (2, 1), Linear::new())
         .unwrap()
         .with_random_state(23);
+    two.build(&Shape::known(&[1, 3, 4, 2])).unwrap();
     let x = ramp_of(&[1, 3, 4, 2]);
     assert_allclose(&two.predict(&x).unwrap(), &two.forward(&x).unwrap(), 0.0f32);
 
-    let mut three =
-        Conv3DTranspose::new(2, (2, 2, 3), vec![1, 2, 3, 2, 2], (1, 2, 1), Linear::new())
-            .unwrap()
-            .with_random_state(23);
+    let mut three = Conv3DTranspose::new(2, (2, 2, 3), (1, 2, 1), Linear::new())
+        .unwrap()
+        .with_random_state(23);
+    three.build(&Shape::known(&[1, 2, 3, 2, 2])).unwrap();
     let x = ramp_of(&[1, 2, 3, 2, 2]);
     assert_allclose(
         &three.predict(&x).unwrap(),
@@ -964,9 +961,11 @@ fn conv_transpose_layers_predict_equals_forward() {
 #[test]
 fn conv3d_transpose_with_random_state_is_reproducible() {
     let make = || {
-        Conv3DTranspose::new(3, (2, 4, 5), vec![1, 6, 7, 8, 2], (1, 1, 1), Linear::new())
+        let mut layer = Conv3DTranspose::new(3, (2, 4, 5), (1, 1, 1), Linear::new())
             .unwrap()
-            .with_random_state(31)
+            .with_random_state(31);
+        layer.build(&Shape::known(&[1, 6, 7, 8, 2])).unwrap();
+        layer
     };
     let first = make();
     let second = make();
@@ -997,7 +996,7 @@ fn conv2d_transpose_accepts_an_input_that_is_not_in_c_order() {
     assert!(!permuted.is_standard_layout());
 
     let make = || {
-        Conv2DTranspose::new(2, (3, 3), vec![2, 4, 3, 2], (2, 2), Linear::new())
+        Conv2DTranspose::new(2, (3, 3), (2, 2), Linear::new())
             .unwrap()
             .with_random_state(5)
     };
@@ -1016,18 +1015,17 @@ fn conv2d_transpose_accepts_an_input_that_is_not_in_c_order() {
 /// Every layer of the family emits a gradient in C order
 #[test]
 fn conv_transpose_layers_emit_gradients_in_c_order() {
-    let mut first = Conv1DTranspose::new(2, 3, vec![1, 4, 2], 2, Linear::new()).unwrap();
+    let mut first = Conv1DTranspose::new(2, 3, 2, Linear::new()).unwrap();
     let out = first.forward(&ramp_of(&[1, 4, 2])).unwrap();
     assert!(first.backward(&out).unwrap().is_standard_layout());
 
-    let mut second = Conv2DTranspose::new(2, (3, 2), vec![1, 3, 4, 2], (2, 1), Linear::new())
+    let mut second = Conv2DTranspose::new(2, (3, 2), (2, 1), Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
     let out = second.forward(&ramp_of(&[1, 3, 4, 2])).unwrap();
     assert!(second.backward(&out).unwrap().is_standard_layout());
 
-    let mut third =
-        Conv3DTranspose::new(2, (2, 2, 2), vec![1, 2, 2, 2, 1], (2, 2, 2), Linear::new()).unwrap();
+    let mut third = Conv3DTranspose::new(2, (2, 2, 2), (2, 2, 2), Linear::new()).unwrap();
     let out = third.forward(&ramp_of(&[1, 2, 2, 2, 1])).unwrap();
     assert!(third.backward(&out).unwrap().is_standard_layout());
 }
@@ -1036,7 +1034,7 @@ fn conv_transpose_layers_emit_gradients_in_c_order() {
 #[test]
 fn conv2d_transpose_backward_accepts_a_gradient_that_is_not_in_c_order() {
     let make = || {
-        Conv2DTranspose::new(2, (2, 2), vec![1, 2, 3, 2], (1, 1), Linear::new())
+        Conv2DTranspose::new(2, (2, 2), (1, 1), Linear::new())
             .unwrap()
             .with_random_state(13)
     };
@@ -1089,15 +1087,9 @@ fn conv2d_transpose_parallel_path_matches_the_serial_path() {
 
     let x = ramp_of(&[batch, side, side, cin]);
     let make = || {
-        Conv2DTranspose::new(
-            filters,
-            (k, k),
-            vec![batch, side, side, cin],
-            (2, 2),
-            Linear::new(),
-        )
-        .unwrap()
-        .with_random_state(29)
+        Conv2DTranspose::new(filters, (k, k), (2, 2), Linear::new())
+            .unwrap()
+            .with_random_state(29)
     };
 
     let mut parallel = make();
@@ -1142,14 +1134,10 @@ fn conv2d_transpose_parallel_gradient_counts_are_constant() {
         "the fixture no longer clears the engine's parallel gate: {flops} FLOPs against {gate}"
     );
 
-    let mut layer = Conv2DTranspose::new(
-        filters,
-        (k, k),
-        vec![batch, side, side, cin],
-        (k, k),
-        Linear::new(),
-    )
-    .unwrap();
+    let mut layer = Conv2DTranspose::new(filters, (k, k), (k, k), Linear::new()).unwrap();
+    layer
+        .build(&Shape::known(&[batch, side, side, cin]))
+        .unwrap();
     layer
         .set_weights(Array4::ones((k, k, filters, cin)), Array1::zeros(filters))
         .unwrap();
@@ -1191,19 +1179,20 @@ fn conv2d_transpose_trains_inside_a_sequential_model() {
         .unwrap()
         .into_dyn();
 
-    let mut model = Sequential::new();
-    model
+    let mut model = SequentialBuilder::new()
         .add(
-            Conv2DTranspose::new(2, (3, 3), vec![2, 3, 3, 1], (1, 1), Linear::new())
+            Conv2DTranspose::new(2, (3, 3), (1, 1), Linear::new())
                 .unwrap()
                 .with_random_state(17),
         )
-        .add(Flatten::new(vec![2, 5, 5, 2]).unwrap())
-        .add(Dense::new(50, 1, Linear::new()).unwrap())
-        .compile(
-            SGD::new(0.002, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+        .add(Flatten::new())
+        .add(Dense::new(1, Linear::new()).unwrap())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.002, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let history = model.fit(&x, &y, 25).unwrap();
     let losses = history.loss();

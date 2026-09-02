@@ -15,6 +15,7 @@
 use crate::common::assert_allclose;
 use ndarray::Array;
 use rustyml::error::{Error, IoError};
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::activation::p_relu::PReLU;
@@ -47,6 +48,8 @@ use rustyml::neural_network::layers::regularization::normalization::layer_normal
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
+use rustyml::neural_network::traits::Layer;
 use rustyml::neural_network::traits::WeightKind;
 use std::borrow::Cow;
 use std::env;
@@ -89,13 +92,16 @@ fn round_trip(
 fn dense_identity_weights_value_check_and_round_trip() {
     let tmp = TempFile::new("dense_identity");
 
-    let mut layer = Dense::new(2, 2, Linear::new()).unwrap();
+    let mut layer = Dense::new(2, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 2])).unwrap();
     let w = Array::from_shape_vec((2, 2), vec![1.0f32, 0.0, 0.0, 1.0]).unwrap();
     let b = Array::zeros((1, 2));
     layer.set_weights(w, b).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(layer);
+    let model = SequentialBuilder::new()
+        .add(layer)
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
 
     let x: Tensor = Array::from_shape_vec((1, 2), vec![3.0f32, -5.0])
         .unwrap()
@@ -112,9 +118,10 @@ fn dense_identity_weights_value_check_and_round_trip() {
     let fresh = round_trip(
         &model,
         || {
-            let mut m = Sequential::new();
-            m.add(Dense::new(2, 2, Linear::new()).unwrap());
-            m
+            SequentialBuilder::new()
+                .add(Dense::new(2, Linear::new()).unwrap())
+                .build(&Shape::known(&[2, 2]))
+                .unwrap()
         },
         tmp.path(),
     );
@@ -128,13 +135,16 @@ fn dense_identity_weights_value_check_and_round_trip() {
 fn dense_scaled_identity_value_check_and_round_trip() {
     let tmp = TempFile::new("dense_scaled");
 
-    let mut layer = Dense::new(2, 2, Linear::new()).unwrap();
+    let mut layer = Dense::new(2, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 2])).unwrap();
     let w = Array::from_shape_vec((2, 2), vec![2.0f32, 0.0, 0.0, 2.0]).unwrap();
     let b = Array::from_shape_vec((1, 2), vec![1.0f32, 1.0]).unwrap();
     layer.set_weights(w, b).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(layer);
+    let model = SequentialBuilder::new()
+        .add(layer)
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
 
     let x: Tensor = Array::from_shape_vec((1, 2), vec![0.0f32, 1.0])
         .unwrap()
@@ -151,9 +161,10 @@ fn dense_scaled_identity_value_check_and_round_trip() {
     let fresh = round_trip(
         &model,
         || {
-            let mut m = Sequential::new();
-            m.add(Dense::new(2, 2, Linear::new()).unwrap());
-            m
+            SequentialBuilder::new()
+                .add(Dense::new(2, Linear::new()).unwrap())
+                .build(&Shape::known(&[2, 2]))
+                .unwrap()
         },
         tmp.path(),
     );
@@ -167,13 +178,16 @@ fn dense_scaled_identity_value_check_and_round_trip() {
 fn dense_zero_weights_bias_only_value_check_and_round_trip() {
     let tmp = TempFile::new("dense_zero_w");
 
-    let mut layer = Dense::new(2, 3, Linear::new()).unwrap();
+    let mut layer = Dense::new(3, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 2])).unwrap();
     let w = Array::zeros((2, 3));
     let b = Array::from_shape_vec((1, 3), vec![0.5f32, -0.5, 1.0]).unwrap();
     layer.set_weights(w, b).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(layer);
+    let model = SequentialBuilder::new()
+        .add(layer)
+        .build(&Shape::known(&[2, 2]))
+        .unwrap();
 
     let x: Tensor = Array::from_shape_vec((2, 2), vec![100.0f32, -200.0, 0.0, 99.0])
         .unwrap()
@@ -190,9 +204,10 @@ fn dense_zero_weights_bias_only_value_check_and_round_trip() {
     let fresh = round_trip(
         &model,
         || {
-            let mut m = Sequential::new();
-            m.add(Dense::new(2, 3, Linear::new()).unwrap());
-            m
+            SequentialBuilder::new()
+                .add(Dense::new(3, Linear::new()).unwrap())
+                .build(&Shape::known(&[2, 2]))
+                .unwrap()
         },
         tmp.path(),
     );
@@ -206,10 +221,11 @@ fn dense_two_layer_trained_round_trip() {
     let tmp = TempFile::new("dense2");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(Dense::new(4, 3, Linear::new()).unwrap())
-            .add(Dense::new(3, 2, Linear::new()).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(Dense::new(3, Linear::new()).unwrap())
+            .add(Dense::new(2, Linear::new()).unwrap())
+            .build(&Shape::known(&[2, 4]))
+            .unwrap()
     };
 
     let mut model = make_arch();
@@ -239,9 +255,10 @@ fn conv1d_round_trip() {
     let tmp = TempFile::new("conv1d");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(Conv1D::new(2, 2, vec![1, 5, 1], 1, Linear::new()).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(Conv1D::new(2, 2, 1, Linear::new()).unwrap())
+            .build(&Shape::known(&[1, 5, 1]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -262,9 +279,10 @@ fn conv2d_round_trip() {
     let tmp = TempFile::new("conv2d");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(Conv2D::new(2, (2, 2), vec![1, 4, 4, 1], (1, 1), Linear::new()).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(Conv2D::new(2, (2, 2), (1, 1), Linear::new()).unwrap())
+            .build(&Shape::known(&[1, 4, 4, 1]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -288,9 +306,10 @@ fn conv3d_round_trip() {
     let tmp = TempFile::new("conv3d");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(Conv3D::new(2, (2, 2, 2), vec![1, 3, 3, 3, 1], (1, 1, 1), Linear::new()).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(Conv3D::new(2, (2, 2, 2), (1, 1, 1), Linear::new()).unwrap())
+            .build(&Shape::known(&[1, 3, 3, 3, 1]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -314,9 +333,10 @@ fn depthwise_conv2d_round_trip() {
     let tmp = TempFile::new("depthwise_conv2d");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(DepthwiseConv2D::new((2, 2), vec![1, 4, 4, 2], (1, 1), Linear::new()).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(DepthwiseConv2D::new((2, 2), (1, 1), Linear::new()).unwrap())
+            .build(&Shape::known(&[1, 4, 4, 2]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -344,14 +364,15 @@ fn depthwise_conv1d_round_trip() {
     let tmp = TempFile::new("depthwise_conv1d");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(
-            DepthwiseConv1D::new(3, vec![1, 8, 2], 1, Linear::new())
-                .unwrap()
-                .with_depth_multiplier(2)
-                .unwrap(),
-        );
-        m
+        SequentialBuilder::new()
+            .add(
+                DepthwiseConv1D::new(3, 1, Linear::new())
+                    .unwrap()
+                    .with_depth_multiplier(2)
+                    .unwrap(),
+            )
+            .build(&Shape::known(&[1, 8, 2]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -378,13 +399,14 @@ fn separable_conv1d_round_trip() {
     let tmp = TempFile::new("separable_conv1d");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(
-            SeparableConv1D::new(3, 3, vec![1, 8, 2], 1, 2, Linear::new())
-                .unwrap()
-                .with_padding(PaddingType::Same),
-        );
-        m
+        SequentialBuilder::new()
+            .add(
+                SeparableConv1D::new(3, 3, 1, 2, Linear::new())
+                    .unwrap()
+                    .with_padding(PaddingType::Same),
+            )
+            .build(&Shape::known(&[1, 8, 2]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -408,9 +430,10 @@ fn conv1d_transpose_round_trip() {
     let tmp = TempFile::new("conv1d_transpose");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(Conv1DTranspose::new(2, 3, vec![1, 4, 1], 2, Linear::new()).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(Conv1DTranspose::new(2, 3, 2, Linear::new()).unwrap())
+            .build(&Shape::known(&[1, 4, 1]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -434,9 +457,10 @@ fn conv2d_transpose_round_trip() {
     let tmp = TempFile::new("conv2d_transpose");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(Conv2DTranspose::new(2, (3, 3), vec![1, 3, 3, 2], (2, 2), Linear::new()).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(Conv2DTranspose::new(2, (3, 3), (2, 2), Linear::new()).unwrap())
+            .build(&Shape::known(&[1, 3, 3, 2]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -460,12 +484,10 @@ fn conv3d_transpose_round_trip() {
     let tmp = TempFile::new("conv3d_transpose");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(
-            Conv3DTranspose::new(2, (2, 2, 2), vec![1, 2, 2, 2, 1], (1, 1, 1), Linear::new())
-                .unwrap(),
-        );
-        m
+        SequentialBuilder::new()
+            .add(Conv3DTranspose::new(2, (2, 2, 2), (1, 1, 1), Linear::new()).unwrap())
+            .build(&Shape::known(&[1, 2, 2, 2, 1]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -489,9 +511,10 @@ fn separable_conv2d_round_trip() {
     let tmp = TempFile::new("separable_conv2d");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(SeparableConv2D::new(2, (2, 2), vec![1, 4, 4, 2], (1, 1), 1, Linear::new()).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(SeparableConv2D::new(2, (2, 2), (1, 1), 1, Linear::new()).unwrap())
+            .build(&Shape::known(&[1, 4, 4, 2]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -515,9 +538,10 @@ fn simple_rnn_round_trip() {
     let tmp = TempFile::new("simple_rnn");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(SimpleRNN::new(2, 3, Tanh::new()).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(SimpleRNN::new(3, Tanh::new()).unwrap())
+            .build(&Shape::known(&[1, 3, 2]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -538,9 +562,10 @@ fn lstm_round_trip() {
     let tmp = TempFile::new("lstm");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(LSTM::new(2, 3, Tanh::new()).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(LSTM::new(3, Tanh::new()).unwrap())
+            .build(&Shape::known(&[1, 3, 2]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -561,9 +586,10 @@ fn gru_round_trip() {
     let tmp = TempFile::new("gru");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(GRU::new(2, 3, Tanh::new()).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(GRU::new(3, Tanh::new()).unwrap())
+            .build(&Shape::known(&[1, 3, 2]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -585,11 +611,12 @@ fn embedding_trained_round_trip_preserves_the_lookup_table() {
     let tmp = TempFile::new("embedding");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(Embedding::new(6, 4).unwrap().with_random_state(21))
-            .add(Flatten::new(vec![2, 3, 4]).unwrap())
-            .add(Dense::new(12, 1, Linear::new()).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(Embedding::new(6, 4).unwrap().with_random_state(21))
+            .add(Flatten::new())
+            .add(Dense::new(1, Linear::new()).unwrap())
+            .build(&Shape::known(&[2, 3]))
+            .unwrap()
     };
 
     let x: Tensor = Array::from_shape_vec((2, 3), vec![1.0f32, 5.0, 0.0, 3.0, 3.0, 2.0])
@@ -619,11 +646,12 @@ fn p_relu_trained_round_trip_preserves_the_slopes() {
     let tmp = TempFile::new("p_relu");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(Dense::new(3, 3, Linear::new()).unwrap())
-            .add(PReLU::new(vec![4, 3], 0.25).unwrap())
-            .add(Dense::new(3, 1, Linear::new()).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(Dense::new(3, Linear::new()).unwrap())
+            .add(PReLU::new(0.25).unwrap())
+            .add(Dense::new(1, Linear::new()).unwrap())
+            .build(&Shape::known(&[4, 3]))
+            .unwrap()
     };
 
     let x: Tensor = Array::from_shape_vec(
@@ -659,21 +687,23 @@ fn p_relu_shared_axes_round_trip_keeps_the_slope_rank() {
     let tmp = TempFile::new("p_relu_shared");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(
-            PReLU::new(vec![2, 3, 3, 2], 0.3)
-                .unwrap()
-                .with_shared_axes(vec![1, 2])
-                .unwrap(),
-        );
-        m
+        SequentialBuilder::new()
+            .add(
+                PReLU::new(0.3)
+                    .unwrap()
+                    .with_shared_axes(vec![1, 2])
+                    .unwrap(),
+            )
+            .build(&Shape::known(&[2, 3, 3, 2]))
+            .unwrap()
     };
 
     // The saved model carries injected slopes, so a fresh model cannot match it by accident
-    let mut injected = PReLU::new(vec![2, 3, 3, 2], 0.3)
+    let mut injected = PReLU::new(0.3)
         .unwrap()
         .with_shared_axes(vec![1, 2])
         .unwrap();
+    injected.build(&Shape::known(&[2, 3, 3, 2])).unwrap();
     injected
         .set_weights(
             Array::from_shape_vec((1, 1, 2), vec![0.4f32, -0.6])
@@ -681,8 +711,10 @@ fn p_relu_shared_axes_round_trip_keeps_the_slope_rank() {
                 .into_dyn(),
         )
         .unwrap();
-    let mut model = Sequential::new();
-    model.add(injected);
+    let model = SequentialBuilder::new()
+        .add(injected)
+        .build(&Shape::known(&[2, 3, 3, 2]))
+        .unwrap();
     assert_eq!(
         model
             .weight("0.alpha")
@@ -727,9 +759,10 @@ fn batch_normalization_trained_round_trip_preserves_running_stats() {
     .into_dyn();
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(BatchNormalization::new(vec![4, 3], 0.9, 1e-5).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(BatchNormalization::new(0.9, 1e-5).unwrap())
+            .build(&Shape::known(&[4, 3]))
+            .unwrap()
     };
 
     // Train a copy to move running stats away from their defaults
@@ -767,9 +800,10 @@ fn batch_normalization_predict_is_deterministic_after_round_trip() {
     .into_dyn();
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(BatchNormalization::new(vec![4, 3], 0.9, 1e-5).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(BatchNormalization::new(0.9, 1e-5).unwrap())
+            .build(&Shape::known(&[4, 3]))
+            .unwrap()
     };
 
     let mut trainable = make_arch();
@@ -795,9 +829,10 @@ fn layer_normalization_round_trip() {
     let tmp = TempFile::new("layer_norm");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(LayerNormalization::new(vec![2, 4], 1e-5).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(LayerNormalization::new(1e-5).unwrap())
+            .build(&Shape::known(&[2, 4]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -821,9 +856,10 @@ fn group_normalization_round_trip() {
     let tmp = TempFile::new("group_norm");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(GroupNormalization::new(vec![1, 4, 4], 2, 1e-5).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(GroupNormalization::new(2, 1e-5).unwrap())
+            .build(&Shape::known(&[1, 4, 4]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -847,9 +883,10 @@ fn instance_normalization_round_trip() {
     let tmp = TempFile::new("instance_norm");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(InstanceNormalization::new(vec![1, 3, 4], 1e-5).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(InstanceNormalization::new(1e-5).unwrap())
+            .build(&Shape::known(&[1, 3, 4]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -874,12 +911,13 @@ fn mixed_model_with_dropout_round_trip() {
     let tmp = TempFile::new("mixed_dropout");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(Dense::new(3, 4, Linear::new()).unwrap())
+        SequentialBuilder::new()
+            .add(Dense::new(4, Linear::new()).unwrap())
             // empty input_shape => Dropout skips its shape validator at runtime
-            .add(Dropout::new(0.3, vec![]).unwrap())
-            .add(Dense::new(4, 2, Linear::new()).unwrap());
-        m
+            .add(Dropout::new(0.3).unwrap())
+            .add(Dense::new(2, Linear::new()).unwrap())
+            .build(&Shape::known(&[1, 3]))
+            .unwrap()
     };
 
     let model = make_arch();
@@ -901,11 +939,12 @@ fn mixed_model_trained_round_trip() {
     let tmp = TempFile::new("mixed_trained");
 
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(Dense::new(3, 4, Linear::new()).unwrap())
-            .add(Dropout::new(0.3, vec![]).unwrap())
-            .add(Dense::new(4, 2, Linear::new()).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(Dense::new(4, Linear::new()).unwrap())
+            .add(Dropout::new(0.3).unwrap())
+            .add(Dense::new(2, Linear::new()).unwrap())
+            .build(&Shape::known(&[2, 3]))
+            .unwrap()
     };
 
     let mut model = make_arch();
@@ -934,8 +973,10 @@ fn mixed_model_trained_round_trip() {
 /// Nonexistent file gives Error::Io(IoError::Std)
 #[test]
 fn load_from_nonexistent_file_gives_io_error() {
-    let mut model = Sequential::new();
-    model.add(Dense::new(2, 2, Linear::new()).unwrap());
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(2, Linear::new()).unwrap())
+        .build(&Shape::known(&[2, 2]))
+        .unwrap();
 
     let result = model.load_from_path("/tmp/this_file_definitely_does_not_exist_rustyml_99999.bin");
     match result {
@@ -953,8 +994,10 @@ fn load_from_invalid_data_gives_serialization_error() {
     bytes.extend_from_slice(b"\xff\xff\xff not valid postcard data");
     std::fs::write(tmp.path(), &bytes).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(Dense::new(2, 2, Linear::new()).unwrap());
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(2, Linear::new()).unwrap())
+        .build(&Shape::known(&[2, 2]))
+        .unwrap();
 
     let result = model.load_from_path(tmp.path());
     match result {
@@ -969,15 +1012,18 @@ fn load_layer_count_mismatch_gives_structure_error() {
     let tmp = TempFile::new("count_mismatch");
 
     // Save a 1-layer model
-    let mut model_1 = Sequential::new();
-    model_1.add(Dense::new(2, 2, Linear::new()).unwrap());
+    let model_1 = SequentialBuilder::new()
+        .add(Dense::new(2, Linear::new()).unwrap())
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
     model_1.save_to_path(tmp.path()).unwrap();
 
     // Try to load into a 2-layer model
-    let mut model_2 = Sequential::new();
-    model_2
-        .add(Dense::new(2, 2, Linear::new()).unwrap())
-        .add(Dense::new(2, 2, Linear::new()).unwrap());
+    let mut model_2 = SequentialBuilder::new()
+        .add(Dense::new(2, Linear::new()).unwrap())
+        .add(Dense::new(2, Linear::new()).unwrap())
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
 
     let result = model_2.load_from_path(tmp.path());
     match result {
@@ -992,12 +1038,16 @@ fn load_layer_count_mismatch_gives_structure_error() {
 fn load_layer_type_mismatch_gives_structure_error() {
     let tmp = TempFile::new("type_mismatch");
 
-    let mut dense_model = Sequential::new();
-    dense_model.add(Dense::new(3, 3, Linear::new()).unwrap());
+    let dense_model = SequentialBuilder::new()
+        .add(Dense::new(3, Linear::new()).unwrap())
+        .build(&Shape::known(&[1, 3]))
+        .unwrap();
     dense_model.save_to_path(tmp.path()).unwrap();
 
-    let mut conv_model = Sequential::new();
-    conv_model.add(Conv1D::new(2, 2, vec![1, 5, 1], 1, Linear::new()).unwrap());
+    let mut conv_model = SequentialBuilder::new()
+        .add(Conv1D::new(2, 2, 1, Linear::new()).unwrap())
+        .build(&Shape::known(&[1, 5, 1]))
+        .unwrap();
 
     let result = conv_model.load_from_path(tmp.path());
     match result {
@@ -1015,13 +1065,17 @@ fn load_layer_type_mismatch_gives_structure_error() {
 fn load_refuses_a_layer_type_that_no_longer_matches() {
     let tmp = TempFile::new("norm_type_mismatch");
 
-    let mut saved = Sequential::new();
-    saved.add(InstanceNormalization::new(vec![2, 4, 4, 3], 1e-5).unwrap());
+    let saved = SequentialBuilder::new()
+        .add(InstanceNormalization::new(1e-5).unwrap())
+        .build(&Shape::known(&[2, 4, 3]))
+        .unwrap();
     saved.save_to_path(tmp.path()).unwrap();
 
     // The same 2 arrays, under the same 2 names, at the same extent
-    let mut target = Sequential::new();
-    target.add(GroupNormalization::new(vec![2, 4, 4, 3], 3, 1e-5).unwrap());
+    let mut target = SequentialBuilder::new()
+        .add(GroupNormalization::new(3, 1e-5).unwrap())
+        .build(&Shape::known(&[2, 4, 3]))
+        .unwrap();
     assert_eq!(target.weight_paths(), vec!["0.gamma", "0.beta"]);
 
     match target.load_from_path(tmp.path()) {
@@ -1043,12 +1097,16 @@ fn load_refuses_a_layer_type_that_no_longer_matches() {
 fn load_weight_shape_mismatch_gives_structure_error() {
     let tmp = TempFile::new("shape_mismatch");
 
-    let mut model_small = Sequential::new();
-    model_small.add(Dense::new(2, 2, Linear::new()).unwrap());
+    let model_small = SequentialBuilder::new()
+        .add(Dense::new(2, Linear::new()).unwrap())
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
     model_small.save_to_path(tmp.path()).unwrap();
 
-    let mut model_big = Sequential::new();
-    model_big.add(Dense::new(3, 3, Linear::new()).unwrap());
+    let mut model_big = SequentialBuilder::new()
+        .add(Dense::new(3, Linear::new()).unwrap())
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
 
     let result = model_big.load_from_path(tmp.path());
     match result {
@@ -1075,8 +1133,10 @@ fn load_wrong_magic_gives_unsupported_format_error() {
     };
     std::fs::write(tmp.path(), postcard::to_allocvec(&headerless).unwrap()).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(Dense::new(2, 2, Linear::new()).unwrap());
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(2, Linear::new()).unwrap())
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
 
     match model.load_from_path(tmp.path()) {
         Err(Error::Io(IoError::UnsupportedModelFormat(_))) => {}
@@ -1090,8 +1150,10 @@ fn load_wrong_magic_gives_unsupported_format_error() {
 fn load_wrong_format_version_gives_unsupported_format_error() {
     let tmp = TempFile::new("wrong_version");
 
-    let mut saved = Sequential::new();
-    saved.add(Dense::new(2, 2, Linear::new()).unwrap());
+    let saved = SequentialBuilder::new()
+        .add(Dense::new(2, Linear::new()).unwrap())
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
     saved.save_to_path(tmp.path()).unwrap();
 
     // Replace only the header, keeping the body byte for byte
@@ -1101,8 +1163,10 @@ fn load_wrong_format_version_gives_unsupported_format_error() {
     bumped.extend_from_slice(body);
     std::fs::write(tmp.path(), &bumped).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(Dense::new(2, 2, Linear::new()).unwrap());
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(2, Linear::new()).unwrap())
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
 
     match model.load_from_path(tmp.path()) {
         Err(Error::Io(IoError::UnsupportedModelFormat(_))) => {}
@@ -1120,8 +1184,10 @@ fn load_wrong_format_version_gives_unsupported_format_error() {
 fn load_older_format_version_names_the_version_it_found_and_the_one_it_wants() {
     let tmp = TempFile::new("older_version");
 
-    let mut saved = Sequential::new();
-    saved.add(Dense::new(2, 2, Linear::new()).unwrap());
+    let saved = SequentialBuilder::new()
+        .add(Dense::new(2, Linear::new()).unwrap())
+        .build(&Shape::known(&[2, 2]))
+        .unwrap();
     saved.save_to_path(tmp.path()).unwrap();
 
     // Keep the body, and put the version of the format before this one in the header
@@ -1131,8 +1197,10 @@ fn load_older_format_version_names_the_version_it_found_and_the_one_it_wants() {
     older.extend_from_slice(body);
     std::fs::write(tmp.path(), &older).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(Dense::new(2, 2, Linear::new()).unwrap());
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(2, Linear::new()).unwrap())
+        .build(&Shape::known(&[2, 2]))
+        .unwrap();
 
     match model.load_from_path(tmp.path()) {
         Err(Error::Io(IoError::UnsupportedModelFormat(message))) => {
@@ -1159,7 +1227,8 @@ fn repeated_layer_type_round_trips_by_position() {
 
     // Every layer holds the same shapes, and its own values
     let injected = |base: f32| {
-        let mut layer = Dense::new(2, 2, Linear::new()).unwrap();
+        let mut layer = Dense::new(2, Linear::new()).unwrap();
+        layer.build(&Shape::known(&[1, 2])).unwrap();
         layer
             .set_weights(
                 Array::from_shape_vec((2, 2), vec![base, base + 1.0, base + 2.0, base + 3.0])
@@ -1170,18 +1239,20 @@ fn repeated_layer_type_round_trips_by_position() {
         layer
     };
     let make_arch = || {
-        let mut m = Sequential::new();
-        m.add(Dense::new(2, 2, Linear::new()).unwrap())
-            .add(Dense::new(2, 2, Linear::new()).unwrap())
-            .add(Dense::new(2, 2, Linear::new()).unwrap());
-        m
+        SequentialBuilder::new()
+            .add(Dense::new(2, Linear::new()).unwrap())
+            .add(Dense::new(2, Linear::new()).unwrap())
+            .add(Dense::new(2, Linear::new()).unwrap())
+            .build(&Shape::known(&[1, 2]))
+            .unwrap()
     };
 
-    let mut model = Sequential::new();
-    model
+    let model = SequentialBuilder::new()
         .add(injected(1.0))
         .add(injected(10.0))
-        .add(injected(100.0));
+        .add(injected(100.0))
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
     assert_eq!(
         model.weight_paths(),
         vec![
@@ -1215,19 +1286,21 @@ fn repeated_layer_type_round_trips_by_position() {
 fn load_partial_reports_applied_missing_and_unused() {
     let tmp = TempFile::new("partial");
 
-    let mut saved = Sequential::new();
-    saved
-        .add(Dense::new(2, 3, Linear::new()).unwrap())
-        .add(Dense::new(3, 4, Linear::new()).unwrap())
-        .add(InstanceNormalization::new(vec![2, 4, 4, 3], 1e-5).unwrap())
-        .add(Dense::new(4, 1, Linear::new()).unwrap());
+    let saved = SequentialBuilder::new()
+        .add(Dense::new(3, Linear::new()).unwrap())
+        .add(Dense::new(4, Linear::new()).unwrap())
+        .add(InstanceNormalization::new(1e-5).unwrap())
+        .add(Dense::new(1, Linear::new()).unwrap())
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
     saved.save_to_path(tmp.path()).unwrap();
 
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(2, 3, Linear::new()).unwrap())
-        .add(Dense::new(3, 5, Linear::new()).unwrap())
-        .add(GroupNormalization::new(vec![2, 4, 4, 3], 3, 1e-5).unwrap());
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(3, Linear::new()).unwrap())
+        .add(Dense::new(5, Linear::new()).unwrap())
+        .add(GroupNormalization::new(5, 1e-5).unwrap())
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
 
     let report = model.load_partial_from_path(tmp.path()).unwrap();
     assert_eq!(report.applied, vec!["0.kernel", "0.bias"]);
@@ -1297,29 +1370,33 @@ fn layer_bits(model: &Sequential, scope: usize) -> Vec<(String, Vec<u32>)> {
 fn a_refused_load_writes_no_array_of_the_layers_before_the_mismatch() {
     let tmp = TempFile::new("atomic_refusal_across_layers");
 
-    let mut saved = Sequential::new();
-    let mut saved_head = Dense::new(3, 2, Linear::new()).unwrap();
+    let mut saved_head = Dense::new(2, Linear::new()).unwrap();
+    saved_head.build(&Shape::known(&[1, 3])).unwrap();
     saved_head
         .set_weights(
             Array::from_shape_vec((3, 2), vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap(),
             Array::from_shape_vec((1, 2), vec![7.0f32, 8.0]).unwrap(),
         )
         .unwrap();
-    saved
+    let saved = SequentialBuilder::new()
         .add(saved_head)
-        .add(Dense::new(2, 4, Linear::new()).unwrap());
+        .add(Dense::new(4, Linear::new()).unwrap())
+        .build(&Shape::known(&[1, 3]))
+        .unwrap();
     saved.save_to_path(tmp.path()).unwrap();
 
-    let mut model = Sequential::new();
-    let mut head = Dense::new(3, 2, Linear::new()).unwrap();
+    let mut head = Dense::new(2, Linear::new()).unwrap();
+    head.build(&Shape::known(&[1, 3])).unwrap();
     head.set_weights(
         Array::from_shape_vec((3, 2), vec![-1.0f32, -2.0, -3.0, -4.0, -5.0, -6.0]).unwrap(),
         Array::from_shape_vec((1, 2), vec![-7.0f32, -8.0]).unwrap(),
     )
     .unwrap();
-    model
+    let mut model = SequentialBuilder::new()
         .add(head)
-        .add(Dense::new(2, 5, Linear::new()).unwrap());
+        .add(Dense::new(5, Linear::new()).unwrap())
+        .build(&Shape::known(&[1, 3]))
+        .unwrap();
 
     // The 2 sides hold other values at position 0, so a write there really shows
     let before = layer_bits(&model, 0);
@@ -1363,15 +1440,18 @@ fn a_refused_load_writes_no_array_of_the_layers_before_the_mismatch() {
 fn a_refused_load_writes_no_earlier_array_of_the_layer_that_disagrees() {
     let tmp = TempFile::new("atomic_refusal_within_a_layer");
 
-    let mut model = Sequential::new();
-    let mut layer = Dense::new(3, 2, Linear::new()).unwrap();
+    let mut layer = Dense::new(2, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 3])).unwrap();
     layer
         .set_weights(
             Array::from_shape_vec((3, 2), vec![-1.0f32, -2.0, -3.0, -4.0, -5.0, -6.0]).unwrap(),
             Array::from_shape_vec((1, 2), vec![-7.0f32, -8.0]).unwrap(),
         )
         .unwrap();
-    model.add(layer);
+    let mut model = SequentialBuilder::new()
+        .add(layer)
+        .build(&Shape::known(&[1, 3]))
+        .unwrap();
 
     let file = ModelCheckpoint {
         magic: MODEL_MAGIC,
@@ -1414,5 +1494,108 @@ fn a_refused_load_writes_no_earlier_array_of_the_layer_that_disagrees() {
         layer_bits(&model, 0),
         before,
         "the refusal wrote the kernel before it read the bias, so a load is not atomic"
+    );
+}
+
+/// A saved model reloads through the build path: construct, build, load
+///
+/// The layers of the target hold their arrays because the build allocated them, and the file
+/// carries the shape each layer was built for. The load compares that shape, so the round trip
+/// pins the build step as well as the values
+#[test]
+fn a_saved_model_reloads_through_the_build_path() {
+    let tmp = TempFile::new("build_path_round_trip");
+    let shape = Shape::known(&[2, 3]);
+
+    let mut source = SequentialBuilder::new()
+        .add(Dense::new(4, Linear::new()).unwrap().with_random_state(19))
+        .add(Dense::new(2, Linear::new()).unwrap().with_random_state(23))
+        .build(&shape)
+        .unwrap();
+    source.compile(
+        SGD::new(0.05, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
+
+    let x: Tensor = Array::from_shape_vec((2, 3), vec![0.5f32, -1.0, 1.5, -0.5, 1.0, -1.5])
+        .unwrap()
+        .into_dyn();
+    let y: Tensor = Array::from_shape_vec((2, 2), vec![1.0f32, 0.0, 0.0, 1.0])
+        .unwrap()
+        .into_dyn();
+    source.fit(&x, &y, 3).unwrap();
+    let expected = source.predict(&x).unwrap();
+    source.save_to_path(tmp.path()).unwrap();
+
+    // The target is a fresh stack of the same architecture. It holds every array only because
+    // the build allocated them
+    let mut target = SequentialBuilder::new()
+        .add(Dense::new(4, Linear::new()).unwrap())
+        .add(Dense::new(2, Linear::new()).unwrap())
+        .build(&shape)
+        .unwrap();
+    target.load_from_path(tmp.path()).unwrap();
+
+    assert_allclose(&target.predict(&x).unwrap(), &expected, 0.0_f32);
+}
+
+/// A file written by a model built for another input shape does not load
+///
+/// The 2 models hold arrays of the same names and the same extents, because a convolution
+/// kernel reads the channel count alone and never a spatial extent. The build shape in the
+/// file is what tells them apart
+#[test]
+fn a_checkpoint_of_another_build_shape_is_refused() {
+    let tmp = TempFile::new("build_shape_mismatch");
+
+    let source = SequentialBuilder::new()
+        .add(Conv2D::new(3, (2, 2), (1, 1), Linear::new()).unwrap())
+        .build(&Shape::known(&[1, 4, 4, 2]))
+        .unwrap();
+    source.save_to_path(tmp.path()).unwrap();
+
+    // The same kernel extents, over a larger image
+    let mut target = SequentialBuilder::new()
+        .add(Conv2D::new(3, (2, 2), (1, 1), Linear::new()).unwrap())
+        .build(&Shape::known(&[1, 6, 6, 2]))
+        .unwrap();
+    assert_eq!(target.weight("0.kernel").unwrap().shape(), &[2, 2, 2, 3]);
+
+    match target.load_from_path(tmp.path()) {
+        Err(Error::Io(IoError::ModelStructureMismatch(message))) => {
+            assert!(message.contains("layer 0"), "{message}");
+            assert!(message.contains("built for input shape"), "{message}");
+        }
+        other => panic!("expected ModelStructureMismatch, got {other:?}"),
+    }
+
+    // The lenient path skips the layer instead of failing, and reports every path of both sides
+    let report = target.load_partial_from_path(tmp.path()).unwrap();
+    assert!(report.applied.is_empty(), "{report:?}");
+    assert_eq!(report.missing, vec!["0.kernel", "0.bias"]);
+    assert_eq!(report.unused, vec!["0.kernel", "0.bias"]);
+}
+
+/// The batch extent is not part of a build shape, so a checkpoint moves between batch sizes
+#[test]
+fn a_checkpoint_moves_between_2_batch_sizes() {
+    let tmp = TempFile::new("build_shape_free_batch");
+
+    let source = SequentialBuilder::new()
+        .add(Conv2D::new(3, (2, 2), (1, 1), Linear::new()).unwrap())
+        .build(&Shape::known(&[1, 4, 4, 2]))
+        .unwrap();
+    source.save_to_path(tmp.path()).unwrap();
+
+    let mut target = SequentialBuilder::new()
+        .add(Conv2D::new(3, (2, 2), (1, 1), Linear::new()).unwrap())
+        .build(&Shape::known(&[8, 4, 4, 2]))
+        .unwrap();
+    target.load_from_path(tmp.path()).unwrap();
+
+    assert_allclose(
+        &target.weight("0.kernel").unwrap(),
+        &source.weight("0.kernel").unwrap(),
+        0.0_f32,
     );
 }

@@ -10,6 +10,7 @@
 //! channels across every spatial position.
 
 use ndarray::Array;
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::regularization::normalization::group_normalization::GroupNormalization;
 use rustyml::neural_network::layers::regularization::normalization::instance_normalization::InstanceNormalization;
@@ -34,7 +35,7 @@ fn param1d(vals: &[f32]) -> Tensor {
 #[test]
 fn group_norm_single_group_forward_values() {
     // shape [batch=1, positions=3, channels=2]. 1 group spans both channels.
-    let mut gn = GroupNormalization::new(vec![1, 3, 2], 1, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(1, 1e-5).unwrap();
 
     // Channels-last row-major: position p holds [channel0, channel1]
     let input = Array::from_shape_vec((1, 3, 2), vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0])
@@ -65,7 +66,7 @@ fn group_norm_single_group_forward_values() {
 #[test]
 fn group_norm_two_groups_forward_values() {
     // shape [batch=1, positions=2, channels=4]. 2 groups of 2 channels each.
-    let mut gn = GroupNormalization::new(vec![1, 2, 4], 2, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
 
     // position0 = [1, 2, 5, 6], position1 = [3, 4, 7, 8].
     // Group 0 (channels 0-1) holds {1, 2, 3, 4}, and group 1 (channels 2-3) holds {5, 6, 7, 8}.
@@ -100,7 +101,7 @@ fn group_norm_two_groups_forward_values() {
 #[test]
 fn group_norm_two_batches_forward_values() {
     // shape [batch=2, positions=3, channels=4]. 2 groups of 2 channels each.
-    let mut gn = GroupNormalization::new(vec![2, 3, 4], 2, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
 
     // Per channel: batch0 has ch0=[1,2,3], ch1=[4,5,6], ch2=[7,8,9], ch3=[10,11,12].
     // batch1 is the same, plus 1. Channels-last stores position p as
@@ -147,7 +148,8 @@ fn group_norm_two_batches_forward_values() {
 /// GN applies custom per-channel gamma and beta after normalization
 #[test]
 fn group_norm_custom_gamma_beta_forward_values() {
-    let mut gn = GroupNormalization::new(vec![1, 2, 4], 2, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
+    gn.build(&Shape::known(&[1, 2, 4])).unwrap();
 
     gn.set_weights(
         param1d(&[2.0, 3.0, 4.0, 5.0]),
@@ -188,7 +190,7 @@ fn group_norm_custom_gamma_beta_forward_values() {
 #[test]
 fn group_norm_constant_input_yields_zero_output() {
     // [batch=1, positions=3, channels=4], 1 group over all 4 channels
-    let mut gn = GroupNormalization::new(vec![1, 3, 4], 1, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(1, 1e-5).unwrap();
 
     let input = Array::from_elem((1, 3, 4), 5.0_f32).into_dyn();
     let output = gn.forward(&input).unwrap();
@@ -202,7 +204,7 @@ fn group_norm_constant_input_yields_zero_output() {
 #[test]
 fn group_norm_channel_axis_is_last() {
     // [batch=1, positions=2, channels=4], 2 groups of 2 channels
-    let mut gn = GroupNormalization::new(vec![1, 2, 4], 2, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
 
     // position0 = [2, 4, 100, 200], position1 = [6, 8, 300, 400]
     let input = Array::from_shape_vec(
@@ -243,7 +245,8 @@ fn group_norm_channel_axis_is_last() {
 /// running mean/var and no mode dependence
 #[test]
 fn group_norm_predict_equals_forward() {
-    let mut gn = GroupNormalization::new(vec![1, 4, 4], 2, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
+    gn.build(&Shape::known(&[1, 4, 4])).unwrap();
     gn.set_training_if_mode_dependent(false);
 
     let input = Array::from_shape_vec(
@@ -273,7 +276,7 @@ fn group_norm_constructor_invalid_parameter_errors() {
     ];
 
     for (num_groups, epsilon, desc) in cases {
-        let err = GroupNormalization::new(vec![1, 4, 4], num_groups, epsilon).unwrap_err();
+        let err = GroupNormalization::new(num_groups, epsilon).unwrap_err();
         assert!(
             matches!(err, Error::InvalidParameter { .. }),
             "expected InvalidParameter for {}, got {:?}",
@@ -283,12 +286,14 @@ fn group_norm_constructor_invalid_parameter_errors() {
     }
 }
 
+/// `GroupNormalization` takes no shape now, so the rank rule moved to the build step
 #[test]
 fn group_norm_error_empty_input_shape() {
-    let err = GroupNormalization::new(vec![], 2, 1e-5).unwrap_err();
+    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
+    let err = gn.build(&Shape::known(&[])).unwrap_err();
     assert!(
-        matches!(err, Error::EmptyInput(_)),
-        "expected EmptyInput, got {:?}",
+        matches!(err, Error::InvalidInput(_)),
+        "expected InvalidInput, got {:?}",
         err
     );
 }
@@ -297,7 +302,7 @@ fn group_norm_error_empty_input_shape() {
 #[test]
 fn group_norm_error_channels_not_divisible_by_groups_at_forward() {
     // Trailing axis is the channel axis: 3 channels, 2 groups, and 3 % 2 != 0
-    let mut gn = GroupNormalization::new(vec![1, 4, 3], 2, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
     let input = Array::ones((1, 4, 3)).into_dyn();
     let err = gn.forward(&input).unwrap_err();
     assert!(
@@ -310,7 +315,7 @@ fn group_norm_error_channels_not_divisible_by_groups_at_forward() {
 /// `backward` before `forward` returns `NnError::ForwardPassNotRun`
 #[test]
 fn group_norm_error_backward_before_forward() {
-    let mut gn = GroupNormalization::new(vec![1, 4, 4], 2, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
     let grad = Array::ones((1, 4, 4)).into_dyn();
     let err = gn.backward(&grad).unwrap_err();
     assert!(
@@ -326,7 +331,8 @@ fn group_norm_error_backward_before_forward() {
 /// `set_weights` with a mismatched gamma shape fails with NnError::WeightShape
 #[test]
 fn group_norm_set_weights_shape_mismatch() {
-    let mut gn = GroupNormalization::new(vec![1, 4, 4], 2, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
+    gn.build(&Shape::known(&[1, 4, 4])).unwrap();
     // gamma should have shape [4] (the trailing channel axis) but shape [3] is passed
     let bad_gamma = param1d(&[1.0, 1.0, 1.0]);
     let beta = param1d(&[0.0, 0.0, 0.0, 0.0]);
@@ -344,7 +350,7 @@ fn group_norm_set_weights_shape_mismatch() {
 #[test]
 fn instance_norm_forward_values() {
     // [batch=1, positions=4, channels=2]
-    let mut inn = InstanceNormalization::new(vec![1, 4, 2], 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(1e-5).unwrap();
 
     // Channels-last: position p holds [ch0[p], ch1[p]], laying down ch0 = [1,2,3,4] and
     // ch1 = [5,6,7,8]
@@ -369,7 +375,8 @@ fn instance_norm_forward_values() {
 /// IN applies the per-channel affine scale-shift step (gamma, beta)
 #[test]
 fn instance_norm_custom_gamma_beta_forward_values() {
-    let mut inn = InstanceNormalization::new(vec![1, 4, 2], 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(1e-5).unwrap();
+    inn.build(&Shape::known(&[1, 4, 2])).unwrap();
     inn.set_weights(param1d(&[2.0, 3.0]), param1d(&[0.5, -0.5]))
         .unwrap();
 
@@ -419,7 +426,7 @@ fn instance_norm_multiple_batches_forward_values() {
     .unwrap()
     .into_dyn();
 
-    let mut inn = InstanceNormalization::new(vec![2, 3, 3], 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(1e-5).unwrap();
     let output = inn.forward(&input).unwrap();
 
     // Every instance is a unit-step ramp of 3 values, so var = ((-1)^2 + 0^2 + 1^2) / 3 = 2/3
@@ -447,7 +454,7 @@ fn instance_norm_multiple_batches_forward_values() {
 /// Constant input gives zero output (var=0, x_norm=0, beta=0)
 #[test]
 fn instance_norm_constant_input_yields_zero_output() {
-    let mut inn = InstanceNormalization::new(vec![2, 3, 4], 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(1e-5).unwrap();
     let input = Array::from_elem((2, 3, 4), 7.0_f32).into_dyn();
     let output = inn.forward(&input).unwrap();
     let expected = Array::zeros((2, 3, 4)).into_dyn();
@@ -459,7 +466,7 @@ fn instance_norm_constant_input_yields_zero_output() {
 #[test]
 fn instance_norm_channel_axis_is_last() {
     // [batch=1, positions=3, channels=2]: ch0 = [1,2,3], ch1 = [10,20,30]
-    let mut inn = InstanceNormalization::new(vec![1, 3, 2], 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(1e-5).unwrap();
 
     let input = Array::from_shape_vec((1, 3, 2), vec![1.0_f32, 10.0, 2.0, 20.0, 3.0, 30.0])
         .unwrap()
@@ -502,8 +509,8 @@ fn group_norm_full_groups_equals_instance_norm() {
     ];
     let input = Array::from_shape_vec((1, 4, 3), data).unwrap().into_dyn();
 
-    let mut gn = GroupNormalization::new(vec![1, 4, 3], 3, 1e-5).unwrap();
-    let mut inn = InstanceNormalization::new(vec![1, 4, 3], 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(3, 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(1e-5).unwrap();
 
     let out_gn = gn.forward(&input).unwrap();
     let out_in = inn.forward(&input).unwrap();
@@ -540,10 +547,12 @@ fn group_norm_full_groups_equals_instance_norm_with_affine() {
     let gamma = param1d(&[2.0, 0.5]);
     let beta = param1d(&[1.0, -1.0]);
 
-    let mut gn = GroupNormalization::new(vec![1, 4, 2], 2, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
+    gn.build(&Shape::known(&[1, 4, 2])).unwrap();
     gn.set_weights(gamma.clone(), beta.clone()).unwrap();
 
-    let mut inn = InstanceNormalization::new(vec![1, 4, 2], 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(1e-5).unwrap();
+    inn.build(&Shape::known(&[1, 4, 2])).unwrap();
     inn.set_weights(gamma, beta).unwrap();
 
     let out_gn = gn.forward(&input).unwrap();
@@ -556,7 +565,8 @@ fn group_norm_full_groups_equals_instance_norm_with_affine() {
 
 #[test]
 fn instance_norm_predict_equals_forward() {
-    let mut inn = InstanceNormalization::new(vec![2, 3, 4], 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(1e-5).unwrap();
+    inn.build(&Shape::known(&[2, 3, 4])).unwrap();
     inn.set_training_if_mode_dependent(false);
 
     let input = Array::from_shape_vec(
@@ -576,7 +586,8 @@ fn instance_norm_predict_equals_forward() {
 /// recomputed from the input regardless of mode
 #[test]
 fn instance_norm_predict_equals_forward_training_mode() {
-    let mut inn = InstanceNormalization::new(vec![1, 4, 2], 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(1e-5).unwrap();
+    inn.build(&Shape::known(&[1, 4, 2])).unwrap();
     inn.set_training_if_mode_dependent(true);
 
     let input = Array::from_shape_vec((1, 4, 2), vec![1.0_f32, 5.0, 2.0, 6.0, 3.0, 7.0, 4.0, 8.0])
@@ -598,7 +609,7 @@ fn instance_norm_constructor_invalid_parameter_errors() {
     let cases = [(0.0_f32, "epsilon=0.0"), (-1e-3_f32, "epsilon=-1e-3")];
 
     for (epsilon, desc) in cases {
-        let err = InstanceNormalization::new(vec![1, 3, 4], epsilon).unwrap_err();
+        let err = InstanceNormalization::new(epsilon).unwrap_err();
         assert!(
             matches!(err, Error::InvalidParameter { .. }),
             "expected InvalidParameter for {}, got {:?}",
@@ -608,12 +619,14 @@ fn instance_norm_constructor_invalid_parameter_errors() {
     }
 }
 
+/// `InstanceNormalization` takes no shape now, so the rank rule moved to the build step
 #[test]
 fn instance_norm_error_empty_input_shape() {
-    let err = InstanceNormalization::new(vec![], 1e-5).unwrap_err();
+    let mut inn = InstanceNormalization::new(1e-5).unwrap();
+    let err = inn.build(&Shape::known(&[])).unwrap_err();
     assert!(
-        matches!(err, Error::EmptyInput(_)),
-        "expected EmptyInput, got {:?}",
+        matches!(err, Error::InvalidInput(_)),
+        "expected InvalidInput, got {:?}",
         err
     );
 }
@@ -621,7 +634,7 @@ fn instance_norm_error_empty_input_shape() {
 /// `backward` before `forward` returns `NnError::ForwardPassNotRun`
 #[test]
 fn instance_norm_error_backward_before_forward() {
-    let mut inn = InstanceNormalization::new(vec![1, 3, 4], 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(1e-5).unwrap();
     let grad = Array::ones((1, 3, 4)).into_dyn();
     let err = inn.backward(&grad).unwrap_err();
     assert!(
@@ -637,7 +650,8 @@ fn instance_norm_error_backward_before_forward() {
 /// `set_weights` with a mismatched gamma shape fails with NnError::WeightShape
 #[test]
 fn instance_norm_set_weights_shape_mismatch() {
-    let mut inn = InstanceNormalization::new(vec![1, 4, 4], 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(1e-5).unwrap();
+    inn.build(&Shape::known(&[1, 4, 4])).unwrap();
     // gamma expects shape [4] (the trailing channel axis) but shape [3] is passed
     let bad_gamma = param1d(&[1.0, 1.0, 1.0]);
     let beta = param1d(&[0.0, 0.0, 0.0, 0.0]);
@@ -654,7 +668,7 @@ fn instance_norm_set_weights_shape_mismatch() {
 #[test]
 fn group_norm_output_shape_matches_input() {
     // [batch=2, positions=5, channels=6] split into 3 groups of 2 channels
-    let mut gn = GroupNormalization::new(vec![2, 5, 6], 3, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(3, 1e-5).unwrap();
     let input = Array::ones((2, 5, 6)).into_dyn();
     let output = gn.forward(&input).unwrap();
     assert_eq!(output.shape(), &[2, 5, 6]);
@@ -664,7 +678,7 @@ fn group_norm_output_shape_matches_input() {
 
 #[test]
 fn instance_norm_output_shape_matches_input() {
-    let mut inn = InstanceNormalization::new(vec![2, 4, 6], 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(1e-5).unwrap();
     let input = Array::ones((2, 4, 6)).into_dyn();
     let output = inn.forward(&input).unwrap();
     assert_eq!(output.shape(), &[2, 4, 6]);
@@ -675,7 +689,7 @@ fn instance_norm_output_shape_matches_input() {
 /// copy, compared with eps=0)
 #[test]
 fn group_norm_backward_eval_mode_passes_gradient_through() {
-    let mut gn = GroupNormalization::new(vec![1, 4, 4], 2, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
     gn.set_training_if_mode_dependent(false);
 
     // Forward in eval mode (still computes from-data stats), irrelevant to passthrough
@@ -703,7 +717,7 @@ fn group_norm_backward_eval_mode_passes_gradient_through() {
 /// (bit-exact copy, asserted with exact equality)
 #[test]
 fn instance_norm_backward_eval_mode_passes_gradient_through() {
-    let mut inn = InstanceNormalization::new(vec![1, 3, 4], 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(1e-5).unwrap();
     inn.set_training_if_mode_dependent(false);
 
     let input = Array::from_shape_vec(
@@ -731,7 +745,7 @@ fn instance_norm_backward_eval_mode_passes_gradient_through() {
 /// min-ndim guard
 #[test]
 fn group_norm_forward_below_3d_input_errors() {
-    let mut gn = GroupNormalization::new(vec![4, 8], 2, 1e-5).unwrap();
+    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
     let input = Array::ones((4, 8)).into_dyn();
     let err = gn.forward(&input).unwrap_err();
     assert!(
@@ -745,7 +759,7 @@ fn group_norm_forward_below_3d_input_errors() {
 /// the min-ndim guard
 #[test]
 fn instance_norm_forward_below_3d_input_errors() {
-    let mut inn = InstanceNormalization::new(vec![4, 8], 1e-5).unwrap();
+    let mut inn = InstanceNormalization::new(1e-5).unwrap();
     let input = Array::ones((4, 8)).into_dyn();
     let err = inn.forward(&input).unwrap_err();
     assert!(

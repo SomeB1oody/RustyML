@@ -2,18 +2,20 @@
 //! height, and width.
 
 use crate::error::Error;
+use crate::neural_network::Shape;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
+use crate::neural_network::layers::build_on_forward;
 use crate::neural_network::layers::convolution::PaddingType;
 use crate::neural_network::layers::pooling::layer_functions_3d_pooling;
 use crate::neural_network::layers::pooling::pooling_engine::{
     PoolKind, windowed_pool_backward, windowed_pool_forward,
 };
 use crate::neural_network::layers::pooling::validation::{
-    validate_all_dims_positive, validate_input_shape_dims, validate_pool_size_3d,
-    validate_strides_3d,
+    validate_pool_size_3d, validate_strides_3d,
 };
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_3d_pooling;
+use crate::neural_network::layers::validation::validate_built_input;
 use crate::neural_network::traits::Layer;
 
 /// 3D max pooling layer
@@ -28,25 +30,14 @@ use crate::neural_network::traits::Layer;
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::{Array5, ArrayD};
 ///
 /// // Create a Sequential model for 3D data processing
-/// let mut model = Sequential::new();
-///
-/// // Add MaxPooling3D layer to the model
-/// // stride defaults to pool_size (2, 2, 2) and padding defaults to Valid
-/// model.add(MaxPooling3D::new((2, 2, 2), vec![1, 32, 32, 32, 16]).unwrap());
-///
-/// // Compile the model with optimizer and loss function
-/// model.compile(
-///     RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(),    // RMSprop optimizer
-///     MeanSquaredError::new()              // Mean Squared Error loss
-/// );
-///
 /// // Create sample 3D input data, for example 3D medical images or volumetric data
 /// // Input: [1 batch, 32x32x32 3D volume, 16 channels]
 /// let input_data = Array5::from_shape_fn((1, 32, 32, 32, 16), |(b, d, h, w, c)| {
@@ -56,6 +47,19 @@ use crate::neural_network::traits::Layer;
 ///
 /// // Create target data for training (output shape: [1, 16, 16, 16, 16])
 /// let target_data = Array5::ones((1, 16, 16, 16, 16)).into_dyn();
+///
+/// // Build a model that holds 1 MaxPooling3D layer
+/// // stride defaults to pool_size (2, 2, 2) and padding defaults to Valid
+/// let mut model = SequentialBuilder::new()
+///     .add(MaxPooling3D::new((2, 2, 2)))
+///     .build(&Shape::known(input_data.shape()))
+///     .unwrap();
+///
+/// // Compile the model with optimizer and loss function
+/// model.compile(
+///     RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(),    // RMSprop optimizer
+///     MeanSquaredError::new()              // Mean Squared Error loss
+/// );
 ///
 /// // Display model architecture
 /// model.summary();
@@ -80,8 +84,8 @@ pub struct MaxPooling3D {
     pool_size: (usize, usize, usize),
     /// Step size of the pooling operation as (depth, height, width)
     strides: (usize, usize, usize),
-    /// Shape of the input tensor declared at construction time
-    input_shape: Vec<usize>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
     /// Padding mode applied around the input before pooling
     padding: PaddingType,
     /// Shape of the most recent forward input, cached for the backward pass
@@ -96,36 +100,25 @@ impl MaxPooling3D {
     /// # Parameters
     ///
     /// - `pool_size` - Size of the pooling window as (depth, height, width)
-    /// - `input_shape` - Input tensor shape `[batch_size, depth, height, width, channels]`
     ///
     /// # Returns
     ///
-    /// - `Result<MaxPooling3D, Error>` - New layer instance on success
+    /// - `MaxPooling3D` - New layer instance
     ///
     /// # Notes
     ///
     /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
     /// with [`MaxPooling3D::with_strides`] and [`MaxPooling3D::with_padding`].
     ///
-    /// # Errors
-    ///
-    /// - `Error::DimensionMismatch` - If `input_shape` is not 5D
-    /// - `Error::InvalidInput` - If any `input_shape` dimension is zero
-    /// - `Error::InvalidParameter` - If `pool_size` has a zero dimension or exceeds the
-    ///   corresponding input dimension
-    pub fn new(pool_size: (usize, usize, usize), input_shape: Vec<usize>) -> Result<Self, Error> {
-        validate_input_shape_dims(&input_shape, 5, "MaxPooling3D")?;
-        validate_all_dims_positive(&input_shape)?;
-        validate_pool_size_3d(pool_size, input_shape[1], input_shape[2], input_shape[3])?;
-
-        Ok(MaxPooling3D {
+    pub fn new(pool_size: (usize, usize, usize)) -> Self {
+        MaxPooling3D {
             pool_size,
             strides: pool_size,
-            input_shape,
+            built: None,
             padding: PaddingType::Valid,
             forward_input_shape: None,
             argmax: None,
-        })
+        }
     }
 
     /// Sets the pooling strides (defaults to `pool_size`)
@@ -161,9 +154,8 @@ impl MaxPooling3D {
 
 impl Layer for MaxPooling3D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.ndim() != 5 {
-            return Err(Error::invalid_input("input tensor is not 5D"));
-        }
+        build_on_forward!(self, input);
+        validate_built_input(&self.built, "MaxPooling3D", input.shape())?;
 
         // Cache the input shape and arg-max positions for the backward pass
         self.forward_input_shape = Some(input.shape().to_vec());
@@ -181,9 +173,7 @@ impl Layer for MaxPooling3D {
 
     /// Runs the forward pass for inference. Writes no cache. See [`Layer::predict`].
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.ndim() != 5 {
-            return Err(Error::invalid_input("input tensor is not 5D"));
-        }
+        validate_built_input(&self.built, "MaxPooling3D", input.shape())?;
 
         let (output, _argmax) = windowed_pool_forward(
             input,

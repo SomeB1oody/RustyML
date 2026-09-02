@@ -23,7 +23,8 @@ use crate::neural_network::{Shape, Tensor};
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::layers::activation::elu::ELU;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::MeanSquaredError;
@@ -35,10 +36,11 @@ use crate::neural_network::{Shape, Tensor};
 ///     .into_dyn();
 ///
 /// // Build a model with ELU activation
-/// let mut model = Sequential::new();
-/// model
+/// let mut model = SequentialBuilder::new()
 ///     .add(ELU::new(1.0).unwrap())
-///     .compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+///     .build(&Shape::known(x.shape()))
+///     .unwrap();
+/// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Forward propagation
 /// let output = model.predict(&x);

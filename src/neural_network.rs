@@ -71,7 +71,8 @@
 //!
 //! ```rust
 //! use rustyml::neural_network::{
-//!     sequential::Sequential,
+//!     Shape,
+//!     sequential::SequentialBuilder,
 //!     layers::{Activation, Dense},
 //!     optimizers::Adam,
 //!     losses::MeanSquaredError,
@@ -83,10 +84,12 @@
 //! let y = Array::ones((2, 1)).into_dyn();  // 2 samples, 1 output
 //!
 //! // Build sequential model
-//! let mut model = Sequential::new();
-//! model.add(Dense::new(4, 8, Activation::ReLU).unwrap())   // Input layer: 4 -> 8
-//!      .add(Dense::new(8, 3, Activation::ReLU).unwrap())   // Hidden layer: 8 -> 3
-//!      .add(Dense::new(3, 1, Activation::Linear).unwrap()); // Output layer: 3 -> 1
+//! let mut model = SequentialBuilder::new()
+//!     .add(Dense::new(8, Activation::ReLU).unwrap())   // Input layer: 4 -> 8
+//!     .add(Dense::new(3, Activation::ReLU).unwrap())   // Hidden layer: 8 -> 3
+//!     .add(Dense::new(1, Activation::Linear).unwrap()) // Output layer: 3 -> 1
+//!     .build(&Shape::known(x.shape()))
+//!     .unwrap();
 //!
 //! // Compile with optimizer and loss function
 //! model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), MeanSquaredError::new());

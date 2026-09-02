@@ -14,8 +14,12 @@ use crate::neural_network::layers::convolution::validation::{
     validate_dilation, validate_filters, validate_kernel_size_3d,
     validate_stride_dilation_exclusive, validate_strides_3d, validate_transpose_input_shape,
 };
-use crate::neural_network::layers::named_weight_layer_functions;
-use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
+use crate::neural_network::layers::validation::{
+    start_build, validate_built_input, validate_optional_weight, validate_weight_shape,
+};
+use crate::neural_network::layers::{
+    build_on_forward, built_layer_shape_functions, named_weight_layer_functions,
+};
 use crate::neural_network::traits::{Layer, ParamGrad};
 use crate::neural_network::{Fans, Initializer, Shape, Tensor};
 use ndarray::{Array1, Array5};
@@ -53,7 +57,8 @@ use ndarray::{Array1, Array5};
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::*;
@@ -66,16 +71,16 @@ use ndarray::{Array1, Array5};
 /// let y = Array5::ones((1, 4, 4, 4, 2)).into_dyn();
 ///
 /// // Build model: add a Conv3DTranspose layer with 2 filters and a 2x2x2 kernel
-/// let mut model = Sequential::new();
-/// model
+/// let mut model = SequentialBuilder::new()
 ///     .add(Conv3DTranspose::new(
 ///         2,                      // Number of filters
 ///         (2, 2, 2),              // Kernel size
-///         vec![1, 3, 3, 3, 1],    // Input shape
 ///         (1, 1, 1),              // Stride
 ///         Activation::ReLU,       // ReLU activation
 ///     ).unwrap())
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
+///     .build(&Shape::known(x.shape()))
+///     .unwrap();
+/// model.compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Print model structure
 /// model.summary();
@@ -124,8 +129,12 @@ pub struct Conv3DTranspose {
     output_cache: Option<Tensor>,
     /// Cached input from the forward pass, used during backpropagation
     input_cache: Option<Tensor>,
-    /// Shape of the input tensor
-    input_shape: Vec<usize>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
+    /// Input channels, which [`Layer::build`] reads from the input shape
+    channels: usize,
+    /// Seed of the weight draw, or `None` to take the global seed or entropy
+    random_state: Option<u64>,
     /// Gradients for the weights, computed during backpropagation
     weight_gradients: Option<Array5<f32>>,
     /// Gradients for the biases, computed during backpropagation
@@ -137,15 +146,14 @@ pub struct Conv3DTranspose {
 impl Conv3DTranspose {
     /// Creates a new 3D transposed convolutional layer with the specified parameters
     ///
-    /// The constructor initializes weights with Xavier (Glorot) uniform initialization and sets
-    /// biases to 0
+    /// The constructor draws nothing. [`Layer::build`] reads the channel count from the input
+    /// shape, draws the kernel with Xavier (Glorot) uniform initialization, and sets the bias
+    /// to 0
     ///
     /// # Parameters
     ///
     /// - `filters` - Number of transposed convolution filters (output channels)
     /// - `kernel_size` - Size of the convolution kernel as (depth, height, width)
-    /// - `input_shape` - Shape of the input tensor as \[batch_size, depth, height, width,
-    ///   channels\]
     /// - `strides` - Stride values as (depth_stride, height_stride, width_stride)
     /// - `activation` - Activation applied to the transposed convolution output
     ///
@@ -164,30 +172,19 @@ impl Conv3DTranspose {
     ///
     /// - `Error::InvalidParameter` - If `filters` is 0
     /// - `Error::InvalidParameter` - If any kernel dimension or stride is 0
-    /// - `Error::InvalidInput` - If `input_shape` is not 5D or holds a 0
     /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize, usize),
-        input_shape: Vec<usize>,
         strides: (usize, usize, usize),
         activation: impl Into<Activation>,
     ) -> Result<Self, Error> {
         validate_filters(filters)?;
         validate_kernel_size_3d(kernel_size)?;
         validate_strides_3d(strides)?;
-        validate_transpose_input_shape(
-            &input_shape,
-            3,
-            "[batch_size, depth, height, width, channels]",
-        )?;
         let activation = activation.into();
         activation.validate()?;
-
-        let channels = input_shape[4];
-        let weights = Self::init_weights_array(filters, channels, kernel_size, None);
-        let bias = Array1::zeros(filters);
 
         Ok(Conv3DTranspose {
             filters,
@@ -195,12 +192,14 @@ impl Conv3DTranspose {
             strides,
             dilation_rate: (1, 1, 1),
             padding: PaddingType::Valid,
-            weights,
-            bias,
+            weights: Array5::zeros((0, 0, 0, 0, 0)),
+            bias: Array1::zeros(0),
             activation,
             output_cache: None,
             input_cache: None,
-            input_shape,
+            built: None,
+            channels: 0,
+            random_state: None,
             weight_gradients: None,
             bias_gradients: None,
             use_bias: true,
@@ -256,10 +255,10 @@ impl Conv3DTranspose {
     /// Sets the seed used to initialize the filter weights and re-initializes them
     /// deterministically
     ///
-    /// By default, the layer seeds weights from the global seed or entropy (see
-    /// [`crate::random`]). This method re-runs Xavier/Glorot uniform initialization with
-    /// `random_state`. Call it before assigning custom weights or training. The bias stays
-    /// zero-initialized
+    /// By default, the draw takes the global seed or entropy (see [`crate::random`]). An
+    /// unbuilt layer holds no kernel, so this records the seed and draws nothing. A layer that
+    /// is already built draws its kernel again from the new seed, so the order of the 2 calls
+    /// does not matter. The bias stays zero-initialized
     ///
     /// # Parameters
     ///
@@ -269,35 +268,34 @@ impl Conv3DTranspose {
     ///
     /// - `Self` - The updated layer
     pub fn with_random_state(mut self, random_state: u64) -> Self {
-        let channels = self.input_shape[4];
-        self.weights =
-            Self::init_weights_array(self.filters, channels, self.kernel_size, Some(random_state));
+        self.random_state = Some(random_state);
+        if self.built.is_some() {
+            self.draw_parameters();
+        }
         self
     }
 
-    /// Xavier/Glorot uniform initialization of the \[kd, kh, kw, filters, channels\] weight tensor
+    /// Draws the kernel and zeroes the bias, at the extents the build settled
     ///
     /// The stored kernel puts the filter axis before the channel axis, and the fan pair does
     /// not follow that order. The layer names the 2 counts, so `fan_in` stays the channel side
-    fn init_weights_array(
-        filters: usize,
-        channels: usize,
-        kernel_size: (usize, usize, usize),
-        random_state: Option<u64>,
-    ) -> Array5<f32> {
-        let k_plane = kernel_size.0 * kernel_size.1 * kernel_size.2;
-        let mut rng = crate::random::make_rng(random_state);
-        Initializer::GlorotUniform.draw(
+    fn draw_parameters(&mut self) {
+        let k_plane = self.kernel_size.0 * self.kernel_size.1 * self.kernel_size.2;
+        let mut rng = crate::random::make_rng(self.random_state);
+        // The transposed kernel stores the filter axis before the channel axis, and the fan
+        // pair still comes from the 2 counts by name
+        self.weights = Initializer::GlorotUniform.draw(
             (
-                kernel_size.0,
-                kernel_size.1,
-                kernel_size.2,
-                filters,
-                channels,
+                self.kernel_size.0,
+                self.kernel_size.1,
+                self.kernel_size.2,
+                self.filters,
+                self.channels,
             ),
-            Fans::conv(channels, filters, k_plane),
+            Fans::conv(self.channels, self.filters, k_plane),
             &mut rng,
-        )
+        );
+        self.bias = Array1::zeros(self.filters);
     }
 
     /// Calculates the output shape of the transposed convolution from the input dimensions
@@ -371,6 +369,9 @@ impl Conv3DTranspose {
         weights: Array5<f32>,
         bias: impl Into<Option<Array1<f32>>>,
     ) -> Result<(), Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("Conv3DTranspose"));
+        }
         validate_weight_shape("kernel", self.weights.shape(), weights.shape())?;
         let bias = validate_optional_weight("bias", "use_bias", self.use_bias, bias.into())?;
         if let Some(bias) = bias.as_ref() {
@@ -385,10 +386,27 @@ impl Conv3DTranspose {
 }
 
 impl Layer for Conv3DTranspose {
+    /// Reads the channel count from the input shape, and draws the kernel and the bias
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "Conv3DTranspose", input)? else {
+            return Ok(());
+        };
+        built.check_rank("Conv3DTranspose", 5)?;
+        let (batch, tail) = built.split_batch("Conv3DTranspose")?;
+        // The family validators read a full extent list, and the batch extent is not part of
+        // what they check
+        let mut dims = vec![batch.unwrap_or(1)];
+        dims.extend(tail);
+        validate_transpose_input_shape(&dims, 3, "[batch_size, depth, height, width, channels]")?;
+        self.channels = dims[4];
+        self.built = Some(built);
+        self.draw_parameters();
+        Ok(())
+    }
+
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.ndim() != 5 {
-            return Err(Error::invalid_input("input tensor is not 5D"));
-        }
+        build_on_forward!(self, input);
+        validate_built_input(&self.built, "Conv3DTranspose", input.shape())?;
 
         self.input_cache = Some(input.clone());
 
@@ -413,9 +431,7 @@ impl Layer for Conv3DTranspose {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.ndim() != 5 {
-            return Err(Error::invalid_input("input tensor is not 5D"));
-        }
+        validate_built_input(&self.built, "Conv3DTranspose", input.shape())?;
 
         let output = conv_transpose_forward(
             input,
@@ -479,9 +495,7 @@ impl Layer for Conv3DTranspose {
         "Conv3DTranspose"
     }
 
-    fn known_input_shape(&self) -> Option<Shape> {
-        Some(Shape::known(&self.input_shape))
-    }
+    built_layer_shape_functions!();
 
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         input.check_rank("Conv3DTranspose", 5)?;

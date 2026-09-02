@@ -329,6 +329,46 @@ pub trait Layer: std::any::Any + Send + Sync {
         "Unknown"
     }
 
+    /// Allocates every array the layer owns, from the shape of the input it will receive
+    ///
+    /// A constructor takes the configuration of a layer and nothing else. It draws no weight,
+    /// because a kernel extent comes from the input and the input is not there yet. `build` is
+    /// where the layer learns that shape, checks it against its own configuration, and
+    /// allocates. A layer that owns no array still records the shape, so it can check every
+    /// later input against it and report an honest output shape
+    ///
+    /// [`SequentialBuilder::build`](crate::neural_network::sequential::SequentialBuilder::build)
+    /// calls this once per layer, threading the output shape of each layer into the next
+    /// through [`compute_output_shape`](Layer::compute_output_shape).
+    /// [`forward`](Layer::forward) builds a layer that a caller drives directly, from the shape
+    /// of the tensor it receives. [`predict`](Layer::predict) takes `&self` and cannot build,
+    /// so it refuses an unbuilt layer with
+    /// [`NnError::NotBuilt`](crate::neural_network::NnError::NotBuilt)
+    ///
+    /// A second call with the same shape does nothing, and no array is drawn twice. A second
+    /// call with another shape is an error, because it would silently replace every weight the
+    /// layer holds
+    ///
+    /// The default does nothing. It is right for every layer that owns no array and reads no
+    /// extent of its input, such as an activation
+    ///
+    /// # Parameters
+    ///
+    /// - `input` - Shape of the tensor that enters the layer, batch axis first
+    ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - `Ok` when the layer holds every array it needs
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the layer cannot accept an input of that shape, or if the
+    ///   layer is already built for another shape
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let _ = input;
+        Ok(())
+    }
+
     /// The output shape the layer gives for an input of the given shape
     ///
     /// The answer is a pure function of the layer configuration and of `input`. The method
@@ -480,10 +520,14 @@ pub trait Layer: std::any::Any + Send + Sync {
 
     /// The shape that the layer was built for, when the layer knows it
     ///
-    /// The slot is reserved. Every layer allocates its arrays in its constructor today, so the
-    /// default `None` is what every layer reports and a checkpoint carries no build shape. The
-    /// change that moves the allocation out of the constructors fills the slot, and the format
-    /// that reads it is already in place. See [`BuildConfig`]
+    /// A layer that [`build`](Layer::build) has run on reports the shape it was built for,
+    /// with the batch axis freed. A layer that owns no array and reads no extent of its input
+    /// keeps the default `None`, and so does any layer before its build. A checkpoint records
+    /// this value, and a load compares it. See [`BuildConfig`]
+    ///
+    /// The batch axis is freed because 1 layer serves every batch size. A model built for 32
+    /// samples and a model built for 1 sample therefore report the same build shape, and a
+    /// checkpoint moves between them
     ///
     /// # Returns
     ///

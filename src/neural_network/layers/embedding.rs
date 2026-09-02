@@ -2,8 +2,10 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::named_weight_layer_functions;
-use crate::neural_network::layers::validation::validate_weight_shape;
+use crate::neural_network::layers::validation::{start_build, validate_weight_shape};
+use crate::neural_network::layers::{
+    build_config_function, build_on_forward, named_weight_layer_functions,
+};
 use crate::neural_network::traits::{Layer, ParamGrad};
 use crate::neural_network::{Fans, Initializer, Shape, Tensor};
 use crate::parallel_gates::{cheap_map_parallel_threshold, split_cap};
@@ -66,7 +68,8 @@ tunable_gate! {
 ///
 /// ```rust
 /// use ndarray::Array2;
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::layers::{Activation, Dense, Embedding, Flatten};
 /// use rustyml::neural_network::optimizers::SGD;
 /// use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
@@ -80,16 +83,18 @@ tunable_gate! {
 ///
 /// // The layer alone turns each of the 6 indices into a 5-element vector
 /// let mut lookup = Embedding::new(10, 5).unwrap();
+/// lookup.build(&Shape::known(x.shape())).unwrap();
 /// let vectors = lookup.predict(&x).unwrap();
 /// assert_eq!(vectors.shape(), &[2, 3, 5]);
 ///
 /// // A flatten step then feeds the vectors to a dense head
-/// let mut model = Sequential::new();
-/// model
+/// let mut model = SequentialBuilder::new()
 ///     .add(Embedding::new(10, 5).unwrap())
-///     .add(Flatten::new(vec![2, 3, 5]).unwrap())
-///     .add(Dense::new(15, 1, Activation::Linear).unwrap())
-///     .compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+///     .add(Flatten::new())
+///     .add(Dense::new(1, Activation::Linear).unwrap())
+///     .build(&Shape::known(x.shape()))
+///     .unwrap();
+/// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// model.summary();
 /// model.fit(&x, &y, 2).unwrap();
@@ -119,6 +124,14 @@ pub struct Embedding {
     output_dim: usize,
     /// Lookup table with shape (input_dim, output_dim)
     embeddings: Array2<f32>,
+    /// The rank the layer built for, with every axis free. `None` before the build
+    ///
+    /// The table depends on the vocabulary size and on the vector width, and on no extent of
+    /// the input. The build shape therefore fixes no axis, and the layer takes an index tensor
+    /// of any extents
+    built: Option<Shape>,
+    /// Seed of the table draw, or `None` to take the global seed or entropy
+    random_state: Option<u64>,
     /// Row indices the forward pass read, in output order. The backward pass scatters into them
     index_cache: Option<Vec<usize>>,
     /// Shape of the most recent forward input, used to check and to shape the gradient
@@ -141,8 +154,9 @@ impl Embedding {
     ///
     /// # Notes
     ///
-    /// The layer seeds the table from the global seed or from entropy by default. For a
-    /// reproducible table, set a seed with [`Embedding::with_random_state`]
+    /// The constructor draws nothing. [`Layer::build`] draws the table, from the global seed
+    /// or from entropy by default. For a reproducible table, set a seed with
+    /// [`Embedding::with_random_state`]
     ///
     /// # Errors
     ///
@@ -164,7 +178,9 @@ impl Embedding {
         Ok(Self {
             input_dim,
             output_dim,
-            embeddings: Self::init_table(input_dim, output_dim, None),
+            embeddings: Array2::zeros((0, 0)),
+            built: None,
+            random_state: None,
             index_cache: None,
             input_shape: None,
             grad_embeddings: None,
@@ -173,9 +189,10 @@ impl Embedding {
 
     /// Sets the seed used to initialize the table and re-initializes it deterministically
     ///
-    /// By default the layer seeds the table from the global seed or from entropy (see
-    /// [`crate::random`]). This re-runs the uniform initialization with `random_state`, so call
-    /// it before assigning custom weights or training
+    /// By default the draw takes the global seed or entropy (see [`crate::random`]). An unbuilt
+    /// layer holds no table, so this records the seed and draws nothing. A layer that is
+    /// already built draws its table again from the new seed, so the order of the 2 calls does
+    /// not matter
     ///
     /// # Parameters
     ///
@@ -185,20 +202,23 @@ impl Embedding {
     ///
     /// - `Self` - The updated layer
     pub fn with_random_state(mut self, random_state: u64) -> Self {
-        self.embeddings = Self::init_table(self.input_dim, self.output_dim, Some(random_state));
+        self.random_state = Some(random_state);
+        if self.built.is_some() {
+            self.draw_parameters();
+        }
         self
     }
 
-    /// Uniform table initialization over `[-INIT_LIMIT, INIT_LIMIT]` for the given seed
+    /// Uniform table initialization over `[-INIT_LIMIT, INIT_LIMIT]`
     ///
     /// The table reads no fan, so the draw takes [`Fans::NONE`]
-    fn init_table(input_dim: usize, output_dim: usize, random_state: Option<u64>) -> Array2<f32> {
-        let mut rng = crate::random::make_rng(random_state);
-        Initializer::Uniform { limit: INIT_LIMIT }.draw(
-            (input_dim, output_dim),
+    fn draw_parameters(&mut self) {
+        let mut rng = crate::random::make_rng(self.random_state);
+        self.embeddings = Initializer::Uniform { limit: INIT_LIMIT }.draw(
+            (self.input_dim, self.output_dim),
             Fans::NONE,
             &mut rng,
-        )
+        );
     }
 
     /// Sets the lookup table for this layer
@@ -216,6 +236,9 @@ impl Embedding {
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `embeddings` does not match the
     ///   layer's configured shape
     pub fn set_weights(&mut self, embeddings: Array2<f32>) -> Result<(), Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("Embedding"));
+        }
         validate_weight_shape("embeddings", self.embeddings.shape(), embeddings.shape())?;
 
         self.embeddings = embeddings.as_standard_layout().into_owned();
@@ -306,8 +329,24 @@ impl Embedding {
 }
 
 impl Layer for Embedding {
+    /// Draws the lookup table
+    ///
+    /// The table is `(input_dim, output_dim)`, and neither extent comes from the input. The
+    /// build therefore records the rank alone, and every axis of the build shape stays free
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        input.check_min_rank("Embedding", 1)?;
+        let canonical = Shape::new(vec![None; input.rank()]);
+        let Some(built) = start_build(&self.built, "Embedding", &canonical)? else {
+            return Ok(());
+        };
+        self.built = Some(built);
+        self.draw_parameters();
+        Ok(())
+    }
+
     /// Training forward: caches the row indices and the input shape for the backward pass
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+        build_on_forward!(self, input);
         let indices = self.to_indices(input)?;
         let output = self.gather(&indices, input.shape());
         self.index_cache = Some(indices);
@@ -317,6 +356,9 @@ impl Layer for Embedding {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("Embedding"));
+        }
         let indices = self.to_indices(input)?;
         Ok(self.gather(&indices, input.shape()))
     }
@@ -379,8 +421,13 @@ impl Layer for Embedding {
     }
 
     fn known_input_shape(&self) -> Option<Shape> {
-        self.input_shape.as_deref().map(Shape::with_free_batch)
+        match &self.input_shape {
+            Some(shape) => Some(Shape::with_free_batch(shape)),
+            None => self.built.clone(),
+        }
     }
+
+    build_config_function!();
 
     /// Every index becomes 1 row of the table, so the output gains a trailing width axis
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {

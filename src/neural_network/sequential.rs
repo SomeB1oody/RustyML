@@ -1,11 +1,25 @@
 //! Sequential model that stacks layers into a feedforward network
 //!
 //! Supports training, prediction, summary, and binary save/load
+//!
+//! # 2 types, and only 1 of them trains
+//!
+//! [`SequentialBuilder`](crate::neural_network::sequential::SequentialBuilder) collects
+//! layers. [`Sequential`](crate::neural_network::sequential::Sequential) is a built model.
+//! [`SequentialBuilder::build`](crate::neural_network::sequential::SequentialBuilder::build) is
+//! the only way to reach a built model, and it takes the
+//! shape of the input. It walks the stack once, gives every layer the shape that reaches it,
+//! and threads each output shape into the next layer
+//!
+//! `fit`, `train_batch`, `evaluate`, `predict`, `save_to_path`, and `load_from_path` are
+//! methods of the built model alone. Training a model that was never built is therefore a
+//! compile error, and no run-time state says whether a model is ready
 
 use super::traits::{Layer, Loss, Optimizer};
 use crate::error::{Error, IoError};
 use crate::math::reduction::det_reduce;
 use crate::neural_network::NnError;
+use crate::neural_network::Shape;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::checkpoint::{
     LoadReport, MODEL_FORMAT_VERSION, MODEL_MAGIC, ModelCheckpoint, apply, apply_partial, capture,
@@ -28,7 +42,8 @@ use std::io::{BufWriter, Write};
 ///
 /// ```rust
 /// use rustyml::neural_network::{
-///     sequential::Sequential,
+///     Shape,
+///     sequential::SequentialBuilder,
 ///     layers::{Activation, Dense},
 ///     optimizers::Adam,
 ///     losses::CategoricalCrossEntropy,
@@ -40,12 +55,13 @@ use std::io::{BufWriter, Write};
 /// let y = Array::ones((32, 10)).into_dyn();  // 32 samples, 10 classes
 ///
 /// // Build a neural network
-/// let mut model = Sequential::new();
-/// model
-///     .add(Dense::new(784, 128, Activation::ReLU).unwrap())
-///     .add(Dense::new(128, 64, Activation::ReLU).unwrap())
-///     .add(Dense::new(64, 10, Activation::Softmax { axis: -1 }).unwrap())
-///     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
+/// let mut model = SequentialBuilder::new()
+///     .add(Dense::new(128, Activation::ReLU).unwrap())
+///     .add(Dense::new(64, Activation::ReLU).unwrap())
+///     .add(Dense::new(10, Activation::Softmax { axis: -1 }).unwrap())
+///     .build(&Shape::known(&[32, 784]))
+///     .unwrap();
+/// model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 ///
 /// // Display model structure
 /// model.summary();
@@ -61,12 +77,13 @@ use std::io::{BufWriter, Write};
 /// // Save model weights to file
 /// model.save_to_path("model.bin").unwrap();
 ///
-/// // Create a new model with the same architecture
-/// let mut new_model = Sequential::new();
-/// new_model
-///     .add(Dense::new(784, 128, Activation::ReLU).unwrap())
-///     .add(Dense::new(128, 64, Activation::ReLU).unwrap())
-///     .add(Dense::new(64, 10, Activation::Softmax { axis: -1 }).unwrap());
+/// // Create a new model with the same architecture, built for the same input shape
+/// let mut new_model = SequentialBuilder::new()
+///     .add(Dense::new(128, Activation::ReLU).unwrap())
+///     .add(Dense::new(64, Activation::ReLU).unwrap())
+///     .add(Dense::new(10, Activation::Softmax { axis: -1 }).unwrap())
+///     .build(&Shape::known(&[32, 784]))
+///     .unwrap();
 ///
 /// // Load weights from file
 /// new_model.load_from_path("model.bin").unwrap();
@@ -84,6 +101,13 @@ use std::io::{BufWriter, Write};
 pub struct Sequential {
     /// All layers in the model
     layers: Vec<Box<dyn Layer>>,
+    /// The shape that reaches each layer, in layer order
+    ///
+    /// [`SequentialBuilder::build`] fills it, so entry `i` is the shape that layer `i` was
+    /// built for. [`summary`](Sequential::summary) reads it, and it is why a model that has
+    /// only ever run [`predict`](Sequential::predict) still prints a real output shape for
+    /// every position
+    input_shapes: Vec<Shape>,
     /// Optimizer used for updating parameters during training
     optimizer: Option<Box<dyn Optimizer>>,
     /// Loss function used to compute training loss
@@ -93,10 +117,174 @@ pub struct Sequential {
     seed: Option<u64>,
 }
 
-impl Default for Sequential {
-    fn default() -> Self {
-        Self::new()
+/// Collects the layers of a model, and builds them against 1 input shape
+///
+/// This is the only way to reach a [`Sequential`]. [`add`](SequentialBuilder::add) never fails
+/// and chains, so a whole stack reads as 1 expression.
+/// [`build`](SequentialBuilder::build) takes the shape of the input, gives every layer the
+/// shape that reaches it, and threads each output shape into the next layer
+///
+/// A layer allocates its arrays in [`Layer::build`], so a model that was never built holds no
+/// weight at all. Splitting the 2 types is what makes that impossible to use by mistake:
+/// `fit`, `train_batch`, `evaluate`, and `predict` are not methods of this type
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
+/// use rustyml::neural_network::layers::{Activation, Dense};
+///
+/// let model = SequentialBuilder::new()
+///     .add(Dense::new(8, Activation::ReLU).unwrap())
+///     .add(Dense::new(1, Activation::Linear).unwrap())
+///     .build(&Shape::known(&[4, 3]))
+///     .unwrap();
+///
+/// // Every layer now holds its arrays
+/// assert_eq!(model.weight_paths(), vec!["0.kernel", "0.bias", "1.kernel", "1.bias"]);
+/// ```
+///
+/// A stack whose shapes do not agree is refused, and the message names the position of the
+/// layer and its type:
+///
+/// ```rust
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
+/// use rustyml::neural_network::layers::{Activation, Dense, MaxPooling2D};
+///
+/// let refused = SequentialBuilder::new()
+///     .add(Dense::new(8, Activation::ReLU).unwrap())
+///     .add(MaxPooling2D::new((2, 2)))
+///     .build(&Shape::known(&[4, 3]));
+///
+/// let message = match refused {
+///     Ok(_) => panic!("the stack does not agree"),
+///     Err(error) => error.to_string(),
+/// };
+/// assert!(message.contains("layer 1"), "{message}");
+/// assert!(message.contains("MaxPooling2D"), "{message}");
+/// ```
+#[derive(Default)]
+pub struct SequentialBuilder {
+    /// The layers collected so far, from the input
+    layers: Vec<Box<dyn Layer>>,
+    /// Optional seed governing the fit-time batch shuffle of the built model
+    seed: Option<u64>,
+}
+
+impl SequentialBuilder {
+    /// Creates a builder that holds no layer
+    ///
+    /// # Returns
+    ///
+    /// - `SequentialBuilder` - An empty builder
+    pub fn new() -> Self {
+        Self {
+            layers: Vec::new(),
+            seed: None,
+        }
     }
+
+    /// Creates a builder that holds no layer, with the fit-time shuffle seed preset
+    ///
+    /// The seed only governs the per-epoch batch shuffle that
+    /// [`Sequential::fit_with_batches`] uses. It reinitializes nothing. See [`crate::random`]
+    ///
+    /// # Parameters
+    ///
+    /// - `seed` - Seed for the reproducible fit-time shuffle
+    ///
+    /// # Returns
+    ///
+    /// - `SequentialBuilder` - An empty builder with the shuffle seed set
+    pub fn new_with_seed(seed: u64) -> Self {
+        Self {
+            layers: Vec::new(),
+            seed: Some(seed),
+        }
+    }
+
+    /// Adds a layer to the end of the stack
+    ///
+    /// The method never fails. Nothing about a layer can disagree with the stack until a shape
+    /// runs through it, and [`build`](SequentialBuilder::build) is where that happens
+    ///
+    /// # Parameters
+    ///
+    /// - `layer` - The layer to add
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The builder, for chaining
+    // The name is the Keras name of this operation, and the signature is what a chained
+    // builder needs. `std::ops::Add` takes 2 values of 1 type and this takes a layer, so the 2
+    // have nothing in common but the word
+    #[allow(clippy::should_implement_trait)]
+    pub fn add<L: 'static + Layer>(mut self, layer: L) -> Self {
+        self.layers.push(Box::new(layer));
+        self
+    }
+
+    /// Builds every layer against `input_shape`, and gives back the model
+    ///
+    /// The walk runs from the input. Each layer is built for the shape that reaches it, and
+    /// [`Layer::compute_output_shape`] gives the shape that reaches the next one. A layer that
+    /// refuses the shape stops the walk, and the message names the position of the layer and
+    /// its type. Nothing is allocated past that position
+    ///
+    /// # Parameters
+    ///
+    /// - `input_shape` - Shape of the tensor that enters the model, batch axis first. The batch
+    ///   extent may be any value, and a layer never checks it
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Sequential, Error>` - The built model
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::EmptyModel)` - If the builder holds no layer
+    /// - `Error::InvalidInput` - If a layer refuses the shape that reaches it. The message
+    ///   names the position of the layer and its type
+    pub fn build(mut self, input_shape: &Shape) -> Result<Sequential, Error> {
+        if self.layers.is_empty() {
+            return Err(Error::NeuralNetwork(NnError::EmptyModel));
+        }
+
+        let mut input_shapes = Vec::with_capacity(self.layers.len());
+        let mut shape = input_shape.clone();
+        for (index, layer) in self.layers.iter_mut().enumerate() {
+            let layer_type = layer.layer_type().to_string();
+            layer
+                .build(&shape)
+                .map_err(|source| build_refusal(index, &layer_type, &shape, source))?;
+            let output = layer
+                .compute_output_shape(&shape)
+                .map_err(|source| build_refusal(index, &layer_type, &shape, source))?;
+            input_shapes.push(shape);
+            shape = output;
+        }
+
+        Ok(Sequential {
+            layers: self.layers,
+            input_shapes,
+            optimizer: None,
+            loss: None,
+            seed: self.seed,
+        })
+    }
+}
+
+/// Names the layer that refused a shape during a model build
+///
+/// A shape error used to appear in the middle of a forward pass, deep inside a model, with no
+/// layer named. The position and the type are what a caller needs to find the layer
+#[cold]
+fn build_refusal(index: usize, layer_type: &str, input: &Shape, source: Error) -> Error {
+    Error::invalid_input(format!(
+        "layer {index} (`{layer_type}`) refused the input shape {input}: {source}"
+    ))
 }
 
 /// Global L2 norm of every gradient currently stored across `layers`, for clip-by-global-norm
@@ -169,20 +357,6 @@ impl History {
 }
 
 impl Sequential {
-    /// Creates a new empty Sequential model
-    ///
-    /// # Returns
-    ///
-    /// - `Sequential` - An empty Sequential model
-    pub fn new() -> Self {
-        Self {
-            layers: Vec::new(),
-            optimizer: None,
-            loss: None,
-            seed: None,
-        }
-    }
-
     /// Sets the seed governing the fit-time batch shuffle
     ///
     /// Controls only the data shuffling order used by `fit_with_batches`. It does not
@@ -231,40 +405,6 @@ impl Sequential {
     /// - `Option<f32>` - The current learning rate, or `None` if the model has not been compiled
     pub fn learning_rate(&self) -> Option<f32> {
         self.optimizer.as_ref().map(|opt| opt.learning_rate())
-    }
-
-    /// Creates a new empty Sequential model with the fit-time shuffle seed preset
-    ///
-    /// Equivalent to `Sequential::new()` followed by `set_seed(seed)`. The seed only governs
-    /// the per-epoch batch shuffle used by `fit_with_batches`. See crate::random
-    ///
-    /// # Parameters
-    ///
-    /// - `seed` - Seed for the reproducible fit-time shuffle. See crate::random
-    ///
-    /// # Returns
-    ///
-    /// - `Sequential` - An empty Sequential model with the shuffle seed set
-    pub fn new_with_seed(seed: u64) -> Self {
-        let mut model = Self::new();
-        model.seed = Some(seed);
-        model
-    }
-
-    /// Adds a layer to the model
-    ///
-    /// Supports method chaining
-    ///
-    /// # Parameters
-    ///
-    /// - `layer` - The layer to add to the model
-    ///
-    /// # Returns
-    ///
-    /// - `&mut Self` - Mutable reference to self for method chaining
-    pub fn add<L: 'static + Layer>(&mut self, layer: L) -> &mut Self {
-        self.layers.push(Box::new(layer));
-        self
     }
 
     /// Configures the optimizer and loss function for the model
@@ -533,7 +673,7 @@ impl Sequential {
     /// # Notes
     ///
     /// The sample order is reshuffled at the start of every epoch. Seed it via
-    /// [`set_seed`](Self::set_seed) / [`new_with_seed`](Self::new_with_seed) for a reproducible
+    /// [`set_seed`](Self::set_seed) or [`SequentialBuilder::new_with_seed`] for a reproducible
     /// shuffle. To train on the whole dataset as a single full-batch gradient step per epoch
     /// instead (no batching, no shuffling), use [`fit`](Self::fit)
     ///
@@ -762,7 +902,7 @@ impl Sequential {
         // Per-type counter for Keras-style names: "dense", "dense_1", "conv2d", ...
         let mut type_counts: HashMap<&str, usize> = HashMap::new();
 
-        for layer in self.layers.iter() {
+        for (index, layer) in self.layers.iter().enumerate() {
             let layer_type = layer.layer_type();
 
             // Generate name from the layer type with a per-type index
@@ -774,7 +914,12 @@ impl Sequential {
             };
             *count += 1;
 
-            let out_shape = layer.output_shape();
+            // The shape table comes from the build, so a model that has only ever run
+            // `predict` still prints a real shape for every position
+            let out_shape = match layer.compute_output_shape(&self.input_shapes[index]) {
+                Ok(shape) => shape.to_string(),
+                Err(_) => "Unknown".to_string(),
+            };
 
             // Both counts are added, so a layer that holds non-trainable state (the running
             // statistics of batch normalization) reaches the total and the third column
@@ -815,6 +960,33 @@ impl Sequential {
         ));
 
         println!("{}", output);
+    }
+
+    /// The shape the model was built for
+    ///
+    /// It is the shape that [`SequentialBuilder::build`] received, batch axis included
+    ///
+    /// # Returns
+    ///
+    /// - `&Shape` - The input shape of the model
+    pub fn input_shape(&self) -> &Shape {
+        // `build` refuses an empty stack, so the table always holds at least 1 entry
+        &self.input_shapes[0]
+    }
+
+    /// The shape the model gives back for the shape it was built for
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Shape, Error>` - Shape of the output of the last layer
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the last layer refuses the shape that reaches it. A build
+    ///   already ruled that out, so this cannot happen on a model this crate built
+    pub fn output_shape(&self) -> Result<Shape, Error> {
+        let last = self.layers.len() - 1;
+        self.layers[last].compute_output_shape(&self.input_shapes[last])
     }
 
     /// Every checkpoint path of the model, in order
@@ -914,8 +1086,11 @@ impl Sequential {
     /// [`load_partial_from_path`](Sequential::load_partial_from_path) to load what matches and
     /// read a report of the rest
     ///
-    /// Build the model structure first, then call this method to load weights. After loading,
-    /// call `compile()` to set the optimizer and loss function
+    /// The model is already built, because [`SequentialBuilder::build`] is the only way to
+    /// reach this type. Every array therefore exists before the load writes into it. The file
+    /// carries the shape each layer was built for, and the load refuses a file whose build
+    /// shape differs from the model, so a checkpoint never lands in a model shaped for another
+    /// input. After loading, call `compile()` to set the optimizer and loss function
     ///
     /// # Parameters
     ///

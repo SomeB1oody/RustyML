@@ -12,10 +12,11 @@
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndarray::Array;
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::layers::*;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
-use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::Layer;
 use std::hint::black_box;
 
@@ -25,7 +26,7 @@ use std::hint::black_box;
 /// (`dense.rs`), so a timed loop over it holds 2 extra tensors live per iteration and measures
 /// the allocator as much as the kernel
 fn dense_forward(c: &mut Criterion) {
-    let layer = Dense::new(784, 512, Activation::ReLU)
+    let layer = Dense::new(512, Activation::ReLU)
         .unwrap()
         .with_random_state(42);
     let x = Array::from_elem((256, 784), 0.5f32).into_dyn();
@@ -36,7 +37,7 @@ fn dense_forward(c: &mut Criterion) {
 
 /// Conv2D forward at batch == 1 (single-sample inference)
 fn conv2d_forward_batch1(c: &mut Criterion) {
-    let mut layer = Conv2D::new(64, (3, 3), vec![1, 96, 96, 32], (1, 1), Activation::ReLU)
+    let mut layer = Conv2D::new(64, (3, 3), (1, 1), Activation::ReLU)
         .unwrap()
         .with_random_state(42);
     let x = Array::from_elem((1, 96, 96, 32), 0.5f32).into_dyn();
@@ -56,16 +57,10 @@ fn conv2d_backward(c: &mut Criterion) {
     let mut group = c.benchmark_group("conv2d_backward");
     group.sample_size(10);
     for &batch in &[16usize, 32usize] {
-        let mut layer = Conv2D::new(
-            64,
-            (3, 3),
-            vec![batch, 64, 64, 32],
-            (1, 1),
-            Activation::ReLU,
-        )
-        .unwrap()
-        .with_padding(PaddingType::Same)
-        .with_random_state(42);
+        let mut layer = Conv2D::new(64, (3, 3), (1, 1), Activation::ReLU)
+            .unwrap()
+            .with_padding(PaddingType::Same)
+            .with_random_state(42);
         let x = Array::from_elem((batch, 64, 64, 32), 0.5f32).into_dyn();
         let grad = Array::from_elem((batch, 64, 64, 64), 0.3f32).into_dyn();
         group.bench_function(format!("conv2d_forward_{batch}x32x64x64_64f"), |b| {
@@ -83,7 +78,7 @@ fn conv2d_backward(c: &mut Criterion) {
 
 /// LSTM forward: fused-gate projections plus the sequential recurrence
 fn lstm_forward(c: &mut Criterion) {
-    let mut layer = LSTM::new(64, 128, Activation::Tanh)
+    let mut layer = LSTM::new(128, Activation::Tanh)
         .unwrap()
         .with_random_state(42);
     let x = Array::from_elem((32, 64, 64), 0.5f32).into_dyn();
@@ -95,7 +90,7 @@ fn lstm_forward(c: &mut Criterion) {
 /// Spatial BatchNorm forward at conv scale (training mode): per-channel column-stat folds plus
 /// the center/normalize passes on the native [B, *spatial, C] layout
 fn batchnorm_forward_spatial(c: &mut Criterion) {
-    let mut layer = BatchNormalization::new(vec![32, 64, 64, 64], 0.99, 1e-5).unwrap();
+    let mut layer = BatchNormalization::new(0.99, 1e-5).unwrap();
     let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
@@ -108,7 +103,7 @@ fn batchnorm_forward_spatial(c: &mut Criterion) {
 /// Spatial BatchNorm backward at the same scale: 5 per-channel column-stat folds plus 2
 /// elementwise passes over the cached forward tensors
 fn batchnorm_backward_spatial(c: &mut Criterion) {
-    let mut layer = BatchNormalization::new(vec![32, 64, 64, 64], 0.99, 1e-5).unwrap();
+    let mut layer = BatchNormalization::new(0.99, 1e-5).unwrap();
     let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
@@ -126,7 +121,7 @@ fn batchnorm_backward_spatial(c: &mut Criterion) {
 /// LayerNorm forward at transformer scale (Default axis): per-row statistics over the
 /// trailing feature axis
 fn layernorm_forward_default(c: &mut Criterion) {
-    let mut layer = LayerNormalization::new(vec![32, 512, 768], 1e-5).unwrap();
+    let mut layer = LayerNormalization::new(1e-5).unwrap();
     let x = Array::from_shape_fn((32, 512, 768), |(b, t, d)| {
         ((b * 7 + t * 13 + d * 3) as f32 * 0.137).sin()
     })
@@ -139,7 +134,7 @@ fn layernorm_forward_default(c: &mut Criterion) {
 /// LayerNorm backward at the same scale: per-row gradient composition plus the gamma/beta
 /// column reductions
 fn layernorm_backward_default(c: &mut Criterion) {
-    let mut layer = LayerNormalization::new(vec![32, 512, 768], 1e-5).unwrap();
+    let mut layer = LayerNormalization::new(1e-5).unwrap();
     let x = Array::from_shape_fn((32, 512, 768), |(b, t, d)| {
         ((b * 7 + t * 13 + d * 3) as f32 * 0.137).sin()
     })
@@ -157,7 +152,7 @@ fn layernorm_backward_default(c: &mut Criterion) {
 /// LayerNorm forward with a Multiple (merged trailing axes) configuration at conv scale: the
 /// merged-axis layout transform is the interesting cost here
 fn layernorm_forward_multi(c: &mut Criterion) {
-    let mut layer = LayerNormalization::new(vec![32, 64, 64, 64], 1e-5)
+    let mut layer = LayerNormalization::new(1e-5)
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![1, 2, 3]))
         .unwrap();
@@ -173,7 +168,7 @@ fn layernorm_forward_multi(c: &mut Criterion) {
 /// GroupNorm forward at conv scale (channels-last, 8 groups): per-instance group statistics
 /// folded from contiguous per-position channel runs
 fn groupnorm_forward(c: &mut Criterion) {
-    let mut layer = GroupNormalization::new(vec![32, 64, 64, 64], 8, 1e-5).unwrap();
+    let mut layer = GroupNormalization::new(8, 1e-5).unwrap();
     let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
@@ -186,7 +181,7 @@ fn groupnorm_forward(c: &mut Criterion) {
 /// GroupNorm backward at the same scale: per-channel parameter folds plus the per-instance
 /// gradient composition
 fn groupnorm_backward(c: &mut Criterion) {
-    let mut layer = GroupNormalization::new(vec![32, 64, 64, 64], 8, 1e-5).unwrap();
+    let mut layer = GroupNormalization::new(8, 1e-5).unwrap();
     let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
@@ -203,7 +198,7 @@ fn groupnorm_backward(c: &mut Criterion) {
 
 /// InstanceNorm forward at the same scale (1 group per channel: many small instances)
 fn instancenorm_forward(c: &mut Criterion) {
-    let mut layer = InstanceNormalization::new(vec![32, 64, 64, 64], 1e-5).unwrap();
+    let mut layer = InstanceNormalization::new(1e-5).unwrap();
     let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
@@ -216,9 +211,7 @@ fn instancenorm_forward(c: &mut Criterion) {
 /// SpatialDropout1D forward at conv scale (training mode): the per-channel mask is broadcast
 /// across the length dimension to the full [B, L, C] shape
 fn spatial_dropout_1d_forward(c: &mut Criterion) {
-    let mut layer = SpatialDropout1D::new(0.2, vec![32, 64, 4096])
-        .unwrap()
-        .with_random_state(42);
+    let mut layer = SpatialDropout1D::new(0.2).unwrap().with_random_state(42);
     let x = Array::from_elem((32, 64, 4096), 0.5f32).into_dyn();
     c.bench_function("spatial_dropout_1d_forward_32x64x4096", |b| {
         b.iter(|| black_box(layer.forward(&x).unwrap()))
@@ -228,9 +221,7 @@ fn spatial_dropout_1d_forward(c: &mut Criterion) {
 /// SpatialDropout2D forward at conv scale (training mode): the per-channel mask is broadcast
 /// across the spatial dimensions to the full [B, H, W, C] shape
 fn spatial_dropout_2d_forward(c: &mut Criterion) {
-    let mut layer = SpatialDropout2D::new(0.2, vec![32, 64, 64, 64])
-        .unwrap()
-        .with_random_state(42);
+    let mut layer = SpatialDropout2D::new(0.2).unwrap().with_random_state(42);
     let x = Array::from_elem((32, 64, 64, 64), 0.5f32).into_dyn();
     c.bench_function("spatial_dropout_2d_forward_32x64x64x64", |b| {
         b.iter(|| black_box(layer.forward(&x).unwrap()))
@@ -240,9 +231,7 @@ fn spatial_dropout_2d_forward(c: &mut Criterion) {
 /// SpatialDropout3D forward at conv scale (training mode): the per-channel mask is broadcast
 /// across the spatial dimensions to the full [B, D, H, W, C] shape
 fn spatial_dropout_3d_forward(c: &mut Criterion) {
-    let mut layer = SpatialDropout3D::new(0.2, vec![8, 64, 16, 32, 32])
-        .unwrap()
-        .with_random_state(42);
+    let mut layer = SpatialDropout3D::new(0.2).unwrap().with_random_state(42);
     let x = Array::from_elem((8, 64, 16, 32, 32), 0.5f32).into_dyn();
     c.bench_function("spatial_dropout_3d_forward_8x64x16x32x32", |b| {
         b.iter(|| black_box(layer.forward(&x).unwrap()))
@@ -251,9 +240,7 @@ fn spatial_dropout_3d_forward(c: &mut Criterion) {
 
 /// SpatialDropout2D backward at conv scale: applies the same per-channel mask to the gradient
 fn spatial_dropout_2d_backward(c: &mut Criterion) {
-    let mut layer = SpatialDropout2D::new(0.2, vec![32, 64, 64, 64])
-        .unwrap()
-        .with_random_state(42);
+    let mut layer = SpatialDropout2D::new(0.2).unwrap().with_random_state(42);
     let x = Array::from_elem((32, 64, 64, 64), 0.5f32).into_dyn();
     layer.forward(&x).unwrap();
     let grad = Array::from_elem((32, 64, 64, 64), 0.3f32).into_dyn();
@@ -264,9 +251,7 @@ fn spatial_dropout_2d_backward(c: &mut Criterion) {
 
 /// SpatialDropout3D backward at conv scale
 fn spatial_dropout_3d_backward(c: &mut Criterion) {
-    let mut layer = SpatialDropout3D::new(0.2, vec![8, 64, 16, 32, 32])
-        .unwrap()
-        .with_random_state(42);
+    let mut layer = SpatialDropout3D::new(0.2).unwrap().with_random_state(42);
     let x = Array::from_elem((8, 64, 16, 32, 32), 0.5f32).into_dyn();
     layer.forward(&x).unwrap();
     let grad = Array::from_elem((8, 64, 16, 32, 32), 0.3f32).into_dyn();
@@ -284,7 +269,7 @@ fn depthwise_separable_conv(c: &mut Criterion) {
 
     // DepthwiseConv2D: groups == channels == filters
     {
-        let mut layer = DepthwiseConv2D::new((3, 3), vec![8, 56, 56, 64], (1, 1), Activation::ReLU)
+        let mut layer = DepthwiseConv2D::new((3, 3), (1, 1), Activation::ReLU)
             .unwrap()
             .with_padding(PaddingType::Same)
             .with_random_state(42);
@@ -303,11 +288,10 @@ fn depthwise_separable_conv(c: &mut Criterion) {
 
     // SeparableConv2D: depthwise (groups == channels) stage then pointwise 1x1, 32 -> 64 filters
     {
-        let mut layer =
-            SeparableConv2D::new(64, (3, 3), vec![8, 56, 56, 32], (1, 1), 1, Activation::ReLU)
-                .unwrap()
-                .with_padding(PaddingType::Same)
-                .with_random_state(42);
+        let mut layer = SeparableConv2D::new(64, (3, 3), (1, 1), 1, Activation::ReLU)
+            .unwrap()
+            .with_padding(PaddingType::Same)
+            .with_random_state(42);
         let x = Array::from_elem((8, 56, 56, 32), 0.5f32).into_dyn();
         let grad = Array::from_elem((8, 56, 56, 64), 0.3f32).into_dyn();
         group.bench_function("separable_forward_8x32x56x56_64f_k3_same", |b| {
@@ -332,22 +316,23 @@ fn mlp_fit_epoch(c: &mut Criterion) {
     group.sample_size(20);
     group.bench_function("mlp_fit_epoch_512x256-128-10", |b| {
         b.iter(|| {
-            let mut model = Sequential::new();
-            model
+            let mut model = SequentialBuilder::new()
                 .add(
-                    Dense::new(256, 128, Activation::ReLU)
+                    Dense::new(128, Activation::ReLU)
                         .unwrap()
                         .with_random_state(42),
                 )
                 .add(
-                    Dense::new(128, 10, Activation::Linear)
+                    Dense::new(10, Activation::Linear)
                         .unwrap()
                         .with_random_state(43),
                 )
-                .compile(
-                    SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-                    MeanSquaredError::new(),
-                );
+                .build(&Shape::known(x.shape()))
+                .unwrap();
+            model.compile(
+                SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+                MeanSquaredError::new(),
+            );
             model.fit(&x, &y, 1).unwrap();
             black_box(model);
         })

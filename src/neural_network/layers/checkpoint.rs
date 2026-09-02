@@ -34,8 +34,10 @@
 //! [`Layer::layer_type`]: crate::neural_network::traits::Layer::layer_type
 //! [`apply`]: crate::neural_network::layers::checkpoint::apply
 //! [`apply_partial`]: crate::neural_network::layers::checkpoint::apply_partial
+//! [`Layer::build`]: crate::neural_network::traits::Layer::build
 
 use crate::error::{Error, IoError};
+use crate::neural_network::Shape;
 use crate::neural_network::traits::{Layer, WeightKind};
 use crate::{Deserialize, Serialize};
 use ndarray::ArrayViewMutD;
@@ -65,18 +67,43 @@ pub const MODEL_FORMAT_VERSION: u32 = 2;
 
 /// The shape that a layer was built for
 ///
-/// The slot is reserved, and no layer fills it today. Every layer allocates its arrays in its
-/// constructor, so a live model already knows every extent and a file needs to carry none of
-/// them. The change that moves the allocation out of the constructors makes the build shape
-/// the 1 thing a fresh layer does not have, and a checkpoint is where it comes from. The field
-/// exists now so that the format takes 1 version bump for the whole move, and not 2
+/// A layer allocates every array it owns in
+/// [`Layer::build`], from the shape of its input.
+/// The build shape is therefore the 1 thing a fresh layer does not have, and it decides every
+/// extent the layer allocates. A file carries it so that a load can refuse a model that was
+/// built for another input
+///
+/// The batch axis is free. A layer serves every batch size, so the batch extent is not part of
+/// what the layer was built for, and a model built for 32 samples takes the checkpoint of a
+/// model built for 1
 ///
 /// A load compares the field when the file and the layer both carry one, and skips the
-/// comparison in every other case
+/// comparison in every other case. A layer that owns no array and reads no extent of its
+/// input, such as an activation, carries none
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuildConfig {
-    /// Shape of the input the layer was built for, with the batch axis first
-    pub input_shape: Vec<usize>,
+    /// Shape of the input the layer was built for, batch axis first and free
+    pub input_shape: Shape,
+}
+
+impl BuildConfig {
+    /// The build record of a layer that built for `input`
+    ///
+    /// The batch axis is freed here, so every caller records the same canonical form
+    ///
+    /// # Parameters
+    ///
+    /// - `input` - Shape the layer built for, batch axis first
+    ///
+    /// # Returns
+    ///
+    /// - `BuildConfig` - The record, with a free batch axis
+    #[inline]
+    pub fn new(input: &Shape) -> Self {
+        Self {
+            input_shape: input.free_batch(),
+        }
+    }
 }
 
 /// 1 named array of 1 layer, as a file holds it
@@ -248,13 +275,14 @@ pub fn apply(layers: &mut [Box<dyn Layer>], file: &ModelCheckpoint<'_>) -> Resul
             )));
         }
 
-        // The slot is reserved, so this compares only when both sides carry a shape
+        // A layer that owns no array carries no build shape, so this compares only when both
+        // sides carry one
         if let (Some(wanted), Some(found)) = (layer.build_config(), saved.build.as_ref())
             && wanted != *found
         {
             return Err(mismatch(format!(
-                "layer {scope} (`{layer_type}`) was built for input shape {:?}, and the file \
-                 records {:?}",
+                "layer {scope} (`{layer_type}`) was built for input shape {}, and the file \
+                 records {}",
                 wanted.input_shape, found.input_shape
             )));
         }
@@ -316,10 +344,15 @@ pub fn apply(layers: &mut [Box<dyn Layer>], file: &ModelCheckpoint<'_>) -> Resul
 /// Applies what the file and the model agree on, and reports the rest
 ///
 /// This is the opt-in lenient load. It writes an array when the position holds the same layer
-/// type, and the file holds the same name, the same kind, and the same shape. Everything else
-/// goes into the report and nothing else fails. A position whose layer type differs
-/// contributes every path of that layer to both lists, because a name and a shape cannot tell
-/// 2 normalization layers apart
+/// type, when the 2 sides agree on the build shape, and when the file holds the same name, the
+/// same kind, and the same shape. Everything else goes into the report and nothing else fails.
+/// A position whose layer type differs contributes every path of that layer to both lists,
+/// because a name and a shape cannot tell 2 normalization layers apart
+///
+/// A position whose build shape differs does the same. [`apply`] refuses such a file, and this
+/// skips the layer: the 2 paths agree that a layer built for another input takes no weights.
+/// The per-array shape check cannot stand in for it, because a convolution kernel is the same
+/// shape for every spatial extent
 ///
 /// # Parameters
 ///
@@ -349,6 +382,22 @@ pub fn apply_partial(layers: &mut [Box<dyn Layer>], file: &ModelCheckpoint<'_>) 
             }
             continue;
         };
+
+        // The lenient load skips a whole layer whose build shape disagrees, rather than
+        // writing weights into a layer that was built for another input. A conv kernel does
+        // not change with the spatial extents, so the per-array shape check below cannot see
+        // such a disagreement. Nothing fails here: every path of both sides is reported
+        if let (Some(wanted), Some(found)) = (layer.build_config(), saved.build.as_ref())
+            && wanted != *found
+        {
+            report
+                .missing
+                .extend(layer.weights().iter().map(|e| weight_path(scope, e.name)));
+            report
+                .unused
+                .extend(saved.weights.iter().map(|r| weight_path(scope, &r.name)));
+            continue;
+        }
 
         let mut taken = vec![false; saved.weights.len()];
         for target in layer.weights_mut().iter_mut() {

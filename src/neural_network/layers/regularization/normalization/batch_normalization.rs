@@ -12,17 +12,20 @@
 use super::col_fold_parallel_min_elems;
 use super::folds::{par_col_dot, par_col_sum, rows_per_block};
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
+use crate::neural_network::layers::build_on_forward;
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::normalization::normalization_layer_shape_functions;
 use crate::neural_network::layers::regularization::validation::{
-    validate_epsilon, validate_input_shape, validate_input_shape_not_empty, validate_momentum,
+    validate_epsilon, validate_momentum,
 };
-use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
+use crate::neural_network::layers::validation::{
+    start_build, validate_built_input, validate_optional_weight, validate_weight_shape,
+};
 use crate::neural_network::traits::{Layer, ParamGrad};
+use crate::neural_network::{Shape, Tensor};
 use ndarray::Axis;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
@@ -50,7 +53,7 @@ tunable_gate! {
 /// use ndarray::Array2;
 ///
 /// // Create a BatchNormalization layer
-/// let mut bn = BatchNormalization::new(vec![32, 128], 0.99, 1e-5).unwrap();
+/// let mut bn = BatchNormalization::new(0.99, 1e-5).unwrap();
 ///
 /// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
@@ -64,8 +67,8 @@ pub struct BatchNormalization {
     epsilon: f32,
     /// Momentum for the moving average of mean and variance
     momentum: f32,
-    /// Shape of the input tensor
-    input_shape: Vec<usize>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
     /// Scale parameter (trainable)
     ///
     /// The array stays allocated and holds every element at 1 when `scale` is false. A scale of
@@ -107,15 +110,6 @@ impl BatchNormalization {
     ///
     /// # Parameters
     ///
-    /// - `input_shape` - Shape of the input tensor, with the **batch** as dimension 0 and the
-    ///   **channel/feature** as the **last** dimension. The trainable `gamma`/`beta` (and the
-    ///   running mean/variance) are per-channel, length `input_shape.last()`. For a 2-D
-    ///   `[batch, features]` input this is standard per-feature BN. For a rank > 2
-    ///   `[batch, *spatial, channels]` input, the statistics reduce over batch **and** all
-    ///   spatial positions (spatial BN, matching Keras). So there is 1 mean/variance/scale/shift
-    ///   per channel. A 1-D `input_shape` (e.g. `vec![4]`) has no channel axis and yields scalar
-    ///   (length-1) parameters broadcast over the whole input. Pass `vec![batch, 4]` to mean
-    ///   "4 features"
     /// - `momentum` - Momentum for the moving average of mean and variance (typically 0.9 or 0.99)
     /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
     ///
@@ -125,31 +119,20 @@ impl BatchNormalization {
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` - If `input_shape` is empty
     /// - `Error::InvalidParameter` - If `momentum` is not between 0.0 and 1.0
     /// - `Error::InvalidParameter` - If `epsilon` is not positive or not finite
-    pub fn new(input_shape: Vec<usize>, momentum: f32, epsilon: f32) -> Result<Self, Error> {
-        validate_input_shape_not_empty(&input_shape)?;
+    pub fn new(momentum: f32, epsilon: f32) -> Result<Self, Error> {
         validate_momentum(momentum)?;
         validate_epsilon(epsilon)?;
-
-        // Parameters are per-channel. The channel axis is the trailing axis
-        let param_shape = if input_shape.len() > 1 {
-            vec![input_shape[input_shape.len() - 1]]
-        } else {
-            vec![1]
-        };
-
-        let param_shape_ndarray = param_shape.as_slice();
 
         Ok(BatchNormalization {
             epsilon,
             momentum,
-            input_shape,
-            gamma: Tensor::ones(param_shape_ndarray),
-            beta: Tensor::zeros(param_shape_ndarray),
-            moving_mean: Tensor::zeros(param_shape_ndarray),
-            moving_variance: Tensor::ones(param_shape_ndarray),
+            built: None,
+            gamma: Tensor::ones([0].as_slice()),
+            beta: Tensor::zeros([0].as_slice()),
+            moving_mean: Tensor::zeros([0].as_slice()),
+            moving_variance: Tensor::ones([0].as_slice()),
             training: true,
             batch_mean: None,
             batch_var: None,
@@ -236,6 +219,9 @@ impl BatchNormalization {
         moving_mean: Tensor,
         moving_variance: Tensor,
     ) -> Result<(), Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("BatchNormalization"));
+        }
         let gamma = validate_optional_weight("gamma", "scale", self.scale, gamma.into())?;
         let beta = validate_optional_weight("beta", "center", self.center, beta.into())?;
         if let Some(gamma) = gamma.as_ref() {
@@ -263,8 +249,36 @@ impl BatchNormalization {
 }
 
 impl Layer for BatchNormalization {
+    /// Allocates the per-channel arrays from the trailing axis of the input
+    ///
+    /// The channel axis is the last axis. An input of rank 1 has no channel axis, so the
+    /// arrays hold 1 element that every position shares
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "BatchNormalization", input)? else {
+            return Ok(());
+        };
+        input.check_min_rank("BatchNormalization", 1)?;
+        let channels = match built.axes()[built.rank() - 1] {
+            _ if built.rank() == 1 => 1,
+            Some(extent) => extent,
+            None => {
+                return Err(Error::invalid_input(format!(
+                    "BatchNormalization needs a fixed extent on the channel axis, and the shape {built} \
+                     leaves that axis free"
+                )));
+            }
+        };
+        self.gamma = Tensor::ones([channels].as_slice());
+        self.beta = Tensor::zeros([channels].as_slice());
+        self.moving_mean = Tensor::zeros([channels].as_slice());
+        self.moving_variance = Tensor::ones([channels].as_slice());
+        self.built = Some(built);
+        Ok(())
+    }
+
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        build_on_forward!(self, input);
+        validate_built_input(&self.built, "BatchNormalization", input.shape())?;
 
         // The parallel passes below need a contiguous slice. A standard-layout input is
         // already contiguous, so only a non-contiguous view pays for a copy.
@@ -426,7 +440,7 @@ impl Layer for BatchNormalization {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        validate_built_input(&self.built, "BatchNormalization", input.shape())?;
 
         // The per-channel statistics are `[C]` and the channel axis is innermost. This lets
         // ndarray's trailing-axis broadcast line them up against an input of any rank on its own
@@ -790,7 +804,7 @@ mod tests {
     /// would mix, and neither number would come out
     #[test]
     fn spatial_forward_normalizes_per_channel_hand_derived() {
-        let mut layer = BatchNormalization::new(vec![1, 2, 2, 2], 0.9, 1e-5).unwrap();
+        let mut layer = BatchNormalization::new(0.9, 1e-5).unwrap();
         // [1, 2, 2, 2] channels-last: each position holds [channel0, channel1]
         let x = Tensor::from_shape_vec(
             IxDyn(&[1, 2, 2, 2]),
@@ -831,11 +845,11 @@ mod tests {
             .map(|i| (i % 17) as f32 * 0.25 - 2.0)
             .collect();
 
-        let mut spatial = BatchNormalization::new(vec![b, h, w, c], 0.9, 1e-5).unwrap();
+        let mut spatial = BatchNormalization::new(0.9, 1e-5).unwrap();
         let x4 = Tensor::from_shape_vec(IxDyn(&[b, h, w, c]), flat.clone()).unwrap();
         let out4 = spatial.forward(&x4).unwrap();
 
-        let mut folded = BatchNormalization::new(vec![b * h * w, c], 0.9, 1e-5).unwrap();
+        let mut folded = BatchNormalization::new(0.9, 1e-5).unwrap();
         let x2 = Tensor::from_shape_vec(IxDyn(&[b * h * w, c]), flat).unwrap();
         let out2 = folded.forward(&x2).unwrap();
 

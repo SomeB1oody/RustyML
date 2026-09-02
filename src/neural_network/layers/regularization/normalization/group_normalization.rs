@@ -2,8 +2,8 @@
 //! group per sample, independent of batch size
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
+use crate::neural_network::layers::build_on_forward;
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
@@ -12,11 +12,13 @@ use crate::neural_network::layers::regularization::normalization::{
     group_norm_backward_core, group_norm_forward_core,
 };
 use crate::neural_network::layers::regularization::validation::{
-    validate_epsilon, validate_input_shape, validate_input_shape_not_empty,
-    validate_min_input_ndim, validate_num_groups, validate_num_groups_positive,
+    validate_epsilon, validate_min_input_ndim, validate_num_groups, validate_num_groups_positive,
 };
-use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
+use crate::neural_network::layers::validation::{
+    start_build, validate_built_input, validate_optional_weight, validate_weight_shape,
+};
 use crate::neural_network::traits::{Layer, ParamGrad};
+use crate::neural_network::{Shape, Tensor};
 
 /// Group Normalization layer for neural networks
 ///
@@ -33,7 +35,7 @@ use crate::neural_network::traits::{Layer, ParamGrad};
 ///
 /// // Create a GroupNormalization layer for input shape [batch, spatial, channels]
 /// // with 4 groups dividing 8 channels
-/// let mut gn_layer = GroupNormalization::new(vec![4, 32, 8], 4, 1e-5).unwrap();
+/// let mut gn_layer = GroupNormalization::new(4, 1e-5).unwrap();
 ///
 /// // Create input tensor
 /// let input = Array3::ones((4, 32, 8)).into_dyn();
@@ -47,8 +49,8 @@ pub struct GroupNormalization {
     num_groups: usize,
     /// Small constant for numerical stability in normalization
     epsilon: f32,
-    /// Shape of the input tensor
-    input_shape: Vec<usize>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
     /// Scale parameter (trainable)
     ///
     /// The array stays allocated and holds every element at 1 when `scale` is false. A scale of
@@ -82,7 +84,6 @@ impl GroupNormalization {
     ///
     /// # Parameters
     ///
-    /// - `input_shape` - Shape of the input tensor
     /// - `num_groups` - Number of groups to divide channels into
     /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
     ///
@@ -92,32 +93,18 @@ impl GroupNormalization {
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` - If `input_shape` is empty
     /// - `Error::InvalidParameter` - If `num_groups` is 0
     /// - `Error::InvalidParameter` - If `epsilon` is not positive or not finite
-    pub fn new(input_shape: Vec<usize>, num_groups: usize, epsilon: f32) -> Result<Self, Error> {
-        validate_input_shape_not_empty(&input_shape)?;
+    pub fn new(num_groups: usize, epsilon: f32) -> Result<Self, Error> {
         validate_num_groups_positive(num_groups)?;
         validate_epsilon(epsilon)?;
-
-        // Parameters have the shape of the channel dimension
-        let param_shape = if input_shape.len() > 1 {
-            let num_channels = input_shape[input_shape.len() - 1];
-            // Divisibility is checked in forward() instead, matching the other layers' error
-            // pattern
-            vec![num_channels]
-        } else {
-            vec![1]
-        };
-
-        let param_shape_ndarray = param_shape.as_slice();
 
         Ok(GroupNormalization {
             num_groups,
             epsilon,
-            input_shape,
-            gamma: Tensor::ones(param_shape_ndarray),
-            beta: Tensor::zeros(param_shape_ndarray),
+            built: None,
+            gamma: Tensor::ones([0].as_slice()),
+            beta: Tensor::zeros([0].as_slice()),
             training: true,
             x_normalized: None,
             inv_std: None,
@@ -197,6 +184,9 @@ impl GroupNormalization {
         gamma: impl Into<Option<Tensor>>,
         beta: impl Into<Option<Tensor>>,
     ) -> Result<(), Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("GroupNormalization"));
+        }
         let gamma = validate_optional_weight("gamma", "scale", self.scale, gamma.into())?;
         let beta = validate_optional_weight("beta", "center", self.center, beta.into())?;
         if let Some(gamma) = gamma.as_ref() {
@@ -216,8 +206,35 @@ impl GroupNormalization {
 }
 
 impl Layer for GroupNormalization {
+    /// Allocates the per-channel arrays from the trailing axis of the input
+    ///
+    /// The channel axis is the last axis. An input of rank 1 has no channel axis, so the
+    /// arrays hold 1 element that every position shares
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "GroupNormalization", input)? else {
+            return Ok(());
+        };
+        input.check_min_rank("GroupNormalization", 1)?;
+        let channels = match built.axes()[built.rank() - 1] {
+            _ if built.rank() == 1 => 1,
+            Some(extent) => extent,
+            None => {
+                return Err(Error::invalid_input(format!(
+                    "GroupNormalization needs a fixed extent on the channel axis, and the shape {built} \
+                     leaves that axis free"
+                )));
+            }
+        };
+        validate_num_groups(channels, self.num_groups)?;
+        self.gamma = Tensor::ones([channels].as_slice());
+        self.beta = Tensor::zeros([channels].as_slice());
+        self.built = Some(built);
+        Ok(())
+    }
+
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        build_on_forward!(self, input);
+        validate_built_input(&self.built, "GroupNormalization", input.shape())?;
         validate_min_input_ndim(input.ndim(), 3, "Group normalization")?;
 
         validate_num_groups(input.shape()[input.ndim() - 1], self.num_groups)?;
@@ -239,7 +256,7 @@ impl Layer for GroupNormalization {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        validate_built_input(&self.built, "GroupNormalization", input.shape())?;
         validate_min_input_ndim(input.ndim(), 3, "Group normalization")?;
 
         validate_num_groups(input.shape()[input.ndim() - 1], self.num_groups)?;

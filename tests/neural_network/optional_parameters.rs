@@ -20,6 +20,7 @@
 use crate::common::assert_allclose;
 use ndarray::{Array, Array1, Array2, Array3, Array4, Array5, IxDyn};
 use rustyml::error::{Error, IoError};
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::Activation;
 use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
@@ -40,6 +41,7 @@ use rustyml::neural_network::layers::regularization::normalization::layer_normal
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::{Layer, Optimizer, WeightKind};
 
 // ---------------------------------------------------------------------------------------
@@ -118,15 +120,18 @@ fn array_of(layer: &dyn Layer, name: &str) -> Vec<f32> {
 /// checks that the kernel really moves
 #[test]
 fn a_bias_free_dense_trains_its_kernel() {
-    let mut layer = Dense::new(3, 2, Activation::Linear)
+    let mut layer = Dense::new(2, Activation::Linear)
         .unwrap()
         .with_use_bias(false);
+    layer.build(&Shape::known(&[1, 3])).unwrap();
     layer
         .set_weights(Array2::from_shape_vec((3, 2), seq(6, 5)).unwrap(), None)
         .unwrap();
 
-    let mut model = Sequential::new();
-    model.add(layer);
+    let mut model = SequentialBuilder::new()
+        .add(layer)
+        .build(&Shape::known(&[4, 3]))
+        .unwrap();
     model.compile(
         SGD::new(0.1, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
@@ -153,9 +158,10 @@ fn a_bias_free_dense_trains_its_kernel() {
 /// The same defect on the convolution side, where the bias is also the last array
 #[test]
 fn a_bias_free_conv2d_trains_its_kernel() {
-    let mut layer = Conv2D::new(2, (2, 2), vec![1, 4, 4, 2], (1, 1), Activation::Linear)
+    let mut layer = Conv2D::new(2, (2, 2), (1, 1), Activation::Linear)
         .unwrap()
         .with_use_bias(false);
+    layer.build(&Shape::known(&[1, 4, 4, 2])).unwrap();
     layer
         .set_weights(
             Array4::from_shape_vec((2, 2, 2, 2), seq(16, 5)).unwrap(),
@@ -163,8 +169,10 @@ fn a_bias_free_conv2d_trains_its_kernel() {
         )
         .unwrap();
 
-    let mut model = Sequential::new();
-    model.add(layer);
+    let mut model = SequentialBuilder::new()
+        .add(layer)
+        .build(&Shape::known(&[1, 4, 4, 2]))
+        .unwrap();
     model.compile(
         SGD::new(0.05, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
@@ -208,7 +216,7 @@ fn every_bias_free_layer_yields_its_kernels() {
         BiasFreeCase {
             name: "Dense",
             layer: Box::new(
-                Dense::new(2, 3, Activation::Linear)
+                Dense::new(3, Activation::Linear)
                     .unwrap()
                     .with_use_bias(false),
             ),
@@ -218,7 +226,7 @@ fn every_bias_free_layer_yields_its_kernels() {
         BiasFreeCase {
             name: "Conv1D",
             layer: Box::new(
-                Conv1D::new(3, 2, vec![1, 6, 2], 1, Activation::Linear)
+                Conv1D::new(3, 2, 1, Activation::Linear)
                     .unwrap()
                     .with_use_bias(false),
             ),
@@ -228,7 +236,7 @@ fn every_bias_free_layer_yields_its_kernels() {
         BiasFreeCase {
             name: "Conv2D",
             layer: Box::new(
-                Conv2D::new(3, (2, 2), vec![1, 4, 4, 2], (1, 1), Activation::Linear)
+                Conv2D::new(3, (2, 2), (1, 1), Activation::Linear)
                     .unwrap()
                     .with_use_bias(false),
             ),
@@ -238,15 +246,9 @@ fn every_bias_free_layer_yields_its_kernels() {
         BiasFreeCase {
             name: "Conv3D",
             layer: Box::new(
-                Conv3D::new(
-                    3,
-                    (2, 2, 2),
-                    vec![1, 3, 3, 3, 2],
-                    (1, 1, 1),
-                    Activation::Linear,
-                )
-                .unwrap()
-                .with_use_bias(false),
+                Conv3D::new(3, (2, 2, 2), (1, 1, 1), Activation::Linear)
+                    .unwrap()
+                    .with_use_bias(false),
             ),
             input: x5.clone(),
             arrays: vec!["kernel"],
@@ -254,7 +256,7 @@ fn every_bias_free_layer_yields_its_kernels() {
         BiasFreeCase {
             name: "Conv1DTranspose",
             layer: Box::new(
-                Conv1DTranspose::new(3, 2, vec![1, 6, 2], 1, Activation::Linear)
+                Conv1DTranspose::new(3, 2, 1, Activation::Linear)
                     .unwrap()
                     .with_use_bias(false),
             ),
@@ -264,7 +266,7 @@ fn every_bias_free_layer_yields_its_kernels() {
         BiasFreeCase {
             name: "Conv2DTranspose",
             layer: Box::new(
-                Conv2DTranspose::new(3, (2, 2), vec![1, 4, 4, 2], (1, 1), Activation::Linear)
+                Conv2DTranspose::new(3, (2, 2), (1, 1), Activation::Linear)
                     .unwrap()
                     .with_use_bias(false),
             ),
@@ -274,15 +276,9 @@ fn every_bias_free_layer_yields_its_kernels() {
         BiasFreeCase {
             name: "Conv3DTranspose",
             layer: Box::new(
-                Conv3DTranspose::new(
-                    3,
-                    (2, 2, 2),
-                    vec![1, 3, 3, 3, 2],
-                    (1, 1, 1),
-                    Activation::Linear,
-                )
-                .unwrap()
-                .with_use_bias(false),
+                Conv3DTranspose::new(3, (2, 2, 2), (1, 1, 1), Activation::Linear)
+                    .unwrap()
+                    .with_use_bias(false),
             ),
             input: x5.clone(),
             arrays: vec!["kernel"],
@@ -290,7 +286,7 @@ fn every_bias_free_layer_yields_its_kernels() {
         BiasFreeCase {
             name: "DepthwiseConv1D",
             layer: Box::new(
-                DepthwiseConv1D::new(2, vec![1, 6, 2], 1, Activation::Linear)
+                DepthwiseConv1D::new(2, 1, Activation::Linear)
                     .unwrap()
                     .with_use_bias(false),
             ),
@@ -300,7 +296,7 @@ fn every_bias_free_layer_yields_its_kernels() {
         BiasFreeCase {
             name: "DepthwiseConv2D",
             layer: Box::new(
-                DepthwiseConv2D::new((2, 2), vec![1, 4, 4, 2], (1, 1), Activation::Linear)
+                DepthwiseConv2D::new((2, 2), (1, 1), Activation::Linear)
                     .unwrap()
                     .with_use_bias(false),
             ),
@@ -310,7 +306,7 @@ fn every_bias_free_layer_yields_its_kernels() {
         BiasFreeCase {
             name: "SeparableConv1D",
             layer: Box::new(
-                SeparableConv1D::new(3, 2, vec![1, 6, 2], 1, 1, Activation::Linear)
+                SeparableConv1D::new(3, 2, 1, 1, Activation::Linear)
                     .unwrap()
                     .with_use_bias(false),
             ),
@@ -320,7 +316,7 @@ fn every_bias_free_layer_yields_its_kernels() {
         BiasFreeCase {
             name: "SeparableConv2D",
             layer: Box::new(
-                SeparableConv2D::new(3, (2, 2), vec![1, 4, 4, 2], (1, 1), 1, Activation::Linear)
+                SeparableConv2D::new(3, (2, 2), (1, 1), 1, Activation::Linear)
                     .unwrap()
                     .with_use_bias(false),
             ),
@@ -393,7 +389,7 @@ fn dropping_gamma_does_not_give_beta_the_optimizer_state_of_gamma() {
     let mut optimizer = SGD::new(0.1, 0.9, false, 0.0).unwrap();
 
     // Step 1 fills the momentum buffer of `gamma`, and leaves the buffer of `beta` at 0
-    let mut full = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
+    let mut full = LayerNormalization::new(1e-5).unwrap();
     assert_eq!(train_once(&mut full, &x, &upstream), vec!["gamma", "beta"]);
     for pg in full.parameters() {
         let all_zero = pg.grad.iter().all(|g| *g == 0.0);
@@ -416,9 +412,7 @@ fn dropping_gamma_does_not_give_beta_the_optimizer_state_of_gamma() {
 
     // Step 2 runs a scale-free layer of the same shape through the same optimizer, at the same
     // scope. `beta` is the only parameter, and it sits at index 0
-    let mut scale_free = LayerNormalization::new(vec![2, 4], 1e-5)
-        .unwrap()
-        .with_scale(false);
+    let mut scale_free = LayerNormalization::new(1e-5).unwrap().with_scale(false);
     assert_eq!(weight_names(&scale_free), vec!["beta"]);
     assert_eq!(train_once(&mut scale_free, &x, &upstream), vec!["beta"]);
     optimizer.step();
@@ -436,31 +430,39 @@ fn dropping_gamma_does_not_give_beta_the_optimizer_state_of_gamma() {
 /// `beta` and a positional key would renumber them
 #[test]
 fn dropping_an_array_moves_no_other_checkpoint_path() {
-    let mut both = Sequential::new();
-    both.add(BatchNormalization::new(vec![2, 4], 0.9, 1e-5).unwrap());
+    let shape = Shape::known(&[4, 3]);
+
+    let both = SequentialBuilder::new()
+        .add(BatchNormalization::new(0.9, 1e-5).unwrap())
+        .build(&shape)
+        .unwrap();
     assert_eq!(
         both.weight_paths(),
         vec!["0.gamma", "0.beta", "0.moving_mean", "0.moving_variance"]
     );
 
-    let mut no_scale = Sequential::new();
-    no_scale.add(
-        BatchNormalization::new(vec![2, 4], 0.9, 1e-5)
-            .unwrap()
-            .with_scale(false),
-    );
+    let no_scale = SequentialBuilder::new()
+        .add(
+            BatchNormalization::new(0.9, 1e-5)
+                .unwrap()
+                .with_scale(false),
+        )
+        .build(&shape)
+        .unwrap();
     assert_eq!(
         no_scale.weight_paths(),
         vec!["0.beta", "0.moving_mean", "0.moving_variance"]
     );
 
-    let mut neither = Sequential::new();
-    neither.add(
-        BatchNormalization::new(vec![2, 4], 0.9, 1e-5)
-            .unwrap()
-            .with_center(false)
-            .with_scale(false),
-    );
+    let neither = SequentialBuilder::new()
+        .add(
+            BatchNormalization::new(0.9, 1e-5)
+                .unwrap()
+                .with_center(false)
+                .with_scale(false),
+        )
+        .build(&shape)
+        .unwrap();
     assert_eq!(
         neither.weight_paths(),
         vec!["0.moving_mean", "0.moving_variance"]
@@ -476,7 +478,7 @@ fn every_normalization_layer_drops_the_array_its_flag_names() {
     let make: [(&str, MakeNormalization); 4] = [
         ("BatchNormalization", |center, scale| {
             Box::new(
-                BatchNormalization::new(vec![2, 4], 0.9, 1e-5)
+                BatchNormalization::new(0.9, 1e-5)
                     .unwrap()
                     .with_center(center)
                     .with_scale(scale),
@@ -484,7 +486,7 @@ fn every_normalization_layer_drops_the_array_its_flag_names() {
         }),
         ("LayerNormalization", |center, scale| {
             Box::new(
-                LayerNormalization::new(vec![2, 4], 1e-5)
+                LayerNormalization::new(1e-5)
                     .unwrap()
                     .with_center(center)
                     .with_scale(scale),
@@ -492,7 +494,7 @@ fn every_normalization_layer_drops_the_array_its_flag_names() {
         }),
         ("GroupNormalization", |center, scale| {
             Box::new(
-                GroupNormalization::new(vec![2, 3, 4], 2, 1e-5)
+                GroupNormalization::new(2, 1e-5)
                     .unwrap()
                     .with_center(center)
                     .with_scale(scale),
@@ -500,7 +502,7 @@ fn every_normalization_layer_drops_the_array_its_flag_names() {
         }),
         ("InstanceNormalization", |center, scale| {
             Box::new(
-                InstanceNormalization::new(vec![2, 3, 4], 1e-5)
+                InstanceNormalization::new(1e-5)
                     .unwrap()
                     .with_center(center)
                     .with_scale(scale),
@@ -536,12 +538,12 @@ fn param_count_matches_the_arrays_a_layer_holds() {
     let layers: Vec<(&str, Box<dyn Layer>)> = vec![
         (
             "Dense with a bias",
-            Box::new(Dense::new(3, 4, Activation::Linear).unwrap()),
+            Box::new(Dense::new(4, Activation::Linear).unwrap()),
         ),
         (
             "Dense without a bias",
             Box::new(
-                Dense::new(3, 4, Activation::Linear)
+                Dense::new(4, Activation::Linear)
                     .unwrap()
                     .with_use_bias(false),
             ),
@@ -549,7 +551,7 @@ fn param_count_matches_the_arrays_a_layer_holds() {
         (
             "Conv2D without a bias",
             Box::new(
-                Conv2D::new(3, (2, 2), vec![1, 4, 4, 2], (1, 1), Activation::Linear)
+                Conv2D::new(3, (2, 2), (1, 1), Activation::Linear)
                     .unwrap()
                     .with_use_bias(false),
             ),
@@ -557,7 +559,7 @@ fn param_count_matches_the_arrays_a_layer_holds() {
         (
             "SeparableConv2D without a bias",
             Box::new(
-                SeparableConv2D::new(3, (2, 2), vec![1, 4, 4, 2], (1, 1), 1, Activation::Linear)
+                SeparableConv2D::new(3, (2, 2), (1, 1), 1, Activation::Linear)
                     .unwrap()
                     .with_use_bias(false),
             ),
@@ -565,7 +567,7 @@ fn param_count_matches_the_arrays_a_layer_holds() {
         (
             "DepthwiseConv2D without a bias",
             Box::new(
-                DepthwiseConv2D::new((2, 2), vec![1, 4, 4, 2], (1, 1), Activation::Linear)
+                DepthwiseConv2D::new((2, 2), (1, 1), Activation::Linear)
                     .unwrap()
                     .with_use_bias(false),
             ),
@@ -573,23 +575,19 @@ fn param_count_matches_the_arrays_a_layer_holds() {
         (
             "BatchNormalization without gamma",
             Box::new(
-                BatchNormalization::new(vec![2, 4], 0.9, 1e-5)
+                BatchNormalization::new(0.9, 1e-5)
                     .unwrap()
                     .with_scale(false),
             ),
         ),
         (
             "LayerNormalization without beta",
-            Box::new(
-                LayerNormalization::new(vec![2, 4], 1e-5)
-                    .unwrap()
-                    .with_center(false),
-            ),
+            Box::new(LayerNormalization::new(1e-5).unwrap().with_center(false)),
         ),
         (
             "GroupNormalization without either",
             Box::new(
-                GroupNormalization::new(vec![2, 3, 4], 2, 1e-5)
+                GroupNormalization::new(2, 1e-5)
                     .unwrap()
                     .with_center(false)
                     .with_scale(false),
@@ -597,17 +595,12 @@ fn param_count_matches_the_arrays_a_layer_holds() {
         ),
         (
             "InstanceNormalization without gamma",
-            Box::new(
-                InstanceNormalization::new(vec![2, 3, 4], 1e-5)
-                    .unwrap()
-                    .with_scale(false),
-            ),
+            Box::new(InstanceNormalization::new(1e-5).unwrap().with_scale(false)),
         ),
         (
             "SimpleRNN",
             Box::new(
                 rustyml::neural_network::layers::recurrent::simple_rnn::SimpleRNN::new(
-                    2,
                     3,
                     Activation::Tanh,
                 )
@@ -617,14 +610,14 @@ fn param_count_matches_the_arrays_a_layer_holds() {
         (
             "LSTM",
             Box::new(
-                rustyml::neural_network::layers::recurrent::lstm::LSTM::new(2, 3, Activation::Tanh)
+                rustyml::neural_network::layers::recurrent::lstm::LSTM::new(3, Activation::Tanh)
                     .unwrap(),
             ),
         ),
         (
             "GRU",
             Box::new(
-                rustyml::neural_network::layers::recurrent::gru::GRU::new(2, 3, Activation::Tanh)
+                rustyml::neural_network::layers::recurrent::gru::GRU::new(3, Activation::Tanh)
                     .unwrap(),
             ),
         ),
@@ -656,33 +649,40 @@ fn param_count_matches_the_arrays_a_layer_holds() {
 /// `count_params`. A bias-free Dense of 3 inputs and 4 units counts 12, not 16
 #[test]
 fn param_count_agrees_with_keras_for_the_optional_configurations() {
-    let dense = Dense::new(3, 4, Activation::Linear)
+    let mut dense = Dense::new(4, Activation::Linear)
         .unwrap()
         .with_use_bias(false);
+    dense.build(&Shape::known(&[1, 3])).unwrap();
     assert_eq!(dense.param_count().trainable, 12);
     assert_eq!(dense.param_count().non_trainable, 0);
 
-    let conv = Conv2D::new(3, (2, 2), vec![1, 4, 4, 2], (1, 1), Activation::Linear)
+    // 24 trainable = 2*2 kernel * 2 input channels * 3 filters
+    let mut conv = Conv2D::new(3, (2, 2), (1, 1), Activation::Linear)
         .unwrap()
         .with_use_bias(false);
+    conv.build(&Shape::known(&[1, 3, 3, 2])).unwrap();
     assert_eq!(conv.param_count().trainable, 24);
 
-    let separable =
-        SeparableConv2D::new(3, (2, 2), vec![1, 4, 4, 2], (1, 1), 1, Activation::Linear)
-            .unwrap()
-            .with_use_bias(false);
-    assert_eq!(separable.param_count().trainable, 14);
-
-    let depthwise = DepthwiseConv2D::new((2, 2), vec![1, 4, 4, 2], (1, 1), Activation::Linear)
+    // 14 trainable = (2*2 depthwise + 3 pointwise) * 2 input channels
+    let mut separable = SeparableConv2D::new(3, (2, 2), (1, 1), 1, Activation::Linear)
         .unwrap()
         .with_use_bias(false);
+    separable.build(&Shape::known(&[1, 3, 3, 2])).unwrap();
+    assert_eq!(separable.param_count().trainable, 14);
+
+    // 8 trainable = 2*2 kernel * 2 input channels * depth_multiplier 1
+    let mut depthwise = DepthwiseConv2D::new((2, 2), (1, 1), Activation::Linear)
+        .unwrap()
+        .with_use_bias(false);
+    depthwise.build(&Shape::known(&[1, 3, 3, 2])).unwrap();
     assert_eq!(depthwise.param_count().trainable, 8);
 
     // Keras reports 12 total for a scale-free BatchNormalization of 4 channels: 4 trainable
     // and 8 non-trainable
-    let batch = BatchNormalization::new(vec![2, 4], 0.9, 1e-5)
+    let mut batch = BatchNormalization::new(0.9, 1e-5)
         .unwrap()
         .with_scale(false);
+    batch.build(&Shape::known(&[1, 4])).unwrap();
     assert_eq!(batch.param_count().trainable, 4);
     assert_eq!(batch.param_count().non_trainable, 8);
     assert_eq!(batch.param_count().total(), 12);
@@ -696,9 +696,10 @@ fn param_count_agrees_with_keras_for_the_optional_configurations() {
 /// the input, and the upstream gradient come from the same deterministic sequence on both sides
 #[test]
 fn a_bias_free_dense_matches_keras() {
-    let mut layer = Dense::new(3, 4, Activation::Linear)
+    let mut layer = Dense::new(4, Activation::Linear)
         .unwrap()
         .with_use_bias(false);
+    layer.build(&Shape::known(&[1, 3])).unwrap();
     layer
         .set_weights(Array2::from_shape_vec((3, 4), seq(12, 50)).unwrap(), None)
         .unwrap();
@@ -767,9 +768,7 @@ fn a_bias_free_dense_matches_keras() {
 /// `beta`, and the forward output is then the normalized value plus `beta`
 #[test]
 fn a_scale_free_layer_normalization_matches_keras() {
-    let mut layer = LayerNormalization::new(vec![2, 4], 1e-5)
-        .unwrap()
-        .with_scale(false);
+    let mut layer = LayerNormalization::new(1e-5).unwrap().with_scale(false);
 
     let x = tensor(&[2, 4], 20);
     let upstream = tensor(&[2, 4], 700);
@@ -822,16 +821,20 @@ fn refusal(result: Result<(), Error>) -> String {
 fn a_checkpoint_with_a_bias_fails_to_load_into_a_bias_free_layer() {
     let file = TempFile::new("dense_bias_into_bias_free");
 
-    let mut with_bias = Sequential::new();
-    with_bias.add(Dense::new(3, 4, Activation::Linear).unwrap());
+    let with_bias = SequentialBuilder::new()
+        .add(Dense::new(4, Activation::Linear).unwrap())
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
     with_bias.save_to_path(file.path()).unwrap();
 
-    let mut bias_free = Sequential::new();
-    bias_free.add(
-        Dense::new(3, 4, Activation::Linear)
-            .unwrap()
-            .with_use_bias(false),
-    );
+    let mut bias_free = SequentialBuilder::new()
+        .add(
+            Dense::new(4, Activation::Linear)
+                .unwrap()
+                .with_use_bias(false),
+        )
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
     let message = refusal(bias_free.load_from_path(file.path()));
     assert!(message.contains("layer 0"), "{message}");
     assert!(message.contains("Dense"), "{message}");
@@ -847,16 +850,20 @@ fn a_checkpoint_with_a_bias_fails_to_load_into_a_bias_free_layer() {
 fn a_bias_free_checkpoint_fails_to_load_into_a_layer_with_a_bias() {
     let file = TempFile::new("bias_free_into_dense_bias");
 
-    let mut bias_free = Sequential::new();
-    bias_free.add(
-        Dense::new(3, 4, Activation::Linear)
-            .unwrap()
-            .with_use_bias(false),
-    );
+    let bias_free = SequentialBuilder::new()
+        .add(
+            Dense::new(4, Activation::Linear)
+                .unwrap()
+                .with_use_bias(false),
+        )
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
     bias_free.save_to_path(file.path()).unwrap();
 
-    let mut with_bias = Sequential::new();
-    with_bias.add(Dense::new(3, 4, Activation::Linear).unwrap());
+    let mut with_bias = SequentialBuilder::new()
+        .add(Dense::new(4, Activation::Linear).unwrap())
+        .build(&Shape::known(&[3, 2]))
+        .unwrap();
     let message = refusal(with_bias.load_from_path(file.path()));
     assert!(message.contains("layer 0"), "{message}");
     assert!(message.contains("bias"), "{message}");
@@ -869,20 +876,16 @@ fn a_bias_free_checkpoint_fails_to_load_into_a_layer_with_a_bias() {
 fn a_checkpoint_of_the_other_optional_array_fails_by_path() {
     let file = TempFile::new("layer_norm_beta_into_gamma");
 
-    let mut scale_free = Sequential::new();
-    scale_free.add(
-        LayerNormalization::new(vec![2, 4], 1e-5)
-            .unwrap()
-            .with_scale(false),
-    );
+    let scale_free = SequentialBuilder::new()
+        .add(LayerNormalization::new(1e-5).unwrap().with_scale(false))
+        .build(&Shape::known(&[3, 4]))
+        .unwrap();
     scale_free.save_to_path(file.path()).unwrap();
 
-    let mut center_free = Sequential::new();
-    center_free.add(
-        LayerNormalization::new(vec![2, 4], 1e-5)
-            .unwrap()
-            .with_center(false),
-    );
+    let mut center_free = SequentialBuilder::new()
+        .add(LayerNormalization::new(1e-5).unwrap().with_center(false))
+        .build(&Shape::known(&[3, 4]))
+        .unwrap();
     let message = refusal(center_free.load_from_path(file.path()));
     assert!(message.contains("0.gamma"), "{message}");
     assert!(message.contains("0.beta"), "{message}");
@@ -894,22 +897,27 @@ fn a_checkpoint_of_the_other_optional_array_fails_by_path() {
 fn a_bias_free_checkpoint_round_trips() {
     let file = TempFile::new("bias_free_round_trip");
 
-    let mut source = Sequential::new();
-    let mut layer = Dense::new(3, 4, Activation::Linear)
+    let mut layer = Dense::new(4, Activation::Linear)
         .unwrap()
         .with_use_bias(false);
+    layer.build(&Shape::known(&[3, 3])).unwrap();
     layer
         .set_weights(Array2::from_shape_vec((3, 4), seq(12, 50)).unwrap(), None)
         .unwrap();
-    source.add(layer);
+    let source = SequentialBuilder::new()
+        .add(layer)
+        .build(&Shape::known(&[3, 3]))
+        .unwrap();
     source.save_to_path(file.path()).unwrap();
 
-    let mut target = Sequential::new();
-    target.add(
-        Dense::new(3, 4, Activation::Linear)
-            .unwrap()
-            .with_use_bias(false),
-    );
+    let mut target = SequentialBuilder::new()
+        .add(
+            Dense::new(4, Activation::Linear)
+                .unwrap()
+                .with_use_bias(false),
+        )
+        .build(&Shape::known(&[3, 3]))
+        .unwrap();
     target.load_from_path(file.path()).unwrap();
 
     assert_eq!(target.weight_paths(), vec!["0.kernel"]);
@@ -922,16 +930,16 @@ fn a_bias_free_checkpoint_round_trips() {
 fn a_partial_load_reports_the_array_the_model_dropped() {
     let file = TempFile::new("partial_gamma");
 
-    let mut full = Sequential::new();
-    full.add(LayerNormalization::new(vec![2, 4], 1e-5).unwrap());
+    let full = SequentialBuilder::new()
+        .add(LayerNormalization::new(1e-5).unwrap())
+        .build(&Shape::known(&[3, 4]))
+        .unwrap();
     full.save_to_path(file.path()).unwrap();
 
-    let mut center_free = Sequential::new();
-    center_free.add(
-        LayerNormalization::new(vec![2, 4], 1e-5)
-            .unwrap()
-            .with_center(false),
-    );
+    let mut center_free = SequentialBuilder::new()
+        .add(LayerNormalization::new(1e-5).unwrap().with_center(false))
+        .build(&Shape::known(&[3, 4]))
+        .unwrap();
     let report = center_free.load_partial_from_path(file.path()).unwrap();
     assert_eq!(report.applied, vec!["0.gamma"]);
     assert!(report.missing.is_empty(), "{:?}", report.missing);
@@ -945,9 +953,10 @@ fn a_partial_load_reports_the_array_the_model_dropped() {
 /// A bias given to a layer that holds none reaches nothing, so the setter refuses it by name
 #[test]
 fn set_weights_refuses_a_bias_that_the_layer_does_not_hold() {
-    let mut layer = Dense::new(3, 4, Activation::Linear)
+    let mut layer = Dense::new(4, Activation::Linear)
         .unwrap()
         .with_use_bias(false);
+    layer.build(&Shape::known(&[1, 3])).unwrap();
     let result = layer.set_weights(
         Array2::from_shape_vec((3, 4), seq(12, 50)).unwrap(),
         Array2::zeros((1, 4)),
@@ -964,7 +973,8 @@ fn set_weights_refuses_a_bias_that_the_layer_does_not_hold() {
 /// The other half of the same rule: a layer that holds a bias must be given one
 #[test]
 fn set_weights_requires_the_bias_that_the_layer_holds() {
-    let mut layer = Dense::new(3, 4, Activation::Linear).unwrap();
+    let mut layer = Dense::new(4, Activation::Linear).unwrap();
+    layer.build(&Shape::known(&[1, 3])).unwrap();
     let result = layer.set_weights(Array2::from_shape_vec((3, 4), seq(12, 50)).unwrap(), None);
     match result {
         Err(Error::InvalidParameter { name, reason }) => {
@@ -978,9 +988,8 @@ fn set_weights_requires_the_bias_that_the_layer_holds() {
 /// The same rule on a normalization layer, for both flags
 #[test]
 fn set_weights_refuses_a_normalization_array_that_the_layer_does_not_hold() {
-    let mut scale_free = LayerNormalization::new(vec![2, 4], 1e-5)
-        .unwrap()
-        .with_scale(false);
+    let mut scale_free = LayerNormalization::new(1e-5).unwrap().with_scale(false);
+    scale_free.build(&Shape::known(&[1, 4])).unwrap();
     match scale_free.set_weights(Tensor::ones(IxDyn(&[4])), Tensor::zeros(IxDyn(&[4]))) {
         Err(Error::InvalidParameter { name, reason }) => {
             assert_eq!(name, "gamma");
@@ -997,9 +1006,8 @@ fn set_weights_refuses_a_normalization_array_that_the_layer_does_not_hold() {
         .unwrap();
     assert_eq!(array_of(&scale_free, "beta"), seq(4, 9));
 
-    let mut center_free = LayerNormalization::new(vec![2, 4], 1e-5)
-        .unwrap()
-        .with_center(false);
+    let mut center_free = LayerNormalization::new(1e-5).unwrap().with_center(false);
+    center_free.build(&Shape::known(&[1, 4])).unwrap();
     match center_free.set_weights(Tensor::ones(IxDyn(&[4])), Tensor::zeros(IxDyn(&[4]))) {
         Err(Error::InvalidParameter { name, reason }) => {
             assert_eq!(name, "beta");
@@ -1012,33 +1020,30 @@ fn set_weights_refuses_a_normalization_array_that_the_layer_does_not_hold() {
 /// The conv setters take the same rule, at every rank
 #[test]
 fn the_conv_setters_refuse_a_bias_that_the_layer_does_not_hold() {
-    let mut c1 = Conv1D::new(2, 2, vec![1, 6, 2], 1, Activation::Linear)
+    let mut c1 = Conv1D::new(2, 2, 1, Activation::Linear)
         .unwrap()
         .with_use_bias(false);
+    c1.build(&Shape::known(&[1, 3, 2])).unwrap();
     assert!(
         c1.set_weights(Array3::zeros((2, 2, 2)), Array1::zeros(2))
             .is_err()
     );
     assert!(c1.set_weights(Array3::zeros((2, 2, 2)), None).is_ok());
 
-    let mut c3 = Conv3D::new(
-        2,
-        (2, 2, 2),
-        vec![1, 3, 3, 3, 2],
-        (1, 1, 1),
-        Activation::Linear,
-    )
-    .unwrap()
-    .with_use_bias(false);
+    let mut c3 = Conv3D::new(2, (2, 2, 2), (1, 1, 1), Activation::Linear)
+        .unwrap()
+        .with_use_bias(false);
+    c3.build(&Shape::known(&[1, 3, 3, 3, 2])).unwrap();
     assert!(
         c3.set_weights(Array5::zeros((2, 2, 2, 2, 2)), Array1::zeros(2))
             .is_err()
     );
     assert!(c3.set_weights(Array5::zeros((2, 2, 2, 2, 2)), None).is_ok());
 
-    let mut sc = SeparableConv1D::new(2, 2, vec![1, 6, 2], 1, 1, Activation::Linear)
+    let mut sc = SeparableConv1D::new(2, 2, 1, 1, Activation::Linear)
         .unwrap()
         .with_use_bias(false);
+    sc.build(&Shape::known(&[1, 3, 2])).unwrap();
     assert!(
         sc.set_weights(
             Array3::zeros((2, 2, 1)),
@@ -1060,20 +1065,19 @@ fn the_conv_setters_refuse_a_bias_that_the_layer_does_not_hold() {
 /// Every default keeps the roster that the layers had before the flags existed
 #[test]
 fn the_defaults_keep_every_array() {
-    let dense = Dense::new(3, 4, Activation::Linear).unwrap();
+    let dense = Dense::new(4, Activation::Linear).unwrap();
     assert_eq!(weight_names(&dense), vec!["kernel", "bias"]);
 
-    let conv = Conv2D::new(3, (2, 2), vec![1, 4, 4, 2], (1, 1), Activation::Linear).unwrap();
+    let conv = Conv2D::new(3, (2, 2), (1, 1), Activation::Linear).unwrap();
     assert_eq!(weight_names(&conv), vec!["kernel", "bias"]);
 
-    let separable =
-        SeparableConv2D::new(3, (2, 2), vec![1, 4, 4, 2], (1, 1), 1, Activation::Linear).unwrap();
+    let separable = SeparableConv2D::new(3, (2, 2), (1, 1), 1, Activation::Linear).unwrap();
     assert_eq!(
         weight_names(&separable),
         vec!["depthwise_kernel", "pointwise_kernel", "bias"]
     );
 
-    let batch = BatchNormalization::new(vec![2, 4], 0.9, 1e-5).unwrap();
+    let batch = BatchNormalization::new(0.9, 1e-5).unwrap();
     assert_eq!(
         weight_names(&batch),
         vec!["gamma", "beta", "moving_mean", "moving_variance"]
@@ -1120,7 +1124,7 @@ fn every_normalization_layer_yields_exactly_the_parameters_it_owns() {
             "BatchNormalization",
             |center, scale| {
                 Box::new(
-                    BatchNormalization::new(vec![4, 4], 0.9, 1e-5)
+                    BatchNormalization::new(0.9, 1e-5)
                         .unwrap()
                         .with_center(center)
                         .with_scale(scale),
@@ -1132,7 +1136,7 @@ fn every_normalization_layer_yields_exactly_the_parameters_it_owns() {
             "LayerNormalization",
             |center, scale| {
                 Box::new(
-                    LayerNormalization::new(vec![4, 4], 1e-5)
+                    LayerNormalization::new(1e-5)
                         .unwrap()
                         .with_center(center)
                         .with_scale(scale),
@@ -1144,7 +1148,7 @@ fn every_normalization_layer_yields_exactly_the_parameters_it_owns() {
             "GroupNormalization",
             |center, scale| {
                 Box::new(
-                    GroupNormalization::new(vec![2, 3, 4], 2, 1e-5)
+                    GroupNormalization::new(2, 1e-5)
                         .unwrap()
                         .with_center(center)
                         .with_scale(scale),
@@ -1156,7 +1160,7 @@ fn every_normalization_layer_yields_exactly_the_parameters_it_owns() {
             "InstanceNormalization",
             |center, scale| {
                 Box::new(
-                    InstanceNormalization::new(vec![2, 3, 4], 1e-5)
+                    InstanceNormalization::new(1e-5)
                         .unwrap()
                         .with_center(center)
                         .with_scale(scale),
@@ -1216,7 +1220,7 @@ fn the_use_bias_layers_yield_exactly_the_parameters_they_own() {
             vec!["kernel"]
         };
 
-        let mut dense = Dense::new(3, 2, Activation::Linear)
+        let mut dense = Dense::new(2, Activation::Linear)
             .unwrap()
             .with_use_bias(use_bias);
         assert_eq!(
@@ -1230,7 +1234,7 @@ fn the_use_bias_layers_yield_exactly_the_parameters_they_own() {
             "Dense with use_bias {use_bias} yields the wrong parameters"
         );
 
-        let mut conv = Conv2D::new(2, (2, 2), vec![1, 4, 4, 2], (1, 1), Activation::Linear)
+        let mut conv = Conv2D::new(2, (2, 2), (1, 1), Activation::Linear)
             .unwrap()
             .with_use_bias(use_bias);
         assert_eq!(
@@ -1265,26 +1269,24 @@ fn a_normalization_layer_that_drops_1_array_trains_the_array_it_keeps() {
         (
             "LayerNormalization without a scale",
             || {
-                let mut model = Sequential::new();
-                model.add(
-                    LayerNormalization::new(vec![4, 4], 1e-5)
-                        .unwrap()
-                        .with_scale(false),
-                );
-                model
+                SequentialBuilder::new()
+                    .add(LayerNormalization::new(1e-5).unwrap().with_scale(false))
+                    .build(&Shape::known(&[4, 4]))
+                    .unwrap()
             },
             "0.beta",
         ),
         (
             "BatchNormalization without a center",
             || {
-                let mut model = Sequential::new();
-                model.add(
-                    BatchNormalization::new(vec![4, 4], 0.9, 1e-5)
-                        .unwrap()
-                        .with_center(false),
-                );
-                model
+                SequentialBuilder::new()
+                    .add(
+                        BatchNormalization::new(0.9, 1e-5)
+                            .unwrap()
+                            .with_center(false),
+                    )
+                    .build(&Shape::known(&[4, 4]))
+                    .unwrap()
             },
             "0.gamma",
         ),

@@ -30,7 +30,8 @@ use ndarray::IxDyn;
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::*;
@@ -40,10 +41,11 @@ use ndarray::IxDyn;
 /// let x = Array2::ones((2, 12)).into_dyn();
 ///
 /// // Fold the 12 features into a 2x3x2 volume. The -1 axis takes the leftover extent
-/// let mut model = Sequential::new();
-/// model
+/// let mut model = SequentialBuilder::new()
 ///     .add(Reshape::new(vec![-1, 3, 2]).unwrap())
-///     .compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+///     .build(&Shape::known(x.shape()))
+///     .unwrap();
+/// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // View model structure
 /// model.summary();

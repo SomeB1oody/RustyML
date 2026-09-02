@@ -5,6 +5,7 @@
 //! differences. This file pins the gradient against reference values instead.
 
 use ndarray::{Array2, Array3, Array4, IxDyn};
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::regularization::normalization::unit_normalization::{
@@ -12,7 +13,7 @@ use rustyml::neural_network::layers::regularization::normalization::unit_normali
 };
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
-use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
@@ -650,8 +651,11 @@ fn unit_normalization_runs_inside_a_sequential_model() {
         Array4::from_shape_fn((2, 3, 3, 4), |(b, h, w, c)| (b + h + w + c) as f32 - 4.0).into_dyn();
     let y = last_axis().predict(&x).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(last_axis()).compile(
+    let mut model = SequentialBuilder::new()
+        .add(last_axis())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
         SGD::new(0.01, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );

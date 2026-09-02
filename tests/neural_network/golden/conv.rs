@@ -70,6 +70,7 @@
 
 use super::{GoldenCase, LayerFixture, golden_weights, golden_weights_from};
 use ndarray::{Ix1, Ix3, Ix4, Ix5};
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::layers::activation::Activation;
 use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::convolution::conv_1d::{Conv1D, ConvPadding};
@@ -166,11 +167,14 @@ fn conv_1d_cases() -> Vec<GoldenCase> {
         dilation_rate: usize,
         activation: Activation,
     ) -> Box<dyn Layer> {
-        let mut layer = Conv1D::new(3, 3, SHAPE_1D.to_vec(), stride, activation)
+        let mut layer = Conv1D::new(3, 3, stride, activation)
             .expect("3 filters and a kernel of 3 fit the input")
             .with_padding(padding)
             .with_dilation_rate(dilation_rate)
             .expect("a positive dilation that no stride above 1 accompanies");
+        layer
+            .build(&Shape::known(&SHAPE_1D))
+            .expect("the layer accepts the shape of the case");
         let weight = golden_weights(&[3, 2, 3])
             .into_dimensionality::<Ix3>()
             .expect("the kernel is rank 3");
@@ -227,11 +231,14 @@ fn conv_2d_cases() -> Vec<GoldenCase> {
         dilation_rate: (usize, usize),
         activation: Activation,
     ) -> Box<dyn Layer> {
-        let mut layer = Conv2D::new(3, kernel_size, SHAPE_2D.to_vec(), strides, activation)
+        let mut layer = Conv2D::new(3, kernel_size, strides, activation)
             .expect("the kernel fits the input")
             .with_padding(padding)
             .with_dilation_rate(dilation_rate)
             .expect("a positive dilation that no stride above 1 accompanies");
+        layer
+            .build(&Shape::known(&SHAPE_2D))
+            .expect("the layer accepts the shape of the case");
         let kernel_shape = [kernel_size.0, kernel_size.1, 2, 3];
         let count: usize = kernel_shape.iter().product();
         let weight = golden_weights(&kernel_shape)
@@ -304,11 +311,14 @@ fn conv_3d_cases() -> Vec<GoldenCase> {
         dilation_rate: (usize, usize, usize),
         activation: Activation,
     ) -> Box<dyn Layer> {
-        let mut layer = Conv3D::new(2, (2, 2, 2), input_shape.to_vec(), strides, activation)
+        let mut layer = Conv3D::new(2, (2, 2, 2), strides, activation)
             .expect("a kernel of 2 fits every spatial extent of the input")
             .with_padding(padding)
             .with_dilation_rate(dilation_rate)
             .expect("a positive dilation that no stride above 1 accompanies");
+        layer
+            .build(&Shape::known(input_shape))
+            .expect("the layer accepts the shape of the case");
         let weight = golden_weights(&[2, 2, 2, 2, 2])
             .into_dimensionality::<Ix5>()
             .expect("the kernel is rank 5");
@@ -379,9 +389,12 @@ fn conv_1d_transpose_cases() -> Vec<GoldenCase> {
     /// The kernel is `[kernel_size, filters, channels]`, so the filter axis comes before the
     /// input-channel axis.
     fn build(stride: usize, padding: PaddingType, activation: Activation) -> Box<dyn Layer> {
-        let mut layer = Conv1DTranspose::new(2, 4, SHAPE_1D_TRANSPOSE.to_vec(), stride, activation)
+        let mut layer = Conv1DTranspose::new(2, 4, stride, activation)
             .expect("2 filters and a kernel of 4")
             .with_padding(padding);
+        layer
+            .build(&Shape::known(&SHAPE_1D_TRANSPOSE))
+            .expect("the layer accepts the shape of the case");
         let weight = golden_weights(&[4, 2, 2])
             .into_dimensionality::<Ix3>()
             .expect("the kernel is rank 3");
@@ -415,15 +428,12 @@ fn conv_2d_transpose_cases() -> Vec<GoldenCase> {
         padding: PaddingType,
         activation: Activation,
     ) -> Box<dyn Layer> {
-        let mut layer = Conv2DTranspose::new(
-            2,
-            kernel_size,
-            SHAPE_2D_TRANSPOSE.to_vec(),
-            (2, 2),
-            activation,
-        )
-        .expect("2 filters over 2 channels")
-        .with_padding(padding);
+        let mut layer = Conv2DTranspose::new(2, kernel_size, (2, 2), activation)
+            .expect("2 filters over 2 channels")
+            .with_padding(padding);
+        layer
+            .build(&Shape::known(&SHAPE_2D_TRANSPOSE))
+            .expect("the layer accepts the shape of the case");
         // The kernel is [kernel_height, kernel_width, filters, channels]
         let kernel_shape = [kernel_size.0, kernel_size.1, 2, 2];
         let count: usize = kernel_shape.iter().product();
@@ -459,15 +469,12 @@ fn conv_3d_transpose_cases() -> Vec<GoldenCase> {
         padding: PaddingType,
         activation: Activation,
     ) -> Box<dyn Layer> {
-        let mut layer = Conv3DTranspose::new(
-            1,
-            kernel_size,
-            SHAPE_3D_TRANSPOSE.to_vec(),
-            (2, 2, 2),
-            activation,
-        )
-        .expect("1 filter over 2 channels")
-        .with_padding(padding);
+        let mut layer = Conv3DTranspose::new(1, kernel_size, (2, 2, 2), activation)
+            .expect("1 filter over 2 channels")
+            .with_padding(padding);
+        layer
+            .build(&Shape::known(&SHAPE_3D_TRANSPOSE))
+            .expect("the layer accepts the shape of the case");
         // The kernel is [kernel_depth, kernel_height, kernel_width, filters, channels]
         let kernel_shape = [kernel_size.0, kernel_size.1, kernel_size.2, 1, 2];
         let count: usize = kernel_shape.iter().product();
@@ -517,13 +524,16 @@ fn depthwise_conv_1d_cases() -> Vec<GoldenCase> {
         activation: Activation,
     ) -> Box<dyn Layer> {
         // `with_depth_multiplier` re-initializes the weights, so it runs before `set_weights`
-        let mut layer = DepthwiseConv1D::new(3, SHAPE_1D.to_vec(), stride, activation)
+        let mut layer = DepthwiseConv1D::new(3, stride, activation)
             .expect("a kernel of 3 fits a length of 6")
             .with_padding(padding)
             .with_dilation_rate(dilation_rate)
             .expect("a positive dilation")
             .with_depth_multiplier(depth_multiplier)
             .expect("a positive depth multiplier");
+        layer
+            .build(&Shape::known(&SHAPE_1D))
+            .expect("the layer accepts the shape of the case");
         let count = 3 * 2 * depth_multiplier;
         let weight = golden_weights(&[3, 2, depth_multiplier])
             .into_dimensionality::<Ix3>()
@@ -577,13 +587,16 @@ fn depthwise_conv_2d_cases() -> Vec<GoldenCase> {
         activation: Activation,
     ) -> Box<dyn Layer> {
         // `with_depth_multiplier` re-initializes the weights, so it runs before `set_weights`
-        let mut layer = DepthwiseConv2D::new(kernel_size, SHAPE_2D.to_vec(), strides, activation)
+        let mut layer = DepthwiseConv2D::new(kernel_size, strides, activation)
             .expect("the kernel fits the input")
             .with_padding(padding)
             .with_dilation_rate(dilation_rate)
             .expect("a positive dilation")
             .with_depth_multiplier(depth_multiplier)
             .expect("a positive depth multiplier");
+        layer
+            .build(&Shape::known(&SHAPE_2D))
+            .expect("the layer accepts the shape of the case");
         let kernel_shape = [kernel_size.0, kernel_size.1, 2, depth_multiplier];
         let count: usize = kernel_shape.iter().product();
         let weight = golden_weights(&kernel_shape)
@@ -656,18 +669,14 @@ fn separable_conv_1d_cases() -> Vec<GoldenCase> {
         dilation_rate: usize,
         activation: Activation,
     ) -> Box<dyn Layer> {
-        let mut layer = SeparableConv1D::new(
-            3,
-            3,
-            SHAPE_1D.to_vec(),
-            stride,
-            depth_multiplier,
-            activation,
-        )
-        .expect("a kernel of 3 fits a length of 6")
-        .with_padding(padding)
-        .with_dilation_rate(dilation_rate)
-        .expect("a positive dilation");
+        let mut layer = SeparableConv1D::new(3, 3, stride, depth_multiplier, activation)
+            .expect("a kernel of 3 fits a length of 6")
+            .with_padding(padding)
+            .with_dilation_rate(dilation_rate)
+            .expect("a positive dilation");
+        layer
+            .build(&Shape::known(&SHAPE_1D))
+            .expect("the layer accepts the shape of the case");
         let depthwise_count = 3 * 2 * depth_multiplier;
         let pointwise_count = 2 * depth_multiplier * 3;
         let depthwise = golden_weights(&[3, 2, depth_multiplier])
@@ -723,18 +732,15 @@ fn separable_conv_2d_cases() -> Vec<GoldenCase> {
         dilation_rate: (usize, usize),
         activation: Activation,
     ) -> Box<dyn Layer> {
-        let mut layer = SeparableConv2D::new(
-            filters,
-            kernel_size,
-            SHAPE_2D.to_vec(),
-            strides,
-            depth_multiplier,
-            activation,
-        )
-        .expect("the kernel fits the input")
-        .with_padding(padding)
-        .with_dilation_rate(dilation_rate)
-        .expect("a positive dilation");
+        let mut layer =
+            SeparableConv2D::new(filters, kernel_size, strides, depth_multiplier, activation)
+                .expect("the kernel fits the input")
+                .with_padding(padding)
+                .with_dilation_rate(dilation_rate)
+                .expect("a positive dilation");
+        layer
+            .build(&Shape::known(&SHAPE_2D))
+            .expect("the layer accepts the shape of the case");
         let depthwise_shape = [kernel_size.0, kernel_size.1, 2, depth_multiplier];
         let pointwise_shape = [1, 1, 2 * depth_multiplier, filters];
         let depthwise_count: usize = depthwise_shape.iter().product();

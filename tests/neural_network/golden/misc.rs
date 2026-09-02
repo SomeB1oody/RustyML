@@ -19,6 +19,7 @@
 
 use super::{GoldenCase, LayerFixture, golden_weights, golden_weights_from};
 use ndarray::Ix2;
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::layers::activation::{
     Activation, ELU, Exponential, HardSigmoid, LeakyReLU, Linear, PReLU, ReLU, SELU, Sigmoid,
     Softmax, Softplus, Softsign, Tanh,
@@ -94,7 +95,10 @@ fn activation_case(label: &'static str, build: fn() -> Box<dyn Layer>) -> Golden
 fn dense_cases() -> Vec<GoldenCase> {
     /// Builds a 3 by 4 Dense layer with fixed weights and the given activation.
     fn build(activation: Activation) -> Box<dyn Layer> {
-        let mut layer = Dense::new(3, 4, activation).expect("3 features into 4 units");
+        let mut layer = Dense::new(4, activation).expect("4 units");
+        layer
+            .build(&Shape::known(&[2, 3]))
+            .expect("the layer accepts the shape of the case");
         let weight = golden_weights(&[3, 4])
             .into_dimensionality::<Ix2>()
             .expect("the weight is rank 2");
@@ -129,10 +133,18 @@ fn dense_cases() -> Vec<GoldenCase> {
 fn flatten_cases() -> Vec<GoldenCase> {
     vec![
         GoldenCase::new("rank_3", &[2, 3, 4], || {
-            Box::new(Flatten::new(vec![2, 3, 4]).expect("a rank 3 shape"))
+            let mut layer = Flatten::new();
+            layer
+                .build(&Shape::known(&[2, 3, 4]))
+                .expect("the layer accepts the shape of the case");
+            Box::new(layer)
         }),
         GoldenCase::new("rank_4", &[2, 2, 3, 2], || {
-            Box::new(Flatten::new(vec![2, 2, 3, 2]).expect("a rank 4 shape"))
+            let mut layer = Flatten::new();
+            layer
+                .build(&Shape::known(&[2, 2, 3, 2]))
+                .expect("the layer accepts the shape of the case");
+            Box::new(layer)
         }),
     ]
 }
@@ -261,7 +273,10 @@ fn softmax_cases() -> Vec<GoldenCase> {
 fn p_relu_cases() -> Vec<GoldenCase> {
     vec![
         GoldenCase::new("per_feature", &ACTIVATION_SHAPE, || {
-            let mut layer = PReLU::new(ACTIVATION_SHAPE.to_vec(), 0.25).expect("a finite slope");
+            let mut layer = PReLU::new(0.25).expect("a finite slope");
+            layer
+                .build(&Shape::known(&ACTIVATION_SHAPE))
+                .expect("the layer accepts the shape of the case");
             layer
                 .set_weights(golden_weights(&[5]))
                 .expect("1 slope per feature");
@@ -269,10 +284,13 @@ fn p_relu_cases() -> Vec<GoldenCase> {
         })
         .with_parameter_grads(&["alpha"]),
         GoldenCase::new("shared_axis_1", &[2, 3, 4], || {
-            let mut layer = PReLU::new(vec![2, 3, 4], 0.25)
+            let mut layer = PReLU::new(0.25)
                 .expect("a finite slope")
                 .with_shared_axes(vec![1])
                 .expect("axis 1 is after the batch axis");
+            layer
+                .build(&Shape::known(&[2, 3, 4]))
+                .expect("the layer accepts the shape of the case");
             layer
                 .set_weights(golden_weights(&[1, 4]))
                 .expect("1 slope per channel");

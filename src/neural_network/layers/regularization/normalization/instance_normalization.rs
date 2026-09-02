@@ -1,8 +1,8 @@
 //! Instance Normalization layer that normalizes each sample and channel independently
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
+use crate::neural_network::layers::build_on_forward;
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
@@ -11,10 +11,13 @@ use crate::neural_network::layers::regularization::normalization::{
     group_norm_backward_core, group_norm_forward_core,
 };
 use crate::neural_network::layers::regularization::validation::{
-    validate_epsilon, validate_input_shape, validate_input_shape_not_empty, validate_min_input_ndim,
+    validate_epsilon, validate_min_input_ndim,
 };
-use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
+use crate::neural_network::layers::validation::{
+    start_build, validate_built_input, validate_optional_weight, validate_weight_shape,
+};
 use crate::neural_network::traits::{Layer, ParamGrad};
+use crate::neural_network::{Shape, Tensor};
 
 /// Instance Normalization layer for neural networks
 ///
@@ -33,7 +36,7 @@ use crate::neural_network::traits::{Layer, ParamGrad};
 /// use ndarray::Array3;
 ///
 /// // Create an InstanceNormalization layer for input shape [batch, spatial, channels]
-/// let mut in_layer = InstanceNormalization::new(vec![4, 32, 3], 1e-5).unwrap();
+/// let mut in_layer = InstanceNormalization::new(1e-5).unwrap();
 ///
 /// // Create input tensor
 /// let input = Array3::ones((4, 32, 3)).into_dyn();
@@ -45,8 +48,8 @@ use crate::neural_network::traits::{Layer, ParamGrad};
 pub struct InstanceNormalization {
     /// Small constant for numerical stability in normalization
     epsilon: f32,
-    /// Shape of the input tensor
-    input_shape: Vec<usize>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
     /// Scale parameter (trainable)
     ///
     /// The array stays allocated and holds every element at 1 when `scale` is false. A scale of
@@ -80,7 +83,6 @@ impl InstanceNormalization {
     ///
     /// # Parameters
     ///
-    /// - `input_shape` - Shape of the input tensor
     /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
     ///
     /// # Returns
@@ -89,26 +91,15 @@ impl InstanceNormalization {
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` - If `input_shape` is empty
     /// - `Error::InvalidParameter` - If `epsilon` is not positive or not finite
-    pub fn new(input_shape: Vec<usize>, epsilon: f32) -> Result<Self, Error> {
-        validate_input_shape_not_empty(&input_shape)?;
+    pub fn new(epsilon: f32) -> Result<Self, Error> {
         validate_epsilon(epsilon)?;
-
-        // Parameters have the shape of the channel dimension
-        let param_shape = if input_shape.len() > 1 {
-            vec![input_shape[input_shape.len() - 1]]
-        } else {
-            vec![1]
-        };
-
-        let param_shape_ndarray = param_shape.as_slice();
 
         Ok(InstanceNormalization {
             epsilon,
-            input_shape,
-            gamma: Tensor::ones(param_shape_ndarray),
-            beta: Tensor::zeros(param_shape_ndarray),
+            built: None,
+            gamma: Tensor::ones([0].as_slice()),
+            beta: Tensor::zeros([0].as_slice()),
             training: true,
             x_normalized: None,
             inv_std: None,
@@ -188,6 +179,9 @@ impl InstanceNormalization {
         gamma: impl Into<Option<Tensor>>,
         beta: impl Into<Option<Tensor>>,
     ) -> Result<(), Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("InstanceNormalization"));
+        }
         let gamma = validate_optional_weight("gamma", "scale", self.scale, gamma.into())?;
         let beta = validate_optional_weight("beta", "center", self.center, beta.into())?;
         if let Some(gamma) = gamma.as_ref() {
@@ -207,8 +201,34 @@ impl InstanceNormalization {
 }
 
 impl Layer for InstanceNormalization {
+    /// Allocates the per-channel arrays from the trailing axis of the input
+    ///
+    /// The channel axis is the last axis. An input of rank 1 has no channel axis, so the
+    /// arrays hold 1 element that every position shares
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "InstanceNormalization", input)? else {
+            return Ok(());
+        };
+        input.check_min_rank("InstanceNormalization", 1)?;
+        let channels = match built.axes()[built.rank() - 1] {
+            _ if built.rank() == 1 => 1,
+            Some(extent) => extent,
+            None => {
+                return Err(Error::invalid_input(format!(
+                    "InstanceNormalization needs a fixed extent on the channel axis, and the shape {built} \
+                     leaves that axis free"
+                )));
+            }
+        };
+        self.gamma = Tensor::ones([channels].as_slice());
+        self.beta = Tensor::zeros([channels].as_slice());
+        self.built = Some(built);
+        Ok(())
+    }
+
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        build_on_forward!(self, input);
+        validate_built_input(&self.built, "InstanceNormalization", input.shape())?;
         validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;
         // 1 group per channel makes group normalization equal to instance normalization
         let num_channels = input.shape()[input.ndim() - 1];
@@ -228,7 +248,7 @@ impl Layer for InstanceNormalization {
     ///
     /// Returns an error if the input shape or dimensionality is invalid
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        validate_built_input(&self.built, "InstanceNormalization", input.shape())?;
         validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;
         let num_channels = input.shape()[input.ndim() - 1];
 

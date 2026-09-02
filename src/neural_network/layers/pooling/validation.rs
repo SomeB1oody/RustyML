@@ -2,37 +2,6 @@
 
 use crate::error::Error;
 
-/// Validates that the input shape has the expected number of dimensions
-///
-/// # Errors
-///
-/// Returns [`Error::DimensionMismatch`] if the shape length does not match expected_dims
-pub(super) fn validate_input_shape_dims(
-    input_shape: &[usize],
-    expected_dims: usize,
-    _layer_name: &str,
-) -> Result<(), Error> {
-    if input_shape.len() != expected_dims {
-        return Err(Error::dimension_mismatch(expected_dims, input_shape.len()));
-    }
-    Ok(())
-}
-
-/// Validates that all dimensions in input_shape are greater than zero
-///
-/// # Errors
-///
-/// Returns [`Error::InvalidInput`] if any dimension is 0
-pub(super) fn validate_all_dims_positive(input_shape: &[usize]) -> Result<(), Error> {
-    if !input_shape.iter().all(|&dim| dim > 0) {
-        return Err(Error::invalid_input(format!(
-            "All dimensions in input_shape must be greater than zero. Got: {:?}",
-            input_shape
-        )));
-    }
-    Ok(())
-}
-
 /// Validates pool size for 1D pooling
 ///
 /// # Errors

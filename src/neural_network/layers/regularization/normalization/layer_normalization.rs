@@ -7,17 +7,18 @@ use super::folds::{
 };
 use super::{col_fold_parallel_min_elems, row_pass_parallel_min_elems};
 use crate::error::{Context, Error};
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
+use crate::neural_network::layers::build_on_forward;
 use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::normalization::normalization_layer_shape_functions;
-use crate::neural_network::layers::regularization::validation::{
-    validate_epsilon, validate_input_shape,
+use crate::neural_network::layers::regularization::validation::validate_epsilon;
+use crate::neural_network::layers::validation::{
+    start_build, validate_built_input, validate_optional_weight, validate_weight_shape,
 };
-use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
 use crate::neural_network::traits::{Layer, ParamGrad};
+use crate::neural_network::{Shape, Tensor};
 use ndarray::{Array1, Axis, IxDyn};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
@@ -315,7 +316,7 @@ fn unmerge_normalized_axes(
 /// use ndarray::Array2;
 ///
 /// // Create a LayerNormalization layer
-/// let mut ln = LayerNormalization::new(vec![32, 128], 1e-5).unwrap();
+/// let mut ln = LayerNormalization::new(1e-5).unwrap();
 ///
 /// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
@@ -329,8 +330,8 @@ pub struct LayerNormalization {
     epsilon: f32,
     /// Axis along which to normalize
     normalized_axis: LayerNormalizationAxis,
-    /// Shape of the input tensor
-    input_shape: Vec<usize>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
     /// Scale parameter (trainable)
     ///
     /// The array stays allocated and holds every element at 1 when `scale` is false. A scale of
@@ -368,7 +369,6 @@ impl LayerNormalization {
     ///
     /// # Parameters
     ///
-    /// - `input_shape` - Shape of the input tensor
     /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
     ///
     /// # Returns
@@ -383,19 +383,15 @@ impl LayerNormalization {
     /// # Errors
     ///
     /// - `Error::invalid_parameter` - If `epsilon` is not positive or not finite
-    pub fn new(input_shape: Vec<usize>, epsilon: f32) -> Result<Self, Error> {
+    pub fn new(epsilon: f32) -> Result<Self, Error> {
         validate_epsilon(epsilon)?;
-
-        let normalized_axis = LayerNormalizationAxis::Default;
-        let param_shape = Self::param_shape_for(&input_shape, &normalized_axis)?;
-        let param_shape_ndarray = param_shape.as_slice();
 
         Ok(LayerNormalization {
             epsilon,
-            normalized_axis,
-            input_shape,
-            gamma: Tensor::ones(param_shape_ndarray),
-            beta: Tensor::zeros(param_shape_ndarray),
+            normalized_axis: LayerNormalizationAxis::Default,
+            built: None,
+            gamma: Tensor::ones([0].as_slice()),
+            beta: Tensor::zeros([0].as_slice()),
             training: true,
             x_normalized: None,
             x_centered: None,
@@ -430,11 +426,52 @@ impl LayerNormalization {
         mut self,
         normalized_axis: LayerNormalizationAxis,
     ) -> Result<Self, Error> {
-        let param_shape = Self::param_shape_for(&self.input_shape, &normalized_axis)?;
-        self.gamma = Tensor::ones(param_shape.as_slice());
-        self.beta = Tensor::zeros(param_shape.as_slice());
+        // An unbuilt layer holds no input shape, so only the axis list itself can be checked
+        // here. `build` checks every axis against the rank of the real input
+        if let LayerNormalizationAxis::Multiple(axes) = &normalized_axis {
+            if axes.is_empty() {
+                return Err(Error::invalid_parameter(
+                    "normalized_axis",
+                    "LayerNormalization Multiple axis list must be non-empty",
+                ));
+            }
+            for (position, &axis) in axes.iter().enumerate() {
+                if axes[..position].contains(&axis) {
+                    return Err(Error::invalid_parameter(
+                        "normalized_axis",
+                        format!("Duplicate normalization axis {axis}"),
+                    ));
+                }
+            }
+        }
         self.normalized_axis = normalized_axis;
+        if let Some(built) = self.built.clone() {
+            let dims = Self::build_dims(&built)?;
+            let param_shape = Self::param_shape_for(&dims, &self.normalized_axis)?;
+            self.gamma = Tensor::ones(param_shape.as_slice());
+            self.beta = Tensor::zeros(param_shape.as_slice());
+        }
         Ok(self)
+    }
+
+    /// The extents of a build shape, with the batch axis replaced by 1
+    ///
+    /// The parameter shape reads an axis by position, and the batch axis is free, so this
+    /// substitutes a placeholder for it. No axis rule of this layer names the batch axis
+    fn build_dims(built: &Shape) -> Result<Vec<usize>, Error> {
+        built
+            .axes()
+            .iter()
+            .enumerate()
+            .map(|(position, axis)| match axis {
+                Some(extent) => Ok(*extent),
+                None if position == 0 => Ok(1),
+                None => Err(Error::invalid_input(format!(
+                    "LayerNormalization needs a fixed extent on axis {position}, and the shape \
+                     {built} leaves that axis free"
+                ))),
+            })
+            .collect()
     }
 
     /// Computes the 1-D `gamma`/`beta` parameter shape for the given input shape and axis
@@ -555,6 +592,9 @@ impl LayerNormalization {
         gamma: impl Into<Option<Tensor>>,
         beta: impl Into<Option<Tensor>>,
     ) -> Result<(), Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("LayerNormalization"));
+        }
         let gamma = validate_optional_weight("gamma", "scale", self.scale, gamma.into())?;
         let beta = validate_optional_weight("beta", "center", self.center, beta.into())?;
         if let Some(gamma) = gamma.as_ref() {
@@ -759,8 +799,23 @@ impl LayerNormalization {
 }
 
 impl Layer for LayerNormalization {
+    /// Allocates `gamma` and `beta` over the normalized axes of the input
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "LayerNormalization", input)? else {
+            return Ok(());
+        };
+        input.check_min_rank("LayerNormalization", 1)?;
+        let dims = Self::build_dims(&built)?;
+        let param_shape = Self::param_shape_for(&dims, &self.normalized_axis)?;
+        self.gamma = Tensor::ones(param_shape.as_slice());
+        self.beta = Tensor::zeros(param_shape.as_slice());
+        self.built = Some(built);
+        Ok(())
+    }
+
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        build_on_forward!(self, input);
+        validate_built_input(&self.built, "LayerNormalization", input.shape())?;
 
         match self.resolve_plan(input)? {
             LayoutPlan::Rows { n } => self.forward_rows(input, n),
@@ -775,7 +830,7 @@ impl Layer for LayerNormalization {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        validate_built_input(&self.built, "LayerNormalization", input.shape())?;
 
         match self.resolve_plan(input)? {
             LayoutPlan::Rows { n } => self.predict_rows(input, n),
@@ -1231,7 +1286,8 @@ mod tests {
         let gamma = Array1::from_shape_fn(n, |j| 1.5 - 0.01 * j as f32);
         let beta = Array1::from_shape_fn(n, |j| -0.75 + 0.02 * j as f32);
 
-        let mut ln = LayerNormalization::new(vec![r, n], 1e-5).unwrap();
+        let mut ln = LayerNormalization::new(1e-5).unwrap();
+        ln.build(&Shape::known(&[r, n])).unwrap();
         ln.set_weights(gamma.clone().into_dyn(), beta.clone().into_dyn())
             .unwrap();
         let out = ln.forward(&x).unwrap();
@@ -1264,11 +1320,11 @@ mod tests {
         let x3 = make_tensor(data.clone(), &[b, h, w]);
         let x2 = make_tensor(data, &[b, n]);
 
-        let mut ln_multi = LayerNormalization::new(vec![b, h, w], 1e-5)
+        let mut ln_multi = LayerNormalization::new(1e-5)
             .unwrap()
             .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![1, 2]))
             .unwrap();
-        let mut ln_default = LayerNormalization::new(vec![b, n], 1e-5).unwrap();
+        let mut ln_default = LayerNormalization::new(1e-5).unwrap();
 
         let out_multi = ln_multi.forward(&x3).unwrap();
         let out_default = ln_default.forward(&x2).unwrap();
@@ -1307,20 +1363,19 @@ mod tests {
     fn multiple_nontrivial_perm_matches_default_on_merged_input() {
         let (d0, d1, d2) = (2usize, 3usize, 4usize);
         let axes = vec![0usize, 2usize];
-        let n = d0 * d2;
         let data: Vec<f32> = (0..d0 * d1 * d2)
             .map(|i| (i as f32 * 0.519).sin())
             .collect();
         let x = make_tensor(data, &[d0, d1, d2]);
 
-        let mut ln_multi = LayerNormalization::new(vec![d0, d1, d2], 1e-5)
+        let mut ln_multi = LayerNormalization::new(1e-5)
             .unwrap()
             .with_normalized_axis(LayerNormalizationAxis::Multiple(axes.clone()))
             .unwrap();
         let out_multi = ln_multi.forward(&x).unwrap();
 
         let (merged, perm, permuted_shape) = merge_normalized_axes(&x, &axes).unwrap();
-        let mut ln_default = LayerNormalization::new(vec![d1, n], 1e-5).unwrap();
+        let mut ln_default = LayerNormalization::new(1e-5).unwrap();
         let expected =
             unmerge_normalized_axes(ln_default.forward(&merged).unwrap(), &perm, &permuted_shape);
 

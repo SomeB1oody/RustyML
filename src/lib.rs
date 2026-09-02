@@ -132,7 +132,8 @@
 //! In your Rust code, write:
 //! ```rust,no_run
 //! use rustyml::neural_network::{
-//!     sequential::Sequential,
+//!     Shape,
+//!     sequential::SequentialBuilder,
 //!     layers::{Activation, Dense},
 //!     optimizers::Adam,
 //!     losses::CategoricalCrossEntropy,
@@ -144,12 +145,13 @@
 //! let y = Array::ones((32, 10)).into_dyn();  // 32 samples, 10 classes
 //!
 //! // Build a neural network
-//! let mut model = Sequential::new();
-//! model
-//!     .add(Dense::new(784, 128, Activation::ReLU).unwrap())
-//!     .add(Dense::new(128, 64, Activation::ReLU).unwrap())
-//!     .add(Dense::new(64, 10, Activation::Softmax { axis: -1 }).unwrap())
-//!     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
+//! let mut model = SequentialBuilder::new()
+//!     .add(Dense::new(128, Activation::ReLU).unwrap())
+//!     .add(Dense::new(64, Activation::ReLU).unwrap())
+//!     .add(Dense::new(10, Activation::Softmax { axis: -1 }).unwrap())
+//!     .build(&Shape::known(x.shape()))
+//!     .unwrap();
+//! model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 //!
 //! // Display model structure
 //! model.summary();
@@ -166,11 +168,12 @@
 //! model.save_to_path("model.bin").unwrap();
 //!
 //! // Create a new model with the same architecture
-//! let mut new_model = Sequential::new();
-//! new_model
-//!     .add(Dense::new(784, 128, Activation::ReLU).unwrap())
-//!     .add(Dense::new(128, 64, Activation::ReLU).unwrap())
-//!     .add(Dense::new(64, 10, Activation::Softmax { axis: -1 }).unwrap());
+//! let mut new_model = SequentialBuilder::new()
+//!     .add(Dense::new(128, Activation::ReLU).unwrap())
+//!     .add(Dense::new(64, Activation::ReLU).unwrap())
+//!     .add(Dense::new(10, Activation::Softmax { axis: -1 }).unwrap())
+//!     .build(&Shape::known(x.shape()))
+//!     .unwrap();
 //!
 //! // Load weights from file
 //! new_model.load_from_path("model.bin").unwrap();

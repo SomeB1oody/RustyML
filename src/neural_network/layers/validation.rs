@@ -2,6 +2,7 @@
 
 use crate::error::Error;
 use crate::neural_network::NnError;
+use crate::neural_network::Shape;
 
 /// Validates that a weight array assigned to a layer has the shape the layer expects
 ///
@@ -78,4 +79,98 @@ pub(super) fn validate_optional_weight<T>(
         )),
         _ => Ok(supplied),
     }
+}
+
+/// Opens the build of a layer, and refuses a second build for another shape
+///
+/// Every layer that allocates from its input shape calls this first. The answer says whether
+/// the layer must allocate. A layer that is already built for the same input keeps every array
+/// it holds, so no weight is ever drawn twice
+///
+/// The comparison frees the batch axis, because 1 layer serves every batch size
+///
+/// # Parameters
+///
+/// - `built` - The shape the layer already built for, or `None` before its first build
+/// - `layer` - Layer name, which the message names
+/// - `input` - Shape the layer is being built for, batch axis first
+///
+/// # Returns
+///
+/// - `Result<Option<Shape>, Error>` - `Some(shape)` to allocate and then record, and `None`
+///   when the layer already holds every array for this input
+///
+/// # Errors
+///
+/// - `Error::InvalidInput` - If the layer is already built for another input shape
+pub(super) fn start_build(
+    built: &Option<Shape>,
+    layer: &str,
+    input: &Shape,
+) -> Result<Option<Shape>, Error> {
+    let Some(held) = built else {
+        return Ok(Some(input.clone()));
+    };
+    if held.free_batch() != input.free_batch() {
+        return Err(Error::invalid_input(format!(
+            "{layer} is already built for the input shape {held}, and cannot build again for \
+             {input}. Build a new layer for the second shape"
+        )));
+    }
+    Ok(None)
+}
+
+/// Checks a live input tensor against the shape the layer was built for
+///
+/// The rank must match, and every axis after the batch axis that the build shape fixes must
+/// match as well. The batch axis is never checked, because 1 layer serves every batch size. An
+/// axis that the build shape leaves free is not checked either, and such an axis is exactly an
+/// axis that no array of the layer depends on
+///
+/// This is the whole input check of a built layer. What the layer prints as its output shape
+/// is what this enforces, so a summary can no longer name an extent that a forward pass would
+/// accept a different value for
+///
+/// # Parameters
+///
+/// - `built` - The shape the layer built for, or `None` while it holds none
+/// - `layer` - Layer name, which the message names
+/// - `actual` - Shape of the tensor that arrived
+///
+/// # Returns
+///
+/// - `Result<(), Error>` - `Ok` when the tensor fits the build
+///
+/// # Errors
+///
+/// - `Error::NeuralNetwork(NnError::NotBuilt)` - If the layer is not built
+/// - `Error::InvalidInput` - If the rank or a fixed axis disagrees with the build shape
+pub(super) fn validate_built_input(
+    built: &Option<Shape>,
+    layer: &'static str,
+    actual: &[usize],
+) -> Result<(), Error> {
+    let Some(built) = built else {
+        return Err(Error::not_built(layer));
+    };
+    let axes = built.axes();
+    if axes.len() != actual.len() {
+        return Err(Error::invalid_input(format!(
+            "{layer} was built for the input shape {built} of rank {}, and got a tensor of \
+             rank {}",
+            axes.len(),
+            actual.len()
+        )));
+    }
+    for (position, (axis, &extent)) in axes.iter().zip(actual.iter()).enumerate().skip(1) {
+        if let Some(wanted) = axis
+            && *wanted != extent
+        {
+            return Err(Error::invalid_input(format!(
+                "{layer} was built for the input shape {built}, and got {extent} on axis \
+                 {position} where it expects {wanted}"
+            )));
+        }
+    }
+    Ok(())
 }

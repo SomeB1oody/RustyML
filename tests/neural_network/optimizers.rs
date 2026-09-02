@@ -15,6 +15,7 @@ use crate::common::named;
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, ArrayD};
 use rustyml::error::Error;
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
@@ -27,6 +28,7 @@ use rustyml::neural_network::optimizers::AdamW;
 use rustyml::neural_network::optimizers::RMSprop;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::{Layer, Optimizer, ParamGrad, WeightMut, WeightRef};
 
 // Helper: simple regression problem
@@ -48,7 +50,8 @@ fn regression_data() -> (Tensor, Tensor) {
 ///
 /// Gives a known starting loss of 1.875 on the regression_data() problem
 fn identity_dense() -> Dense {
-    let mut layer = Dense::new(1, 1, Linear::new()).unwrap();
+    let mut layer = Dense::new(1, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 1])).unwrap();
     let w = Array::from_shape_vec((1, 1), vec![1.0_f32]).unwrap();
     let b = Array::from_shape_vec((1, 1), vec![0.0_f32]).unwrap();
     layer.set_weights(w, b).unwrap();
@@ -254,8 +257,11 @@ fn adagrad_accepts_valid_hyperparameters() {
 #[test]
 fn identity_dense_initial_mse_is_1_875() {
     let (x, y) = regression_data();
-    let mut model = Sequential::new();
-    model.add(identity_dense()).compile(
+    let mut model = SequentialBuilder::new()
+        .add(identity_dense())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
         SGD::new(0.01, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
@@ -272,11 +278,14 @@ fn sgd_single_layer_loss_decreases_over_20_epochs() {
     let (x, y) = regression_data();
     let initial_mse = 1.875_f32;
 
-    let mut model = Sequential::new();
     // Plain SGD needs lr < 2 / lambda_max(Hessian) to converge here, about 2 / 5.5, or about
     // 0.36. A rate of 0.5 overshoots and diverges. This test uses 0.1, which reduces the loss
     // steadily.
-    model.add(identity_dense()).compile(
+    let mut model = SequentialBuilder::new()
+        .add(identity_dense())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
         SGD::new(0.1, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
@@ -299,8 +308,11 @@ fn adam_single_layer_loss_decreases_over_20_epochs() {
     let (x, y) = regression_data();
     let initial_mse = 1.875_f32;
 
-    let mut model = Sequential::new();
-    model.add(identity_dense()).compile(
+    let mut model = SequentialBuilder::new()
+        .add(identity_dense())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
         Adam::new(0.1, 0.9, 0.999, 1e-8, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
@@ -323,8 +335,11 @@ fn rmsprop_single_layer_loss_decreases_over_20_epochs() {
     let (x, y) = regression_data();
     let initial_mse = 1.875_f32;
 
-    let mut model = Sequential::new();
-    model.add(identity_dense()).compile(
+    let mut model = SequentialBuilder::new()
+        .add(identity_dense())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
         RMSprop::new(0.1, 0.9, 1e-8, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
@@ -347,8 +362,11 @@ fn adagrad_single_layer_loss_decreases_over_20_epochs() {
     let (x, y) = regression_data();
     let initial_mse = 1.875_f32;
 
-    let mut model = Sequential::new();
-    model.add(identity_dense()).compile(
+    let mut model = SequentialBuilder::new()
+        .add(identity_dense())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
         AdaGrad::new(0.5, 1e-8, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
@@ -377,15 +395,19 @@ fn adam_two_layer_loss_decreases_and_buffers_allocated_correctly() {
     // and never flakes on a pathological Xavier init
     const SEED: u64 = 0;
     let build_model = || -> Sequential {
-        let layer1 = Dense::new(1, 4, Linear::new())
+        let layer1 = Dense::new(4, Linear::new())
             .unwrap()
             .with_random_state(SEED);
-        let layer2 = Dense::new(4, 1, Linear::new())
+        let layer2 = Dense::new(1, Linear::new())
             .unwrap()
             .with_random_state(SEED);
 
-        let mut model = Sequential::new_with_seed(SEED);
-        model.add(layer1).add(layer2).compile(
+        let mut model = SequentialBuilder::new_with_seed(SEED)
+            .add(layer1)
+            .add(layer2)
+            .build(&Shape::known(x.shape()))
+            .unwrap();
+        model.compile(
             Adam::new(0.05, 0.9, 0.999, 1e-8, 0.0).unwrap(),
             MeanSquaredError::new(),
         );
@@ -422,15 +444,19 @@ fn sgd_two_layer_loss_decreases() {
     const SEED: u64 = 0;
     let (x, y) = regression_data();
 
-    let layer1 = Dense::new(1, 4, Linear::new())
+    let layer1 = Dense::new(4, Linear::new())
         .unwrap()
         .with_random_state(SEED);
-    let layer2 = Dense::new(4, 1, Linear::new())
+    let layer2 = Dense::new(1, Linear::new())
         .unwrap()
         .with_random_state(SEED);
 
-    let mut model = Sequential::new();
-    model.add(layer1).add(layer2).compile(
+    let mut model = SequentialBuilder::new()
+        .add(layer1)
+        .add(layer2)
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
         SGD::new(0.05, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
@@ -455,15 +481,19 @@ fn rmsprop_two_layer_loss_decreases() {
     const SEED: u64 = 0;
     let (x, y) = regression_data();
 
-    let layer1 = Dense::new(1, 4, Linear::new())
+    let layer1 = Dense::new(4, Linear::new())
         .unwrap()
         .with_random_state(SEED);
-    let layer2 = Dense::new(4, 1, Linear::new())
+    let layer2 = Dense::new(1, Linear::new())
         .unwrap()
         .with_random_state(SEED);
 
-    let mut model = Sequential::new();
-    model.add(layer1).add(layer2).compile(
+    let mut model = SequentialBuilder::new()
+        .add(layer1)
+        .add(layer2)
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
         RMSprop::new(0.01, 0.9, 1e-8, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
@@ -488,15 +518,19 @@ fn adagrad_two_layer_loss_decreases() {
     const SEED: u64 = 0;
     let (x, y) = regression_data();
 
-    let layer1 = Dense::new(1, 4, Linear::new())
+    let layer1 = Dense::new(4, Linear::new())
         .unwrap()
         .with_random_state(SEED);
-    let layer2 = Dense::new(4, 1, Linear::new())
+    let layer2 = Dense::new(1, Linear::new())
         .unwrap()
         .with_random_state(SEED);
 
-    let mut model = Sequential::new();
-    model.add(layer1).add(layer2).compile(
+    let mut model = SequentialBuilder::new()
+        .add(layer1)
+        .add(layer2)
+        .build(&Shape::known(&[1, 1]))
+        .unwrap();
+    model.compile(
         AdaGrad::new(0.5, 1e-8, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
@@ -526,11 +560,15 @@ fn sgd_one_step_weight_update_matches_hand_calculation() {
     // w=1, b=0  ->  y_hat=2,  loss=(2-6)^2/1 = 16
     let w = Array::from_shape_vec((1, 1), vec![1.0_f32]).unwrap();
     let b = Array::from_shape_vec((1, 1), vec![0.0_f32]).unwrap();
-    let mut layer = Dense::new(1, 1, Linear::new()).unwrap();
+    let mut layer = Dense::new(1, Linear::new()).unwrap();
+    layer.build(&Shape::known(x.shape())).unwrap();
     layer.set_weights(w, b).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(layer).compile(
+    let mut model = SequentialBuilder::new()
+        .add(layer)
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
         SGD::new(0.01, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
@@ -571,12 +609,16 @@ fn clip_by_global_norm_scales_sgd_step() {
 
     let w = Array::from_shape_vec((1, 1), vec![1.0_f32]).unwrap();
     let b = Array::from_shape_vec((1, 1), vec![0.0_f32]).unwrap();
-    let mut layer = Dense::new(1, 1, Linear::new()).unwrap();
+    let mut layer = Dense::new(1, Linear::new()).unwrap();
+    layer.build(&Shape::known(x.shape())).unwrap();
     layer.set_weights(w, b).unwrap();
 
     let max_norm = 8.0_f32;
-    let mut model = Sequential::new();
-    model.add(layer).compile(
+    let mut model = SequentialBuilder::new()
+        .add(layer)
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
         SGD::new(0.01, 0.0, false, 0.0)
             .unwrap()
             .with_global_clipnorm(max_norm)
@@ -610,11 +652,15 @@ fn clip_by_global_norm_above_norm_is_noop() {
 
     let w = Array::from_shape_vec((1, 1), vec![1.0_f32]).unwrap();
     let b = Array::from_shape_vec((1, 1), vec![0.0_f32]).unwrap();
-    let mut layer = Dense::new(1, 1, Linear::new()).unwrap();
+    let mut layer = Dense::new(1, Linear::new()).unwrap();
+    layer.build(&Shape::known(x.shape())).unwrap();
     layer.set_weights(w, b).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(layer).compile(
+    let mut model = SequentialBuilder::new()
+        .add(layer)
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
         SGD::new(0.01, 0.0, false, 0.0)
             .unwrap()
             .with_global_clipnorm(100.0)
@@ -665,7 +711,8 @@ fn set_learning_rate_scales_the_step() {
     let y = Array::from_shape_vec((1, 1), vec![6.0_f32])
         .unwrap()
         .into_dyn();
-    let mut layer = Dense::new(1, 1, Linear::new()).unwrap();
+    let mut layer = Dense::new(1, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 1])).unwrap();
     layer
         .set_weights(
             Array::from_shape_vec((1, 1), vec![1.0_f32]).unwrap(),
@@ -673,8 +720,11 @@ fn set_learning_rate_scales_the_step() {
         )
         .unwrap();
 
-    let mut model = Sequential::new();
-    model.add(layer).compile(
+    let mut model = SequentialBuilder::new()
+        .add(layer)
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
         SGD::new(0.01, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
@@ -696,7 +746,8 @@ fn sgd_decoupled_weight_decay_shrinks_param() {
     let y = Array::from_shape_vec((1, 1), vec![6.0_f32])
         .unwrap()
         .into_dyn();
-    let mut layer = Dense::new(1, 1, Linear::new()).unwrap();
+    let mut layer = Dense::new(1, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 1])).unwrap();
     layer
         .set_weights(
             Array::from_shape_vec((1, 1), vec![1.0_f32]).unwrap(),
@@ -704,8 +755,11 @@ fn sgd_decoupled_weight_decay_shrinks_param() {
         )
         .unwrap();
 
-    let mut model = Sequential::new();
-    model.add(layer).compile(
+    let mut model = SequentialBuilder::new()
+        .add(layer)
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
         SGD::new(0.01, 0.0, false, 0.5).unwrap(),
         MeanSquaredError::new(),
     );
@@ -730,7 +784,8 @@ fn dense_after_one_sgd_step(
     lr: f32,
     weight_decay: f32,
 ) -> (ArrayD<f32>, ArrayD<f32>) {
-    let mut layer = Dense::new(2, 2, Linear::new()).unwrap();
+    let mut layer = Dense::new(2, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 2])).unwrap();
     layer.set_weights(w0.clone(), b0.clone()).unwrap();
     let x = Array::from_shape_vec((1, 2), vec![1.0_f32, 2.0])
         .unwrap()
@@ -786,7 +841,7 @@ fn weight_decay_decays_dense_weights_but_skips_bias() {
 /// pass and 1 SGD step at the given `weight_decay`. The upstream gradient is fixed and nonzero.
 /// Returns the resulting (gamma, beta).
 fn batchnorm_gamma_beta_after_one_sgd_step(weight_decay: f32) -> (ArrayD<f32>, ArrayD<f32>) {
-    let mut bn = BatchNormalization::new(vec![2, 3], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
     bn.set_training_if_mode_dependent(true);
     let x = Array::from_shape_vec((2, 3), vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0])
         .unwrap()
@@ -838,7 +893,8 @@ fn dense_weights_after_one_step<O: Optimizer>(
     w0: &Array2<f32>,
     b0: &Array2<f32>,
 ) -> (ArrayD<f32>, ArrayD<f32>) {
-    let mut layer = Dense::new(2, 2, Linear::new()).unwrap();
+    let mut layer = Dense::new(2, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 2])).unwrap();
     layer.set_weights(w0.clone(), b0.clone()).unwrap();
     let x = Array::from_shape_vec((1, 2), vec![1.0_f32, 2.0])
         .unwrap()
@@ -909,8 +965,11 @@ fn adam_l2_and_adamw_decoupled_differ_with_weight_decay() {
 fn adamw_single_layer_loss_decreases_over_20_epochs() {
     let (x, y) = regression_data();
 
-    let mut model = Sequential::new();
-    model.add(identity_dense()).compile(
+    let mut model = SequentialBuilder::new()
+        .add(identity_dense())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
         AdamW::new(0.1, 0.9, 0.999, 1e-8, 0.01).unwrap(),
         MeanSquaredError::new(),
     );
@@ -949,8 +1008,11 @@ fn adamw_validates_hyperparameters() {
 #[test]
 fn sgd_momentum_loss_decreases() {
     let (x, y) = regression_data();
-    let mut model = Sequential::new();
-    model.add(identity_dense()).compile(
+    let mut model = SequentialBuilder::new()
+        .add(identity_dense())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
         SGD::new(0.05, 0.9, true, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
@@ -1007,7 +1069,8 @@ fn every_optimizer_reports_its_current_learning_rate() {
 /// Builds a Dense(2 -> 2, Linear) that holds the identity map, so 2 runs of the same schedule
 /// stay comparable element by element
 fn pass_through_dense() -> Dense {
-    let mut layer = Dense::new(2, 2, Linear::new()).unwrap();
+    let mut layer = Dense::new(2, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 2])).unwrap();
     let weights = Array::from_shape_vec((2, 2), vec![1.0_f32, 0.0, 0.0, 1.0]).unwrap();
     let bias = Array::from_shape_vec((1, 2), vec![0.0_f32, 0.0]).unwrap();
     layer.set_weights(weights, bias).unwrap();
@@ -1100,48 +1163,126 @@ fn a_changing_parameter_count_must_not_move_another_layer_state() {
     );
 }
 
-/// Adding a layer to a compiled model between 2 batches must not move the per-parameter
-/// optimizer state of the layers that were there first
+/// Builds a Dense(2 -> 2, Linear) that holds the identity map and a bias of `[1, 0]`
 ///
-/// The added layer holds the identity map, so it changes neither the forward output nor the
-/// gradient that reaches the first layer. The first layer must therefore end batch 2 with
-/// exactly the weights it reaches when no layer is added at all
+/// The bias moves the output away from the input, so a layer that stands after this one sees
+/// something other than `x`. The 2 layers then have 2 different kernel gradients, which is
+/// what lets the data of the test below hold 1 of them at 0 and the other away from it
+fn shifted_dense() -> Dense {
+    let mut layer = Dense::new(2, Linear::new()).unwrap();
+    layer.build(&Shape::known(&[1, 2])).unwrap();
+    let weights = Array::from_shape_vec((2, 2), vec![1.0_f32, 0.0, 0.0, 1.0]).unwrap();
+    let bias = Array::from_shape_vec((1, 2), vec![1.0_f32, 0.0]).unwrap();
+    layer.set_weights(weights, bias).unwrap();
+    layer
+}
+
+/// Builds a bias-free Dense(2 -> 2, Linear) that holds the identity map
+///
+/// A bias-free layer holds the kernel alone. A step that leaves the kernel where it is
+/// therefore leaves the whole layer where it is, and the layer goes on passing its input and
+/// its gradient through unchanged
+fn pass_through_dense_no_bias() -> Dense {
+    let mut layer = Dense::new(2, Linear::new()).unwrap().with_use_bias(false);
+    layer.build(&Shape::known(&[1, 2])).unwrap();
+    let weights = Array::from_shape_vec((2, 2), vec![1.0_f32, 0.0, 0.0, 1.0]).unwrap();
+    layer.set_weights(weights, None::<Array2<f32>>).unwrap();
+    layer
+}
+
+/// A second layer in the stack moves no per-parameter optimizer state of the first one
+///
+/// The optimizer keys its state on [`ParamId`], which is the position of the layer counted
+/// from the input plus the name the layer gives the tensor. The first layer therefore holds
+/// `{scope 0, "kernel"}` in both models below, and the second layer of the stacked model
+/// reaches a key of its own. A key that dropped the scope would give both layers 1 momentum
+/// buffer, and the first layer would carry the gradient of the second one into batch 2
+///
+/// The 2 models must agree element by element, so the second layer must pass the forward
+/// output and the backward gradient through unchanged for every batch that the comparison
+/// covers. It holds the identity map at the start, and the data below holds it there. The
+/// first layer adds a bias of `[1, 0]`, so what reaches the second layer is `h = x + [1, 0]`.
+/// The kernel gradient of the second layer is `h^T (pred - y)`, and `y` is picked so that
+/// `h` has 2 proportional rows that both stand orthogonal to `pred - y`. That gradient is
+/// therefore 0, and a bias-free layer has no other tensor to move. The kernel gradient of the
+/// first layer is `x^T (pred - y)`, and the bias shift keeps that 1 away from 0, so a shared
+/// momentum buffer would carry a real value from the first layer into the second one
+///
+/// A model used to be able to grow a layer between 2 batches, and the test that stood here
+/// added the second layer after batch 1 and compared batch 2. That setup needed no such
+/// construction: the added layer had never taken a step, so it entered batch 2 holding the
+/// identity map by itself. [`SequentialBuilder::build`] is now the only way to reach a model,
+/// so both layers take every batch, and an ordinary second layer trains away from the
+/// identity in batch 1
 #[test]
-fn adding_a_layer_must_not_move_an_earlier_layer_state() {
-    let x = Array::from_shape_vec((2, 2), vec![1.0_f32, 2.0, -1.0, 0.5])
+fn a_second_layer_moves_no_state_of_the_first() {
+    // The first layer adds `[1, 0]`, so it gives the second layer `h = [[1, 2], [2, 4]]`, whose
+    // 2 rows are proportional
+    let x = Array::from_shape_vec((2, 2), vec![0.0_f32, 2.0, 1.0, 4.0])
         .unwrap()
         .into_dyn();
-    let y = Array::from_shape_vec((2, 2), vec![0.3_f32, -0.7, 1.1, 0.2])
+    // The prediction is `h`, so `pred - y` is `[[2, 2], [-1, -1]]`. Every column of it stands
+    // orthogonal to both columns of `h`, and to neither column of `x`
+    let y = Array::from_shape_vec((2, 2), vec![-1.0_f32, 0.0, 3.0, 5.0])
         .unwrap()
         .into_dyn();
 
-    let mut plain = Sequential::new();
-    plain.add(pass_through_dense()).compile(
+    let mut plain = SequentialBuilder::new()
+        .add(shifted_dense())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    plain.compile(
         SGD::new(0.1, 0.9, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
     plain.train_batch(&x, &y).unwrap();
     plain.train_batch(&x, &y).unwrap();
 
-    let mut grown = Sequential::new();
-    grown.add(pass_through_dense()).compile(
+    let mut stacked = SequentialBuilder::new()
+        .add(shifted_dense())
+        .add(pass_through_dense_no_bias())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    stacked.compile(
         SGD::new(0.1, 0.9, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
-    grown.train_batch(&x, &y).unwrap();
-    grown.add(pass_through_dense());
-    grown.train_batch(&x, &y).unwrap();
+    stacked.train_batch(&x, &y).unwrap();
+    stacked.train_batch(&x, &y).unwrap();
 
-    let first_of = |model: &Sequential| {
+    let kernel_of = |model: &Sequential, path: &str| {
         model
-            .weight("0.kernel")
-            .expect("layer 0 must be Dense")
+            .weight(path)
+            .unwrap_or_else(|| panic!("{path} must name a kernel"))
             .to_owned()
     };
+
+    // The construction holds for the 2 backward passes that the comparison reads. Batch 1
+    // gives the second layer a gradient of 0, so batch 2 meets the identity map again. The
+    // batch-2 step of the second layer lands after every backward pass of that batch, so no
+    // gradient of the first layer ever passes through anything but the identity
+    let mut probe = SequentialBuilder::new()
+        .add(shifted_dense())
+        .add(pass_through_dense_no_bias())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    probe.compile(
+        SGD::new(0.1, 0.9, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
+    probe.train_batch(&x, &y).unwrap();
     assert_same_kernel(
-        &first_of(&grown),
-        &first_of(&plain),
-        "the first layer must keep its own momentum when a second layer is added",
+        &kernel_of(&probe, "1.kernel"),
+        &Array::from_shape_vec((2, 2), vec![1.0_f32, 0.0, 0.0, 1.0])
+            .unwrap()
+            .into_dyn(),
+        "the second layer must take no step in batch 1",
+    );
+
+    assert_same_kernel(
+        &kernel_of(&stacked, "0.kernel"),
+        &kernel_of(&plain, "0.kernel"),
+        "the first layer must keep its own momentum when a second layer stands after it",
     );
 }
 

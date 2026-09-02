@@ -3,8 +3,10 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::named_weight_layer_functions;
-use crate::neural_network::layers::validation::validate_weight_shape;
+use crate::neural_network::layers::validation::{start_build, validate_weight_shape};
+use crate::neural_network::layers::{
+    build_config_function, build_on_forward, named_weight_layer_functions,
+};
 use crate::neural_network::traits::{Layer, ParamGrad};
 use crate::neural_network::{Shape, Tensor};
 use crate::parallel_gates::cheap_map_parallel_threshold;
@@ -50,7 +52,8 @@ use ndarray::{ArrayD, Axis, Zip};
 /// use rustyml::neural_network::layers::{Activation, Dense, PReLU};
 /// use rustyml::neural_network::losses::MeanSquaredError;
 /// use rustyml::neural_network::optimizers::SGD;
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::traits::Layer;
 ///
 /// // 2 samples of 3 features, with negative values that exercise the learned branch
@@ -60,18 +63,20 @@ use ndarray::{ArrayD, Axis, Zip};
 /// let y = Array2::zeros((2, 1)).into_dyn();
 ///
 /// // The layer alone starts from a slope of 0.25 on each of the 3 features
-/// let mut slopes = PReLU::new(vec![2, 3], 0.25).unwrap();
+/// let mut slopes = PReLU::new(0.25).unwrap();
+/// slopes.build(&Shape::known(x.shape())).unwrap();
 /// let out = slopes.predict(&x).unwrap();
 /// assert_eq!(out[[0, 0]], -0.25);
 /// assert_eq!(out[[0, 1]], 2.0);
 ///
 /// // Inside a model the 3 slopes train together with the dense weights
-/// let mut model = Sequential::new();
-/// model
-///     .add(Dense::new(3, 3, Activation::Linear).unwrap())
-///     .add(PReLU::new(vec![2, 3], 0.25).unwrap())
-///     .add(Dense::new(3, 1, Activation::Linear).unwrap())
-///     .compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+/// let mut model = SequentialBuilder::new()
+///     .add(Dense::new(3, Activation::Linear).unwrap())
+///     .add(PReLU::new(0.25).unwrap())
+///     .add(Dense::new(1, Activation::Linear).unwrap())
+///     .build(&Shape::known(x.shape()))
+///     .unwrap();
+/// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// model.fit(&x, &y, 2).unwrap();
 /// assert_eq!(model.predict(&x).unwrap().shape(), &[2, 1]);
@@ -98,6 +103,8 @@ pub struct PReLU {
     /// Trainable negative-side slopes. Rank is 1 below the input rank, and a shared axis has
     /// extent 1
     alpha: ArrayD<f32>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
     /// Cached input from the forward pass, used during backpropagation
     input_cache: Option<Tensor>,
     /// Stored slope gradients, kept allocated across steps and overwritten on each backward
@@ -109,8 +116,6 @@ impl PReLU {
     ///
     /// # Parameters
     ///
-    /// - `input_shape` - Shape of the input tensor, batch axis first, such as
-    ///   \[batch_size, height, width, channels\]
     /// - `alpha` - Starting value of every negative-side slope. Use 0 to start from the
     ///   [`ReLU`](crate::neural_network::layers::activation::relu::ReLU) transform
     ///
@@ -120,27 +125,13 @@ impl PReLU {
     ///
     /// # Notes
     ///
-    /// Without [`PReLU::with_shared_axes`], the layer holds 1 slope per position of
-    /// `input_shape` with the batch axis removed
+    /// Without [`PReLU::with_shared_axes`], the layer holds 1 slope per position of the build
+    /// shape with the batch axis removed
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If `input_shape` has fewer than 2 dimensions, or holds a 0
     /// - `Error::InvalidParameter` - If `alpha` is not finite
-    pub fn new(input_shape: Vec<usize>, alpha: f32) -> Result<Self, Error> {
-        if input_shape.len() < 2 {
-            return Err(Error::invalid_input(format!(
-                "PReLU layer expects an input_shape of rank 2 or more, with the batch axis \
-                 first, got rank {}",
-                input_shape.len()
-            )));
-        }
-        if let Some(axis) = input_shape.iter().position(|&extent| extent == 0) {
-            return Err(Error::invalid_input(format!(
-                "PReLU layer expects every dimension of input_shape to be 1 or more: axis \
-                 {axis} has extent 0"
-            )));
-        }
+    pub fn new(alpha: f32) -> Result<Self, Error> {
         if !alpha.is_finite() {
             return Err(Error::invalid_parameter(
                 "alpha",
@@ -149,15 +140,28 @@ impl PReLU {
             ));
         }
 
-        let alpha_array = ArrayD::from_elem(input_shape[1..].to_vec(), alpha);
         Ok(Self {
-            input_shape,
+            input_shape: Vec::new(),
             shared_axes: Vec::new(),
             alpha_init: alpha,
-            alpha: alpha_array,
+            alpha: ArrayD::from_elem(Vec::new(), alpha),
+            built: None,
             input_cache: None,
             grad_alpha: None,
         })
+    }
+
+    /// Fills the slope array at the extents the build settled
+    ///
+    /// Axis `d` of the input is axis `d - 1` of the slope array, because the batch axis is not
+    /// part of it. A shared axis drops to extent 1, and the slope then broadcasts over it
+    fn allocate_alpha(&mut self) {
+        let mut param_shape = self.input_shape[1..].to_vec();
+        for &axis in &self.shared_axes {
+            param_shape[axis - 1] = 1;
+        }
+        self.alpha = ArrayD::from_elem(param_shape, self.alpha_init);
+        self.grad_alpha = None;
     }
 
     /// Makes the named axes share 1 slope, and resizes the slope array to match
@@ -187,9 +191,9 @@ impl PReLU {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If an axis is 0, which is the batch axis and is always
-    ///   shared, or is not below the input rank, or appears more than 1 time
+    ///   shared, or appears more than 1 time. [`Layer::build`] reports an axis that the rank of
+    ///   the real input does not hold
     pub fn with_shared_axes(mut self, shared_axes: Vec<usize>) -> Result<Self, Error> {
-        let rank = self.input_shape.len();
         let mut sorted = shared_axes;
         sorted.sort_unstable();
         for (position, &axis) in sorted.iter().enumerate() {
@@ -200,12 +204,6 @@ impl PReLU {
                      the batch",
                 ));
             }
-            if axis >= rank {
-                return Err(Error::invalid_parameter(
-                    "shared_axes",
-                    format!("holds axis {axis}, and the input has rank {rank}"),
-                ));
-            }
             if position > 0 && sorted[position - 1] == axis {
                 return Err(Error::invalid_parameter(
                     "shared_axes",
@@ -214,15 +212,10 @@ impl PReLU {
             }
         }
 
-        // Axis `d` of the input is axis `d - 1` of the slope array, because the batch axis is
-        // not part of it
-        let mut param_shape = self.input_shape[1..].to_vec();
-        for &axis in &sorted {
-            param_shape[axis - 1] = 1;
-        }
-        self.alpha = ArrayD::from_elem(param_shape, self.alpha_init);
-        self.grad_alpha = None;
         self.shared_axes = sorted;
+        if self.built.is_some() {
+            self.allocate_alpha();
+        }
         Ok(self)
     }
 
@@ -242,6 +235,9 @@ impl PReLU {
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `alpha` does not match the layer's
     ///   configured shape
     pub fn set_weights(&mut self, alpha: ArrayD<f32>) -> Result<(), Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("PReLU"));
+        }
         validate_weight_shape("alpha", self.alpha.shape(), alpha.shape())?;
 
         self.alpha = alpha.as_standard_layout().into_owned();
@@ -256,6 +252,9 @@ impl PReLU {
     /// - `Error::InvalidInput` - If the rank differs from the configured rank, or an axis that
     ///   is not shared has an extent the slope array cannot cover
     fn validate_input(&self, input: &Tensor) -> Result<(), Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("PReLU"));
+        }
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
@@ -310,11 +309,46 @@ impl PReLU {
 }
 
 impl Layer for PReLU {
+    /// Allocates 1 slope per position of the input shape, with the batch axis removed
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "PReLU", input)? else {
+            return Ok(());
+        };
+        built.check_min_rank("PReLU", 2)?;
+        let (_, tail) = built.split_batch("PReLU")?;
+        if let Some(axis) = tail.iter().position(|&extent| extent == 0) {
+            return Err(Error::invalid_input(format!(
+                "PReLU layer expects every dimension of the input shape to be 1 or more: axis \
+                 {} has extent 0",
+                axis + 1
+            )));
+        }
+        if let Some(&axis) = self.shared_axes.iter().find(|&&axis| axis > tail.len()) {
+            return Err(Error::invalid_parameter(
+                "shared_axes",
+                format!(
+                    "holds axis {axis}, and the input has rank {}",
+                    tail.len() + 1
+                ),
+            ));
+        }
+
+        // The slope array reads an extent by position, and the batch axis is not part of it, so
+        // a placeholder stands in for the batch axis
+        let mut dims = vec![1];
+        dims.extend(tail);
+        self.input_shape = dims;
+        self.built = Some(built);
+        self.allocate_alpha();
+        Ok(())
+    }
+
     /// Training forward: caches the input, which the backward pass needs for both gradients
     ///
     /// The output alone cannot serve. A slope of 0 maps the whole negative side onto 0, so the
     /// output no longer says which elements were negative
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+        build_on_forward!(self, input);
         let output = self.activate(input)?;
         self.input_cache = Some(input.clone());
         Ok(output)
@@ -400,14 +434,31 @@ impl Layer for PReLU {
     fn known_input_shape(&self) -> Option<Shape> {
         // A shared axis accepts any extent, so the observed shape can differ from the
         // configured one
-        Some(match &self.input_cache {
-            Some(input) => Shape::known(input.shape()),
-            None => Shape::known(&self.input_shape),
-        })
+        match &self.input_cache {
+            Some(input) => Some(Shape::known(input.shape())),
+            None => self.built.clone(),
+        }
     }
 
+    build_config_function!();
+
     /// The layer keeps every extent, and it refuses a shape its slope array cannot cover
+    ///
+    /// The layer changes no extent, so an unbuilt layer answers with the shape it is given.
+    /// It still refuses a rank that its `shared_axes` reach past, because that count comes
+    /// from the configuration. A built layer holds 1 slope per position of every axis that
+    /// `shared_axes` leaves out, and it refuses any other extent on such an axis
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        if self.built.is_none() {
+            input.check_min_rank("PReLU", 2)?;
+            if let Some(&axis) = self.shared_axes.iter().find(|&&axis| axis >= input.rank()) {
+                return Err(Error::invalid_parameter(
+                    "shared_axes",
+                    format!("holds axis {axis}, and the input has rank {}", input.rank()),
+                ));
+            }
+            return Ok(input.clone());
+        }
         input.check_rank("PReLU", self.input_shape.len())?;
         for (axis, extent) in input.axes().iter().enumerate().skip(1) {
             if self.shared_axes.contains(&axis) {

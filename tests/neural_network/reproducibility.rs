@@ -8,12 +8,14 @@
 //! "different" assertions require the max absolute difference to clear a small threshold.
 
 use ndarray::Array2;
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::Activation;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::Layer;
 
 use super::common::{GlobalSeedGuard, assert_allclose};
@@ -39,13 +41,17 @@ fn max_abs_diff(a: &Tensor, b: &Tensor) -> f32 {
         .fold(0.0_f32, f32::max)
 }
 
-/// Build a tiny `Dense(4 -> 3, ReLU)`, applying `seed` via `with_random_state` when `Some`
+/// Build a tiny, built `Dense(4 -> 3, ReLU)`, applying `seed` via `with_random_state` when
+/// `Some`. `with_random_state` only records the seed; `build` is what draws the weights, so
+/// every caller of this helper gets a layer `predict` can already run
 fn dense_4_3(seed: Option<u64>) -> Dense {
-    let dense = Dense::new(4, 3, Activation::ReLU).expect("Dense::new(4,3) must succeed");
-    match seed {
+    let dense = Dense::new(3, Activation::ReLU).expect("Dense::new(3) must succeed");
+    let mut dense = match seed {
         Some(s) => dense.with_random_state(s),
         None => dense,
-    }
+    };
+    dense.build(&Shape::known(&[1, 4])).unwrap();
+    dense
 }
 
 /// 2 `Dense` layers with the same explicit seed produce byte-identical `predict()`
@@ -136,18 +142,19 @@ fn training_reproducible() {
 
     // Build 2 identical, fully-seeded models and train them identically
     let build_and_train = || -> Sequential {
-        let mut model = Sequential::new_with_seed(42);
-        model
+        let mut model = SequentialBuilder::new_with_seed(42)
             .add(dense_4_3(Some(7)))
             .add(
-                Dense::new(3, 1, Activation::Linear)
+                Dense::new(1, Activation::Linear)
                     .unwrap()
                     .with_random_state(11),
             )
-            .compile(
-                SGD::new(0.05, 0.0, false, 0.0).unwrap(),
-                MeanSquaredError::new(),
-            );
+            .build(&Shape::known(x.shape()))
+            .unwrap();
+        model.compile(
+            SGD::new(0.05, 0.0, false, 0.0).unwrap(),
+            MeanSquaredError::new(),
+        );
         // batch_size < n_samples => the seeded per-epoch shuffle is actually used
         model.fit_with_batches(&x, &y, 5, 2).unwrap();
         model
@@ -172,8 +179,10 @@ fn global_seed_advances_between_unseeded_draws() {
 
     let (p_first, p_second) = {
         let _seed = GlobalSeedGuard::set(2024);
-        let first = Dense::new(4, 3, Activation::Linear).unwrap(); // sub-seed #1 from the global
-        let second = Dense::new(4, 3, Activation::Linear).unwrap(); // sub-seed #2, must differ
+        let mut first = Dense::new(3, Activation::Linear).unwrap();
+        first.build(&Shape::known(&[1, 4])).unwrap(); // sub-seed #1 from the global
+        let mut second = Dense::new(3, Activation::Linear).unwrap();
+        second.build(&Shape::known(&[1, 4])).unwrap(); // sub-seed #2, must differ
         (first.predict(&x).unwrap(), second.predict(&x).unwrap())
         // `_seed` clears the global here, before the assertion below
     };
@@ -193,14 +202,17 @@ fn cleared_global_seed_unseeded_layers_differ() {
 
     // Set a global, build 1 unseeded layer from it (matches the reproducibility setup)
     let guard = GlobalSeedGuard::set(777);
-    let _seeded_from_global = Dense::new(4, 3, Activation::Linear).unwrap();
+    let mut _seeded_from_global = Dense::new(3, Activation::Linear).unwrap();
+    _seeded_from_global.build(&Shape::known(&[1, 4])).unwrap();
     // Clear the global so subsequent unseeded layers fall back to entropy. Dropping the guard
     // already clears it, so the call below is an idempotent reaffirmation.
     drop(guard);
     rustyml::clear_global_seed(); // explicit: no global seed is installed
 
-    let a = Dense::new(4, 3, Activation::Linear).unwrap();
-    let b = Dense::new(4, 3, Activation::Linear).unwrap();
+    let mut a = Dense::new(3, Activation::Linear).unwrap();
+    a.build(&Shape::known(&[1, 4])).unwrap();
+    let mut b = Dense::new(3, Activation::Linear).unwrap();
+    b.build(&Shape::known(&[1, 4])).unwrap();
     let pa = a.predict(&x).unwrap();
     let pb = b.predict(&x).unwrap();
 

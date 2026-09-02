@@ -12,6 +12,7 @@
 //!   the entry validation. The recorded semantics come from Keras 3.15.1 on the jax backend
 
 use ndarray::Array;
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::regularization::dropout::dropout::Dropout;
 use rustyml::neural_network::layers::regularization::dropout::spatial_dropout_1d::SpatialDropout1D;
@@ -41,7 +42,7 @@ fn filled(shape: &[usize], value: f32) -> Tensor {
 #[test]
 fn dropout_rate_zero_is_identity_in_training_mode() {
     // rate=0 takes the dedicated early-return path, so no units drop
-    let mut layer = Dropout::new(0.0, vec![3, 4]).unwrap();
+    let mut layer = Dropout::new(0.0).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = Array::from_shape_vec(
@@ -60,7 +61,7 @@ fn dropout_rate_zero_is_identity_in_training_mode() {
 #[test]
 fn dropout_rate_one_yields_zeros_in_training_mode() {
     // rate=1 takes the dedicated early-return path, giving all zeros
-    let mut layer = Dropout::new(1.0, vec![2, 5]).unwrap();
+    let mut layer = Dropout::new(1.0).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = filled(&[2, 5], 3.0);
@@ -72,7 +73,7 @@ fn dropout_rate_one_yields_zeros_in_training_mode() {
 #[test]
 fn dropout_eval_mode_is_exact_identity() {
     // Inverted dropout: inference passes the input through unchanged
-    let mut layer = Dropout::new(0.5, vec![2, 3]).unwrap();
+    let mut layer = Dropout::new(0.5).unwrap();
     layer.set_training_if_mode_dependent(false);
 
     let input = Array::from_shape_vec((2, 3), vec![1.0, -1.0, 2.0, 0.5, -0.5, 3.0])
@@ -84,7 +85,8 @@ fn dropout_eval_mode_is_exact_identity() {
 
 #[test]
 fn dropout_predict_equals_forward_in_eval_mode() {
-    let mut layer = Dropout::new(0.3, vec![2, 4]).unwrap();
+    let mut layer = Dropout::new(0.3).unwrap();
+    layer.build(&Shape::known(&[2, 4])).unwrap();
     layer.set_training_if_mode_dependent(false);
 
     let input = Array::from_shape_vec((2, 4), (0..8).map(|v| v as f32 * 0.5).collect())
@@ -99,7 +101,8 @@ fn dropout_predict_equals_forward_in_eval_mode() {
 
 #[test]
 fn dropout_predict_is_identity_in_training_mode() {
-    let mut layer = Dropout::new(0.9, vec![3]).unwrap();
+    let mut layer = Dropout::new(0.9).unwrap();
+    layer.build(&Shape::known(&[3])).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = Array::from_shape_vec((3,), vec![1.0, -2.0, 3.0])
@@ -112,7 +115,7 @@ fn dropout_predict_is_identity_in_training_mode() {
 #[test]
 fn dropout_training_inverted_scaling_on_kept_units() {
     // Inverted dropout scales kept units by 1/(1-rate). With rate=0.5, scale = 2.0.
-    let mut layer = Dropout::new(0.5, vec![200]).unwrap();
+    let mut layer = Dropout::new(0.5).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = ones(&[200]);
@@ -139,7 +142,7 @@ fn dropout_training_inverted_scaling_on_kept_units() {
 #[test]
 fn dropout_rate_one_backward_returns_zeros() {
     // rate=1 zeroes the forward output. Backward returns zeros too, from its own early-return path
-    let mut layer = Dropout::new(1.0, vec![2, 3]).unwrap();
+    let mut layer = Dropout::new(1.0).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = filled(&[2, 3], 1.0);
@@ -154,7 +157,7 @@ fn dropout_rate_one_backward_returns_zeros() {
 #[test]
 fn dropout_rate_zero_backward_passes_gradient_through() {
     // rate=0 -> forward identity, backward passes gradient through unchanged
-    let mut layer = Dropout::new(0.0, vec![2, 3]).unwrap();
+    let mut layer = Dropout::new(0.0).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = filled(&[2, 3], 1.0);
@@ -170,7 +173,7 @@ fn dropout_rate_zero_backward_passes_gradient_through() {
 #[test]
 fn dropout_eval_backward_passes_gradient_through() {
     // Inference mode: backward() passes gradient through unchanged
-    let mut layer = Dropout::new(0.5, vec![2, 3]).unwrap();
+    let mut layer = Dropout::new(0.5).unwrap();
     layer.set_training_if_mode_dependent(false);
 
     let input = filled(&[2, 3], 1.0);
@@ -187,7 +190,7 @@ fn dropout_eval_backward_passes_gradient_through() {
 fn dropout_backward_kept_units_scaled_correctly() {
     // Backward multiplies grad_output by 1/(1-rate). With rate=0.5 and all-ones input,
     // kept output and kept gradient both equal 2.0, and dropped units give 0.0
-    let mut layer = Dropout::new(0.5, vec![50]).unwrap();
+    let mut layer = Dropout::new(0.5).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = ones(&[50]);
@@ -214,7 +217,7 @@ fn dropout_backward_kept_units_scaled_correctly() {
 fn dropout_constructor_rejects_invalid_rate() {
     // Same constructor and error for a negative rate and a rate above 1
     for rate in [-0.1_f32, 1.5_f32] {
-        let err = Dropout::new(rate, vec![10]).unwrap_err();
+        let err = Dropout::new(rate).unwrap_err();
         assert!(
             matches!(err, Error::InvalidParameter { .. }),
             "rate {rate}: expected InvalidParameter, got {:?}",
@@ -225,14 +228,14 @@ fn dropout_constructor_rejects_invalid_rate() {
 
 #[test]
 fn dropout_constructor_accepts_boundary_rates_zero_and_one() {
-    assert!(Dropout::new(0.0, vec![5]).is_ok());
-    assert!(Dropout::new(1.0, vec![5]).is_ok());
+    assert!(Dropout::new(0.0).is_ok());
+    assert!(Dropout::new(1.0).is_ok());
 }
 
 #[test]
 fn dropout_backward_before_forward_returns_forward_pass_not_run() {
     // mask is None -> backward before forward -> ForwardPassNotRun error
-    let mut layer = Dropout::new(0.5, vec![4]).unwrap();
+    let mut layer = Dropout::new(0.5).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let grad = filled(&[4], 1.0);
@@ -249,7 +252,7 @@ fn spatial_dropout_backward_before_forward_reports_concrete_layer_name() {
     // Regression: shared dropout_backward must name the concrete SpatialDropout layer
     // in ForwardPassNotRun, not a hardcoded "Dropout"
     // Channels-last: (batch=2, length=8, channels=4)
-    let mut d1 = SpatialDropout1D::new(0.5, vec![2, 8, 4]).unwrap();
+    let mut d1 = SpatialDropout1D::new(0.5).unwrap();
     d1.set_training_if_mode_dependent(true);
     let err1 = d1.backward(&filled(&[2, 8, 4], 1.0)).unwrap_err();
     assert!(
@@ -262,7 +265,7 @@ fn spatial_dropout_backward_before_forward_reports_concrete_layer_name() {
     );
 
     // Channels-last: (batch=2, height=4, width=4, channels=3)
-    let mut d2 = SpatialDropout2D::new(0.5, vec![2, 4, 4, 3]).unwrap();
+    let mut d2 = SpatialDropout2D::new(0.5).unwrap();
     d2.set_training_if_mode_dependent(true);
     let err2 = d2.backward(&filled(&[2, 4, 4, 3], 1.0)).unwrap_err();
     assert!(
@@ -275,7 +278,7 @@ fn spatial_dropout_backward_before_forward_reports_concrete_layer_name() {
     );
 
     // Channels-last: (batch=1, depth=3, height=3, width=3, channels=2)
-    let mut d3 = SpatialDropout3D::new(0.5, vec![1, 3, 3, 3, 2]).unwrap();
+    let mut d3 = SpatialDropout3D::new(0.5).unwrap();
     d3.set_training_if_mode_dependent(true);
     let err3 = d3.backward(&filled(&[1, 3, 3, 3, 2], 1.0)).unwrap_err();
     assert!(
@@ -288,24 +291,27 @@ fn spatial_dropout_backward_before_forward_reports_concrete_layer_name() {
     );
 }
 
+/// A built layer accepts a feature count that its build shape does not name
+///
+/// The layer owns no array and reads no extent, so nothing about the build shape reaches the
+/// transform. Keras 3 marks `Dropout` built at construction for the same reason
 #[test]
-fn dropout_forward_rejects_shape_mismatch() {
-    let mut layer = Dropout::new(0.5, vec![2, 4]).unwrap();
-    // input has wrong feature dim
+fn dropout_forward_accepts_a_shape_the_build_did_not_name() {
+    let mut layer = Dropout::new(0.5).unwrap();
+    layer.build(&Shape::known(&[2, 4])).unwrap();
+    // The feature count differs from the 1 the build named
     let input = Array::ones((2, 5)).into_dyn();
-    let err = layer.forward(&input).unwrap_err();
-    assert!(
-        matches!(err, Error::ShapeMismatch { .. }),
-        "expected ShapeMismatch, got {:?}",
-        err
-    );
+    let out = layer
+        .forward(&input)
+        .unwrap_or_else(|e| panic!("forward refused a wider input: {e:?}"));
+    assert_eq!(out.shape(), &[2, 5]);
 }
 
 /// The declared shape's leading axis is fixed at construction from the whole dataset.
 /// Enforcing it on each call would reject every mini-batch, so both paths accept any batch size.
 #[test]
 fn dropout_accepts_any_batch_size() {
-    let mut layer = Dropout::new(0.5, vec![8, 4]).unwrap();
+    let mut layer = Dropout::new(0.5).unwrap();
     for batch in [1usize, 3, 8, 16] {
         let input = Array::ones((batch, 4)).into_dyn();
         let out = layer
@@ -319,26 +325,41 @@ fn dropout_accepts_any_batch_size() {
     }
 }
 
+/// `predict` takes the same freedom as `forward`, and it refuses an unbuilt layer alone
 #[test]
-fn dropout_predict_rejects_shape_mismatch() {
-    let layer = Dropout::new(0.5, vec![2, 4]).unwrap();
-    let input = Array::ones((2, 5)).into_dyn();
-    let err = layer.predict(&input).unwrap_err();
+fn dropout_predict_accepts_a_shape_the_build_did_not_name() {
+    let mut layer = Dropout::new(0.5).unwrap();
     assert!(
-        matches!(err, Error::ShapeMismatch { .. }),
-        "expected ShapeMismatch, got {:?}",
-        err
+        matches!(
+            layer.predict(&Array::ones((2, 4)).into_dyn()),
+            Err(Error::NeuralNetwork(NnError::NotBuilt("Dropout")))
+        ),
+        "predict must refuse a layer that holds no build"
     );
+
+    layer.build(&Shape::known(&[2, 4])).unwrap();
+    let input = Array::ones((2, 5)).into_dyn();
+    let out = layer
+        .predict(&input)
+        .unwrap_or_else(|e| panic!("predict refused a wider input: {e:?}"));
+    assert_eq!(out.shape(), &[2, 5]);
 }
 
+/// 1 layer serves every rank
+///
+/// The layer owns no array and reads no extent, so a rank cannot be wrong. Keras 3 takes the
+/// same position: `Dropout` is built at construction, and 1 instance passes a rank-2, a
+/// rank-3, and a rank-4 tensor. The build shape here names rank 2, and the rank-3 tensor
+/// passes all the same
 #[test]
-fn dropout_empty_input_shape_accepts_any_shape() {
-    // validate_input_shape skips when expected_shape is empty
-    let mut layer = Dropout::new(0.0, vec![]).unwrap();
+fn dropout_accepts_any_rank() {
+    let mut layer = Dropout::new(0.0).unwrap();
     let a = Array::ones((2, 3)).into_dyn();
     let b = Array::ones((5, 7, 2)).into_dyn();
     assert!(layer.forward(&a).is_ok());
     assert!(layer.forward(&b).is_ok());
+    assert!(layer.predict(&a).is_ok());
+    assert!(layer.predict(&b).is_ok());
 }
 
 // SpatialDropout1D - channel-consistency and values
@@ -347,7 +368,7 @@ fn dropout_empty_input_shape_accepts_any_shape() {
 fn spatial_dropout_1d_rate_zero_is_identity() {
     // rate=0 -> identity in training mode
     // Channels-last: (batch=2, length=8, channels=4)
-    let mut layer = SpatialDropout1D::new(0.0, vec![2, 8, 4]).unwrap();
+    let mut layer = SpatialDropout1D::new(0.0).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = filled(&[2, 8, 4], 1.5_f32);
@@ -359,7 +380,7 @@ fn spatial_dropout_1d_rate_zero_is_identity() {
 fn spatial_dropout_1d_rate_one_yields_zeros() {
     // rate=1 -> all zeros
     // Channels-last: (batch=1, length=5, channels=3)
-    let mut layer = SpatialDropout1D::new(1.0, vec![1, 5, 3]).unwrap();
+    let mut layer = SpatialDropout1D::new(1.0).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = filled(&[1, 5, 3], 2.0);
@@ -371,7 +392,7 @@ fn spatial_dropout_1d_rate_one_yields_zeros() {
 #[test]
 fn spatial_dropout_1d_eval_is_identity() {
     // Channels-last: (batch=2, length=6, channels=4)
-    let mut layer = SpatialDropout1D::new(0.5, vec![2, 6, 4]).unwrap();
+    let mut layer = SpatialDropout1D::new(0.5).unwrap();
     layer.set_training_if_mode_dependent(false);
 
     let input = filled(&[2, 6, 4], 3.0);
@@ -382,7 +403,8 @@ fn spatial_dropout_1d_eval_is_identity() {
 #[test]
 fn spatial_dropout_1d_predict_is_identity() {
     // Channels-last: (batch=1, length=6, channels=4)
-    let layer = SpatialDropout1D::new(0.8, vec![1, 6, 4]).unwrap();
+    let mut layer = SpatialDropout1D::new(0.8).unwrap();
+    layer.build(&Shape::known(&[1, 6, 4])).unwrap();
     let input = filled(&[1, 6, 4], 2.0);
     let out = layer.predict(&input).unwrap();
     assert_allclose(&out, &input, 1e-6_f32);
@@ -396,7 +418,7 @@ fn spatial_dropout_1d_channel_consistency() {
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate); // = 2.0
 
-    let mut layer = SpatialDropout1D::new(rate, vec![1, 10, 8]).unwrap();
+    let mut layer = SpatialDropout1D::new(rate).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = ones(&[1, 10, 8]);
@@ -432,7 +454,7 @@ fn spatial_dropout_1d_kept_channel_exact_scale() {
     let scale = 1.0 / (1.0 - rate); // ~=1.6667
 
     // Channels-last layout: (batch=1, length=4, channels=10)
-    let mut layer = SpatialDropout1D::new(rate, vec![1, 4, 10]).unwrap();
+    let mut layer = SpatialDropout1D::new(rate).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     // Give each spatial position a distinct value
@@ -470,7 +492,7 @@ fn spatial_dropout_1d_backward_channel_consistency() {
     // Backward: gradient zeroed for dropped channels, scaled for kept channels
     // Channels-last layout: (batch=1, length=4, channels=6)
     let rate = 0.5_f32;
-    let mut layer = SpatialDropout1D::new(rate, vec![1, 4, 6]).unwrap();
+    let mut layer = SpatialDropout1D::new(rate).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = ones(&[1, 4, 6]);
@@ -501,26 +523,26 @@ fn spatial_dropout_1d_backward_channel_consistency() {
 fn spatial_dropout_1d_rejects_invalid_rate() {
     // Channels-last: (batch=1, length=8, channels=4)
     assert!(matches!(
-        SpatialDropout1D::new(-0.1, vec![1, 8, 4]).unwrap_err(),
+        SpatialDropout1D::new(-0.1).unwrap_err(),
         Error::InvalidParameter { .. }
     ));
     assert!(matches!(
-        SpatialDropout1D::new(1.5, vec![1, 8, 4]).unwrap_err(),
+        SpatialDropout1D::new(1.5).unwrap_err(),
         Error::InvalidParameter { .. }
     ));
 }
 
 #[test]
 fn spatial_dropout_1d_accepts_boundary_rates() {
-    assert!(SpatialDropout1D::new(0.0, vec![1, 8, 4]).is_ok());
-    assert!(SpatialDropout1D::new(1.0, vec![1, 8, 4]).is_ok());
+    assert!(SpatialDropout1D::new(0.0).is_ok());
+    assert!(SpatialDropout1D::new(1.0).is_ok());
 }
 
 #[test]
 fn spatial_dropout_1d_rejects_wrong_ndim_forward() {
     // SpatialDropout1D requires 3D input
     // Channels-last: (batch=2, length=8, channels=4)
-    let mut layer = SpatialDropout1D::new(0.5, vec![2, 8, 4]).unwrap();
+    let mut layer = SpatialDropout1D::new(0.5).unwrap();
     let input_2d = Array::ones((2, 8)).into_dyn();
     assert!(layer.forward(&input_2d).is_err());
 
@@ -531,14 +553,14 @@ fn spatial_dropout_1d_rejects_wrong_ndim_forward() {
 #[test]
 fn spatial_dropout_1d_rejects_wrong_ndim_predict() {
     // predict() also enforces ndim
-    let layer = SpatialDropout1D::new(0.5, vec![2, 8, 4]).unwrap();
+    let layer = SpatialDropout1D::new(0.5).unwrap();
     let input_2d = Array::ones((2, 8)).into_dyn();
     assert!(layer.predict(&input_2d).is_err());
 }
 
 #[test]
 fn spatial_dropout_1d_backward_before_forward_returns_error() {
-    let mut layer = SpatialDropout1D::new(0.5, vec![1, 8, 4]).unwrap();
+    let mut layer = SpatialDropout1D::new(0.5).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let grad = filled(&[1, 8, 4], 1.0);
@@ -555,7 +577,7 @@ fn spatial_dropout_1d_backward_before_forward_returns_error() {
 #[test]
 fn spatial_dropout_2d_rate_zero_is_identity() {
     // Channels-last: (batch=2, height=4, width=4, channels=3)
-    let mut layer = SpatialDropout2D::new(0.0, vec![2, 4, 4, 3]).unwrap();
+    let mut layer = SpatialDropout2D::new(0.0).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = filled(&[2, 4, 4, 3], 1.0);
@@ -566,7 +588,7 @@ fn spatial_dropout_2d_rate_zero_is_identity() {
 #[test]
 fn spatial_dropout_2d_rate_one_yields_zeros() {
     // Channels-last: (batch=1, height=3, width=3, channels=2)
-    let mut layer = SpatialDropout2D::new(1.0, vec![1, 3, 3, 2]).unwrap();
+    let mut layer = SpatialDropout2D::new(1.0).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = filled(&[1, 3, 3, 2], 5.0);
@@ -577,7 +599,7 @@ fn spatial_dropout_2d_rate_one_yields_zeros() {
 #[test]
 fn spatial_dropout_2d_eval_is_identity() {
     // Channels-last: (batch=1, height=4, width=4, channels=2)
-    let mut layer = SpatialDropout2D::new(0.5, vec![1, 4, 4, 2]).unwrap();
+    let mut layer = SpatialDropout2D::new(0.5).unwrap();
     layer.set_training_if_mode_dependent(false);
 
     let input = filled(&[1, 4, 4, 2], 2.0);
@@ -588,7 +610,8 @@ fn spatial_dropout_2d_eval_is_identity() {
 #[test]
 fn spatial_dropout_2d_predict_is_identity() {
     // Channels-last: (batch=1, height=3, width=3, channels=2)
-    let layer = SpatialDropout2D::new(0.7, vec![1, 3, 3, 2]).unwrap();
+    let mut layer = SpatialDropout2D::new(0.7).unwrap();
+    layer.build(&Shape::known(&[1, 3, 3, 2])).unwrap();
     let input = filled(&[1, 3, 3, 2], 2.5);
     let out = layer.predict(&input).unwrap();
     assert_allclose(&out, &input, 1e-6_f32);
@@ -601,7 +624,7 @@ fn spatial_dropout_2d_channel_consistency() {
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate);
 
-    let mut layer = SpatialDropout2D::new(rate, vec![1, 4, 4, 8]).unwrap();
+    let mut layer = SpatialDropout2D::new(rate).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = ones(&[1, 4, 4, 8]);
@@ -628,27 +651,27 @@ fn spatial_dropout_2d_channel_consistency() {
 #[test]
 fn spatial_dropout_2d_rejects_wrong_ndim() {
     // Channels-last: (batch=1, height=4, width=4, channels=2)
-    let mut layer = SpatialDropout2D::new(0.5, vec![1, 4, 4, 2]).unwrap();
+    let mut layer = SpatialDropout2D::new(0.5).unwrap();
     let input_3d = Array::ones((1, 4, 4)).into_dyn();
     assert!(layer.forward(&input_3d).is_err());
 }
 
 #[test]
 fn spatial_dropout_2d_predict_rejects_wrong_ndim() {
-    let layer = SpatialDropout2D::new(0.5, vec![1, 4, 4, 2]).unwrap();
+    let layer = SpatialDropout2D::new(0.5).unwrap();
     let input_3d = Array::ones((1, 4, 4)).into_dyn();
     assert!(layer.predict(&input_3d).is_err());
 }
 
 #[test]
 fn spatial_dropout_2d_rejects_invalid_rate() {
-    assert!(SpatialDropout2D::new(-0.5, vec![1, 4, 4, 2]).is_err());
-    assert!(SpatialDropout2D::new(1.1, vec![1, 4, 4, 2]).is_err());
+    assert!(SpatialDropout2D::new(-0.5).is_err());
+    assert!(SpatialDropout2D::new(1.1).is_err());
 }
 
 #[test]
 fn spatial_dropout_2d_backward_before_forward_returns_error() {
-    let mut layer = SpatialDropout2D::new(0.5, vec![1, 4, 4, 2]).unwrap();
+    let mut layer = SpatialDropout2D::new(0.5).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let grad = filled(&[1, 4, 4, 2], 1.0);
@@ -668,7 +691,7 @@ fn spatial_dropout_2d_backward_channel_consistency() {
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate);
 
-    let mut layer = SpatialDropout2D::new(rate, vec![1, 3, 3, 6]).unwrap();
+    let mut layer = SpatialDropout2D::new(rate).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = ones(&[1, 3, 3, 6]);
@@ -696,7 +719,7 @@ fn spatial_dropout_2d_backward_channel_consistency() {
 #[test]
 fn spatial_dropout_3d_rate_zero_is_identity() {
     // Channels-last: (batch=1, depth=2, height=3, width=3, channels=3)
-    let mut layer = SpatialDropout3D::new(0.0, vec![1, 2, 3, 3, 3]).unwrap();
+    let mut layer = SpatialDropout3D::new(0.0).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = filled(&[1, 2, 3, 3, 3], 1.0);
@@ -707,7 +730,7 @@ fn spatial_dropout_3d_rate_zero_is_identity() {
 #[test]
 fn spatial_dropout_3d_rate_one_yields_zeros() {
     // Channels-last: (batch=1, depth=2, height=2, width=2, channels=2)
-    let mut layer = SpatialDropout3D::new(1.0, vec![1, 2, 2, 2, 2]).unwrap();
+    let mut layer = SpatialDropout3D::new(1.0).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = filled(&[1, 2, 2, 2, 2], 3.0);
@@ -718,7 +741,7 @@ fn spatial_dropout_3d_rate_one_yields_zeros() {
 #[test]
 fn spatial_dropout_3d_eval_is_identity() {
     // Channels-last: (batch=1, depth=2, height=3, width=3, channels=2)
-    let mut layer = SpatialDropout3D::new(0.5, vec![1, 2, 3, 3, 2]).unwrap();
+    let mut layer = SpatialDropout3D::new(0.5).unwrap();
     layer.set_training_if_mode_dependent(false);
 
     let input = filled(&[1, 2, 3, 3, 2], 4.0);
@@ -729,7 +752,8 @@ fn spatial_dropout_3d_eval_is_identity() {
 #[test]
 fn spatial_dropout_3d_predict_is_identity() {
     // Channels-last: (batch=1, depth=2, height=3, width=3, channels=2)
-    let layer = SpatialDropout3D::new(0.6, vec![1, 2, 3, 3, 2]).unwrap();
+    let mut layer = SpatialDropout3D::new(0.6).unwrap();
+    layer.build(&Shape::known(&[1, 2, 3, 3, 2])).unwrap();
     let input = filled(&[1, 2, 3, 3, 2], 1.5);
     let out = layer.predict(&input).unwrap();
     assert_allclose(&out, &input, 1e-6_f32);
@@ -742,7 +766,7 @@ fn spatial_dropout_3d_channel_consistency() {
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate);
 
-    let mut layer = SpatialDropout3D::new(rate, vec![1, 2, 3, 3, 8]).unwrap();
+    let mut layer = SpatialDropout3D::new(rate).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = ones(&[1, 2, 3, 3, 8]);
@@ -771,27 +795,27 @@ fn spatial_dropout_3d_channel_consistency() {
 #[test]
 fn spatial_dropout_3d_rejects_wrong_ndim() {
     // Channels-last: (batch=1, depth=2, height=3, width=3, channels=2)
-    let mut layer = SpatialDropout3D::new(0.5, vec![1, 2, 3, 3, 2]).unwrap();
+    let mut layer = SpatialDropout3D::new(0.5).unwrap();
     let input_4d = Array::ones((1, 2, 3, 3)).into_dyn();
     assert!(layer.forward(&input_4d).is_err());
 }
 
 #[test]
 fn spatial_dropout_3d_predict_rejects_wrong_ndim() {
-    let layer = SpatialDropout3D::new(0.5, vec![1, 2, 3, 3, 2]).unwrap();
+    let layer = SpatialDropout3D::new(0.5).unwrap();
     let input_4d = Array::ones((1, 2, 3, 3)).into_dyn();
     assert!(layer.predict(&input_4d).is_err());
 }
 
 #[test]
 fn spatial_dropout_3d_rejects_invalid_rate() {
-    assert!(SpatialDropout3D::new(-0.1, vec![1, 2, 3, 3, 2]).is_err());
-    assert!(SpatialDropout3D::new(2.0, vec![1, 2, 3, 3, 2]).is_err());
+    assert!(SpatialDropout3D::new(-0.1).is_err());
+    assert!(SpatialDropout3D::new(2.0).is_err());
 }
 
 #[test]
 fn spatial_dropout_3d_backward_before_forward_returns_error() {
-    let mut layer = SpatialDropout3D::new(0.5, vec![1, 2, 3, 3, 2]).unwrap();
+    let mut layer = SpatialDropout3D::new(0.5).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let grad = filled(&[1, 2, 3, 3, 2], 1.0);
@@ -810,7 +834,7 @@ fn spatial_dropout_3d_backward_channel_consistency() {
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate);
 
-    let mut layer = SpatialDropout3D::new(rate, vec![1, 2, 2, 2, 4]).unwrap();
+    let mut layer = SpatialDropout3D::new(rate).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = ones(&[1, 2, 2, 2, 4]);
@@ -842,7 +866,7 @@ fn spatial_dropout_3d_backward_channel_consistency() {
 fn dropout_predict_does_not_overwrite_mask_from_forward() {
     // Sequence forward() -> predict() -> backward(): predict() must not touch the stored
     // mask, so backward() still uses the forward() mask
-    let mut layer = Dropout::new(0.5, vec![10]).unwrap();
+    let mut layer = Dropout::new(0.5).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = ones(&[10]);
@@ -909,7 +933,7 @@ fn keep_mask(output: &Tensor) -> Vec<u8> {
 
 /// Runs 1 training forward over an all-ones input and returns the recovered keep mask
 fn masked_ones(shape: &[usize], noise_shape: Option<Vec<Option<usize>>>, seed: u64) -> Vec<u8> {
-    let mut layer = Dropout::new(NS_RATE, shape.to_vec()).unwrap();
+    let mut layer = Dropout::new(NS_RATE).unwrap();
     if let Some(noise_shape) = noise_shape {
         layer = layer.with_noise_shape(noise_shape).unwrap();
     }
@@ -1145,7 +1169,7 @@ fn dropout_noise_shape_none_entry_takes_the_input_extent() {
 /// TRAP (c): a rate of 1 with a noise_shape is legal and gives all zeros
 #[test]
 fn dropout_noise_shape_at_rate_one_gives_zeros() {
-    let mut layer = Dropout::new(1.0, vec![2, 3, 4])
+    let mut layer = Dropout::new(1.0)
         .unwrap()
         .with_noise_shape(vec![Some(2), Some(1), Some(4)])
         .unwrap()
@@ -1160,7 +1184,7 @@ fn dropout_noise_shape_at_rate_one_gives_zeros() {
     assert!(grad.iter().all(|&v| v == 0.0), "rate 1 kept a gradient");
 
     // A rate of 0 stays the identity with a noise_shape as well
-    let mut layer = Dropout::new(0.0, vec![2, 3, 4])
+    let mut layer = Dropout::new(0.0)
         .unwrap()
         .with_noise_shape(vec![Some(2), Some(1), Some(4)])
         .unwrap();
@@ -1174,7 +1198,7 @@ fn dropout_noise_shape_at_rate_one_gives_zeros() {
 /// both are `mask * scale`. The gradient must also stay constant along the shared axis
 #[test]
 fn dropout_noise_shape_backward_broadcasts_the_small_mask() {
-    let mut layer = Dropout::new(NS_RATE, vec![2, 3, 4])
+    let mut layer = Dropout::new(NS_RATE)
         .unwrap()
         .with_noise_shape(vec![Some(2), Some(1), Some(4)])
         .unwrap()
@@ -1214,7 +1238,7 @@ fn dropout_noise_shape_backward_broadcasts_the_small_mask() {
 /// Inference passes the input through unchanged, whatever the noise_shape says
 #[test]
 fn dropout_noise_shape_passes_through_in_inference_mode() {
-    let mut layer = Dropout::new(NS_RATE, vec![2, 3, 4])
+    let mut layer = Dropout::new(NS_RATE)
         .unwrap()
         .with_noise_shape(vec![Some(2), Some(1), Some(4)])
         .unwrap()
@@ -1251,7 +1275,7 @@ fn dropout_noise_shape_seed_pins_the_mask() {
 /// An entry that is neither 1 nor the input extent on its axis is rejected
 #[test]
 fn dropout_noise_shape_rejects_an_entry_that_is_not_the_input_extent() {
-    let mut layer = Dropout::new(NS_RATE, vec![2, 3, 4])
+    let mut layer = Dropout::new(NS_RATE)
         .unwrap()
         .with_noise_shape(vec![Some(2), Some(2), Some(4)])
         .unwrap();
@@ -1265,7 +1289,7 @@ fn dropout_noise_shape_rejects_an_entry_that_is_not_the_input_extent() {
 
     // The right-aligned reading applies to the rejection as well: 3 is the extent of axis 1,
     // but the short form lines it up against axis 2, whose extent is 4
-    let mut layer = Dropout::new(NS_RATE, vec![2, 3, 4])
+    let mut layer = Dropout::new(NS_RATE)
         .unwrap()
         .with_noise_shape(vec![Some(1), Some(3)])
         .unwrap();
@@ -1279,7 +1303,7 @@ fn dropout_noise_shape_rejects_an_entry_that_is_not_the_input_extent() {
 /// A noise_shape of a higher rank than the input is rejected
 #[test]
 fn dropout_noise_shape_rejects_a_higher_rank_than_the_input() {
-    let mut layer = Dropout::new(NS_RATE, vec![2, 3, 4])
+    let mut layer = Dropout::new(NS_RATE)
         .unwrap()
         .with_noise_shape(vec![Some(1), Some(2), Some(3), Some(4)])
         .unwrap();
@@ -1294,13 +1318,13 @@ fn dropout_noise_shape_rejects_a_higher_rank_than_the_input() {
 /// The builder rejects an empty noise_shape and an entry of 0
 #[test]
 fn dropout_noise_shape_builder_rejects_an_empty_vector_and_a_zero_entry() {
-    let layer = Dropout::new(NS_RATE, vec![2, 3, 4]).unwrap();
+    let layer = Dropout::new(NS_RATE).unwrap();
     assert!(matches!(
         layer.with_noise_shape(vec![]).unwrap_err(),
         Error::EmptyInput(_)
     ));
 
-    let layer = Dropout::new(NS_RATE, vec![2, 3, 4]).unwrap();
+    let layer = Dropout::new(NS_RATE).unwrap();
     assert!(matches!(
         layer
             .with_noise_shape(vec![Some(2), Some(0), Some(4)])
@@ -1346,7 +1370,7 @@ fn dropout_noise_shape_shares_two_axes_of_a_rank_four_input() {
 /// input has exactly 4 distinct draws, whatever the input size
 #[test]
 fn dropout_noise_shape_keeps_the_mask_at_its_own_shape() {
-    let mut layer = Dropout::new(NS_RATE, vec![8, 64, 4])
+    let mut layer = Dropout::new(NS_RATE)
         .unwrap()
         .with_noise_shape(vec![Some(1), Some(1), Some(4)])
         .unwrap()

@@ -5,6 +5,7 @@
 //! the jax backend, and every one of them is bit-exact against this implementation.
 
 use ndarray::{Array2, IxDyn};
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
@@ -12,7 +13,7 @@ use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::rescaling::Rescaling;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
-use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
@@ -324,18 +325,15 @@ fn rescaling_trains_inside_a_sequential_model() {
         .unwrap()
         .into_dyn();
 
-    let mut model = Sequential::new();
-    model
+    let mut model = SequentialBuilder::new()
         .add(Rescaling::new(1.0 / 255.0))
-        .add(
-            Dense::new(3, 1, Linear::new())
-                .unwrap()
-                .with_random_state(7),
-        )
-        .compile(
-            SGD::new(0.05, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+        .add(Dense::new(1, Linear::new()).unwrap().with_random_state(7))
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.05, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let first = model.fit(&x, &y, 1).unwrap();
     let later = model.fit(&x, &y, 20).unwrap();
@@ -345,8 +343,11 @@ fn rescaling_trains_inside_a_sequential_model() {
     );
 
     // The scaled input stays inside [0, 1], which is the point of the layer
-    let mut only_rescaling = Sequential::new();
-    only_rescaling.add(Rescaling::new(1.0 / 255.0)).compile(
+    let mut only_rescaling = SequentialBuilder::new()
+        .add(Rescaling::new(1.0 / 255.0))
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    only_rescaling.compile(
         SGD::new(0.05, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );

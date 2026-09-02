@@ -2,7 +2,10 @@
 
 use crate::error::{Context, Error};
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
+use crate::neural_network::layers::validation::{start_build, validate_built_input};
+use crate::neural_network::layers::{
+    build_config_function, build_on_forward, no_trainable_parameters_layer_functions,
+};
 use crate::neural_network::traits::Layer;
 use crate::neural_network::{Shape, Tensor};
 use ndarray::IxDyn;
@@ -28,10 +31,11 @@ use ndarray::IxDyn;
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::*;
+/// use rustyml::neural_network::Shape;
 /// use ndarray::Array4;
 ///
 /// // Create a 4D input tensor: [batch_size, height, width, channels]
@@ -39,10 +43,11 @@ use ndarray::IxDyn;
 /// let x = Array4::ones((2, 4, 4, 3)).into_dyn();
 ///
 /// // Build a model containing a Flatten layer
-/// let mut model = Sequential::new();
-/// model
-///     .add(Flatten::new(vec![2, 4, 4, 3]).unwrap())
-///     .compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+/// let mut model = SequentialBuilder::new()
+///     .add(Flatten::new())
+///     .build(&Shape::known(&[2, 4, 4, 3]))
+///     .unwrap();
+/// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // View model structure
 /// model.summary();
@@ -53,13 +58,10 @@ use ndarray::IxDyn;
 /// // The output shape should be [2, 48]
 /// assert_eq!(flattened.shape(), &[2, 48]);
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Flatten {
-    /// Input shape the constructor declared, batch axis first
-    ///
-    /// The layer reports its output shape from this, and not from the tensors it sees. See
-    /// [`Layer::known_input_shape`]
-    declared_shape: Vec<usize>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
     /// Shape of the most recent forward input. The backward pass restores it
     ///
     /// A flatten moves no data, so the backward pass needs the shape alone
@@ -69,52 +71,41 @@ pub struct Flatten {
 impl Flatten {
     /// Creates a new Flatten layer
     ///
-    /// # Parameters
-    ///
-    /// - `input_shape` - Input tensor shape, such as `[batch_size, length, features]`,
-    ///   `[batch_size, height, width, channels]`, or
-    ///   `[batch_size, depth, height, width, channels]`
+    /// The layer takes no input shape. [`Layer::build`] gives it one, and a forward pass on a
+    /// layer that a caller drives by hand builds it from the tensor that arrives
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - New `Flatten` layer instance
-    ///
-    /// # Errors
-    ///
-    /// - `Error::InvalidInput` - If `input_shape` has fewer than 2 dimensions or contains a zero
-    pub fn new(input_shape: Vec<usize>) -> Result<Self, Error> {
-        if input_shape.len() < 2 {
-            return Err(Error::invalid_input(format!(
-                "Input shape must have at least 2 dimensions [batch_size, features...], got {}D",
-                input_shape.len()
-            )));
-        }
-
-        for (i, &dim) in input_shape.iter().enumerate() {
-            if dim == 0 {
-                return Err(Error::invalid_input(format!(
-                    "Dimension {} must be greater than 0, got {}",
-                    i, dim
-                )));
-            }
-        }
-
-        Ok(Flatten {
-            declared_shape: input_shape,
+    /// - `Flatten` - A new `Flatten` layer
+    pub fn new() -> Self {
+        Self {
+            built: None,
             input_shape: None,
-        })
+        }
     }
 }
 
 impl Layer for Flatten {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        let input_shape = input.shape();
-        if input_shape.len() < 3 || input_shape.len() > 5 {
+    /// Records the shape the layer folds. The layer holds no array, so nothing is allocated
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "Flatten", input)? else {
+            return Ok(());
+        };
+        if !(3..=5).contains(&built.rank()) {
             return Err(Error::invalid_input(format!(
                 "Flatten layer expects 3D, 4D, or 5D input, got {}D tensor",
-                input_shape.len()
+                built.rank()
             )));
         }
+        built.split_batch("Flatten")?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+        build_on_forward!(self, input);
+        validate_built_input(&self.built, "Flatten", input.shape())?;
+        let input_shape = input.shape();
 
         self.input_shape = Some(input_shape.to_vec());
 
@@ -129,13 +120,8 @@ impl Layer for Flatten {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
+        validate_built_input(&self.built, "Flatten", input.shape())?;
         let input_shape = input.shape();
-        if input_shape.len() < 3 || input_shape.len() > 5 {
-            return Err(Error::invalid_input(format!(
-                "Flatten layer expects 3D, 4D, or 5D input, got {}D tensor",
-                input_shape.len()
-            )));
-        }
 
         let batch_size = input_shape[0];
         let flattened_features: usize = input_shape[1..].iter().product();
@@ -172,9 +158,12 @@ impl Layer for Flatten {
         "Flatten"
     }
 
+    /// The batch axis is free, because the fold serves every batch size
     fn known_input_shape(&self) -> Option<Shape> {
-        Some(Shape::with_free_batch(&self.declared_shape))
+        self.built.as_ref().map(Shape::free_batch)
     }
+
+    build_config_function!();
 
     /// Every axis after the batch axis folds into 1 feature axis
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {

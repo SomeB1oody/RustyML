@@ -9,6 +9,7 @@
 //! the shortest decimal form that reads back as the same `f32`.
 
 use ndarray::{Array1, Array2, Array3, IxDyn};
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
@@ -17,7 +18,7 @@ use rustyml::neural_network::layers::embedding::Embedding;
 use rustyml::neural_network::layers::flatten::Flatten;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
-use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::Layer;
 use rustyml::{error::Error, neural_network::NnError};
 
@@ -42,6 +43,7 @@ fn t3(a: usize, b: usize, c: usize, data: Vec<f32>) -> Tensor {
 /// Build an `Embedding` whose table holds the given row-major values
 fn embedding_with_table(input_dim: usize, output_dim: usize, table: Vec<f32>) -> Embedding {
     let mut layer = Embedding::new(input_dim, output_dim).unwrap();
+    layer.build(&Shape::known(&[1, 1])).unwrap();
     layer
         .set_weights(Array2::from_shape_vec((input_dim, output_dim), table).unwrap())
         .unwrap();
@@ -73,7 +75,8 @@ fn embedding_new_rejects_a_zero_dimension() {
 #[test]
 fn embedding_param_count_is_the_table_size() {
     for (input_dim, output_dim) in [(1usize, 1usize), (10, 5), (128, 64)] {
-        let layer = Embedding::new(input_dim, output_dim).unwrap();
+        let mut layer = Embedding::new(input_dim, output_dim).unwrap();
+        layer.build(&Shape::known(&[1])).unwrap();
         assert_eq!(
             layer.param_count(),
             ParamCounts::trainable(input_dim * output_dim)
@@ -407,6 +410,7 @@ fn embedding_backward_checks_the_gradient_shape() {
 #[test]
 fn embedding_set_weights_checks_the_table_shape() {
     let mut layer = Embedding::new(4, 3).unwrap();
+    layer.build(&Shape::known(&[1, 1])).unwrap();
     let wrong = Array2::zeros((3, 4));
     assert!(matches!(
         layer.set_weights(wrong),
@@ -462,9 +466,12 @@ fn embedding_exposes_no_parameter_before_the_backward_pass() {
 /// A seed makes the starting table reproducible, and the table stays inside the uniform range
 #[test]
 fn embedding_with_random_state_is_reproducible_and_bounded() {
-    let first = Embedding::new(64, 8).unwrap().with_random_state(7);
-    let second = Embedding::new(64, 8).unwrap().with_random_state(7);
-    let third = Embedding::new(64, 8).unwrap().with_random_state(8);
+    let mut first = Embedding::new(64, 8).unwrap().with_random_state(7);
+    first.build(&Shape::known(&[1])).unwrap();
+    let mut second = Embedding::new(64, 8).unwrap().with_random_state(7);
+    second.build(&Shape::known(&[1])).unwrap();
+    let mut third = Embedding::new(64, 8).unwrap().with_random_state(8);
+    third.build(&Shape::known(&[1])).unwrap();
 
     let a = named(&first, "embeddings");
     let b = named(&second, "embeddings");
@@ -491,15 +498,16 @@ fn embedding_trains_inside_a_sequential_model() {
     );
     let y = t2(4, 1, vec![1.0, -1.0, 0.5, -0.5]);
 
-    let mut model = Sequential::new();
-    model
+    let mut model = SequentialBuilder::new()
         .add(Embedding::new(6, 4).unwrap().with_random_state(11))
-        .add(Flatten::new(vec![4, 3, 4]).unwrap())
-        .add(Dense::new(12, 1, Linear::new()).unwrap())
-        .compile(
-            SGD::new(0.05, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+        .add(Flatten::new())
+        .add(Dense::new(1, Linear::new()).unwrap())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.05, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let history = model.fit(&x, &y, 40).unwrap();
     let losses = history.loss();
@@ -517,15 +525,16 @@ fn embedding_training_leaves_an_unselected_row_untouched() {
     let x = t2(2, 2, vec![0.0, 1.0, 1.0, 0.0]);
     let y = t2(2, 1, vec![1.0, -1.0]);
 
-    let mut model = Sequential::new();
-    model
+    let mut model = SequentialBuilder::new()
         .add(Embedding::new(4, 2).unwrap().with_random_state(3))
-        .add(Flatten::new(vec![2, 2, 2]).unwrap())
-        .add(Dense::new(4, 1, Linear::new()).unwrap())
-        .compile(
-            SGD::new(0.1, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+        .add(Flatten::new())
+        .add(Dense::new(1, Linear::new()).unwrap())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.1, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let before = model
         .weight("0.embeddings")

@@ -5,13 +5,16 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, IxDyn};
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::Activation;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::regularization::dropout::dropout::Dropout;
+use rustyml::neural_network::layers::{Flatten, MaxPooling2D};
 use rustyml::neural_network::losses::{CategoricalCrossEntropy, MeanSquaredError};
 use rustyml::neural_network::optimizers::{Adam, SGD};
-use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
+use rustyml::neural_network::traits::Layer;
 use rustyml::neural_network::traits::Loss;
 use rustyml::{error::Error, neural_network::NnError};
 
@@ -29,13 +32,16 @@ fn t2(rows: usize, cols: usize, data: Vec<f32>) -> Tensor {
 /// Dense(2->2, Linear) with identity weights and zero bias returns the input unchanged
 #[test]
 fn test_predict_identity_weights_linear_dense() {
-    let mut dense = Dense::new(2, 2, Activation::Linear).unwrap();
+    let mut dense = Dense::new(2, Activation::Linear).unwrap();
+    dense.build(&Shape::known(&[1, 2])).unwrap();
     let w = Array2::from_shape_vec((2, 2), vec![1.0_f32, 0.0, 0.0, 1.0]).unwrap();
     let b = Array2::from_shape_vec((1, 2), vec![0.0_f32, 0.0]).unwrap();
     dense.set_weights(w, b).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(dense);
+    let model = SequentialBuilder::new()
+        .add(dense)
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
 
     let x = t2(1, 2, vec![3.0, 4.0]);
     let out = model.predict(&x).unwrap();
@@ -47,13 +53,16 @@ fn test_predict_identity_weights_linear_dense() {
 /// Dense(1->1, Linear) applies the scalar affine map 2*x + 1
 #[test]
 fn test_predict_scalar_affine() {
-    let mut dense = Dense::new(1, 1, Activation::Linear).unwrap();
+    let mut dense = Dense::new(1, Activation::Linear).unwrap();
+    dense.build(&Shape::known(&[1, 1])).unwrap();
     let w = Array2::from_shape_vec((1, 1), vec![2.0_f32]).unwrap();
     let b = Array2::from_shape_vec((1, 1), vec![1.0_f32]).unwrap();
     dense.set_weights(w, b).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(dense);
+    let model = SequentialBuilder::new()
+        .add(dense)
+        .build(&Shape::known(&[1, 1]))
+        .unwrap();
 
     let x = t2(1, 1, vec![5.0]);
     let out = model.predict(&x).unwrap();
@@ -64,7 +73,8 @@ fn test_predict_scalar_affine() {
 /// Dense(3->2, Linear) applies a known linear transform to 1 input row
 #[test]
 fn test_predict_2d_linear_transform() {
-    let mut dense = Dense::new(3, 2, Activation::Linear).unwrap();
+    let mut dense = Dense::new(2, Activation::Linear).unwrap();
+    dense.build(&Shape::known(&[1, 3])).unwrap();
     // weights shape (in=3, out=2)
     let w = Array2::from_shape_vec(
         (3, 2),
@@ -78,8 +88,10 @@ fn test_predict_2d_linear_transform() {
     let b = Array2::from_shape_vec((1, 2), vec![0.0_f32, 0.0]).unwrap();
     dense.set_weights(w, b).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(dense);
+    let model = SequentialBuilder::new()
+        .add(dense)
+        .build(&Shape::known(&[1, 3]))
+        .unwrap();
 
     let x = t2(1, 3, vec![2.0, 3.0, 4.0]);
     let out = model.predict(&x).unwrap();
@@ -92,18 +104,23 @@ fn test_predict_2d_linear_transform() {
 /// 2 stacked Linear Dense layers chain correctly: first projects, second sums both inputs
 #[test]
 fn test_predict_two_layer_stack() {
-    let mut d1 = Dense::new(3, 2, Activation::Linear).unwrap();
+    let mut d1 = Dense::new(2, Activation::Linear).unwrap();
+    d1.build(&Shape::known(&[1, 3])).unwrap();
     let w1 = Array2::from_shape_vec((3, 2), vec![1.0_f32, 0.0, 0.0, 1.0, 0.0, 0.0]).unwrap();
     let b1 = Array2::from_shape_vec((1, 2), vec![0.0_f32, 0.0]).unwrap();
     d1.set_weights(w1, b1).unwrap();
 
-    let mut d2 = Dense::new(2, 1, Activation::Linear).unwrap();
+    let mut d2 = Dense::new(1, Activation::Linear).unwrap();
+    d2.build(&Shape::known(&[1, 2])).unwrap();
     let w2 = Array2::from_shape_vec((2, 1), vec![1.0_f32, 1.0]).unwrap();
     let b2 = Array2::from_shape_vec((1, 1), vec![0.0_f32]).unwrap();
     d2.set_weights(w2, b2).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(d1).add(d2);
+    let model = SequentialBuilder::new()
+        .add(d1)
+        .add(d2)
+        .build(&Shape::known(&[1, 3]))
+        .unwrap();
 
     let x = t2(1, 3, vec![5.0, 7.0, 99.0]);
     let out = model.predict(&x).unwrap();
@@ -115,13 +132,16 @@ fn test_predict_two_layer_stack() {
 /// Dense(1->3, Softmax) on a zero pre-activation yields the uniform distribution [1/3, 1/3, 1/3]
 #[test]
 fn test_predict_dense_softmax_equal_input() {
-    let mut dense = Dense::new(1, 3, Activation::Softmax { axis: -1 }).unwrap();
+    let mut dense = Dense::new(3, Activation::Softmax { axis: -1 }).unwrap();
+    dense.build(&Shape::known(&[1, 1])).unwrap();
     let w = Array2::from_shape_vec((1, 3), vec![1.0_f32, 2.0, 3.0]).unwrap();
     let b = Array2::from_shape_vec((1, 3), vec![0.0_f32, 0.0, 0.0]).unwrap();
     dense.set_weights(w, b).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(dense);
+    let model = SequentialBuilder::new()
+        .add(dense)
+        .build(&Shape::known(&[1, 1]))
+        .unwrap();
 
     // input 0 -> z = [0, 0, 0] -> softmax -> [1/3, 1/3, 1/3]
     let x = t2(1, 1, vec![0.0]);
@@ -140,13 +160,16 @@ fn test_predict_dense_softmax_equal_input() {
 /// Dense(1->3, Softmax) with all-zero weights ignores the input and stays uniform
 #[test]
 fn test_predict_dense_softmax_known_probs() {
-    let mut dense = Dense::new(1, 3, Activation::Softmax { axis: -1 }).unwrap();
+    let mut dense = Dense::new(3, Activation::Softmax { axis: -1 }).unwrap();
+    dense.build(&Shape::known(&[1, 1])).unwrap();
     let w: Array2<f32> = Array2::zeros((1, 3));
     let b: Array2<f32> = Array2::zeros((1, 3));
     dense.set_weights(w, b).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(dense);
+    let model = SequentialBuilder::new()
+        .add(dense)
+        .build(&Shape::known(&[1, 1]))
+        .unwrap();
 
     let x = t2(1, 1, vec![99.0]);
     let out = model.predict(&x).unwrap();
@@ -162,13 +185,16 @@ fn test_predict_dense_softmax_known_probs() {
 /// 2 back-to-back predict() calls on the same input produce identical tensors
 #[test]
 fn test_predict_is_deterministic() {
-    let mut dense = Dense::new(3, 2, Activation::Linear).unwrap();
+    let mut dense = Dense::new(2, Activation::Linear).unwrap();
+    dense.build(&Shape::known(&[1, 3])).unwrap();
     let w = Array2::from_shape_vec((3, 2), vec![0.1_f32, 0.2, 0.3, 0.4, 0.5, 0.6]).unwrap();
     let b = Array2::from_shape_vec((1, 2), vec![0.01_f32, -0.02]).unwrap();
     dense.set_weights(w, b).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(dense);
+    let model = SequentialBuilder::new()
+        .add(dense)
+        .build(&Shape::known(&[1, 3]))
+        .unwrap();
 
     let x = t2(1, 3, vec![1.0, -1.0, 2.0]);
     let out1 = model.predict(&x).unwrap();
@@ -181,10 +207,11 @@ fn test_predict_is_deterministic() {
 /// summary() runs without panicking
 #[test]
 fn test_summary_does_not_panic() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(4, 8, Activation::ReLU).unwrap())
-        .add(Dense::new(8, 2, Activation::Softmax { axis: -1 }).unwrap());
+    let model = SequentialBuilder::new()
+        .add(Dense::new(8, Activation::ReLU).unwrap())
+        .add(Dense::new(2, Activation::Softmax { axis: -1 }).unwrap())
+        .build(&Shape::known(&[2, 4]))
+        .unwrap();
     model.summary();
 }
 
@@ -193,8 +220,10 @@ fn test_summary_does_not_panic() {
 /// fit() before compile() returns NotCompiled
 #[test]
 fn test_fit_before_compile_returns_not_compiled() {
-    let mut model = Sequential::new();
-    model.add(Dense::new(2, 1, Activation::Linear).unwrap());
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[1, 2]))
+        .unwrap();
     let x = t2(2, 2, vec![1.0, 0.0, 0.0, 1.0]);
     let y = t2(2, 1, vec![1.0, 0.0]);
     assert!(
@@ -206,31 +235,28 @@ fn test_fit_before_compile_returns_not_compiled() {
     );
 }
 
-/// fit() on a model with no layers returns EmptyModel
+/// A model that holds no layer cannot be built, so `fit` never sees one
 #[test]
-fn test_fit_empty_model_returns_empty_model_error() {
-    let mut model = Sequential::new();
-    model.compile(
-        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-        MeanSquaredError::new(),
-    );
-    let x = t2(2, 2, vec![1.0, 0.0, 0.0, 1.0]);
-    let y = t2(2, 1, vec![1.0, 0.0]);
+fn a_builder_that_holds_no_layer_is_refused() {
+    let refused = SequentialBuilder::new().build(&Shape::known(&[2, 2]));
+    let error = match refused {
+        Ok(_) => panic!("a builder that holds no layer must not build"),
+        Err(error) => error,
+    };
     assert!(
-        matches!(
-            model.fit(&x, &y, 1),
-            Err(Error::NeuralNetwork(NnError::EmptyModel))
-        ),
-        "expected EmptyModel"
+        matches!(error, Error::NeuralNetwork(NnError::EmptyModel)),
+        "expected EmptyModel, got: {error:?}"
     );
 }
 
-/// predict() on a model with no layers returns EmptyModel
+/// The same refusal is the only way a caller reaches `EmptyModel` now
 #[test]
-fn test_predict_empty_model_returns_empty_model_error() {
-    let model = Sequential::new();
-    let x = t2(1, 2, vec![1.0, 2.0]);
-    let err = model.predict(&x).unwrap_err();
+fn a_builder_that_holds_no_layer_is_refused_for_every_shape() {
+    let refused = SequentialBuilder::new().build(&Shape::known(&[1, 2, 3, 4]));
+    let err = match refused {
+        Ok(_) => panic!("a builder that holds no layer must not build"),
+        Err(error) => error,
+    };
     assert!(
         matches!(err, Error::NeuralNetwork(NnError::EmptyModel)),
         "expected EmptyModel, got: {err:?}"
@@ -240,13 +266,14 @@ fn test_predict_empty_model_returns_empty_model_error() {
 /// fit() with an empty input tensor returns EmptyInput
 #[test]
 fn test_fit_empty_x_returns_empty_input_error() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(2, 1, Activation::Linear).unwrap())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[0, 2]))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let x: Tensor = Array::zeros((0, 2)).into_dyn();
     let y: Tensor = Array::zeros((0, 1)).into_dyn();
@@ -259,13 +286,14 @@ fn test_fit_empty_x_returns_empty_input_error() {
 /// fit() with mismatched x/y batch sizes returns DimensionMismatch
 #[test]
 fn test_fit_batch_size_mismatch_returns_dimension_mismatch() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(2, 1, Activation::Linear).unwrap())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[3, 2]))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let x = t2(3, 2, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     let y = t2(2, 1, vec![1.0, 2.0]); // batch 2 != 3
@@ -278,8 +306,10 @@ fn test_fit_batch_size_mismatch_returns_dimension_mismatch() {
 /// predict() with an empty input tensor returns EmptyInput
 #[test]
 fn test_predict_empty_x_returns_empty_input_error() {
-    let mut model = Sequential::new();
-    model.add(Dense::new(2, 1, Activation::Linear).unwrap());
+    let model = SequentialBuilder::new()
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[0, 2]))
+        .unwrap();
 
     let x: Tensor = Array::zeros((0, 2)).into_dyn();
     let err = model.predict(&x).unwrap_err();
@@ -292,13 +322,14 @@ fn test_predict_empty_x_returns_empty_input_error() {
 /// fit_with_batches with batch_size=0 returns InvalidParameter
 #[test]
 fn test_fit_with_batches_zero_batch_size_returns_invalid_parameter() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(2, 1, Activation::Linear).unwrap())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[4, 2]))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let x = t2(4, 2, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
     let y = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
@@ -315,13 +346,14 @@ fn test_fit_with_batches_zero_batch_size_returns_invalid_parameter() {
 /// fit_with_batches with batch_size > n_samples returns InvalidParameter
 #[test]
 fn test_fit_with_batches_batch_size_exceeds_samples_returns_invalid_parameter() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(2, 1, Activation::Linear).unwrap())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[3, 2]))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let x = t2(3, 2, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     let y = t2(3, 1, vec![1.0, 2.0, 3.0]);
@@ -341,13 +373,17 @@ fn test_fit_with_batches_batch_size_exceeds_samples_returns_invalid_parameter() 
 /// Training for 0 epochs leaves the weights identical to before the call
 #[test]
 fn test_fit_zero_epochs_unchanged_weights() {
-    let mut dense = Dense::new(1, 1, Activation::Linear).unwrap();
+    let mut dense = Dense::new(1, Activation::Linear).unwrap();
+    dense.build(&Shape::known(&[1, 1])).unwrap();
     let w = Array2::from_shape_vec((1, 1), vec![3.0_f32]).unwrap();
     let b = Array2::from_shape_vec((1, 1), vec![0.0_f32]).unwrap();
     dense.set_weights(w, b).unwrap();
 
-    let mut model = Sequential::new();
-    model.add(dense).compile(
+    let mut model = SequentialBuilder::new()
+        .add(dense)
+        .build(&Shape::known(&[1, 1]))
+        .unwrap();
+    model.compile(
         SGD::new(0.01, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
@@ -371,17 +407,18 @@ fn test_convergence_linear_regression_y_eq_2x_plus_1() {
     let x = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
     let y = t2(4, 1, vec![3.0, 5.0, 7.0, 9.0]);
 
-    let mut model = Sequential::new();
-    model
+    let mut model = SequentialBuilder::new()
         .add(
-            Dense::new(1, 1, Activation::Linear)
+            Dense::new(1, Activation::Linear)
                 .unwrap()
                 .with_random_state(0),
         )
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     model.fit(&x, &y, 300).unwrap();
 
@@ -398,17 +435,18 @@ fn test_convergence_linear_regression_with_batches() {
     let x = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
     let y = t2(4, 1, vec![3.0, 5.0, 7.0, 9.0]);
 
-    let mut model = Sequential::new_with_seed(0);
-    model
+    let mut model = SequentialBuilder::new_with_seed(0)
         .add(
-            Dense::new(1, 1, Activation::Linear)
+            Dense::new(1, Activation::Linear)
                 .unwrap()
                 .with_random_state(0),
         )
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     model.fit_with_batches(&x, &y, 500, 2).unwrap();
 
@@ -449,24 +487,25 @@ fn test_convergence_2class_softmax_adam() {
         0.0, 1.0,
     ]);
 
-    let mut model = Sequential::new();
     // Seeds the weight init to avoid a pathological draw. Otherwise the Tanh hidden layer could
     // saturate and push the test below the 0.7 probability threshold within the epoch budget.
-    model
+    let mut model = SequentialBuilder::new()
         .add(
-            Dense::new(2, 8, Activation::Tanh)
+            Dense::new(8, Activation::Tanh)
                 .unwrap()
                 .with_random_state(0),
         )
         .add(
-            Dense::new(8, 2, Activation::Softmax { axis: -1 })
+            Dense::new(2, Activation::Softmax { axis: -1 })
                 .unwrap()
                 .with_random_state(0),
         )
-        .compile(
-            Adam::new(0.01, 0.9, 0.999, 1e-8, 0.0).unwrap(),
-            CategoricalCrossEntropy::new(false),
-        );
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        Adam::new(0.01, 0.9, 0.999, 1e-8, 0.0).unwrap(),
+        CategoricalCrossEntropy::new(false),
+    );
 
     model.fit(&x, &y, 600).unwrap();
 
@@ -497,13 +536,14 @@ fn test_predict_deterministic_after_training() {
     let x = t2(2, 2, vec![1.0, 0.0, 0.0, 1.0]);
     let y = t2(2, 2, vec![1.0, 0.0, 0.0, 1.0]);
 
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(2, 2, Activation::Linear).unwrap())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(2, Activation::Linear).unwrap())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     model.fit(&x, &y, 5).unwrap();
 
@@ -518,13 +558,14 @@ fn test_predict_deterministic_after_training() {
 /// fit() records exactly 1 loss per epoch, in epoch order, and training drives them down
 #[test]
 fn test_fit_history_has_one_loss_per_epoch() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(1, 1, Activation::Linear).unwrap())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[4, 1]))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let x = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
     let y = t2(4, 1, vec![3.0, 5.0, 7.0, 9.0]);
@@ -548,13 +589,14 @@ fn test_fit_history_has_one_loss_per_epoch() {
 /// fit() over 0 epochs still validates, and returns a history with no entries
 #[test]
 fn test_fit_zero_epochs_yields_empty_history() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(1, 1, Activation::Linear).unwrap())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[2, 1]))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let x = t2(2, 1, vec![1.0, 2.0]);
     let y = t2(2, 1, vec![1.0, 2.0]);
@@ -566,13 +608,14 @@ fn test_fit_zero_epochs_yields_empty_history() {
 /// model's loss (Keras' convention). The last entry overstates the trained model's loss.
 #[test]
 fn test_fit_history_records_the_pre_update_loss() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(1, 1, Activation::Linear).unwrap())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[4, 1]))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let x = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
     let y = t2(4, 1, vec![3.0, 5.0, 7.0, 9.0]);
@@ -605,19 +648,20 @@ fn test_fit_with_batches_weights_batches_by_sample_count() {
     let y = t2(5, 1, vec![0.0, 1.0, 4.0, 9.0, 100.0]);
 
     for seed in 0..5_u64 {
-        let mut model = Sequential::new_with_seed(seed);
-        model
+        let mut model = SequentialBuilder::new_with_seed(seed)
             .add(
-                Dense::new(1, 1, Activation::Linear)
+                Dense::new(1, Activation::Linear)
                     .unwrap()
                     .with_random_state(7),
             )
-            // A step this small is below the f32 resolution of the weights it would move, so
-            // the model is frozen. The per-sample losses stay fixed across the epoch
-            .compile(
-                SGD::new(1e-30, 0.0, false, 0.0).unwrap(),
-                MeanSquaredError::new(),
-            );
+            .build(&Shape::known(x.shape()))
+            .unwrap();
+        // A step this small is below the f32 resolution of the weights it would move, so
+        // the model is frozen. The per-sample losses stay fixed across the epoch
+        model.compile(
+            SGD::new(1e-30, 0.0, false, 0.0).unwrap(),
+            MeanSquaredError::new(),
+        );
 
         let predictions = model.predict(&x).unwrap();
         let per_sample: Vec<f32> = predictions
@@ -661,13 +705,14 @@ fn test_fit_with_batches_full_batch_equivalent() {
     let x = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
     let y = t2(4, 1, vec![3.0, 5.0, 7.0, 9.0]);
 
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(1, 1, Activation::Linear).unwrap())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     // batch_size == n_samples: 1 batch per epoch
     model.fit_with_batches(&x, &y, 400, 4).unwrap();
@@ -688,17 +733,18 @@ fn test_train_batch_reproduces_fit() {
     let y = t2(4, 1, vec![3.0, 5.0, 7.0, 9.0]);
 
     let build = || {
-        let mut model = Sequential::new();
-        model
+        let mut model = SequentialBuilder::new()
             .add(
-                Dense::new(1, 1, Activation::Linear)
+                Dense::new(1, Activation::Linear)
                     .unwrap()
                     .with_random_state(11),
             )
-            .compile(
-                SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-                MeanSquaredError::new(),
-            );
+            .build(&Shape::known(x.shape()))
+            .unwrap();
+        model.compile(
+            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+            MeanSquaredError::new(),
+        );
         model
     };
 
@@ -722,13 +768,14 @@ fn test_train_batch_reproduces_fit() {
 /// equals the loss of the model as it stood on entry
 #[test]
 fn test_train_batch_returns_the_pre_update_loss() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(1, 1, Activation::Linear).unwrap())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[4, 1]))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let x = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
     let y = t2(4, 1, vec![3.0, 5.0, 7.0, 9.0]);
@@ -748,8 +795,10 @@ fn test_train_batch_returns_the_pre_update_loss() {
 /// it: an uncompiled model is an error, not a panic
 #[test]
 fn test_train_batch_on_uncompiled_model_is_an_error() {
-    let mut model = Sequential::new();
-    model.add(Dense::new(1, 1, Activation::Linear).unwrap());
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[2, 1]))
+        .unwrap();
 
     let x = t2(2, 1, vec![1.0, 2.0]);
     let y = t2(2, 1, vec![1.0, 2.0]);
@@ -768,14 +817,15 @@ fn test_train_batch_on_uncompiled_model_is_an_error() {
 /// `evaluate` is `predict` scored with the compiled loss, and leaves the model untouched
 #[test]
 fn test_evaluate_matches_predict_then_compute_loss() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(2, 3, Activation::ReLU).unwrap())
-        .add(Dense::new(3, 1, Activation::Linear).unwrap())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(3, Activation::ReLU).unwrap())
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[3, 2]))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let x = t2(3, 2, vec![1.0, -0.5, 0.25, 2.0, -1.0, 0.5]);
     let y = t2(3, 1, vec![1.0, -2.0, 0.5]);
@@ -793,17 +843,18 @@ fn test_evaluate_matches_predict_then_compute_loss() {
 /// The training path samples a fresh mask each call on the same frozen model, so it does not.
 #[test]
 fn test_evaluate_runs_in_inference_mode() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(4, 32, Activation::Linear).unwrap())
-        .add(Dropout::new(0.5, vec![16, 32]).unwrap())
-        .add(Dense::new(32, 1, Activation::Linear).unwrap())
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(32, Activation::Linear).unwrap())
+        .add(Dropout::new(0.5).unwrap())
+        .add(Dense::new(1, Activation::Linear).unwrap())
         // Frozen: with a step this far below the weights' f32 resolution, every difference
         // observed below comes from the dropout mask alone
-        .compile(
-            SGD::new(1e-30, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+        .build(&Shape::known(&[16, 4]))
+        .unwrap();
+    model.compile(
+        SGD::new(1e-30, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let x = Array::linspace(-1.0, 1.0, 64)
         .into_shape_with_order((16, 4))
@@ -836,8 +887,10 @@ fn test_evaluate_runs_in_inference_mode() {
 /// missing for the call it made
 #[test]
 fn test_evaluate_on_uncompiled_model_reports_the_missing_loss() {
-    let mut model = Sequential::new();
-    model.add(Dense::new(1, 1, Activation::Linear).unwrap());
+    let model = SequentialBuilder::new()
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[2, 1]))
+        .unwrap();
 
     let x = t2(2, 1, vec![1.0, 2.0]);
     let y = t2(2, 1, vec![1.0, 2.0]);
@@ -855,13 +908,14 @@ fn test_evaluate_on_uncompiled_model_reports_the_missing_loss() {
 /// The training and scoring paths reject it rather than panic on the missing axis.
 #[test]
 fn test_rank_zero_inputs_are_rejected() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(1, 1, Activation::Linear).unwrap())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[1, 1]))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let scalar: Tensor = Array::from_elem(IxDyn(&[]), 1.0_f32);
     let y = t2(1, 1, vec![1.0]);
@@ -882,15 +936,16 @@ fn test_rank_zero_inputs_are_rejected() {
 /// it. An uncompiled model has no rate to report.
 #[test]
 fn test_learning_rate_reads_back_through_the_model() {
-    let mut model = Sequential::new();
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[2, 1]))
+        .unwrap();
     assert_eq!(model.learning_rate(), None);
 
-    model
-        .add(Dense::new(1, 1, Activation::Linear).unwrap())
-        .compile(
-            Adam::new(0.003, 0.9, 0.999, 1e-8, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+    model.compile(
+        Adam::new(0.003, 0.9, 0.999, 1e-8, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     assert_eq!(model.learning_rate(), Some(0.003));
 
@@ -904,7 +959,8 @@ fn test_learning_rate_reads_back_through_the_model() {
 /// `mse`, on `y = 2x` for `x = 0..4`, batched by 2. Every literal below matches Keras' output.
 #[test]
 fn test_batch_losses_and_epoch_mean_match_keras() {
-    let mut dense = Dense::new(1, 1, Activation::Linear).unwrap();
+    let mut dense = Dense::new(1, Activation::Linear).unwrap();
+    dense.build(&Shape::known(&[1, 1])).unwrap();
     dense
         .set_weights(
             Array2::from_shape_vec((1, 1), vec![0.5_f32]).unwrap(),
@@ -912,8 +968,11 @@ fn test_batch_losses_and_epoch_mean_match_keras() {
         )
         .unwrap();
 
-    let mut model = Sequential::new();
-    model.add(dense).compile(
+    let mut model = SequentialBuilder::new()
+        .add(dense)
+        .build(&Shape::known(&[5, 1]))
+        .unwrap();
+    model.compile(
         SGD::new(0.1, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
@@ -961,4 +1020,79 @@ fn test_batch_losses_and_epoch_mean_match_keras() {
     // epoch figure because this learning rate overshoots. That is why the recorded loss cannot
     // be read as the trained model's loss.
     assert_abs_diff_eq!(model.evaluate(&x, &y).unwrap(), 9.242_0_f32, epsilon = 1e-4);
+}
+
+// The build step
+
+/// A stack whose shapes do not agree is refused, and the refusal names the position of the
+/// layer and its type
+///
+/// A shape error used to reach a caller in the middle of a forward pass, deep inside a model,
+/// with no layer named. The build walks the stack once, threads the output shape of each layer
+/// into the next, and stops at the first layer that cannot take what reaches it
+#[test]
+fn the_build_refuses_a_stack_whose_shapes_do_not_agree_and_names_the_layer() {
+    // Layer 0 gives a rank-2 output, and layer 1 needs rank 4
+    let refused = SequentialBuilder::new()
+        .add(Dense::new(8, Activation::ReLU).unwrap())
+        .add(MaxPooling2D::new((2, 2)))
+        .add(Dense::new(1, Activation::Linear).unwrap())
+        .build(&Shape::known(&[4, 3]));
+
+    let message = match refused {
+        Ok(_) => panic!("the stack does not agree, so the build must refuse it"),
+        Err(error) => error.to_string(),
+    };
+    assert!(message.contains("layer 1"), "{message}");
+    assert!(message.contains("MaxPooling2D"), "{message}");
+}
+
+/// The refusal names the position, and not the type alone, so 2 layers of 1 type are told apart
+#[test]
+fn the_build_names_the_position_of_the_layer_that_refuses() {
+    let refused = SequentialBuilder::new()
+        .add(Dense::new(8, Activation::ReLU).unwrap())
+        .add(Dense::new(4, Activation::ReLU).unwrap())
+        .add(Flatten::new())
+        .build(&Shape::known(&[4, 3]));
+
+    let message = match refused {
+        Ok(_) => panic!("a rank-2 tensor does not reach a Flatten layer"),
+        Err(error) => error.to_string(),
+    };
+    assert!(message.contains("layer 2"), "{message}");
+    assert!(message.contains("Flatten"), "{message}");
+}
+
+/// Every layer holds its arrays after the build, and none of them before it
+#[test]
+fn the_build_is_what_allocates_every_array_of_the_model() {
+    let bare = Dense::new(4, Activation::Linear).unwrap();
+    assert_eq!(bare.param_count().total(), 0);
+
+    let model = SequentialBuilder::new()
+        .add(Dense::new(4, Activation::Linear).unwrap())
+        .add(Dense::new(2, Activation::Linear).unwrap())
+        .build(&Shape::known(&[5, 3]))
+        .unwrap();
+    assert_eq!(
+        model.weight_paths(),
+        vec!["0.kernel", "0.bias", "1.kernel", "1.bias"]
+    );
+    // 3 * 4 + 4 for layer 0, and 4 * 2 + 2 for layer 1
+    assert_eq!(model.weight("0.kernel").unwrap().shape(), &[3, 4]);
+    assert_eq!(model.weight("1.kernel").unwrap().shape(), &[4, 2]);
+}
+
+/// The model reports the shape it was built for, and the shape it gives back
+#[test]
+fn the_model_reports_both_ends_of_the_shape_it_was_built_for() {
+    let model = SequentialBuilder::new()
+        .add(Dense::new(8, Activation::ReLU).unwrap())
+        .add(Dense::new(2, Activation::Linear).unwrap())
+        .build(&Shape::known(&[4, 3]))
+        .unwrap();
+
+    assert_eq!(model.input_shape().to_string(), "(4, 3)");
+    assert_eq!(model.output_shape().unwrap().to_string(), "(4, 2)");
 }

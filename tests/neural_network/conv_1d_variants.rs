@@ -9,6 +9,7 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array3};
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
@@ -56,8 +57,13 @@ fn depthwise_conv1d_new_rejects_invalid_args() {
         ("zero channels", 2, vec![1, 5, 0], 1, Want::Input),
     ];
     for (label, kernel_size, input_shape, stride, want) in cases {
-        let err =
-            DepthwiseConv1D::new(kernel_size, input_shape, stride, Linear::new()).unwrap_err();
+        let err = match want {
+            Want::Param => DepthwiseConv1D::new(kernel_size, stride, Linear::new()).unwrap_err(),
+            Want::Input => {
+                let mut layer = DepthwiseConv1D::new(kernel_size, stride, Linear::new()).unwrap();
+                layer.build(&Shape::known(&input_shape)).unwrap_err()
+            }
+        };
         match want {
             Want::Param => assert!(
                 matches!(err, Error::InvalidParameter { .. }),
@@ -74,7 +80,7 @@ fn depthwise_conv1d_new_rejects_invalid_args() {
 /// `with_depth_multiplier(0)` returns InvalidParameter
 #[test]
 fn depthwise_conv1d_with_depth_multiplier_rejects_zero() {
-    let err = DepthwiseConv1D::new(2, vec![1, 5, 2], 1, Linear::new())
+    let err = DepthwiseConv1D::new(2, 1, Linear::new())
         .unwrap()
         .with_depth_multiplier(0)
         .unwrap_err();
@@ -84,23 +90,27 @@ fn depthwise_conv1d_with_depth_multiplier_rejects_zero() {
     );
 }
 
-/// A runtime input whose channel count differs from the declared one returns DimensionMismatch,
+/// A runtime input whose channel count differs from the built shape returns InvalidInput,
 /// instead of a panic.
+///
+/// The build step fixes the channel count, so a later mismatch is a build-shape disagreement
+/// (`validate_built_input`) rather than the layer's own runtime check.
 #[test]
 fn depthwise_conv1d_forward_rejects_wrong_channels() {
-    let mut conv = DepthwiseConv1D::new(2, vec![1, 5, 2], 1, Linear::new()).unwrap();
+    let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
+    conv.build(&Shape::known(&[1, 5, 2])).unwrap();
     let x = Array::ones((1_usize, 5, 3)).into_dyn();
     let err = conv.forward(&x).unwrap_err();
     assert!(
-        matches!(err, Error::DimensionMismatch { .. }),
-        "expected DimensionMismatch, got {err:?}"
+        matches!(err, Error::InvalidInput(_)),
+        "expected InvalidInput, got {err:?}"
     );
 }
 
 /// A 4D input reaching a 1D layer returns InvalidInput rather than reading the wrong axes.
 #[test]
 fn depthwise_conv1d_forward_rejects_non_3d_input() {
-    let mut conv = DepthwiseConv1D::new(2, vec![1, 5, 2], 1, Linear::new()).unwrap();
+    let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
     let x = Array::ones((1_usize, 5, 2, 1)).into_dyn();
     let err = conv.forward(&x).unwrap_err();
     assert!(
@@ -117,7 +127,8 @@ fn depthwise_conv1d_forward_rejects_non_3d_input() {
 /// input channels into every filter, so perturbing channel 0 would move all 3 outputs.
 #[test]
 fn depthwise_conv1d_cross_channel_no_bleed() {
-    let mut conv = DepthwiseConv1D::new(3, vec![1, 6, 3], 1, Linear::new()).unwrap();
+    let mut conv = DepthwiseConv1D::new(3, 1, Linear::new()).unwrap();
+    conv.build(&Shape::known(&[1, 6, 3])).unwrap();
     // Distinct, non-zero weights everywhere, so a leak between channels cannot cancel
     let w = Array3::from_shape_vec((3, 3, 1), ramp(9)).unwrap();
     conv.set_weights(w, Array1::from_vec(vec![0.25, -0.5, 0.75]))
@@ -153,21 +164,17 @@ fn depthwise_conv1d_matches_a_block_diagonal_conv1d() {
     let (length, channels, kernel) = (7usize, 3usize, 3usize);
     let taps = ramp(kernel * channels);
 
-    let mut depthwise =
-        DepthwiseConv1D::new(kernel, vec![2, length, channels], 2, Linear::new()).unwrap();
+    let mut depthwise = DepthwiseConv1D::new(kernel, 2, Linear::new()).unwrap();
+    depthwise
+        .build(&Shape::known(&[2, length, channels]))
+        .unwrap();
     let dw = Array3::from_shape_vec((kernel, channels, 1), taps.clone()).unwrap();
     let bias = Array1::from_vec(vec![0.5, -0.25, 1.0]);
     depthwise.set_weights(dw, bias.clone()).unwrap();
 
     // Conv1D kernel is [k, Cin, F]. Filter `f` reads only input channel `f`
-    let mut plain = Conv1D::new(
-        channels,
-        kernel,
-        vec![2, length, channels],
-        2,
-        Linear::new(),
-    )
-    .unwrap();
+    let mut plain = Conv1D::new(channels, kernel, 2, Linear::new()).unwrap();
+    plain.build(&Shape::known(&[2, length, channels])).unwrap();
     let mut pw = Array3::<f32>::zeros((kernel, channels, channels));
     for t in 0..kernel {
         for c in 0..channels {
@@ -199,9 +206,10 @@ fn depthwise_conv1d_output_length_rule() {
         ("same s3", 10, 4, 3, PaddingType::Same, 4),
     ];
     for (label, length, kernel, stride, padding, want) in cases {
-        let conv = DepthwiseConv1D::new(kernel, vec![2, length, 3], stride, Linear::new())
+        let mut conv = DepthwiseConv1D::new(kernel, stride, Linear::new())
             .unwrap()
             .with_padding(padding);
+        conv.build(&Shape::known(&[2, length, 3])).unwrap();
         let x = Array::ones((2_usize, length, 3)).into_dyn();
         let out = conv.predict(&x).unwrap();
         assert_eq!(out.shape(), &[2, want, 3], "[{label}] output shape");
@@ -216,9 +224,10 @@ fn depthwise_conv1d_output_length_rule() {
 /// give a different, and detectably wrong, output.
 #[test]
 fn depthwise_conv1d_same_padding_splits_with_the_extra_cell_at_the_end() {
-    let mut conv = DepthwiseConv1D::new(4, vec![1, 4, 1], 1, Linear::new())
+    let mut conv = DepthwiseConv1D::new(4, 1, Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
+    conv.build(&Shape::known(&[1, 4, 1])).unwrap();
     conv.set_weights(Array3::ones((4, 1, 1)), Array1::zeros(1))
         .unwrap();
 
@@ -243,10 +252,11 @@ fn depthwise_conv1d_same_padding_splits_with_the_extra_cell_at_the_end() {
 /// input channel count.
 #[test]
 fn depthwise_conv1d_depth_multiplier_widens_every_shape() {
-    let mut conv = DepthwiseConv1D::new(3, vec![2, 10, 4], 1, Linear::new())
+    let mut conv = DepthwiseConv1D::new(3, 1, Linear::new())
         .unwrap()
         .with_depth_multiplier(3)
         .unwrap();
+    conv.build(&Shape::known(&[2, 10, 4])).unwrap();
 
     // Kernel [k, C, dm] = [3, 4, 3] and bias [C*dm] = [12]
     assert_eq!(params_of(&conv), 3 * 4 * 3 + 12);
@@ -262,7 +272,8 @@ fn depthwise_conv1d_depth_multiplier_widens_every_shape() {
 /// `predict` in eval mode returns the same values as `forward`, and writes no caches
 #[test]
 fn depthwise_conv1d_predict_equals_forward() {
-    let mut conv = DepthwiseConv1D::new(3, vec![2, 9, 2], 2, Linear::new()).unwrap();
+    let mut conv = DepthwiseConv1D::new(3, 2, Linear::new()).unwrap();
+    conv.build(&Shape::known(&[2, 9, 2])).unwrap();
     let x = seq([2, 9, 2], ramp(36));
 
     let predicted = conv.predict(&x).unwrap();
@@ -270,7 +281,8 @@ fn depthwise_conv1d_predict_equals_forward() {
     assert_allclose(&predicted, &forwarded, 0.0_f32);
 
     // `predict` left no cache, so a second `predict` cannot enable `backward`
-    let mut fresh = DepthwiseConv1D::new(3, vec![2, 9, 2], 2, Linear::new()).unwrap();
+    let mut fresh = DepthwiseConv1D::new(3, 2, Linear::new()).unwrap();
+    fresh.build(&Shape::known(&[2, 9, 2])).unwrap();
     fresh.predict(&x).unwrap();
     assert!(fresh.backward(&predicted).is_err());
 }
@@ -278,7 +290,7 @@ fn depthwise_conv1d_predict_equals_forward() {
 /// `backward` before `forward` returns an error rather than reading an empty cache
 #[test]
 fn depthwise_conv1d_backward_before_forward_errors() {
-    let mut conv = DepthwiseConv1D::new(2, vec![1, 5, 2], 1, Linear::new()).unwrap();
+    let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
     let grad = Array::ones((1_usize, 4, 2)).into_dyn();
     assert!(conv.backward(&grad).is_err());
 }
@@ -286,7 +298,8 @@ fn depthwise_conv1d_backward_before_forward_errors() {
 /// A rejected input leaves no partial cache behind
 #[test]
 fn depthwise_conv1d_rejected_forward_leaves_no_cache() {
-    let mut conv = DepthwiseConv1D::new(2, vec![1, 5, 2], 1, Linear::new()).unwrap();
+    let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
+    conv.build(&Shape::known(&[1, 5, 2])).unwrap();
     let wrong = Array::ones((1_usize, 5, 3)).into_dyn();
     assert!(conv.forward(&wrong).is_err());
 
@@ -300,7 +313,8 @@ fn depthwise_conv1d_rejected_forward_leaves_no_cache() {
 /// `set_weights` rejects an array whose shape does not match the layer
 #[test]
 fn depthwise_conv1d_set_weights_shape_mismatch_errors() {
-    let mut conv = DepthwiseConv1D::new(2, vec![1, 5, 2], 1, Linear::new()).unwrap();
+    let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
+    conv.build(&Shape::known(&[1, 5, 2])).unwrap();
 
     let err = conv
         .set_weights(Array3::zeros((3, 2, 1)), Array1::zeros(2))
@@ -330,7 +344,7 @@ fn depthwise_conv1d_emits_c_order_tensors_from_a_strided_input() {
     assert!(!strided.is_standard_layout(), "the fixture must be strided");
     assert_eq!(strided.shape(), &[1, 4, 6]);
 
-    let mut conv = DepthwiseConv1D::new(2, vec![1, 4, 6], 1, Linear::new())
+    let mut conv = DepthwiseConv1D::new(2, 1, Linear::new())
         .unwrap()
         .with_random_state(7);
     let out = conv.forward(&strided).unwrap();
@@ -344,7 +358,7 @@ fn depthwise_conv1d_emits_c_order_tensors_from_a_strided_input() {
 
     // The values must not depend on the input layout either
     let repacked = strided.as_standard_layout().into_owned();
-    let mut twin = DepthwiseConv1D::new(2, vec![1, 4, 6], 1, Linear::new())
+    let mut twin = DepthwiseConv1D::new(2, 1, Linear::new())
         .unwrap()
         .with_random_state(7);
     assert_allclose(&twin.forward(&repacked).unwrap(), &out, 0.0_f32);
@@ -374,7 +388,7 @@ fn depthwise_conv1d_parallel_path_matches_the_serial_path() {
         .map(|k| (k % 11) as f32 - 5.0)
         .collect();
 
-    let mut conv = DepthwiseConv1D::new(kernel, vec![samples, length, channels], 1, Linear::new())
+    let mut conv = DepthwiseConv1D::new(kernel, 1, Linear::new())
         .unwrap()
         .with_random_state(11);
 
@@ -435,9 +449,16 @@ fn separable_conv1d_new_rejects_invalid_args() {
         ("non-3D input_shape", 2, 2, vec![1, 5], 1, 1, Want::Input),
     ];
     for (label, filters, kernel_size, input_shape, stride, dm, want) in cases {
-        let err =
-            SeparableConv1D::new(filters, kernel_size, input_shape, stride, dm, Linear::new())
-                .unwrap_err();
+        let err = match want {
+            Want::Param => {
+                SeparableConv1D::new(filters, kernel_size, stride, dm, Linear::new()).unwrap_err()
+            }
+            Want::Input => {
+                let mut layer =
+                    SeparableConv1D::new(filters, kernel_size, stride, dm, Linear::new()).unwrap();
+                layer.build(&Shape::known(&input_shape)).unwrap_err()
+            }
+        };
         match want {
             Want::Param => assert!(
                 matches!(err, Error::InvalidParameter { .. }),
@@ -454,7 +475,7 @@ fn separable_conv1d_new_rejects_invalid_args() {
 /// A 4D input reaching a 1D layer returns InvalidInput rather than reading the wrong axes.
 #[test]
 fn separable_conv1d_forward_rejects_non_3d_input() {
-    let mut conv = SeparableConv1D::new(2, 2, vec![1, 5, 2], 1, 1, Linear::new()).unwrap();
+    let mut conv = SeparableConv1D::new(2, 2, 1, 1, Linear::new()).unwrap();
     let x = Array::ones((1_usize, 5, 2, 1)).into_dyn();
     let err = conv.forward(&x).unwrap_err();
     assert!(
@@ -463,22 +484,26 @@ fn separable_conv1d_forward_rejects_non_3d_input() {
     );
 }
 
-/// A runtime input whose channel count differs from the declared one returns DimensionMismatch,
+/// A runtime input whose channel count differs from the built shape returns InvalidInput,
 /// instead of reading past the end of the depthwise kernel.
+///
+/// The build step fixes the channel count, so a later mismatch is a build-shape disagreement
+/// (`validate_built_input`) rather than the layer's own runtime check.
 #[test]
 fn separable_conv1d_forward_rejects_wrong_channels() {
-    let mut conv = SeparableConv1D::new(2, 2, vec![1, 5, 2], 1, 1, Linear::new()).unwrap();
+    let mut conv = SeparableConv1D::new(2, 2, 1, 1, Linear::new()).unwrap();
+    conv.build(&Shape::known(&[1_usize, 5, 2])).unwrap();
     let x = Array::ones((1_usize, 5, 3)).into_dyn();
     let err = conv.forward(&x).unwrap_err();
     assert!(
-        matches!(err, Error::DimensionMismatch { .. }),
-        "expected DimensionMismatch, got {err:?}"
+        matches!(err, Error::InvalidInput(_)),
+        "expected InvalidInput, got {err:?}"
     );
     // `predict` guards the same way, so neither entry point can reach the kernel
     let err = conv.predict(&x).unwrap_err();
     assert!(
-        matches!(err, Error::DimensionMismatch { .. }),
-        "expected DimensionMismatch from predict, got {err:?}"
+        matches!(err, Error::InvalidInput(_)),
+        "expected InvalidInput from predict, got {err:?}"
     );
 }
 
@@ -491,7 +516,8 @@ fn separable_conv1d_output_shape_and_param_count() {
     // (depth_multiplier, expected parameter count). The depthwise kernel is [k, C, dm], the
     // pointwise kernel is [1, C*dm, F], and the bias is [F]
     for (dm, want_params) in [(1usize, 9 + 3 * 5 + 5), (2, 3 * 3 * 2 + 6 * 5 + 5)] {
-        let mut conv = SeparableConv1D::new(5, 3, vec![2, 10, 3], 1, dm, Linear::new()).unwrap();
+        let mut conv = SeparableConv1D::new(5, 3, 1, dm, Linear::new()).unwrap();
+        conv.build(&Shape::known(&[2, 10, 3])).unwrap();
         assert_eq!(params_of(&conv), want_params, "dm {dm} parameter count");
 
         let out = conv
@@ -507,7 +533,8 @@ fn separable_conv1d_output_shape_and_param_count() {
 /// Identity depthwise and pointwise 1-tap kernels with zero bias reproduce the input exactly
 #[test]
 fn separable_conv1d_identity_reproduces_input() {
-    let mut conv = SeparableConv1D::new(1, 1, vec![1, 5, 1], 1, 1, Linear::new()).unwrap();
+    let mut conv = SeparableConv1D::new(1, 1, 1, 1, Linear::new()).unwrap();
+    conv.build(&Shape::known(&[1, 5, 1])).unwrap();
     conv.set_weights(
         Array3::ones((1, 1, 1)),
         Array3::ones((1, 1, 1)),
@@ -523,7 +550,8 @@ fn separable_conv1d_identity_reproduces_input() {
 /// Depthwise `[1, 0, 1]` then pointwise scale-by-2 plus bias 1 over 1..=5 matches by hand
 #[test]
 fn separable_conv1d_known_weight_forward_values() {
-    let mut conv = SeparableConv1D::new(1, 3, vec![1, 5, 1], 1, 1, Linear::new()).unwrap();
+    let mut conv = SeparableConv1D::new(1, 3, 1, 1, Linear::new()).unwrap();
+    conv.build(&Shape::known(&[1, 5, 1])).unwrap();
 
     // depthwise [k, C, dm]: taps 1, 0, 1 select position i and i+2
     let dw = Array3::from_shape_vec((3, 1, 1), vec![1.0, 0.0, 1.0]).unwrap();
@@ -545,9 +573,10 @@ fn separable_conv1d_known_weight_forward_values() {
 /// `Same` padding zero-pads the depthwise stage of the separable layer too
 #[test]
 fn separable_conv1d_same_padding_zero_pads_depthwise() {
-    let mut conv = SeparableConv1D::new(1, 3, vec![1, 5, 1], 1, 1, Linear::new())
+    let mut conv = SeparableConv1D::new(1, 3, 1, 1, Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
+    conv.build(&Shape::known(&[1, 5, 1])).unwrap();
     conv.set_weights(
         Array3::ones((3, 1, 1)),
         Array3::ones((1, 1, 1)),
@@ -572,7 +601,8 @@ fn separable_conv1d_same_padding_zero_pads_depthwise() {
 /// distinct power of 2. Any transposition of either stage changes the total.
 #[test]
 fn separable_conv1d_depth_multiplier_2_forward_values() {
-    let mut conv = SeparableConv1D::new(1, 1, vec![1, 2, 2], 1, 2, Linear::new()).unwrap();
+    let mut conv = SeparableConv1D::new(1, 1, 1, 2, Linear::new()).unwrap();
+    conv.build(&Shape::known(&[1, 2, 2])).unwrap();
     let dw = Array3::from_shape_vec((1, 2, 2), vec![1.0, 10.0, 100.0, 1000.0]).unwrap();
     let pw = Array3::from_shape_vec((1, 4, 1), vec![1.0, 2.0, 4.0, 8.0]).unwrap();
     conv.set_weights(dw, pw, Array1::zeros(1)).unwrap();
@@ -603,16 +633,10 @@ fn separable_conv1d_matches_a_depthwise_then_pointwise_stack() {
         .collect();
     let bias: Vec<f32> = (0..filters).map(|v| 0.2 * v as f32 - 0.3).collect();
 
-    let mut fused = SeparableConv1D::new(
-        filters,
-        kernel,
-        vec![2, length, channels],
-        2,
-        dm,
-        Linear::new(),
-    )
-    .unwrap()
-    .with_padding(PaddingType::Same);
+    let mut fused = SeparableConv1D::new(filters, kernel, 2, dm, Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
+    fused.build(&Shape::known(&[2, length, channels])).unwrap();
     fused
         .set_weights(
             Array3::from_shape_vec((kernel, channels, dm), dw_taps.clone()).unwrap(),
@@ -622,11 +646,14 @@ fn separable_conv1d_matches_a_depthwise_then_pointwise_stack() {
         .unwrap();
 
     // Stage 1 alone. It carries no bias, so this stack puts a zero bias on it
-    let mut stage_1 = DepthwiseConv1D::new(kernel, vec![2, length, channels], 2, Linear::new())
+    let mut stage_1 = DepthwiseConv1D::new(kernel, 2, Linear::new())
         .unwrap()
         .with_depth_multiplier(dm)
         .unwrap()
         .with_padding(PaddingType::Same);
+    stage_1
+        .build(&Shape::known(&[2, length, channels]))
+        .unwrap();
     stage_1
         .set_weights(
             Array3::from_shape_vec((kernel, channels, dm), dw_taps).unwrap(),
@@ -636,14 +663,10 @@ fn separable_conv1d_matches_a_depthwise_then_pointwise_stack() {
 
     // Stage 2 is a 1-tap Conv1D over the widened channels, and it carries the bias
     let out_length = length.div_ceil(2);
-    let mut stage_2 = Conv1D::new(
-        filters,
-        1,
-        vec![2, out_length, channels * dm],
-        1,
-        Linear::new(),
-    )
-    .unwrap();
+    let mut stage_2 = Conv1D::new(filters, 1, 1, Linear::new()).unwrap();
+    stage_2
+        .build(&Shape::known(&[2, out_length, channels * dm]))
+        .unwrap();
     stage_2
         .set_weights(
             Array3::from_shape_vec((1, channels * dm, filters), pw_taps).unwrap(),
@@ -661,7 +684,8 @@ fn separable_conv1d_matches_a_depthwise_then_pointwise_stack() {
 /// `predict` in eval mode returns the same values as `forward`
 #[test]
 fn separable_conv1d_predict_equals_forward() {
-    let mut conv = SeparableConv1D::new(3, 3, vec![2, 9, 2], 2, 2, Linear::new()).unwrap();
+    let mut conv = SeparableConv1D::new(3, 3, 2, 2, Linear::new()).unwrap();
+    conv.build(&Shape::known(&[2, 9, 2])).unwrap();
     let x = seq([2, 9, 2], ramp(36));
     let predicted = conv.predict(&x).unwrap();
     let forwarded = conv.forward(&x).unwrap();
@@ -671,7 +695,7 @@ fn separable_conv1d_predict_equals_forward() {
 /// `backward` before `forward` returns an error rather than reading an empty cache
 #[test]
 fn separable_conv1d_backward_before_forward_errors() {
-    let mut conv = SeparableConv1D::new(2, 2, vec![1, 5, 2], 1, 1, Linear::new()).unwrap();
+    let mut conv = SeparableConv1D::new(2, 2, 1, 1, Linear::new()).unwrap();
     let grad = Array::ones((1_usize, 4, 2)).into_dyn();
     assert!(conv.backward(&grad).is_err());
 }
@@ -679,7 +703,9 @@ fn separable_conv1d_backward_before_forward_errors() {
 /// `set_weights` rejects any of the 3 arrays whose shape does not match the layer
 #[test]
 fn separable_conv1d_set_weights_shape_mismatch_errors() {
-    let mut conv = SeparableConv1D::new(2, 2, vec![1, 5, 2], 1, 1, Linear::new()).unwrap();
+    let mut conv = SeparableConv1D::new(2, 2, 1, 1, Linear::new()).unwrap();
+    conv.build(&rustyml::neural_network::Shape::known(&[1, 5, 2]))
+        .unwrap();
     // (label, depthwise shape, pointwise shape, bias length)
     type Shape = (usize, usize, usize);
     type Case = (&'static str, Shape, Shape, usize);
@@ -709,7 +735,7 @@ fn separable_conv1d_emits_c_order_tensors_from_a_strided_input() {
     assert!(!strided.is_standard_layout(), "the fixture must be strided");
     assert_eq!(strided.shape(), &[1, 4, 6]);
 
-    let mut conv = SeparableConv1D::new(2, 2, vec![1, 4, 6], 1, 1, Linear::new())
+    let mut conv = SeparableConv1D::new(2, 2, 1, 1, Linear::new())
         .unwrap()
         .with_random_state(3);
     let out = conv.forward(&strided).unwrap();
@@ -722,7 +748,7 @@ fn separable_conv1d_emits_c_order_tensors_from_a_strided_input() {
     assert!(grad.is_standard_layout(), "input gradient must be C order");
 
     let repacked = strided.as_standard_layout().into_owned();
-    let mut twin = SeparableConv1D::new(2, 2, vec![1, 4, 6], 1, 1, Linear::new())
+    let mut twin = SeparableConv1D::new(2, 2, 1, 1, Linear::new())
         .unwrap()
         .with_random_state(3);
     assert_allclose(&twin.forward(&repacked).unwrap(), &out, 0.0_f32);
@@ -734,15 +760,17 @@ fn separable_conv1d_emits_c_order_tensors_from_a_strided_input() {
 /// Each layer names its arrays as Keras does, and the shapes are the ones it declares
 #[test]
 fn conv_1d_variants_name_their_weights() {
-    let depthwise = DepthwiseConv1D::new(3, vec![1, 10, 4], 1, Linear::new())
+    let mut depthwise = DepthwiseConv1D::new(3, 1, Linear::new())
         .unwrap()
         .with_depth_multiplier(2)
         .unwrap();
+    depthwise.build(&Shape::known(&[1, 10, 4])).unwrap();
     assert_eq!(named(&depthwise, "kernel").shape(), &[3, 4, 2]);
     assert_eq!(named(&depthwise, "bias").len(), 8);
     assert_eq!(depthwise.layer_type(), "DepthwiseConv1D");
 
-    let separable = SeparableConv1D::new(5, 3, vec![1, 10, 4], 1, 2, Linear::new()).unwrap();
+    let mut separable = SeparableConv1D::new(5, 3, 1, 2, Linear::new()).unwrap();
+    separable.build(&Shape::known(&[1, 10, 4])).unwrap();
     assert_eq!(named(&separable, "depthwise_kernel").shape(), &[3, 4, 2]);
     assert_eq!(named(&separable, "pointwise_kernel").shape(), &[1, 8, 5]);
     assert_eq!(named(&separable, "bias").len(), 5);
@@ -752,7 +780,7 @@ fn conv_1d_variants_name_their_weights() {
 /// The bias skips decoupled weight decay while both kernels take it
 #[test]
 fn separable_conv1d_bias_is_exempt_from_weight_decay() {
-    let mut conv = SeparableConv1D::new(2, 2, vec![1, 5, 2], 1, 1, Linear::new()).unwrap();
+    let mut conv = SeparableConv1D::new(2, 2, 1, 1, Linear::new()).unwrap();
     let x = seq([1, 5, 2], ramp(10));
     conv.forward(&x).unwrap();
     conv.backward(&Array::ones((1_usize, 4, 2)).into_dyn())
@@ -768,7 +796,7 @@ fn separable_conv1d_bias_is_exempt_from_weight_decay() {
 /// The depthwise bias skips decoupled weight decay while the kernel takes it
 #[test]
 fn depthwise_conv1d_bias_is_exempt_from_weight_decay() {
-    let mut conv = DepthwiseConv1D::new(2, vec![1, 5, 2], 1, Linear::new()).unwrap();
+    let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
     let x = seq([1, 5, 2], ramp(10));
     conv.forward(&x).unwrap();
     conv.backward(&Array::ones((1_usize, 4, 2)).into_dyn())

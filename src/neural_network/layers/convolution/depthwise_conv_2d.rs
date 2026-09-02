@@ -12,9 +12,13 @@ use crate::neural_network::layers::convolution::validation::{
     valid_output_size, validate_depth_multiplier, validate_dilation, validate_input_shape_2d,
     validate_kernel_size_2d, validate_strides_2d, validate_valid_kernel_fits,
 };
-use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_2d;
-use crate::neural_network::layers::validation::{validate_optional_weight, validate_weight_shape};
+use crate::neural_network::layers::validation::{
+    start_build, validate_built_input, validate_optional_weight, validate_weight_shape,
+};
+use crate::neural_network::layers::{
+    build_on_forward, built_layer_shape_functions, named_weight_layer_functions,
+};
 use crate::neural_network::traits::{Layer, ParamGrad};
 use crate::neural_network::{Fans, Initializer, Shape, Tensor};
 use ndarray::{Array1, Array4};
@@ -33,25 +37,12 @@ use ndarray::{Array1, Array4};
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array4;
-///
-/// let mut model = Sequential::new();
-///
-/// // DepthwiseConv2D with ReLU (new initializes the weights)
-/// let depthwise_layer = DepthwiseConv2D::new(
-///     (2, 2),                  // kernel_size
-///     vec![1, 4, 4, 3],        // input shape [batch_size, height, width, channels]
-///     (1, 1),                  // strides
-///     Activation::ReLU,        // activation
-/// ).unwrap();
-///
-/// model
-///     .add(depthwise_layer)
-///     .compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Input data shape: [batch_size, height, width, channels]
 /// let batch_size = 1;
@@ -72,6 +63,19 @@ use ndarray::{Array1, Array4};
 ///
 /// let input = input_data.into_dyn();
 ///
+/// // DepthwiseConv2D with ReLU. The build draws the weights
+/// let depthwise_layer = DepthwiseConv2D::new(
+///     (2, 2),                  // kernel_size
+///     (1, 1),                  // strides
+///     Activation::ReLU,        // activation
+/// ).unwrap();
+///
+/// let mut model = SequentialBuilder::new()
+///     .add(depthwise_layer)
+///     .build(&Shape::known(input.shape()))
+///     .unwrap();
+/// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+///
 /// model.summary();
 ///
 /// let output = model.predict(&input).unwrap();
@@ -87,7 +91,7 @@ use ndarray::{Array1, Array4};
 /// ```
 #[derive(Debug)]
 pub struct DepthwiseConv2D {
-    /// Number of input channels, read from the declared input shape
+    /// Number of input channels, which [`Layer::build`] reads from the input shape
     channels: usize,
     /// Kernels per input channel. The output carries `channels * depth_multiplier` of them
     depth_multiplier: usize,
@@ -113,8 +117,10 @@ pub struct DepthwiseConv2D {
     output_cache: Option<Tensor>,
     /// Cached input tensor for the backward pass
     input: Option<Tensor>,
-    /// Shape of the input tensor
-    input_shape: Vec<usize>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
+    /// Seed of the weight draw, or `None` to take the global seed or entropy
+    random_state: Option<u64>,
     /// Gradients with respect to weights
     weight_gradients: Option<Array4<f32>>,
     /// Gradients with respect to bias
@@ -129,7 +135,6 @@ impl DepthwiseConv2D {
     /// # Parameters
     ///
     /// - `kernel_size` - Size of the convolution kernel as (height, width)
-    /// - `input_shape` - Shape of the input tensor as \[batch_size, height, width, channels\]
     /// - `strides` - Stride of the convolution as (height_stride, width_stride)
     /// - `activation` - Activation function applied to the output
     ///
@@ -154,36 +159,30 @@ impl DepthwiseConv2D {
     /// - `Error::InvalidParameter` - If any kernel dimension or stride is 0
     /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
-    /// - `Error::InvalidInput` - If `input_shape` is not 4D or has 0 channels
     pub fn new(
         kernel_size: (usize, usize),
-        input_shape: Vec<usize>,
         strides: (usize, usize),
         activation: impl Into<Activation>,
     ) -> Result<Self, Error> {
         validate_kernel_size_2d(kernel_size)?;
         validate_strides_2d(strides)?;
-        validate_input_shape_2d(&input_shape)?;
         let activation = activation.into();
         activation.validate()?;
 
-        let channels = input_shape[3];
-        let weights = Self::init_weights_array(channels, 1, kernel_size, None);
-        let bias = Array1::zeros(channels);
-
         Ok(Self {
-            channels,
+            channels: 0,
             depth_multiplier: 1,
             kernel_size,
             strides,
             dilation_rate: (1, 1),
             padding: PaddingType::Valid,
-            weights,
-            bias,
+            weights: Array4::zeros((0, 0, 0, 0)),
+            bias: Array1::zeros(0),
             activation,
             output_cache: None,
             input: None,
-            input_shape,
+            built: None,
+            random_state: None,
             weight_gradients: None,
             bias_gradients: None,
             use_bias: true,
@@ -257,9 +256,9 @@ impl DepthwiseConv2D {
     pub fn with_depth_multiplier(mut self, depth_multiplier: usize) -> Result<Self, Error> {
         validate_depth_multiplier(depth_multiplier)?;
         self.depth_multiplier = depth_multiplier;
-        self.weights =
-            Self::init_weights_array(self.channels, depth_multiplier, self.kernel_size, None);
-        self.bias = Array1::zeros(self.channels * depth_multiplier);
+        if self.built.is_some() {
+            self.draw_parameters();
+        }
         Ok(self)
     }
 
@@ -277,12 +276,10 @@ impl DepthwiseConv2D {
     ///
     /// - `Self` - The updated layer
     pub fn with_random_state(mut self, random_state: u64) -> Self {
-        self.weights = Self::init_weights_array(
-            self.channels,
-            self.depth_multiplier,
-            self.kernel_size,
-            Some(random_state),
-        );
+        self.random_state = Some(random_state);
+        if self.built.is_some() {
+            self.draw_parameters();
+        }
         self
     }
 
@@ -291,19 +288,25 @@ impl DepthwiseConv2D {
     /// The depth multiplier takes the place of the filter count in the fan pair, so `fan_in`
     /// counts every input channel although a depthwise unit reads only 1 of them. See
     /// [`Fans::conv`]
-    fn init_weights_array(
-        channels: usize,
-        depth_multiplier: usize,
-        kernel_size: (usize, usize),
-        random_state: Option<u64>,
-    ) -> Array4<f32> {
-        let (kernel_height, kernel_width) = kernel_size;
-        let mut rng = crate::random::make_rng(random_state);
-        Initializer::GlorotUniform.draw(
-            (kernel_height, kernel_width, channels, depth_multiplier),
-            Fans::conv(channels, depth_multiplier, kernel_height * kernel_width),
+    fn draw_parameters(&mut self) {
+        let (kernel_height, kernel_width) = self.kernel_size;
+        let mut rng = crate::random::make_rng(self.random_state);
+        // The depth multiplier takes the place of the filter count. See `Fans::conv`
+        self.weights = Initializer::GlorotUniform.draw(
+            (
+                kernel_height,
+                kernel_width,
+                self.channels,
+                self.depth_multiplier,
+            ),
+            Fans::conv(
+                self.channels,
+                self.depth_multiplier,
+                kernel_height * kernel_width,
+            ),
             &mut rng,
-        )
+        );
+        self.bias = Array1::zeros(self.channels * self.depth_multiplier);
     }
 
     /// Calculates padding dimensions for Same padding mode
@@ -371,6 +374,9 @@ impl DepthwiseConv2D {
         weights: Array4<f32>,
         bias: impl Into<Option<Array1<f32>>>,
     ) -> Result<(), Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("DepthwiseConv2D"));
+        }
         validate_weight_shape("kernel", self.weights.shape(), weights.shape())?;
         let bias = validate_optional_weight("bias", "use_bias", self.use_bias, bias.into())?;
         if let Some(bias) = bias.as_ref() {
@@ -422,13 +428,7 @@ impl DepthwiseConv2D {
     /// Shared numeric body of [`Layer::forward`] and [`Layer::predict`]. `forward` wraps this and
     /// records the input/output caches. `predict` returns the result directly
     fn convolve(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.ndim() != 4 {
-            return Err(Error::invalid_input("input tensor is not 4D"));
-        }
-        let channels = input.shape()[3];
-        if channels != self.channels {
-            return Err(Error::dimension_mismatch(self.channels, channels));
-        }
+        validate_built_input(&self.built, "DepthwiseConv2D", input.shape())?;
         validate_valid_kernel_fits(
             self.padding.into(),
             &[self.kernel_size.0, self.kernel_size.1],
@@ -463,11 +463,29 @@ impl DepthwiseConv2D {
 }
 
 impl Layer for DepthwiseConv2D {
+    /// Reads the channel count from the input shape, and draws the kernel and the bias
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "DepthwiseConv2D", input)? else {
+            return Ok(());
+        };
+        built.check_rank("DepthwiseConv2D", 4)?;
+        let (batch, tail) = built.split_batch("DepthwiseConv2D")?;
+        // The family validators read a full extent list, and the batch extent is not part of
+        // what they check
+        let mut dims = vec![batch.unwrap_or(1)];
+        dims.extend(tail);
+        validate_input_shape_2d(&dims)?;
+        self.channels = dims[3];
+        self.built = Some(built);
+        self.draw_parameters();
+        Ok(())
+    }
+
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+        build_on_forward!(self, input);
         let activated = self.convolve(input)?;
         // Cache only after a successful convolution, so a rejected input leaves no partial state
         self.input = Some(input.clone());
-        self.input_shape = input.shape().to_vec();
         self.output_cache = Some(activated.clone());
         Ok(activated)
     }
@@ -523,16 +541,18 @@ impl Layer for DepthwiseConv2D {
         "DepthwiseConv2D"
     }
 
-    fn known_input_shape(&self) -> Option<Shape> {
-        (!self.input_shape.is_empty()).then(|| Shape::known(&self.input_shape))
-    }
+    built_layer_shape_functions!();
 
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         input.check_rank("DepthwiseConv2D", 4)?;
         let (batch, tail) = input.split_batch("DepthwiseConv2D")?;
         let (height, width) = (tail[0], tail[1]);
-        if tail[2] != self.channels {
-            return Err(Error::dimension_mismatch(self.channels, tail[2]));
+        let channels = tail[2];
+        // The layer keeps 1 kernel group per channel of the shape it was built for, so a built
+        // layer refuses any other channel count. An unbuilt layer holds no group yet, and the
+        // answer needs the channel count of the argument alone
+        if self.built.is_some() && channels != self.channels {
+            return Err(Error::dimension_mismatch(self.channels, channels));
         }
         let (keff_h, keff_w) = self.effective_kernel_size();
         // A `Valid` layer whose effective kernel is longer than an input axis is legal until the
@@ -551,7 +571,7 @@ impl Layer for DepthwiseConv2D {
         // A depthwise convolution emits `channels * depth_multiplier` channels
         Ok(Shape::from_batch(
             batch,
-            &[out_height, out_width, self.channels * self.depth_multiplier],
+            &[out_height, out_width, channels * self.depth_multiplier],
         ))
     }
 
@@ -611,8 +631,8 @@ mod tests {
     /// channels
     #[test]
     fn depthwise_forward_keeps_channels_separate_hand_derived() {
-        let mut layer =
-            DepthwiseConv2D::new((2, 2), vec![1, 3, 3, 2], (1, 1), Linear::new()).unwrap();
+        let mut layer = DepthwiseConv2D::new((2, 2), (1, 1), Linear::new()).unwrap();
+        layer.build(&Shape::known(&[1, 3, 3, 2])).unwrap();
         // [kh, kw, C, dm] with dm == 1: channel 0 all ones, channel 1 all twos
         let weights =
             Array4::from_shape_vec((2, 2, 2, 1), vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0])
@@ -643,10 +663,11 @@ mod tests {
     /// `c * depth_multiplier + m`, the Keras ordering
     #[test]
     fn depthwise_depth_multiplier_output_channel_order() {
-        let mut layer = DepthwiseConv2D::new((1, 1), vec![1, 1, 1, 2], (1, 1), Linear::new())
+        let mut layer = DepthwiseConv2D::new((1, 1), (1, 1), Linear::new())
             .unwrap()
             .with_depth_multiplier(2)
             .unwrap();
+        layer.build(&Shape::known(&[1, 1, 1, 2])).unwrap();
         assert_eq!(layer.weights.shape(), &[1, 1, 2, 2]);
 
         // [kh=1, kw=1, C=2, dm=2] flat as (c, m): c0 -> [1, 10], c1 -> [100, 1000]

@@ -8,9 +8,12 @@ use crate::neural_network::layers::named_weight_layer_functions;
 use crate::neural_network::layers::recurrent::gate::take_cache;
 use crate::neural_network::layers::recurrent::input_step;
 use crate::neural_network::layers::recurrent::validation::{
-    split_grad_output, validate_input_3d, validate_recurrent_dimensions,
+    split_grad_output, validate_dimension_greater_than_zero, validate_input_3d,
+    validate_recurrent_dimensions,
 };
+use crate::neural_network::layers::validation::start_build;
 use crate::neural_network::layers::validation::validate_weight_shape;
+use crate::neural_network::layers::{build_config_function, build_on_forward};
 use crate::neural_network::traits::{Layer, ParamGrad};
 use crate::neural_network::{Fans, Initializer, Shape, Tensor};
 use gemmkit_ndarray::dot;
@@ -30,7 +33,8 @@ use ndarray::{Array, Array2, Array3, Axis};
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::Shape;
+/// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::*;
@@ -42,10 +46,11 @@ use ndarray::{Array, Array2, Array3, Axis};
 /// let y = Array::ones((2, 3)).into_dyn();
 ///
 /// // Build model: 1 SimpleRNN layer with Tanh activation
-/// let mut model = Sequential::new();
-/// model
-/// .add(SimpleRNN::new(4, 3, Activation::Tanh).unwrap())
-/// .compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
+/// let mut model = SequentialBuilder::new()
+///     .add(SimpleRNN::new(3, Activation::Tanh).unwrap())
+///     .build(&Shape::known(x.shape()))
+///     .unwrap();
+/// model.compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Print structure
 /// model.summary();
@@ -59,8 +64,13 @@ use ndarray::{Array, Array2, Array3, Axis};
 /// ```
 #[derive(Debug)]
 pub struct SimpleRNN {
-    /// Number of input features
+    /// Feature count per timestep, which [`Layer::build`] reads from the input shape
     input_dim: usize,
+    /// Shape the kernels depend on, which is `(None, None, input_dim)`. `None` before the
+    /// build
+    built: Option<Shape>,
+    /// Seed of the weight draw, or `None` to take the global seed or entropy
+    random_state: Option<u64>,
     /// Number of output units (neurons)
     units: usize,
     /// Weight matrix connecting inputs to the layer with shape (input_dim, units)
@@ -108,26 +118,22 @@ impl SimpleRNN {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `input_dim` or `units` is 0
+    /// - `Error::InvalidParameter` - If `units` is 0
     /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
-    pub fn new(
-        input_dim: usize,
-        units: usize,
-        activation: impl Into<Activation>,
-    ) -> Result<Self, Error> {
-        validate_recurrent_dimensions(input_dim, units)?;
+    pub fn new(units: usize, activation: impl Into<Activation>) -> Result<Self, Error> {
+        validate_dimension_greater_than_zero(units, "units")?;
         let activation = activation.into();
         activation.validate()?;
 
-        let (kernel, recurrent_kernel) = Self::init_weights_arrays(input_dim, units, None);
-        let bias = Array::zeros((1, units));
         Ok(SimpleRNN {
-            input_dim,
+            input_dim: 0,
+            built: None,
+            random_state: None,
             units,
-            kernel,
-            recurrent_kernel,
-            bias,
+            kernel: Array::zeros((0, 0)),
+            recurrent_kernel: Array::zeros((0, 0)),
+            bias: Array::zeros((0, 0)),
             input_cache: None,
             hidden_state_cache: None,
             grad_kernel: None,
@@ -154,10 +160,10 @@ impl SimpleRNN {
     ///
     /// - `Self` - The updated layer
     pub fn with_random_state(mut self, random_state: u64) -> Self {
-        let (kernel, recurrent_kernel) =
-            Self::init_weights_arrays(self.input_dim, self.units, Some(random_state));
-        self.kernel = kernel;
-        self.recurrent_kernel = recurrent_kernel;
+        self.random_state = Some(random_state);
+        if self.built.is_some() {
+            self.draw_parameters();
+        }
         self
     }
 
@@ -209,23 +215,20 @@ impl SimpleRNN {
     /// Both draws share a single RNG, kernel first and then recurrent kernel, so a given seed
     /// reproduces the exact same pair of matrices. The order is part of the contract of this
     /// layer. A second generator, or the reverse order, changes the recurrent kernel
-    fn init_weights_arrays(
-        input_dim: usize,
-        units: usize,
-        random_state: Option<u64>,
-    ) -> (Array2<f32>, Array2<f32>) {
-        let mut rng = crate::random::make_rng(random_state);
+    fn draw_parameters(&mut self) {
+        let mut rng = crate::random::make_rng(self.random_state);
 
-        let kernel = Initializer::GlorotUniform.draw(
-            (input_dim, units),
-            Fans::new(input_dim, units),
+        self.kernel = Initializer::GlorotUniform.draw(
+            (self.input_dim, self.units),
+            Fans::new(self.input_dim, self.units),
             &mut rng,
         );
 
         // Orthonormal columns keep the hidden-state transition norm-preserving
-        let recurrent_kernel = Initializer::Orthogonal.draw_orthogonal(units, Fans::NONE, &mut rng);
+        self.recurrent_kernel =
+            Initializer::Orthogonal.draw_orthogonal(self.units, Fans::NONE, &mut rng);
 
-        (kernel, recurrent_kernel)
+        self.bias = Array::zeros((1, self.units));
     }
 
     /// Sets the weights for this layer
@@ -251,6 +254,9 @@ impl SimpleRNN {
         recurrent_kernel: Array2<f32>,
         bias: Array2<f32>,
     ) -> Result<(), Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("SimpleRNN"));
+        }
         validate_weight_shape("kernel", self.kernel.shape(), kernel.shape())?;
         validate_weight_shape(
             "recurrent_kernel",
@@ -366,8 +372,36 @@ impl SimpleRNN {
 }
 
 impl Layer for SimpleRNN {
+    /// Reads the feature count from the last axis, and draws both kernels and the bias
+    ///
+    /// 1 generator threads the input kernel and then the orthogonal recurrent kernel, in that
+    /// order. A second generator, or the other order, changes every value of the second draw
+    ///
+    /// The kernels depend on the feature count and on the unit count, and on no other extent.
+    /// The build shape therefore fixes the last axis alone, and the layer takes a batch of any
+    /// size and a sequence of any length
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        input.check_rank("SimpleRNN", 3)?;
+        let Some(input_dim) = input.axes()[2] else {
+            return Err(Error::invalid_input(format!(
+                "SimpleRNN needs a fixed feature count on axis 2, and the shape {input} leaves \
+                 that axis free"
+            )));
+        };
+        validate_recurrent_dimensions(input_dim, self.units)?;
+        let canonical = Shape::new(vec![None, None, Some(input_dim)]);
+        let Some(built) = start_build(&self.built, "SimpleRNN", &canonical)? else {
+            return Ok(());
+        };
+        self.input_dim = input_dim;
+        self.built = Some(built);
+        self.draw_parameters();
+        Ok(())
+    }
+
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_3d(input)?;
+        build_on_forward!(self, input);
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
         self.input_cache = Some(x3.to_owned());
 
@@ -379,6 +413,9 @@ impl Layer for SimpleRNN {
 
     /// Inference forward pass. Runs in eval mode and writes no caches. See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("SimpleRNN"));
+        }
         validate_input_3d(input)?;
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
         self.run(&x3, None)
@@ -472,17 +509,22 @@ impl Layer for SimpleRNN {
         "SimpleRNN"
     }
 
+    build_config_function!();
+
     fn known_input_shape(&self) -> Option<Shape> {
         // The layer keeps no input shape. It knows the feature count of 1 timestep, and it
         // serves every batch size and every sequence length, so both of those axes are free
-        Some(Shape::new(vec![None, None, Some(self.input_dim)]))
+        self.built.clone()
     }
 
     /// A returned sequence keeps the time axis, and a returned final state drops it
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         input.check_rank("SimpleRNN", 3)?;
         let axes = input.axes();
-        if let Some(features) = axes[2]
+        // The unit count settles the answer, so an unbuilt layer gives it. A built layer holds
+        // a kernel of a fixed width, and it refuses a feature count that the kernel cannot take
+        if self.built.is_some()
+            && let Some(features) = axes[2]
             && features != self.input_dim
         {
             return Err(Error::invalid_input(format!(

@@ -4,6 +4,7 @@
 //! `gradient_check.rs` covers gradient values. This file does not duplicate them.
 
 use ndarray::{Array2, Array3, Array4, Array5, IxDyn};
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
@@ -14,7 +15,7 @@ use rustyml::neural_network::layers::recurrent::lstm::LSTM;
 use rustyml::neural_network::layers::repeat_vector::RepeatVector;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
-use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::Layer;
 use rustyml::prelude::Activation;
 use rustyml::{error::Error, neural_network::NnError};
@@ -188,14 +189,15 @@ fn permute_output_is_in_c_order() {
 fn permute_feeds_softmax() {
     let x = ramp_of(&[2, 3, 4]);
 
-    let mut model = Sequential::new();
-    model
+    let mut model = SequentialBuilder::new()
         .add(Permute::new(vec![2, 1]).unwrap())
         .add(Softmax::new())
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let out = model.predict(&x).unwrap();
     assert_eq!(out.shape(), &[2, 4, 3]);
@@ -518,30 +520,19 @@ fn repeat_vector_bridges_two_recurrent_layers() {
     let x = ramp_of(&[4, 6, 3]).map(|v| v * 0.01);
     let y = t2(4, 2, vec![0.0, 1.0, 0.5, -0.5, 0.25, 0.75, -1.0, 0.0]);
 
-    let mut model = Sequential::new();
-    model
+    let mut model = SequentialBuilder::new()
         // The encoder returns its last state, a rank-2 [4, 5] tensor
-        .add(
-            LSTM::new(3, 5, Activation::Tanh)
-                .unwrap()
-                .with_random_state(7),
-        )
+        .add(LSTM::new(5, Activation::Tanh).unwrap().with_random_state(7))
         // The repeat turns that state into a 6-step sequence the decoder can read
         .add(RepeatVector::new(6).unwrap())
-        .add(
-            LSTM::new(5, 4, Activation::Tanh)
-                .unwrap()
-                .with_random_state(9),
-        )
-        .add(
-            Dense::new(4, 2, Linear::new())
-                .unwrap()
-                .with_random_state(11),
-        )
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+        .add(LSTM::new(4, Activation::Tanh).unwrap().with_random_state(9))
+        .add(Dense::new(2, Linear::new()).unwrap().with_random_state(11))
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let history = model.fit(&x, &y, 5).unwrap();
     assert_eq!(history.loss().len(), 5);
@@ -560,19 +551,16 @@ fn permute_inside_sequential_model_trains() {
     let x = ramp_of(&[4, 3, 6]).map(|v| v * 0.01);
     let y = t2(4, 1, vec![0.0, 1.0, 0.5, -0.5]);
 
-    let mut model = Sequential::new();
-    model
+    let mut model = SequentialBuilder::new()
         .add(Permute::new(vec![2, 1]).unwrap())
-        .add(rustyml::neural_network::layers::flatten::Flatten::new(vec![4, 6, 3]).unwrap())
-        .add(
-            Dense::new(18, 1, Linear::new())
-                .unwrap()
-                .with_random_state(3),
-        )
-        .compile(
-            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-            MeanSquaredError::new(),
-        );
+        .add(rustyml::neural_network::layers::flatten::Flatten::new())
+        .add(Dense::new(1, Linear::new()).unwrap().with_random_state(3))
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let history = model.fit(&x, &y, 5).unwrap();
     assert_eq!(history.loss().len(), 5);

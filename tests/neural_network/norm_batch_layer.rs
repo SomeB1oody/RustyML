@@ -3,6 +3,7 @@
 //! definition. Gradient correctness lives in tests/neural_network/gradient_check.rs.
 
 use ndarray::{ArrayD, Dimension};
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization;
 use rustyml::neural_network::layers::regularization::normalization::layer_normalization::{
     LayerNormalization, LayerNormalizationAxis,
@@ -29,13 +30,14 @@ fn tensor2(data: Vec<f32>, rows: usize, cols: usize) -> rustyml::neural_network:
 
 // Constructor validation
 
-/// BatchNormalization::new returns Err(EmptyInput) when input_shape is empty
+/// `BatchNormalization` takes no shape now, so the rank rule moved to the build step
 #[test]
-fn bn_constructor_rejects_empty_input_shape() {
-    let result = BatchNormalization::new(vec![], 0.9, 1e-5);
+fn bn_build_rejects_empty_input_shape() {
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
+    let result = bn.build(&Shape::known(&[]));
     assert!(
-        matches!(result, Err(Error::EmptyInput(_))),
-        "expected EmptyInput, got {:?}",
+        matches!(result, Err(Error::InvalidInput(_))),
+        "expected InvalidInput, got {:?}",
         result
     );
 }
@@ -52,7 +54,7 @@ fn bn_constructor_rejects_invalid_scalar_params() {
         (0.9, -1e-5, "epsilon < 0.0"),
     ];
     for (momentum, epsilon, label) in cases {
-        let result = BatchNormalization::new(vec![4, 3], momentum, epsilon);
+        let result = BatchNormalization::new(momentum, epsilon);
         assert!(
             matches!(result, Err(Error::InvalidParameter { .. })),
             "expected InvalidParameter for {label} (momentum={momentum}, epsilon={epsilon}), got {:?}",
@@ -64,31 +66,33 @@ fn bn_constructor_rejects_invalid_scalar_params() {
 /// BatchNormalization::new succeeds for boundary momentum values 0.0 and 1.0
 #[test]
 fn bn_constructor_accepts_boundary_momentum_values() {
-    assert!(BatchNormalization::new(vec![4, 3], 0.0, 1e-5).is_ok());
-    assert!(BatchNormalization::new(vec![4, 3], 1.0, 1e-5).is_ok());
+    assert!(BatchNormalization::new(0.0, 1e-5).is_ok());
+    assert!(BatchNormalization::new(1.0, 1e-5).is_ok());
 }
 
 // Shape mismatch on forward
 
-/// BatchNormalization forward returns Err(ShapeMismatch) when the feature axis differs
-/// from the declared [4, 3]
+/// BatchNormalization forward returns Err(InvalidInput) when the feature axis differs
+/// from the built shape [4, 3]
 #[test]
 fn bn_forward_rejects_wrong_input_shape() {
-    let mut bn = BatchNormalization::new(vec![4, 3], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
+    bn.build(&Shape::known(&[4, 3])).unwrap();
     let wrong = tensor2(vec![1.0f32; 8], 4, 2);
     let result = bn.forward(&wrong);
     assert!(
-        matches!(result, Err(Error::ShapeMismatch { .. })),
-        "expected ShapeMismatch, got {:?}",
+        matches!(result, Err(Error::InvalidInput(_))),
+        "expected InvalidInput, got {:?}",
         result
     );
 }
 
-/// The declared shape's leading axis is not a property of the layer.
+/// The build shape's leading axis is not a property of the layer.
 /// Enforcing it would reject every mini-batch, so a different batch size is accepted.
 #[test]
 fn bn_forward_accepts_different_batch_size() {
-    let mut bn = BatchNormalization::new(vec![4, 3], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
+    bn.build(&Shape::known(&[4, 3])).unwrap();
     let smaller = tensor2(vec![1.0f32; 6], 2, 3);
     let out = bn
         .forward(&smaller)
@@ -111,7 +115,7 @@ fn bn_train_output_has_batch_mean_zero_and_var_one() {
     ];
     let input = tensor2(data, 4, 3);
 
-    let mut bn = BatchNormalization::new(vec![4, 3], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
     // Default: training=true, gamma=1, beta=0
     let output = bn.forward(&input).unwrap();
     assert_eq!(output.shape(), &[4, 3]);
@@ -140,7 +144,7 @@ fn bn_train_output_has_batch_mean_zero_and_var_one() {
 #[test]
 fn bn_train_forward_concrete_values_4x1() {
     let input = tensor2(vec![2.0f32, 4.0, 6.0, 8.0], 4, 1);
-    let mut bn = BatchNormalization::new(vec![4, 1], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
 
     let output = bn.forward(&input).unwrap();
 
@@ -157,7 +161,7 @@ fn bn_train_forward_concrete_values_4x1() {
 #[test]
 fn bn_running_stats_update_after_one_forward() {
     let input_train = tensor2(vec![2.0f32, 4.0, 6.0, 8.0], 4, 1);
-    let mut bn = BatchNormalization::new(vec![4, 1], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
 
     // Training forward updates running stats
     bn.forward(&input_train).unwrap();
@@ -179,7 +183,8 @@ fn bn_running_stats_update_after_one_forward() {
 /// In eval mode, BN normalizes with running_mean and running_var injected via set_weights
 #[test]
 fn bn_eval_uses_running_stats_from_set_weights() {
-    let mut bn = BatchNormalization::new(vec![2, 3], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
+    bn.build(&Shape::known(&[2, 3])).unwrap();
 
     // Inject known running statistics and trivial gamma/beta
     let gamma = tensor1(vec![1.0f32, 1.0, 1.0]);
@@ -210,7 +215,8 @@ fn bn_eval_uses_running_stats_from_set_weights() {
 /// In eval mode, BN predict() matches forward() bit-exactly without mutating state
 #[test]
 fn bn_predict_equals_forward_in_eval_mode() {
-    let mut bn = BatchNormalization::new(vec![2, 3], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
+    bn.build(&Shape::known(&[2, 3])).unwrap();
 
     let gamma = tensor1(vec![1.0f32, 1.0, 1.0]);
     let beta = tensor1(vec![0.0f32, 0.0, 0.0]);
@@ -234,7 +240,8 @@ fn bn_predict_equals_forward_in_eval_mode() {
 /// (input_shape [4,3] expects gamma [3], supplied [2])
 #[test]
 fn bn_set_weights_rejects_wrong_gamma_shape() {
-    let mut bn = BatchNormalization::new(vec![4, 3], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
+    bn.build(&Shape::known(&[4, 3])).unwrap();
 
     let gamma_bad = tensor1(vec![1.0f32, 1.0]); // wrong: [2] instead of [3]
     let beta = tensor1(vec![0.0f32, 0.0, 0.0]);
@@ -257,7 +264,8 @@ fn bn_set_weights_rejects_wrong_gamma_shape() {
 /// BN eval mode applies custom gamma and beta to the normalized value
 #[test]
 fn bn_eval_applies_custom_gamma_and_beta() {
-    let mut bn = BatchNormalization::new(vec![1, 1], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
+    bn.build(&Shape::known(&[1, 1])).unwrap();
 
     let gamma = tensor1(vec![2.0f32]);
     let beta = tensor1(vec![1.0f32]);
@@ -283,7 +291,7 @@ fn bn_eval_applies_custom_gamma_and_beta() {
 /// (momentum 0.5), verified through an eval-mode forward
 #[test]
 fn bn_running_stats_accumulate_over_multiple_forwards() {
-    let mut bn = BatchNormalization::new(vec![2, 1], 0.5, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.5, 1e-5).unwrap();
 
     let x = tensor2(vec![0.0f32, 2.0], 2, 1);
     bn.forward(&x).unwrap();
@@ -314,7 +322,7 @@ fn bn_uniform_batch_output_is_zero() {
         3.0, 7.0, -2.0, // row 3
     ];
     let input = tensor2(data, 4, 3);
-    let mut bn = BatchNormalization::new(vec![4, 3], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
 
     let output = bn.forward(&input).unwrap();
     let zeros = tensor2(vec![0.0f32; 12], 4, 3);
@@ -329,11 +337,11 @@ fn bn_uniform_batch_output_is_zero() {
 fn bn_training_and_eval_modes_produce_different_outputs() {
     let input = tensor2(vec![1.0f32, 1.0, 3.0, 3.0], 2, 2);
 
-    let mut bn_train = BatchNormalization::new(vec![2, 2], 0.9, 1e-5).unwrap();
+    let mut bn_train = BatchNormalization::new(0.9, 1e-5).unwrap();
     // Training mode (default), running stats untouched (mean=0, var=1)
     let out_train = bn_train.forward(&input).unwrap();
 
-    let mut bn_eval = BatchNormalization::new(vec![2, 2], 0.9, 1e-5).unwrap();
+    let mut bn_eval = BatchNormalization::new(0.9, 1e-5).unwrap();
     bn_eval.set_training_if_mode_dependent(false);
     let out_eval = bn_eval.forward(&input).unwrap();
 
@@ -359,7 +367,7 @@ fn ln_constructor_rejects_invalid_epsilon() {
     // (epsilon, label) rows. Each must yield InvalidParameter.
     let cases = [(0.0, "epsilon == 0.0"), (-1e-5, "epsilon < 0.0")];
     for (epsilon, label) in cases {
-        let result = LayerNormalization::new(vec![4, 3], epsilon);
+        let result = LayerNormalization::new(epsilon);
         assert!(
             matches!(result, Err(Error::InvalidParameter { .. })),
             "expected InvalidParameter for {label} (epsilon={epsilon}), got {:?}",
@@ -371,7 +379,7 @@ fn ln_constructor_rejects_invalid_epsilon() {
 /// LayerNormalization::new with Multiple([]) returns Err(InvalidParameter)
 #[test]
 fn ln_constructor_rejects_multiple_empty_axes() {
-    let result = LayerNormalization::new(vec![4, 3], 1e-5)
+    let result = LayerNormalization::new(1e-5)
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![]));
     assert!(
@@ -381,13 +389,15 @@ fn ln_constructor_rejects_multiple_empty_axes() {
     );
 }
 
-/// LayerNormalization::new with Multiple(axes) rejects an out-of-bounds axis
-/// (axis 2 against input_shape [4,3] of ndim 2)
+/// `with_normalized_axis` cannot see the rank yet, so an out-of-bounds axis (axis 2 against a
+/// build shape of ndim 2) is caught at build time instead
 #[test]
 fn ln_constructor_rejects_multiple_out_of_bounds_axis() {
-    let result = LayerNormalization::new(vec![4, 3], 1e-5)
+    let mut ln = LayerNormalization::new(1e-5)
         .unwrap()
-        .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![0, 2]));
+        .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![0, 2]))
+        .unwrap();
+    let result = ln.build(&Shape::known(&[4, 3]));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -398,7 +408,7 @@ fn ln_constructor_rejects_multiple_out_of_bounds_axis() {
 /// LayerNormalization::new with Multiple(axes) rejects a duplicate axis (e.g. [0, 0])
 #[test]
 fn ln_constructor_rejects_multiple_duplicate_axes() {
-    let result = LayerNormalization::new(vec![4, 3], 1e-5)
+    let result = LayerNormalization::new(1e-5)
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![0, 0]));
     assert!(
@@ -418,7 +428,7 @@ fn ln_default_each_sample_has_mean_zero_and_var_one() {
         2.0, -2.0, 0.0, 4.0, // row 1: mean=1, var=5
     ];
     let input = tensor2(data, 2, 4);
-    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(1e-5).unwrap();
 
     let output = ln.forward(&input).unwrap();
     assert_eq!(output.shape(), &[2, 4]);
@@ -445,7 +455,7 @@ fn ln_default_forward_concrete_values() {
         2.0, -2.0, 0.0, 4.0, // row 1
     ];
     let input = tensor2(data, 2, 4);
-    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(1e-5).unwrap();
 
     let output = ln.forward(&input).unwrap();
 
@@ -475,7 +485,7 @@ fn ln_custom_axis0_concrete_values() {
     // rows=3, cols=2. Normalizes across rows for each column (axis=0).
     let data = vec![1.0f32, 4.0, 3.0, 2.0, 5.0, 6.0];
     let input = tensor2(data, 3, 2);
-    let mut ln = LayerNormalization::new(vec![3, 2], 1e-5)
+    let mut ln = LayerNormalization::new(1e-5)
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Custom(0))
         .unwrap();
@@ -506,7 +516,7 @@ fn ln_custom_axis0_concrete_values() {
 fn ln_custom_axis0_each_column_has_mean_zero_and_var_one() {
     let data: Vec<f32> = (0..15).map(|v| v as f32 * 1.3 - 4.0).collect();
     let input = tensor2(data, 5, 3);
-    let mut ln = LayerNormalization::new(vec![5, 3], 1e-5)
+    let mut ln = LayerNormalization::new(1e-5)
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Custom(0))
         .unwrap();
@@ -534,7 +544,7 @@ fn ln_custom_axis0_each_column_has_mean_zero_and_var_one() {
 fn ln_multiple_axes_output_has_mean_zero_and_var_one() {
     let data: Vec<f32> = (0..12).map(|i| 0.5 * i as f32 - 2.75).collect();
     let input = tensor2(data, 3, 4);
-    let mut ln = LayerNormalization::new(vec![3, 4], 1e-5)
+    let mut ln = LayerNormalization::new(1e-5)
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![0, 1]))
         .unwrap();
@@ -560,7 +570,7 @@ fn ln_multiple_single_axis_on_3d_input() {
     let shape = vec![2, 3, 4];
     let input = ArrayD::from_shape_vec(shape.clone(), data).unwrap();
 
-    let mut ln = LayerNormalization::new(vec![2, 3, 4], 1e-5)
+    let mut ln = LayerNormalization::new(1e-5)
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![1]))
         .unwrap();
@@ -593,7 +603,7 @@ fn ln_default_constant_row_is_finite_and_zero() {
         1.0, 2.0, 3.0, 4.0, // non-constant row
     ];
     let input = tensor2(data, 2, 4);
-    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(1e-5).unwrap();
 
     let output = ln.forward(&input).unwrap();
 
@@ -628,7 +638,7 @@ fn ln_default_constant_row_is_finite_and_zero() {
 fn ln_predict_equals_forward() {
     let data = vec![1.0f32, 3.0, 5.0, 7.0, 2.0, -2.0, 0.0, 4.0];
     let input = tensor2(data, 2, 4);
-    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(1e-5).unwrap();
 
     // Run forward first (writes caches)
     let out_forward = ln.forward(&input).unwrap();
@@ -644,7 +654,8 @@ fn ln_predict_equals_forward() {
 #[test]
 fn ln_set_weights_custom_gamma_beta() {
     let input = tensor2(vec![0.0f32, 4.0], 1, 2);
-    let mut ln = LayerNormalization::new(vec![1, 2], 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(1e-5).unwrap();
+    ln.build(&Shape::known(&[1, 2])).unwrap();
 
     let gamma = tensor1(vec![3.0f32, 3.0]);
     let beta = tensor1(vec![10.0f32, 10.0]);
@@ -665,7 +676,8 @@ fn ln_set_weights_custom_gamma_beta() {
 /// LN set_weights rejects a wrong gamma shape ([3] against expected [4])
 #[test]
 fn ln_set_weights_rejects_wrong_gamma_shape() {
-    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(1e-5).unwrap();
+    ln.build(&Shape::known(&[1, 4])).unwrap();
     let bad_gamma = tensor1(vec![1.0f32, 1.0, 1.0]); // [3] instead of [4]
     let beta = tensor1(vec![0.0f32; 4]);
     let result = ln.set_weights(bad_gamma, beta);
@@ -681,15 +693,16 @@ fn ln_set_weights_rejects_wrong_gamma_shape() {
 
 // Shape-mismatch on LN forward
 
-/// LN forward rejects input whose feature axis ([2, 5]) differs from the declared [2, 4]
+/// LN forward rejects input whose feature axis ([2, 5]) differs from the built shape [2, 4]
 #[test]
 fn ln_forward_rejects_wrong_input_shape() {
-    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(1e-5).unwrap();
+    ln.build(&Shape::known(&[2, 4])).unwrap();
     let wrong = tensor2(vec![1.0f32; 10], 2, 5);
     let result = ln.forward(&wrong);
     assert!(
-        matches!(result, Err(Error::ShapeMismatch { .. })),
-        "expected ShapeMismatch, got {:?}",
+        matches!(result, Err(Error::InvalidInput(_))),
+        "expected InvalidInput, got {:?}",
         result
     );
 }
@@ -701,7 +714,7 @@ fn ln_forward_rejects_wrong_input_shape() {
 fn ln_mode_switch_does_not_change_forward_output() {
     let data = vec![1.0f32, 3.0, 5.0, 7.0, 2.0, -2.0, 0.0, 4.0];
     let input = tensor2(data, 2, 4);
-    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(1e-5).unwrap();
 
     // Training mode output
     let out_train = ln.forward(&input).unwrap();
@@ -720,7 +733,7 @@ fn ln_mode_switch_does_not_change_forward_output() {
 fn ln_predict_equals_forward_in_eval_mode() {
     let data = vec![1.0f32, 3.0, 5.0, 7.0, 2.0, -2.0, 0.0, 4.0];
     let input = tensor2(data, 2, 4);
-    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(1e-5).unwrap();
     ln.set_training_if_mode_dependent(false);
 
     let out_forward = ln.forward(&input).unwrap();
@@ -736,7 +749,7 @@ fn ln_predict_equals_forward_in_eval_mode() {
 fn ln_multiple_valid_axes_forward_succeeds() {
     let data: Vec<f32> = (0..12).map(|i| i as f32).collect();
     let input = tensor2(data, 3, 4);
-    let mut ln = LayerNormalization::new(vec![3, 4], 1e-5)
+    let mut ln = LayerNormalization::new(1e-5)
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![0, 1]))
         .unwrap();
@@ -753,7 +766,7 @@ fn ln_multiple_valid_axes_forward_succeeds() {
 /// BatchNormalization::backward called before any forward returns ForwardPassNotRun
 #[test]
 fn bn_backward_before_forward_errors() {
-    let mut bn = BatchNormalization::new(vec![2, 3], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
     let grad = tensor2(vec![1.0f32; 6], 2, 3);
     let err = bn.backward(&grad).unwrap_err();
     assert!(
@@ -769,7 +782,7 @@ fn bn_backward_before_forward_errors() {
 /// LayerNormalization::backward called before any forward returns ForwardPassNotRun
 #[test]
 fn ln_backward_before_forward_errors() {
-    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(1e-5).unwrap();
     let grad = tensor2(vec![1.0f32; 8], 2, 4);
     let err = ln.backward(&grad).unwrap_err();
     assert!(
@@ -787,7 +800,7 @@ fn ln_backward_before_forward_errors() {
 /// LN Custom(axis) with axis >= input.ndim() is rejected at forward time with InvalidParameter
 #[test]
 fn ln_custom_axis_out_of_bounds_forward_errors() {
-    let mut ln = LayerNormalization::new(vec![4], 1e-5)
+    let mut ln = LayerNormalization::new(1e-5)
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Custom(5))
         .unwrap();
@@ -803,10 +816,11 @@ fn ln_custom_axis_out_of_bounds_forward_errors() {
 /// LN Custom(axis) out-of-bounds is also rejected by predict() with InvalidParameter
 #[test]
 fn ln_custom_axis_out_of_bounds_predict_errors() {
-    let ln = LayerNormalization::new(vec![4], 1e-5)
+    let mut ln = LayerNormalization::new(1e-5)
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Custom(5))
         .unwrap();
+    ln.build(&Shape::known(&[4])).unwrap();
     let input = tensor1(vec![1.0f32, 2.0, 3.0, 4.0]); // ndim = 1, axis 5 is out of bounds
     let result = ln.predict(&input);
     assert!(
@@ -819,7 +833,7 @@ fn ln_custom_axis_out_of_bounds_predict_errors() {
 /// LN Default on a 0-dim (scalar) tensor is rejected at forward time with InvalidInput
 #[test]
 fn ln_default_scalar_input_forward_errors() {
-    let mut ln = LayerNormalization::new(vec![], 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(1e-5).unwrap();
     let scalar = ArrayD::from_shape_vec(vec![], vec![3.0f32]).unwrap(); // 0-dim tensor
     let result = ln.forward(&scalar);
     assert!(
@@ -832,7 +846,8 @@ fn ln_default_scalar_input_forward_errors() {
 /// LN Default on a 0-dim (scalar) tensor is also rejected by predict() with InvalidInput
 #[test]
 fn ln_default_scalar_input_predict_errors() {
-    let ln = LayerNormalization::new(vec![], 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(1e-5).unwrap();
+    ln.build(&Shape::known(&[4])).unwrap();
     let scalar = ArrayD::from_shape_vec(vec![], vec![3.0f32]).unwrap(); // 0-dim tensor
     let result = ln.predict(&scalar);
     assert!(
@@ -847,7 +862,7 @@ fn ln_default_scalar_input_predict_errors() {
 /// BatchNormalization::backward in eval mode returns grad_output unchanged (bit-exact)
 #[test]
 fn bn_backward_eval_mode_passes_gradient_through() {
-    let mut bn = BatchNormalization::new(vec![2, 3], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
     bn.set_training_if_mode_dependent(false);
 
     // A forward in eval mode (uses running stats) does not affect the passthrough
@@ -865,7 +880,7 @@ fn bn_backward_eval_mode_passes_gradient_through() {
 /// LayerNormalization::backward in eval mode returns grad_output unchanged (bit-exact)
 #[test]
 fn ln_backward_eval_mode_passes_gradient_through() {
-    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(1e-5).unwrap();
     ln.set_training_if_mode_dependent(false);
 
     let input = tensor2(vec![1.0f32, 3.0, 5.0, 7.0, 2.0, -2.0, 0.0, 4.0], 2, 4);
@@ -883,7 +898,7 @@ fn ln_backward_eval_mode_passes_gradient_through() {
 /// every element as its own sample, preserving the input shape
 #[test]
 fn bn_new_scalar_param_branch_forward_1d() {
-    let mut bn = BatchNormalization::new(vec![4], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
 
     let input = tensor1(vec![1.0f32, 2.0, 3.0, 4.0]);
     let output = bn.forward(&input).unwrap();
@@ -904,7 +919,8 @@ fn bn_spatial_4d_normalizes_per_channel() {
     use rustyml::neural_network::layers::ParamCounts;
 
     // [N=1, H=2, W=2, C=2]
-    let mut bn = BatchNormalization::new(vec![1, 2, 2, 2], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
+    bn.build(&Shape::known(&[1, 2, 2, 2])).unwrap();
     // Per-channel (C=2) parameters: gamma[2] + beta[2] = 4 trainable (not 2*C*H*W = 16), plus
     // the running mean[2] and the running variance[2], which no optimizer updates
     assert_eq!(bn.param_count(), ParamCounts::new(4, 4));
@@ -945,7 +961,7 @@ fn bn_spatial_4d_normalizes_per_channel() {
 fn bn_spatial_4d_backward_shape() {
     use rustyml::neural_network::Tensor;
     // [N=2, H=3, W=2, C=2]: the trailing axis is the channel axis
-    let mut bn = BatchNormalization::new(vec![2, 3, 2, 2], 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
     let x: Tensor =
         ArrayD::from_shape_fn(vec![2, 3, 2, 2], |idx| (idx[1] + idx[2] + idx[3]) as f32);
     bn.forward(&x).unwrap();
@@ -987,7 +1003,7 @@ fn bn_run(shape: &[usize], gate: usize) -> (ArrayD<f32>, ArrayD<f32>, Vec<f32>) 
         ((k % 19) as f32) * 0.0625 - 0.5
     });
 
-    let mut bn = BatchNormalization::new(shape.to_vec(), 0.9, 1e-5).unwrap();
+    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
     let out = bn.forward(&x).unwrap();
     let grad_in = bn.backward(&grad).unwrap();
     // `parameters` hands out gamma and beta with the gradients the backward pass just wrote
@@ -1074,7 +1090,8 @@ fn bn_gate_move_does_not_change_any_bit() {
 #[test]
 fn bn_param_count_splits_the_trainable_and_the_non_trainable_half() {
     for channels in [1usize, 3, 8] {
-        let bn = BatchNormalization::new(vec![4, channels], 0.9, 1e-5).unwrap();
+        let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
+        bn.build(&Shape::known(&[2, channels])).unwrap();
         let counts = bn.param_count();
         assert_eq!(
             counts.trainable,
@@ -1106,15 +1123,18 @@ fn bn_param_count_splits_the_trainable_and_the_non_trainable_half() {
 /// the same channel count. Neither the batch nor the spatial axes enter the count
 #[test]
 fn bn_param_count_counts_the_channel_axis_alone() {
-    let flat = BatchNormalization::new(vec![2, 7], 0.9, 1e-5).unwrap();
-    let spatial = BatchNormalization::new(vec![2, 5, 5, 7], 0.9, 1e-5).unwrap();
+    let mut flat = BatchNormalization::new(0.9, 1e-5).unwrap();
+    flat.build(&Shape::known(&[2, 7])).unwrap();
+    let mut spatial = BatchNormalization::new(0.9, 1e-5).unwrap();
+    spatial.build(&Shape::known(&[1, 2, 2, 7])).unwrap();
     assert_eq!(spatial.param_count(), flat.param_count());
     assert_eq!(spatial.param_count().trainable, 14);
     assert_eq!(spatial.param_count().non_trainable, 14);
     assert_eq!(spatial.param_count().total(), 28);
 
-    // A 1-D input shape has no channel axis and gives scalar parameters
-    let scalar = BatchNormalization::new(vec![4], 0.9, 1e-5).unwrap();
+    // A 1-D build shape has no channel axis and gives scalar parameters
+    let mut scalar = BatchNormalization::new(0.9, 1e-5).unwrap();
+    scalar.build(&Shape::known(&[5])).unwrap();
     assert_eq!(scalar.param_count().trainable, 2);
     assert_eq!(scalar.param_count().non_trainable, 2);
     assert_eq!(scalar.param_count().total(), 4);
@@ -1128,7 +1148,8 @@ fn bn_param_count_counts_the_channel_axis_alone() {
 /// not a constant that every layer reports
 #[test]
 fn ln_param_count_reports_no_non_trainable_parameter() {
-    let ln = LayerNormalization::new(vec![4, 3], 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(1e-5).unwrap();
+    ln.build(&Shape::known(&[2, 3])).unwrap();
     let counts = ln.param_count();
     assert_eq!(counts.trainable, 6, "gamma and beta over 3 features");
     assert_eq!(

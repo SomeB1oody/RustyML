@@ -2,11 +2,12 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
-use crate::neural_network::layers::regularization::validation::{
-    shape_preserving_output, validate_input_shape, validate_stddev,
+use crate::neural_network::layers::regularization::validation::validate_stddev;
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    build_on_forward, built_layer_shape_functions, no_trainable_parameters_layer_functions,
 };
 use crate::neural_network::traits::Layer;
 use crate::neural_network::{Shape, Tensor};
@@ -19,6 +20,14 @@ use ndarray_rand::rand_distr::Normal;
 /// Adds random noise sampled from a normal distribution with mean 0 during training
 /// to improve robustness and reduce overfitting
 ///
+/// # Shape freedom
+///
+/// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of
+/// any shape and of any rank. [`Layer::build`] records the shape it is given, and
+/// [`Layer::output_shape`] reports it, but no later input is checked against it. See the
+/// "Shape freedom" section of
+/// [`Dropout`](crate::neural_network::layers::regularization::dropout::dropout::Dropout)
+///
 /// # Examples
 ///
 /// ```rust
@@ -27,7 +36,7 @@ use ndarray_rand::rand_distr::Normal;
 /// use ndarray::Array2;
 ///
 /// // GaussianNoise layer with standard deviation 0.1
-/// let mut noise_layer = GaussianNoise::new(0.1, vec![32, 128]).unwrap();
+/// let mut noise_layer = GaussianNoise::new(0.1).unwrap();
 ///
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
@@ -38,8 +47,8 @@ use ndarray_rand::rand_distr::Normal;
 pub struct GaussianNoise {
     /// Standard deviation of the Gaussian noise to add
     stddev: f32,
-    /// Expected shape of the input tensor
-    input_shape: Vec<usize>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
     /// Whether the layer is in training mode or inference mode
     training: bool,
     /// Random number generator used to sample the Gaussian noise
@@ -52,7 +61,6 @@ impl GaussianNoise {
     /// # Parameters
     ///
     /// - `stddev` - Standard deviation of the Gaussian noise, must be non-negative
-    /// - `input_shape` - Shape of the input tensor
     ///
     /// # Returns
     ///
@@ -66,14 +74,14 @@ impl GaussianNoise {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `stddev` is negative
-    pub fn new(stddev: f32, input_shape: Vec<usize>) -> Result<Self, Error> {
+    pub fn new(stddev: f32) -> Result<Self, Error> {
         validate_stddev(stddev)?;
 
         let rng = crate::random::make_rng(None);
 
         Ok(GaussianNoise {
             stddev,
-            input_shape,
+            built: None,
             training: true,
             rng,
         })
@@ -100,9 +108,25 @@ impl GaussianNoise {
 }
 
 impl Layer for GaussianNoise {
+    /// Records the shape the layer serves. The layer holds no array, so nothing is
+    /// allocated
+    ///
+    /// The recorded shape is what [`Layer::output_shape`] reports, and no more. The layer owns
+    /// no array and reads no extent, so it checks no later input against it. See the
+    /// "Shape freedom" section of the type
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "GaussianNoise", input)? else {
+            return Ok(());
+        };
+        input.check_min_rank("GaussianNoise", 1)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    /// Adds noise to a tensor of any shape. See the "Shape freedom" section of the type
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // `stddev` was validated in `new()`. Only the runtime input needs a check.
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        // `stddev` was validated in `new()`, and the input needs no check
+        build_on_forward!(self, input);
 
         // During inference or when stddev is 0, pass input through unchanged
         if !self.training || self.stddev == 0.0 {
@@ -121,9 +145,14 @@ impl Layer for GaussianNoise {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
+    ///
+    /// The input needs no check, and the layer takes a tensor of any shape. `predict` cannot
+    /// build, so it still refuses a layer that holds no build
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `stddev` was validated in `new()`. Only the runtime input needs a check.
-        validate_input_shape(input.shape(), &self.input_shape)?;
+        // `stddev` was validated in `new()`, and the input needs no check
+        if self.built.is_none() {
+            return Err(Error::not_built("GaussianNoise"));
+        }
 
         // Inference is identity: pass input through without sampling noise
         Ok(input.clone())
@@ -139,13 +168,7 @@ impl Layer for GaussianNoise {
         "GaussianNoise"
     }
 
-    fn known_input_shape(&self) -> Option<Shape> {
-        (!self.input_shape.is_empty()).then(|| Shape::known(&self.input_shape))
-    }
-
-    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
-        shape_preserving_output(input, &self.input_shape, "GaussianNoise")
-    }
+    built_layer_shape_functions!();
 
     no_trainable_parameters_layer_functions!();
 

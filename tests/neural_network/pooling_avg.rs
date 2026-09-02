@@ -7,6 +7,7 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::pooling::average_pooling_1d::AveragePooling1D;
@@ -24,10 +25,7 @@ use rustyml::{error::Error, neural_network::NnError};
 /// Forward mean values for pool_size=2, stride=2 over a 1D channel
 #[test]
 fn avg_pool_1d_forward_values_pool2_stride2() {
-    let mut layer = AveragePooling1D::new(2, vec![1, 6, 1])
-        .unwrap()
-        .with_stride(2)
-        .unwrap();
+    let mut layer = AveragePooling1D::new(2).with_stride(2).unwrap();
     let x: Tensor = Array::from_shape_vec((1, 6, 1), vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0])
         .unwrap()
         .into_dyn();
@@ -42,10 +40,7 @@ fn avg_pool_1d_forward_values_pool2_stride2() {
 /// Forward mean values for a moving window: pool_size=3, stride=1 over 2 identical channels
 #[test]
 fn avg_pool_1d_forward_values_pool3_stride1() {
-    let mut layer = AveragePooling1D::new(3, vec![1, 6, 2])
-        .unwrap()
-        .with_stride(1)
-        .unwrap();
+    let mut layer = AveragePooling1D::new(3).with_stride(1).unwrap();
     // Both channels carry the same values 0..5 along the length axis
     let mut data = vec![0.0f32; 6 * 2];
     for l in 0..6usize {
@@ -68,10 +63,7 @@ fn avg_pool_1d_forward_values_pool3_stride1() {
 /// Pooling acts per-batch on independent values across a 2-batch input
 #[test]
 fn avg_pool_1d_forward_multi_batch() {
-    let mut layer = AveragePooling1D::new(2, vec![2, 4, 1])
-        .unwrap()
-        .with_stride(2)
-        .unwrap();
+    let mut layer = AveragePooling1D::new(2).with_stride(2).unwrap();
     let x: Tensor =
         Array::from_shape_vec((2, 4, 1), vec![2.0f32, 4.0, 6.0, 8.0, 1.0, 3.0, 5.0, 7.0])
             .unwrap()
@@ -89,19 +81,14 @@ fn avg_pool_1d_forward_multi_batch() {
 /// predict() returns the same result as forward()
 #[test]
 fn avg_pool_1d_predict_equals_forward() {
-    let mut layer = AveragePooling1D::new(2, vec![1, 6, 1])
-        .unwrap()
-        .with_stride(2)
-        .unwrap();
+    let mut layer = AveragePooling1D::new(2).with_stride(2).unwrap();
     let x: Tensor = Array::from_shape_vec((1, 6, 1), vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0])
         .unwrap()
         .into_dyn();
     let fwd = layer.forward(&x).unwrap();
     // predict() is on &self, so a fresh layer (no forward cache) must still agree
-    let layer_pred = AveragePooling1D::new(2, vec![1, 6, 1])
-        .unwrap()
-        .with_stride(2)
-        .unwrap();
+    let mut layer_pred = AveragePooling1D::new(2).with_stride(2).unwrap();
+    layer_pred.build(&Shape::known(&[1, 6, 1])).unwrap();
     let pred = layer_pred.predict(&x).unwrap();
     assert_eq!(fwd.shape(), pred.shape());
     for (a, b) in fwd.iter().zip(pred.iter()) {
@@ -112,10 +99,7 @@ fn avg_pool_1d_predict_equals_forward() {
 /// backward() before forward() returns ForwardPassNotRun
 #[test]
 fn avg_pool_1d_backward_before_forward_errors() {
-    let mut layer = AveragePooling1D::new(2, vec![1, 4, 1])
-        .unwrap()
-        .with_stride(2)
-        .unwrap();
+    let mut layer = AveragePooling1D::new(2).with_stride(2).unwrap();
     let grad: Tensor = Array::ones((1, 2, 1)).into_dyn();
     let result = layer.backward(&grad);
     assert!(
@@ -131,56 +115,46 @@ fn avg_pool_1d_backward_before_forward_errors() {
 /// forward() and predict() reject wrong-rank input (2D instead of 3D)
 #[test]
 fn avg_pool_1d_wrong_rank_input_errors() {
-    let mut layer = AveragePooling1D::new(2, vec![1, 4, 1])
-        .unwrap()
-        .with_stride(2)
-        .unwrap();
+    let mut layer = AveragePooling1D::new(2).with_stride(2).unwrap();
     let bad: Tensor = Array::ones((4, 4)).into_dyn();
     assert!(layer.forward(&bad).is_err());
-    let layer_pred = AveragePooling1D::new(2, vec![1, 4, 1])
-        .unwrap()
-        .with_stride(2)
-        .unwrap();
+    let layer_pred = AveragePooling1D::new(2).with_stride(2).unwrap();
     assert!(layer_pred.predict(&bad).is_err());
 }
 
-/// Constructor rejects pool_size=0
+/// The build rejects a pool size of 0
 #[test]
-fn avg_pool_1d_constructor_rejects_zero_pool_size() {
-    let result = AveragePooling1D::new(0, vec![1, 6, 1]);
+fn avg_pool_1d_build_rejects_zero_pool_size() {
+    let result = AveragePooling1D::new(0).build(&Shape::known(&[2, 8, 3]));
     assert!(result.is_err(), "pool_size=0 must be rejected");
 }
 
 /// Constructor rejects stride=0
 #[test]
 fn avg_pool_1d_constructor_rejects_zero_stride() {
-    let result = AveragePooling1D::new(2, vec![1, 6, 1])
-        .unwrap()
-        .with_stride(0);
+    let result = AveragePooling1D::new(2).with_stride(0);
     assert!(result.is_err(), "stride=0 must be rejected");
 }
 
-/// Constructor rejects pool_size larger than input length
+/// The build rejects a pool size larger than the input length
 #[test]
-fn avg_pool_1d_constructor_rejects_pool_size_larger_than_length() {
-    let result = AveragePooling1D::new(8, vec![1, 6, 1]);
+fn avg_pool_1d_build_rejects_pool_size_larger_than_length() {
+    let result = AveragePooling1D::new(8).build(&Shape::known(&[2, 4, 3]));
     assert!(result.is_err(), "pool_size > length must be rejected");
 }
 
-/// Constructor rejects non-3D input_shape
+/// The build rejects a shape that is not rank 3
 #[test]
-fn avg_pool_1d_constructor_rejects_wrong_input_shape_dims() {
-    let result = AveragePooling1D::new(2, vec![1, 6]);
-    assert!(result.is_err(), "2D input_shape must be rejected");
+fn avg_pool_1d_build_rejects_wrong_rank() {
+    let result = AveragePooling1D::new(2).build(&Shape::known(&[2, 8]));
+    assert!(result.is_err(), "a rank-2 build shape must be rejected");
 }
 
 /// layer_type() and output_shape() return correct strings
 #[test]
 fn avg_pool_1d_layer_type_and_output_shape() {
-    let layer = AveragePooling1D::new(2, vec![1, 6, 1])
-        .unwrap()
-        .with_stride(2)
-        .unwrap();
+    let mut layer = AveragePooling1D::new(2).with_stride(2).unwrap();
+    layer.build(&Shape::known(&[1, 6, 1])).unwrap();
     assert_eq!(layer.layer_type(), "AveragePooling1D");
     let shape_str = layer.output_shape();
     assert_eq!(shape_str, "(1, 3, 1)");
@@ -189,7 +163,8 @@ fn avg_pool_1d_layer_type_and_output_shape() {
 /// Stride defaults to pool_size when the caller passes None
 #[test]
 fn avg_pool_1d_default_stride_equals_pool_size() {
-    let layer = AveragePooling1D::new(3, vec![1, 6, 1]).unwrap();
+    let mut layer = AveragePooling1D::new(3);
+    layer.build(&Shape::known(&[1, 6, 1])).unwrap();
     assert_eq!(layer.output_shape(), "(1, 2, 1)");
 }
 
@@ -200,10 +175,7 @@ fn avg_pool_1d_default_stride_equals_pool_size() {
 /// Forward mean values for a 4x4 input, pool=(2,2), stride=(2,2)
 #[test]
 fn avg_pool_2d_forward_values_pool2x2_stride2x2() {
-    let mut layer = AveragePooling2D::new((2, 2), vec![1, 4, 4, 1])
-        .unwrap()
-        .with_strides((2, 2))
-        .unwrap();
+    let mut layer = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
     let vals: Vec<f32> = (0..16).map(|v| v as f32).collect();
     let x: Tensor = Array::from_shape_vec((1, 4, 4, 1), vals)
         .unwrap()
@@ -220,10 +192,7 @@ fn avg_pool_2d_forward_values_pool2x2_stride2x2() {
 /// Forward mean values for a non-square pool=(2,3) and stride=(1,1) on a [1,3,5,1] input
 #[test]
 fn avg_pool_2d_forward_values_nonsquare_pool() {
-    let mut layer = AveragePooling2D::new((2, 3), vec![1, 3, 5, 1])
-        .unwrap()
-        .with_strides((1, 1))
-        .unwrap();
+    let mut layer = AveragePooling2D::new((2, 3)).with_strides((1, 1)).unwrap();
     let vals: Vec<f32> = (0..15).map(|v| v as f32).collect();
     let x: Tensor = Array::from_shape_vec((1, 3, 5, 1), vals)
         .unwrap()
@@ -243,10 +212,7 @@ fn avg_pool_2d_forward_values_nonsquare_pool() {
 /// height/width/channel transposition changes the values, not just the shape.
 #[test]
 fn avg_pool_2d_forward_multi_channel_independence() {
-    let mut layer = AveragePooling2D::new((2, 2), vec![1, 4, 4, 2])
-        .unwrap()
-        .with_strides((2, 2))
-        .unwrap();
+    let mut layer = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
     // value(h, w, c) = 4*h + w + 100*c. Channels interleave on the last axis.
     // Channel 0 holds 0..15 row-major over the 4x4 grid. Channel 1 holds the same plus 100.
     let mut vals = Vec::with_capacity(4 * 4 * 2);
@@ -276,19 +242,14 @@ fn avg_pool_2d_forward_multi_channel_independence() {
 /// predict() produces the same values as forward() for AveragePooling2D
 #[test]
 fn avg_pool_2d_predict_equals_forward() {
-    let mut layer = AveragePooling2D::new((2, 2), vec![1, 4, 4, 1])
-        .unwrap()
-        .with_strides((2, 2))
-        .unwrap();
+    let mut layer = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
     let vals: Vec<f32> = (0..16).map(|v| v as f32).collect();
     let x: Tensor = Array::from_shape_vec((1, 4, 4, 1), vals)
         .unwrap()
         .into_dyn();
     let fwd = layer.forward(&x).unwrap();
-    let layer_pred = AveragePooling2D::new((2, 2), vec![1, 4, 4, 1])
-        .unwrap()
-        .with_strides((2, 2))
-        .unwrap();
+    let mut layer_pred = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
+    layer_pred.build(&Shape::known(&[1, 4, 4, 1])).unwrap();
     let pred = layer_pred.predict(&x).unwrap();
     assert_eq!(fwd.shape(), pred.shape());
     for (a, b) in fwd.iter().zip(pred.iter()) {
@@ -299,10 +260,7 @@ fn avg_pool_2d_predict_equals_forward() {
 /// backward() before forward() returns ForwardPassNotRun
 #[test]
 fn avg_pool_2d_backward_before_forward_errors() {
-    let mut layer = AveragePooling2D::new((2, 2), vec![1, 4, 4, 1])
-        .unwrap()
-        .with_strides((2, 2))
-        .unwrap();
+    let mut layer = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
     let grad: Tensor = Array::ones((1, 2, 2, 1)).into_dyn();
     let result = layer.backward(&grad);
     assert!(
@@ -318,67 +276,58 @@ fn avg_pool_2d_backward_before_forward_errors() {
 /// Wrong-rank input to forward/predict errors (3D instead of 4D)
 #[test]
 fn avg_pool_2d_wrong_rank_input_errors() {
-    let mut layer = AveragePooling2D::new((2, 2), vec![1, 4, 4, 1])
-        .unwrap()
-        .with_strides((2, 2))
-        .unwrap();
+    let mut layer = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
     let bad: Tensor = Array::ones((4, 4, 4)).into_dyn();
     assert!(layer.forward(&bad).is_err());
-    let layer_pred = AveragePooling2D::new((2, 2), vec![1, 4, 4, 1])
-        .unwrap()
-        .with_strides((2, 2))
-        .unwrap();
+    let layer_pred = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
     assert!(layer_pred.predict(&bad).is_err());
 }
 
-/// Constructor rejects non-4D input_shape
+/// The build rejects a shape that is not rank 4
 #[test]
-fn avg_pool_2d_constructor_rejects_wrong_dims() {
-    let result = AveragePooling2D::new((2, 2), vec![1, 4, 4]);
-    assert!(result.is_err(), "3D input_shape must be rejected");
+fn avg_pool_2d_build_rejects_wrong_rank() {
+    let result = AveragePooling2D::new((2, 2)).build(&Shape::known(&[2, 8, 3]));
+    assert!(result.is_err(), "a rank-3 build shape must be rejected");
 }
 
 /// Constructor rejects zero stride
 #[test]
 fn avg_pool_2d_constructor_rejects_zero_stride() {
-    let result = AveragePooling2D::new((2, 2), vec![1, 4, 4, 1])
-        .unwrap()
-        .with_strides((0, 2));
+    let result = AveragePooling2D::new((2, 2)).with_strides((0, 2));
     assert!(result.is_err(), "zero height stride must be rejected");
-    let result2 = AveragePooling2D::new((2, 2), vec![1, 4, 4, 1])
-        .unwrap()
-        .with_strides((2, 0));
+    let result2 = AveragePooling2D::new((2, 2)).with_strides((2, 0));
     assert!(result2.is_err(), "zero width stride must be rejected");
 }
 
-/// Constructor rejects pool_size larger than spatial dimensions
+/// The build rejects a pool size larger than a spatial extent
 #[test]
-fn avg_pool_2d_constructor_rejects_oversized_pool() {
-    let result = AveragePooling2D::new((5, 2), vec![1, 4, 4, 1]);
+fn avg_pool_2d_build_rejects_oversized_pool() {
+    let result = AveragePooling2D::new((5, 2)).build(&Shape::known(&[2, 4, 4, 3]));
     assert!(result.is_err(), "pool_h > input_h must be rejected");
 }
 
-/// Constructor rejects a zero batch or channel dimension. The check happens at construction,
-/// not at forward.
+/// The build rejects a zero spatial extent, because no window fits it
 #[test]
-fn avg_pool_2d_constructor_rejects_zero_batch_or_channel() {
+fn avg_pool_2d_build_rejects_a_zero_spatial_extent() {
     assert!(
-        AveragePooling2D::new((2, 2), vec![0, 4, 4, 1]).is_err(),
-        "zero batch dimension must be rejected"
+        AveragePooling2D::new((2, 2))
+            .build(&Shape::known(&[2, 0, 4, 3]))
+            .is_err(),
+        "a zero height must be rejected"
     );
     assert!(
-        AveragePooling2D::new((2, 2), vec![1, 4, 4, 0]).is_err(),
-        "zero channel dimension must be rejected"
+        AveragePooling2D::new((2, 2))
+            .build(&Shape::known(&[2, 4, 0, 3]))
+            .is_err(),
+        "a zero width must be rejected"
     );
 }
 
 /// layer_type() and output_shape() return correct strings
 #[test]
 fn avg_pool_2d_layer_type_and_output_shape() {
-    let layer = AveragePooling2D::new((2, 2), vec![1, 4, 4, 1])
-        .unwrap()
-        .with_strides((2, 2))
-        .unwrap();
+    let mut layer = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
+    layer.build(&Shape::known(&[1, 4, 4, 1])).unwrap();
     assert_eq!(layer.layer_type(), "AveragePooling2D");
     assert_eq!(layer.output_shape(), "(1, 2, 2, 1)");
 }
@@ -386,7 +335,8 @@ fn avg_pool_2d_layer_type_and_output_shape() {
 /// Strides default to pool_size when the caller passes None
 #[test]
 fn avg_pool_2d_default_stride_equals_pool_size() {
-    let layer = AveragePooling2D::new((2, 2), vec![1, 6, 6, 1]).unwrap();
+    let mut layer = AveragePooling2D::new((2, 2));
+    layer.build(&Shape::known(&[1, 6, 6, 1])).unwrap();
     assert_eq!(layer.output_shape(), "(1, 3, 3, 1)");
 }
 
@@ -396,8 +346,7 @@ fn avg_pool_2d_default_stride_equals_pool_size() {
 /// Forward mean value for a single (2,2,2) window covering the whole [1,2,2,2,1] volume
 #[test]
 fn avg_pool_3d_forward_values_single_window() {
-    let mut layer = AveragePooling3D::new((2, 2, 2), vec![1, 2, 2, 2, 1])
-        .unwrap()
+    let mut layer = AveragePooling3D::new((2, 2, 2))
         .with_strides((1, 1, 1))
         .unwrap();
     let vals: Vec<f32> = (0..8).map(|v| v as f32).collect();
@@ -413,8 +362,7 @@ fn avg_pool_3d_forward_values_single_window() {
 /// Forward mean values for 2 depth windows: pool=(2,2,2), stride_d=2 on a [1,4,2,2,1] input
 #[test]
 fn avg_pool_3d_forward_values_two_depth_windows() {
-    let mut layer = AveragePooling3D::new((2, 2, 2), vec![1, 4, 2, 2, 1])
-        .unwrap()
+    let mut layer = AveragePooling3D::new((2, 2, 2))
         .with_strides((2, 1, 1))
         .unwrap();
     let vals: Vec<f32> = (0..16).map(|v| v as f32).collect();
@@ -432,8 +380,7 @@ fn avg_pool_3d_forward_values_two_depth_windows() {
 /// predict() produces the same values as forward() for AveragePooling3D
 #[test]
 fn avg_pool_3d_predict_equals_forward() {
-    let mut layer = AveragePooling3D::new((2, 2, 2), vec![1, 2, 2, 2, 1])
-        .unwrap()
+    let mut layer = AveragePooling3D::new((2, 2, 2))
         .with_strides((1, 1, 1))
         .unwrap();
     let vals: Vec<f32> = (0..8).map(|v| v as f32).collect();
@@ -441,10 +388,10 @@ fn avg_pool_3d_predict_equals_forward() {
         .unwrap()
         .into_dyn();
     let fwd = layer.forward(&x).unwrap();
-    let layer_pred = AveragePooling3D::new((2, 2, 2), vec![1, 2, 2, 2, 1])
-        .unwrap()
+    let mut layer_pred = AveragePooling3D::new((2, 2, 2))
         .with_strides((1, 1, 1))
         .unwrap();
+    layer_pred.build(&Shape::known(&[1, 2, 2, 2, 1])).unwrap();
     let pred = layer_pred.predict(&x).unwrap();
     assert_eq!(fwd.shape(), pred.shape());
     for (a, b) in fwd.iter().zip(pred.iter()) {
@@ -455,8 +402,7 @@ fn avg_pool_3d_predict_equals_forward() {
 /// backward() before forward() returns ForwardPassNotRun for AveragePooling3D
 #[test]
 fn avg_pool_3d_backward_before_forward_errors() {
-    let mut layer = AveragePooling3D::new((2, 2, 2), vec![1, 4, 4, 4, 1])
-        .unwrap()
+    let mut layer = AveragePooling3D::new((2, 2, 2))
         .with_strides((2, 2, 2))
         .unwrap();
     let grad: Tensor = Array::ones((1, 2, 2, 2, 1)).into_dyn();
@@ -474,56 +420,55 @@ fn avg_pool_3d_backward_before_forward_errors() {
 /// Wrong-rank input (4D instead of 5D) errors
 #[test]
 fn avg_pool_3d_wrong_rank_input_errors() {
-    let mut layer = AveragePooling3D::new((2, 2, 2), vec![1, 4, 4, 4, 1])
-        .unwrap()
+    let mut layer = AveragePooling3D::new((2, 2, 2))
         .with_strides((2, 2, 2))
         .unwrap();
     let bad: Tensor = Array::ones((1, 4, 4, 1)).into_dyn();
     assert!(layer.forward(&bad).is_err());
-    let layer_pred = AveragePooling3D::new((2, 2, 2), vec![1, 4, 4, 4, 1])
-        .unwrap()
+    let layer_pred = AveragePooling3D::new((2, 2, 2))
         .with_strides((2, 2, 2))
         .unwrap();
     assert!(layer_pred.predict(&bad).is_err());
 }
 
-/// Constructor rejects non-5D input_shape
+/// The build rejects a shape that is not rank 5
 #[test]
-fn avg_pool_3d_constructor_rejects_wrong_dims() {
-    let result = AveragePooling3D::new((2, 2, 2), vec![1, 4, 4, 1]);
-    assert!(result.is_err(), "4D input_shape must be rejected");
+fn avg_pool_3d_build_rejects_wrong_rank() {
+    let result = AveragePooling3D::new((2, 2, 2)).build(&Shape::known(&[1, 4, 4, 2]));
+    assert!(result.is_err(), "a rank-4 build shape must be rejected");
 }
 
 /// Constructor rejects zero strides
 #[test]
 fn avg_pool_3d_constructor_rejects_zero_stride() {
-    let result = AveragePooling3D::new((2, 2, 2), vec![1, 4, 4, 4, 1])
-        .unwrap()
-        .with_strides((0, 2, 2));
+    let result = AveragePooling3D::new((2, 2, 2)).with_strides((0, 2, 2));
     assert!(result.is_err(), "zero depth stride must be rejected");
 }
 
-/// Constructor rejects a zero batch or channel dimension. The check happens at construction,
-/// not at forward.
+/// The build rejects a zero spatial extent, because no window fits it
 #[test]
-fn avg_pool_3d_constructor_rejects_zero_batch_or_channel() {
+fn avg_pool_3d_build_rejects_a_zero_spatial_extent() {
     assert!(
-        AveragePooling3D::new((2, 2, 2), vec![0, 4, 4, 4, 1]).is_err(),
-        "zero batch dimension must be rejected"
+        AveragePooling3D::new((2, 2, 2))
+            .build(&Shape::known(&[1, 0, 4, 4, 1]))
+            .is_err(),
+        "a zero depth must be rejected"
     );
     assert!(
-        AveragePooling3D::new((2, 2, 2), vec![1, 4, 4, 4, 0]).is_err(),
-        "zero channel dimension must be rejected"
+        AveragePooling3D::new((2, 2, 2))
+            .build(&Shape::known(&[1, 4, 4, 0, 1]))
+            .is_err(),
+        "a zero width must be rejected"
     );
 }
 
 /// layer_type() and output_shape() return correct strings
 #[test]
 fn avg_pool_3d_layer_type_and_output_shape() {
-    let layer = AveragePooling3D::new((2, 2, 2), vec![1, 4, 4, 4, 1])
-        .unwrap()
+    let mut layer = AveragePooling3D::new((2, 2, 2))
         .with_strides((2, 2, 2))
         .unwrap();
+    layer.build(&Shape::known(&[1, 4, 4, 4, 1])).unwrap();
     assert_eq!(layer.layer_type(), "AveragePooling3D");
     assert_eq!(layer.output_shape(), "(1, 2, 2, 2, 1)");
 }
@@ -531,7 +476,8 @@ fn avg_pool_3d_layer_type_and_output_shape() {
 /// For 3D, strides default to pool_size when the caller passes None
 #[test]
 fn avg_pool_3d_default_stride_equals_pool_size() {
-    let layer = AveragePooling3D::new((2, 2, 2), vec![1, 4, 4, 4, 1]).unwrap();
+    let mut layer = AveragePooling3D::new((2, 2, 2));
+    layer.build(&Shape::known(&[1, 4, 4, 4, 1])).unwrap();
     assert_eq!(layer.output_shape(), "(1, 2, 2, 2, 1)");
 }
 
@@ -915,8 +861,7 @@ fn global_avg_pool_3d_output_shape() {
 /// For a 3x3 input, pool 2x2, stride 2, the trailing windows divide by their in-bounds count.
 #[test]
 fn avg_pool_2d_same_padding_excludes_padding() {
-    let mut layer = AveragePooling2D::new((2, 2), vec![1, 3, 3, 1])
-        .unwrap()
+    let mut layer = AveragePooling2D::new((2, 2))
         .with_strides((2, 2))
         .unwrap()
         .with_padding(PaddingType::Same);

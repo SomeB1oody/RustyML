@@ -253,6 +253,67 @@ macro_rules! named_weight_layer_functions {
 }
 pub(in crate::neural_network::layers) use named_weight_layer_functions;
 
+/// Generates the 2 build reports of a layer that holds a `built: Option<Shape>` field
+///
+/// [`Layer::known_input_shape`] gives the shape the layer built for, and
+/// [`Layer::build_config`] gives the same shape with the batch axis freed, which is what a
+/// checkpoint records. A layer whose displayed input shape comes from somewhere else uses
+/// `build_config_function` instead and writes its own `known_input_shape`
+///
+/// It is path-exported like `no_trainable_parameters_layer_functions`:
+/// `use crate::neural_network::layers::built_layer_shape_functions;`
+///
+/// [`Layer::known_input_shape`]: crate::neural_network::traits::Layer::known_input_shape
+/// [`Layer::build_config`]: crate::neural_network::traits::Layer::build_config
+macro_rules! built_layer_shape_functions {
+    () => {
+        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
+            self.built.clone()
+        }
+
+        $crate::neural_network::layers::build_config_function!();
+    };
+}
+pub(in crate::neural_network::layers) use built_layer_shape_functions;
+
+/// Generates [`Layer::build_config`] of a layer that holds a `built: Option<Shape>` field
+///
+/// [`Layer::build_config`]: crate::neural_network::traits::Layer::build_config
+macro_rules! build_config_function {
+    () => {
+        fn build_config(&self) -> Option<$crate::neural_network::layers::checkpoint::BuildConfig> {
+            self.built
+                .as_ref()
+                .map($crate::neural_network::layers::checkpoint::BuildConfig::new)
+        }
+    };
+}
+pub(in crate::neural_network::layers) use build_config_function;
+
+/// Builds a layer from the tensor that reached its forward pass, when it holds no build yet
+///
+/// A caller that drives 1 layer by hand never calls [`Layer::build`], so the forward pass
+/// builds the layer from the shape it receives. The whole shape goes in, batch extent
+/// included, so the layer reports the shape it was really given.
+/// [`Layer::predict`] takes `&self` and cannot do this, and it refuses an unbuilt layer
+///
+/// It is path-exported like `no_trainable_parameters_layer_functions`:
+/// `use crate::neural_network::layers::build_on_forward;`
+///
+/// [`Layer::build`]: crate::neural_network::traits::Layer::build
+/// [`Layer::predict`]: crate::neural_network::traits::Layer::predict
+macro_rules! build_on_forward {
+    ($layer:expr, $input:expr) => {
+        if $layer.built.is_none() {
+            $crate::neural_network::traits::Layer::build(
+                $layer,
+                &$crate::neural_network::Shape::known($input.shape()),
+            )?;
+        }
+    };
+}
+pub(in crate::neural_network::layers) use build_on_forward;
+
 /// Wraps 1 named array as the `Option` that `named_weight_layer_functions` collects
 ///
 /// The rule with 1 argument takes an array that the layer always holds, and it is always

@@ -31,6 +31,7 @@
 use super::{GoldenCase, LayerFixture};
 use ndarray::IxDyn;
 use rustyml::error::Error;
+use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::border::{Cropping1D, Cropping2D, Cropping3D};
@@ -208,15 +209,24 @@ const PLACEHOLDER_SHAPE: [usize; 1] = [1];
 fn max_pooling_1d_cases() -> Vec<GoldenCase> {
     vec![
         GoldenCase::new("pool2_stride2", &[2, 8, 3], || {
-            Box::new(MaxPooling1D::new(2, vec![2, 8, 3]).expect("a 3D input shape"))
+            Box::new({
+                let mut layer = MaxPooling1D::new(2);
+                layer
+                    .build(&Shape::known(&[2, 8, 3]))
+                    .expect("the layer accepts the shape of the case");
+                layer
+            })
         }),
         GoldenCase::new("pool3_stride2_remainder", &[2, 7, 4], || {
-            Box::new(
-                MaxPooling1D::new(3, vec![2, 7, 4])
-                    .expect("a 3D input shape")
+            Box::new({
+                let mut layer = MaxPooling1D::new(3)
                     .with_stride(2)
-                    .expect("a positive stride"),
-            )
+                    .expect("a positive stride");
+                layer
+                    .build(&Shape::known(&[2, 7, 4]))
+                    .expect("the layer accepts the shape of the case");
+                layer
+            })
         }),
         // Pins rule 1 of `HandBuiltInput`: a tie goes to the first maximum in window order.
         //
@@ -249,7 +259,13 @@ fn max_pooling_1d_cases() -> Vec<GoldenCase> {
                     -2.0, 6.0, // position 4
                     0.25, 6.0, // position 5
                 ],
-                Box::new(MaxPooling1D::new(3, vec![1, 6, 2]).expect("a 3D input shape")),
+                Box::new({
+                    let mut layer = MaxPooling1D::new(3);
+                    layer
+                        .build(&Shape::known(&[1, 6, 2]))
+                        .expect("the layer accepts the shape of the case");
+                    layer
+                }),
             )
         }),
         // Pins rule 2 of `HandBuiltInput`: the NaN rule of the max fold.
@@ -271,7 +287,13 @@ fn max_pooling_1d_cases() -> Vec<GoldenCase> {
             HandBuiltInput::boxed(
                 &[1, 6, 1],
                 &[1.0, f32::NAN, 9.0, f32::NAN, 2.0, f32::NAN],
-                Box::new(MaxPooling1D::new(3, vec![1, 6, 1]).expect("a 3D input shape")),
+                Box::new({
+                    let mut layer = MaxPooling1D::new(3);
+                    layer
+                        .build(&Shape::known(&[1, 6, 1]))
+                        .expect("the layer accepts the shape of the case");
+                    layer
+                }),
             )
         }),
         // Pins rule 3 of `HandBuiltInput`: a window that no element wins keeps its own seed.
@@ -300,7 +322,13 @@ fn max_pooling_1d_cases() -> Vec<GoldenCase> {
                 HandBuiltInput::boxed(
                     &[1, 4, 1],
                     &[1.0, 2.0, f32::NEG_INFINITY, f32::NEG_INFINITY],
-                    Box::new(MaxPooling1D::new(2, vec![1, 4, 1]).expect("a 3D input shape")),
+                    Box::new({
+                        let mut layer = MaxPooling1D::new(2);
+                        layer
+                            .build(&Shape::known(&[1, 4, 1]))
+                            .expect("the layer accepts the shape of the case");
+                        layer
+                    }),
                 )
             },
         ),
@@ -313,14 +341,22 @@ fn max_pooling_1d_cases() -> Vec<GoldenCase> {
 fn max_pooling_2d_cases() -> Vec<GoldenCase> {
     vec![
         GoldenCase::new("pool2x2_stride2x2", &[2, 6, 6, 3], || {
-            Box::new(MaxPooling2D::new((2, 2), vec![2, 6, 6, 3]).expect("a 4D input shape"))
+            Box::new({
+                let mut layer = MaxPooling2D::new((2, 2));
+                layer
+                    .build(&Shape::known(&[2, 6, 6, 3]))
+                    .expect("the layer accepts the shape of the case");
+                layer
+            })
         }),
         GoldenCase::new("same_remainder_5x5", &[2, 5, 5, 2], || {
-            Box::new(
-                MaxPooling2D::new((2, 2), vec![2, 5, 5, 2])
-                    .expect("a 4D input shape")
-                    .with_padding(PaddingType::Same),
-            )
+            Box::new({
+                let mut layer = MaxPooling2D::new((2, 2)).with_padding(PaddingType::Same);
+                layer
+                    .build(&Shape::known(&[2, 5, 5, 2]))
+                    .expect("the layer accepts the shape of the case");
+                layer
+            })
         }),
         // Pins rule 1 of `HandBuiltInput` at rank 2, and with it the window scan order.
         //
@@ -357,7 +393,13 @@ fn max_pooling_2d_cases() -> Vec<GoldenCase> {
                     4.0, -1.0, 7.0, 7.0, // row 2
                     0.5, 4.0, 7.0, 5.0, // row 3
                 ],
-                Box::new(MaxPooling2D::new((2, 2), vec![1, 4, 4, 1]).expect("a 4D input shape")),
+                Box::new({
+                    let mut layer = MaxPooling2D::new((2, 2));
+                    layer
+                        .build(&Shape::known(&[1, 4, 4, 1]))
+                        .expect("the layer accepts the shape of the case");
+                    layer
+                }),
             )
         }),
         // Pins rule 3 of `HandBuiltInput` at rank 2.
@@ -391,9 +433,13 @@ fn max_pooling_2d_cases() -> Vec<GoldenCase> {
                         f32::NEG_INFINITY,
                         f32::NEG_INFINITY, // row 1
                     ],
-                    Box::new(
-                        MaxPooling2D::new((2, 2), vec![1, 2, 4, 1]).expect("a 4D input shape"),
-                    ),
+                    Box::new({
+                        let mut layer = MaxPooling2D::new((2, 2));
+                        layer
+                            .build(&Shape::known(&[1, 2, 4, 1]))
+                            .expect("the layer accepts the shape of the case");
+                        layer
+                    }),
                 )
             },
         ),
@@ -406,10 +452,22 @@ fn max_pooling_2d_cases() -> Vec<GoldenCase> {
 fn max_pooling_3d_cases() -> Vec<GoldenCase> {
     vec![
         GoldenCase::new("pool2x2x2_valid", &[2, 4, 4, 4, 1], || {
-            Box::new(MaxPooling3D::new((2, 2, 2), vec![2, 4, 4, 4, 1]).expect("a 5D input shape"))
+            Box::new({
+                let mut layer = MaxPooling3D::new((2, 2, 2));
+                layer
+                    .build(&Shape::known(&[2, 4, 4, 4, 1]))
+                    .expect("the layer accepts the shape of the case");
+                layer
+            })
         }),
         GoldenCase::new("depth_remainder", &[2, 5, 3, 3, 1], || {
-            Box::new(MaxPooling3D::new((2, 3, 3), vec![2, 5, 3, 3, 1]).expect("a 5D input shape"))
+            Box::new({
+                let mut layer = MaxPooling3D::new((2, 3, 3));
+                layer
+                    .build(&Shape::known(&[2, 5, 3, 3, 1]))
+                    .expect("the layer accepts the shape of the case");
+                layer
+            })
         }),
         // Pins rule 1 of `HandBuiltInput` at rank 3, with a tie that spans all 3 spatial axes.
         //
@@ -442,9 +500,13 @@ fn max_pooling_3d_cases() -> Vec<GoldenCase> {
                     8.0, 0.0, 2.0, 6.0, // depth 1, height 0
                     -4.0, 8.0, 5.0, 1.0, // depth 1, height 1
                 ],
-                Box::new(
-                    MaxPooling3D::new((2, 2, 2), vec![1, 2, 2, 4, 1]).expect("a 5D input shape"),
-                ),
+                Box::new({
+                    let mut layer = MaxPooling3D::new((2, 2, 2));
+                    layer
+                        .build(&Shape::known(&[1, 2, 2, 4, 1]))
+                        .expect("the layer accepts the shape of the case");
+                    layer
+                }),
             )
         }),
         // Pins rule 3 of `HandBuiltInput` at rank 3.
@@ -479,10 +541,13 @@ fn max_pooling_3d_cases() -> Vec<GoldenCase> {
                         5.0, 0.0, negative, negative, // depth 1, height 0
                         -4.0, 6.0, negative, negative, // depth 1, height 1
                     ],
-                    Box::new(
-                        MaxPooling3D::new((2, 2, 2), vec![1, 2, 2, 4, 1])
-                            .expect("a 5D input shape"),
-                    ),
+                    Box::new({
+                        let mut layer = MaxPooling3D::new((2, 2, 2));
+                        layer
+                            .build(&Shape::known(&[1, 2, 2, 4, 1]))
+                            .expect("the layer accepts the shape of the case");
+                        layer
+                    }),
                 )
             },
         ),
@@ -498,16 +563,25 @@ fn max_pooling_3d_cases() -> Vec<GoldenCase> {
 fn average_pooling_1d_cases() -> Vec<GoldenCase> {
     vec![
         GoldenCase::new("pool3_stride3", &[2, 6, 2], || {
-            Box::new(AveragePooling1D::new(3, vec![2, 6, 2]).expect("a 3D input shape"))
+            Box::new({
+                let mut layer = AveragePooling1D::new(3);
+                layer
+                    .build(&Shape::known(&[2, 6, 2]))
+                    .expect("the layer accepts the shape of the case");
+                layer
+            })
         }),
         GoldenCase::new("pool3_stride2_same", &[2, 7, 2], || {
-            Box::new(
-                AveragePooling1D::new(3, vec![2, 7, 2])
-                    .expect("a 3D input shape")
+            Box::new({
+                let mut layer = AveragePooling1D::new(3)
                     .with_stride(2)
                     .expect("a positive stride")
-                    .with_padding(PaddingType::Same),
-            )
+                    .with_padding(PaddingType::Same);
+                layer
+                    .build(&Shape::known(&[2, 7, 2]))
+                    .expect("the layer accepts the shape of the case");
+                layer
+            })
         }),
         // Records how average pooling answers a NaN, as the contrast to the max fold.
         //
@@ -527,7 +601,13 @@ fn average_pooling_1d_cases() -> Vec<GoldenCase> {
             HandBuiltInput::boxed(
                 &[1, 4, 1],
                 &[1.0, f32::NAN, 4.0, 6.0],
-                Box::new(AveragePooling1D::new(2, vec![1, 4, 1]).expect("a 3D input shape")),
+                Box::new({
+                    let mut layer = AveragePooling1D::new(2);
+                    layer
+                        .build(&Shape::known(&[1, 4, 1]))
+                        .expect("the layer accepts the shape of the case");
+                    layer
+                }),
             )
         }),
     ]
@@ -538,15 +618,24 @@ fn average_pooling_1d_cases() -> Vec<GoldenCase> {
 fn average_pooling_2d_cases() -> Vec<GoldenCase> {
     vec![
         GoldenCase::new("pool3x2_nonsquare", &[2, 6, 4, 2], || {
-            Box::new(AveragePooling2D::new((3, 2), vec![2, 6, 4, 2]).expect("a 4D input shape"))
+            Box::new({
+                let mut layer = AveragePooling2D::new((3, 2));
+                layer
+                    .build(&Shape::known(&[2, 6, 4, 2]))
+                    .expect("the layer accepts the shape of the case");
+                layer
+            })
         }),
         GoldenCase::new("overlap_stride1x1", &[2, 5, 5, 2], || {
-            Box::new(
-                AveragePooling2D::new((2, 2), vec![2, 5, 5, 2])
-                    .expect("a 4D input shape")
+            Box::new({
+                let mut layer = AveragePooling2D::new((2, 2))
                     .with_strides((1, 1))
-                    .expect("positive strides"),
-            )
+                    .expect("positive strides");
+                layer
+                    .build(&Shape::known(&[2, 5, 5, 2]))
+                    .expect("the layer accepts the shape of the case");
+                layer
+            })
         }),
     ]
 }
@@ -556,19 +645,24 @@ fn average_pooling_2d_cases() -> Vec<GoldenCase> {
 fn average_pooling_3d_cases() -> Vec<GoldenCase> {
     vec![
         GoldenCase::new("same_depth_remainder", &[2, 5, 4, 4, 1], || {
-            Box::new(
-                AveragePooling3D::new((2, 2, 2), vec![2, 5, 4, 4, 1])
-                    .expect("a 5D input shape")
-                    .with_padding(PaddingType::Same),
-            )
+            Box::new({
+                let mut layer = AveragePooling3D::new((2, 2, 2)).with_padding(PaddingType::Same);
+                layer
+                    .build(&Shape::known(&[2, 5, 4, 4, 1]))
+                    .expect("the layer accepts the shape of the case");
+                layer
+            })
         }),
         GoldenCase::new("overlap_stride", &[2, 4, 4, 4, 1], || {
-            Box::new(
-                AveragePooling3D::new((2, 2, 2), vec![2, 4, 4, 4, 1])
-                    .expect("a 5D input shape")
+            Box::new({
+                let mut layer = AveragePooling3D::new((2, 2, 2))
                     .with_strides((1, 1, 1))
-                    .expect("positive strides"),
-            )
+                    .expect("positive strides");
+                layer
+                    .build(&Shape::known(&[2, 4, 4, 4, 1]))
+                    .expect("the layer accepts the shape of the case");
+                layer
+            })
         }),
     ]
 }
