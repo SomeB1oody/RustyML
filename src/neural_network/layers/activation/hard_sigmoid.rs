@@ -1,12 +1,15 @@
-//! Hard sigmoid activation layer that applies `clip(x/6 + 0.5, 0, 1)` elementwise and caches
+//! Hard sigmoid activation layer that applies `clip(x/6 + 0.5, 0, 1)` elementwise and parks
 //! the output for backpropagation
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::{Activation, cached_shape};
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Hard sigmoid activation layer
 ///
@@ -50,8 +53,8 @@ use crate::neural_network::{Shape, Tensor};
 /// ```
 #[derive(Debug)]
 pub struct HardSigmoid {
-    /// Cached activated output from the forward pass, used during backpropagation
-    output_cache: Option<Tensor>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
 }
 
 impl HardSigmoid {
@@ -61,7 +64,7 @@ impl HardSigmoid {
     ///
     /// - `Self` - A new `HardSigmoid` layer
     pub fn new() -> Self {
-        HardSigmoid { output_cache: None }
+        HardSigmoid { built: None }
     }
 }
 
@@ -71,8 +74,28 @@ impl Default for HardSigmoid {
     }
 }
 
-impl Layer for HardSigmoid {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+impl LayerBase for HardSigmoid {
+    fn layer_type(&self) -> &str {
+        "HardSigmoid"
+    }
+
+    built_layer_shape_functions!();
+
+    no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for HardSigmoid {
+    /// Records the shape the layer serves. The layer holds no array, so nothing is allocated
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "HardSigmoid", input)? else {
+            return Ok(());
+        };
+        self.compute_output_shape(&built)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
@@ -80,41 +103,22 @@ impl Layer for HardSigmoid {
         let output = Activation::HardSigmoid.forward(input)?;
 
         // Cache activated output for backpropagation
-        self.output_cache = Some(output.clone());
+        if ctx.is_training() {
+            ctx.push_cache(output.clone());
+        }
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.is_empty() {
-            return Err(Error::empty_input("input tensor"));
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let output: Tensor = ctx.pop_cache("HardSigmoid")?;
+
+        // Hard sigmoid preserves shape, so gradient must match the cached output
+        if grad_output.shape() != output.shape() {
+            return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
         }
 
-        Activation::HardSigmoid.forward(input)
+        // Hard sigmoid derivative is 1/6 on the linear segment, and 0 on both saturated ends
+        Activation::HardSigmoid.backward(&output, grad_output)
     }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        if let Some(output) = &self.output_cache {
-            // Hard sigmoid preserves shape, so gradient must match the cached output
-            if grad_output.shape() != output.shape() {
-                return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
-            }
-
-            // Hard sigmoid derivative is 1/6 on the linear segment, and 0 on both saturated ends
-            Activation::HardSigmoid.backward(output, grad_output)
-        } else {
-            Err(Error::forward_pass_not_run("HardSigmoid"))
-        }
-    }
-
-    fn layer_type(&self) -> &str {
-        "HardSigmoid"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        cached_shape(&self.output_cache)
-    }
-
-    no_trainable_parameters_layer_functions!();
 }

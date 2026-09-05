@@ -2,21 +2,21 @@
 //! depth, height, and width.
 
 use crate::error::Error;
-use crate::neural_network::Shape;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::build_on_forward;
 use crate::neural_network::layers::convolution::PaddingType;
-use crate::neural_network::layers::pooling::layer_functions_3d_pooling;
 use crate::neural_network::layers::pooling::pooling_engine::{
     PoolKind, windowed_pool_backward, windowed_pool_forward,
 };
 use crate::neural_network::layers::pooling::validation::{
     validate_pool_size_3d, validate_strides_3d,
 };
+use crate::neural_network::layers::pooling::{
+    layer_base_functions_pooling, layer_functions_3d_pooling,
+};
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_3d_pooling;
 use crate::neural_network::layers::validation::validate_built_input;
-use crate::neural_network::traits::Layer;
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// 3D average pooling layer
 ///
@@ -88,8 +88,6 @@ pub struct AveragePooling3D {
     built: Option<Shape>,
     /// Padding mode applied around the input before pooling
     padding: PaddingType,
-    /// Shape of the most recent forward input, cached for the backward pass
-    forward_input_shape: Option<Vec<usize>>,
 }
 
 impl AveragePooling3D {
@@ -114,7 +112,6 @@ impl AveragePooling3D {
             strides: pool_size,
             built: None,
             padding: PaddingType::Valid,
-            forward_input_shape: None,
         }
     }
 
@@ -149,26 +146,16 @@ impl AveragePooling3D {
     }
 }
 
-impl Layer for AveragePooling3D {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        build_on_forward!(self, input);
-        validate_built_input(&self.built, "AveragePooling3D", input.shape())?;
-
-        // Cache the input shape for the backward pass
-        self.forward_input_shape = Some(input.shape().to_vec());
-
-        let (output, _) = windowed_pool_forward(
-            input,
-            &[self.pool_size.0, self.pool_size.1, self.pool_size.2],
-            &[self.strides.0, self.strides.1, self.strides.2],
-            PoolKind::Average,
-            self.padding,
-        );
-        Ok(output)
+impl LayerBase for AveragePooling3D {
+    fn layer_type(&self) -> &str {
+        "AveragePooling3D"
     }
 
-    /// Runs the forward pass for inference. Writes no cache. See [`Layer::predict`].
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
+    layer_base_functions_pooling!();
+}
+
+impl UnaryLayer for AveragePooling3D {
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         validate_built_input(&self.built, "AveragePooling3D", input.shape())?;
 
         let (output, _) = windowed_pool_forward(
@@ -178,28 +165,27 @@ impl Layer for AveragePooling3D {
             PoolKind::Average,
             self.padding,
         );
+
+        if ctx.is_training() {
+            // The only value the backward pass needs is the shape it must restore
+            ctx.push_cache(input.shape().to_vec());
+        }
+
         Ok(output)
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        let input_shape = self
-            .forward_input_shape
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("AveragePooling3D"))?;
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let input_shape: Vec<usize> = ctx.pop_cache("AveragePooling3D")?;
 
         Ok(windowed_pool_backward(
             grad_output,
-            input_shape,
+            &input_shape,
             &[self.pool_size.0, self.pool_size.1, self.pool_size.2],
             &[self.strides.0, self.strides.1, self.strides.2],
             PoolKind::Average,
             None,
             self.padding,
         ))
-    }
-
-    fn layer_type(&self) -> &str {
-        "AveragePooling3D"
     }
 
     layer_functions_3d_pooling!("AveragePooling3D");

@@ -14,8 +14,8 @@ use rustyml::neural_network::layers::{Flatten, MaxPooling2D};
 use rustyml::neural_network::losses::{CategoricalCrossEntropy, MeanSquaredError};
 use rustyml::neural_network::optimizers::{Adam, SGD};
 use rustyml::neural_network::sequential::SequentialBuilder;
-use rustyml::neural_network::traits::Layer;
 use rustyml::neural_network::traits::Loss;
+use rustyml::neural_network::traits::{LayerBase, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 // helpers

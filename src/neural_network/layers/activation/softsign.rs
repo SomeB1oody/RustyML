@@ -1,12 +1,15 @@
-//! Softsign activation layer that applies `x / (1 + |x|)` elementwise and caches the output
+//! Softsign activation layer that applies `x / (1 + |x|)` elementwise and parks the output
 //! for backpropagation
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::{Activation, cached_shape};
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Softsign activation layer
 ///
@@ -48,8 +51,8 @@ use crate::neural_network::{Shape, Tensor};
 /// ```
 #[derive(Debug)]
 pub struct Softsign {
-    /// Cached activated output from the forward pass, used during backpropagation
-    output_cache: Option<Tensor>,
+    /// Shape the layer was built for. `None` before the build
+    built: Option<Shape>,
 }
 
 impl Softsign {
@@ -59,7 +62,7 @@ impl Softsign {
     ///
     /// - `Self` - A new `Softsign` layer
     pub fn new() -> Self {
-        Softsign { output_cache: None }
+        Softsign { built: None }
     }
 }
 
@@ -69,8 +72,29 @@ impl Default for Softsign {
     }
 }
 
-impl Layer for Softsign {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+impl LayerBase for Softsign {
+    fn layer_type(&self) -> &str {
+        "Softsign"
+    }
+
+    built_layer_shape_functions!();
+
+    no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for Softsign {
+    /// Records the shape the layer serves. The layer holds no array, so nothing is
+    /// allocated
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "Softsign", input)? else {
+            return Ok(());
+        };
+        self.compute_output_shape(&built)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
@@ -78,41 +102,22 @@ impl Layer for Softsign {
         let output = Activation::Softsign.forward(input)?;
 
         // Cache activated output for backpropagation
-        self.output_cache = Some(output.clone());
+        if ctx.is_training() {
+            ctx.push_cache(output.clone());
+        }
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.is_empty() {
-            return Err(Error::empty_input("input tensor"));
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let output: Tensor = ctx.pop_cache("Softsign")?;
+
+        // Softsign preserves shape, so gradient must match the cached output
+        if grad_output.shape() != output.shape() {
+            return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
         }
 
-        Activation::Softsign.forward(input)
+        // Softsign derivative is 1 / (1 + |x|)^2
+        Activation::Softsign.backward(&output, grad_output)
     }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        if let Some(output) = &self.output_cache {
-            // Softsign preserves shape, so gradient must match the cached output
-            if grad_output.shape() != output.shape() {
-                return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
-            }
-
-            // Softsign derivative is 1 / (1 + |x|)^2
-            Activation::Softsign.backward(output, grad_output)
-        } else {
-            Err(Error::forward_pass_not_run("Softsign"))
-        }
-    }
-
-    fn layer_type(&self) -> &str {
-        "Softsign"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        cached_shape(&self.output_cache)
-    }
-
-    no_trainable_parameters_layer_functions!();
 }

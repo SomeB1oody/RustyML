@@ -14,7 +14,7 @@
 //! WeightRecord         name, kind, shape, data
 //! ```
 //!
-//! The layer type is the string that [`Layer::layer_type`] returns, and a load compares it
+//! The layer type is the string that [`LayerBase::layer_type`] returns, and a load compares it
 //! per position. Name and shape alone are too weak for that comparison:
 //! `InstanceNormalization`, `GroupNormalization`, and a rank-2 `LayerNormalization` all hold
 //! `gamma` and `beta` of the same extent, so nothing but the type name tells them apart
@@ -31,10 +31,10 @@
 //! caller asks for it by name. A lenient default would load a file that is wrong for the model
 //! and leave the difference to show up as a wrong prediction
 //!
-//! [`Layer::layer_type`]: crate::neural_network::traits::Layer::layer_type
+//! [`LayerBase::layer_type`]: crate::neural_network::traits::LayerBase::layer_type
 //! [`apply`]: crate::neural_network::layers::checkpoint::apply
 //! [`apply_partial`]: crate::neural_network::layers::checkpoint::apply_partial
-//! [`Layer::build`]: crate::neural_network::traits::Layer::build
+//! [`UnaryLayer::build`]: crate::neural_network::traits::UnaryLayer::build
 
 use crate::error::{Error, IoError};
 use crate::neural_network::Shape;
@@ -63,15 +63,18 @@ pub const MODEL_MAGIC: u32 = 0x524D_4C4D;
 /// type of each position, and the name, the kind, and the shape of every array. Those checks
 /// can all pass for a file that another release wrote, so this number is what makes such a
 /// file fail instead of loading values that mean something else
-pub const MODEL_FORMAT_VERSION: u32 = 2;
+pub const MODEL_FORMAT_VERSION: u32 = 3;
 
-/// The shape that a layer was built for
+/// The shapes that a layer was built for
 ///
 /// A layer allocates every array it owns in
-/// [`Layer::build`], from the shape of its input.
-/// The build shape is therefore the 1 thing a fresh layer does not have, and it decides every
-/// extent the layer allocates. A file carries it so that a load can refuse a model that was
-/// built for another input
+/// [`Layer::build_many`], from the shapes of
+/// its inputs. The build shape is therefore the 1 thing a fresh layer does not have, and it
+/// decides every extent the layer allocates. A file carries it so that a load can refuse a
+/// model that was built for another input
+///
+/// The record holds 1 shape per input of the layer. Almost every layer takes 1 input, and a
+/// merge layer takes several
 ///
 /// The batch axis is free. A layer serves every batch size, so the batch extent is not part of
 /// what the layer was built for, and a model built for 32 samples takes the checkpoint of a
@@ -82,14 +85,31 @@ pub const MODEL_FORMAT_VERSION: u32 = 2;
 /// input, such as an activation, carries none
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuildConfig {
-    /// Shape of the input the layer was built for, batch axis first and free
-    pub input_shape: Shape,
+    /// Shape of every input the layer was built for, each with a first and free batch axis
+    pub input_shapes: Vec<Shape>,
 }
 
 impl BuildConfig {
-    /// The build record of a layer that built for `input`
+    /// The build record of a layer that built for `inputs`
     ///
-    /// The batch axis is freed here, so every caller records the same canonical form
+    /// The batch axis of every shape is freed here, so every caller records the same canonical
+    /// form
+    ///
+    /// # Parameters
+    ///
+    /// - `inputs` - 1 shape per input of the layer, batch axis first
+    ///
+    /// # Returns
+    ///
+    /// - `BuildConfig` - The record, with a free batch axis on every shape
+    #[inline]
+    pub fn new(inputs: &[Shape]) -> Self {
+        Self {
+            input_shapes: inputs.iter().map(Shape::free_batch).collect(),
+        }
+    }
+
+    /// The build record of a layer with 1 input that built for `input`
     ///
     /// # Parameters
     ///
@@ -97,12 +117,25 @@ impl BuildConfig {
     ///
     /// # Returns
     ///
-    /// - `BuildConfig` - The record, with a free batch axis
+    /// - `BuildConfig` - The record, holding that 1 shape with a free batch axis
     #[inline]
-    pub fn new(input: &Shape) -> Self {
+    pub fn unary(input: &Shape) -> Self {
         Self {
-            input_shape: input.free_batch(),
+            input_shapes: vec![input.free_batch()],
         }
+    }
+
+    /// The shapes as 1 line, for an error message
+    ///
+    /// # Returns
+    ///
+    /// - `String` - The shapes, separated by a comma when the layer takes several inputs
+    fn describe(&self) -> String {
+        self.input_shapes
+            .iter()
+            .map(Shape::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -127,12 +160,12 @@ pub struct WeightRecord<'a> {
 /// The `'a` lifetime is threaded from the layer, as in [`WeightRecord`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerCheckpoint<'a> {
-    /// The string that [`Layer::layer_type`] returned. A load compares it against the layer
+    /// The string that [`LayerBase::layer_type`](crate::neural_network::traits::LayerBase::layer_type) returned. A load compares it against the layer
     /// at the same position
     pub layer_type: Cow<'a, str>,
     /// The shape the layer was built for, when the layer reports one. See [`BuildConfig`]
     pub build: Option<BuildConfig>,
-    /// Every array the layer holds, in the order [`Layer::weights`] gives them
+    /// Every array the layer holds, in the order [`LayerBase::weights`](crate::neural_network::traits::LayerBase::weights) gives them
     pub weights: Vec<WeightRecord<'a>>,
 }
 
@@ -283,7 +316,8 @@ pub fn apply(layers: &mut [Box<dyn Layer>], file: &ModelCheckpoint<'_>) -> Resul
             return Err(mismatch(format!(
                 "layer {scope} (`{layer_type}`) was built for input shape {}, and the file \
                  records {}",
-                wanted.input_shape, found.input_shape
+                wanted.describe(),
+                found.describe()
             )));
         }
 

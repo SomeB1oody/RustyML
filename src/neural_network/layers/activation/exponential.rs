@@ -1,12 +1,15 @@
-//! Exponential activation layer that applies `e^x` elementwise and caches the output for
+//! Exponential activation layer that applies `e^x` elementwise and parks the output for
 //! backpropagation
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::{Activation, cached_shape};
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Exponential activation layer
 ///
@@ -48,8 +51,8 @@ use crate::neural_network::{Shape, Tensor};
 /// ```
 #[derive(Debug)]
 pub struct Exponential {
-    /// Cached activated output from the forward pass, used during backpropagation
-    output_cache: Option<Tensor>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
 }
 
 impl Exponential {
@@ -59,7 +62,7 @@ impl Exponential {
     ///
     /// - `Self` - A new `Exponential` layer
     pub fn new() -> Self {
-        Exponential { output_cache: None }
+        Exponential { built: None }
     }
 }
 
@@ -69,8 +72,28 @@ impl Default for Exponential {
     }
 }
 
-impl Layer for Exponential {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+impl LayerBase for Exponential {
+    fn layer_type(&self) -> &str {
+        "Exponential"
+    }
+
+    built_layer_shape_functions!();
+
+    no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for Exponential {
+    /// Records the shape the layer serves. The layer holds no array, so nothing is allocated
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "Exponential", input)? else {
+            return Ok(());
+        };
+        self.compute_output_shape(&built)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
@@ -78,41 +101,22 @@ impl Layer for Exponential {
         let output = Activation::Exponential.forward(input)?;
 
         // Cache activated output for backpropagation
-        self.output_cache = Some(output.clone());
+        if ctx.is_training() {
+            ctx.push_cache(output.clone());
+        }
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.is_empty() {
-            return Err(Error::empty_input("input tensor"));
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let output: Tensor = ctx.pop_cache("Exponential")?;
+
+        // Exponential preserves shape, so gradient must match the cached output
+        if grad_output.shape() != output.shape() {
+            return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
         }
 
-        Activation::Exponential.forward(input)
+        // Exponential derivative is e^x, which equals the cached output
+        Activation::Exponential.backward(&output, grad_output)
     }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        if let Some(output) = &self.output_cache {
-            // Exponential preserves shape, so gradient must match the cached output
-            if grad_output.shape() != output.shape() {
-                return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
-            }
-
-            // Exponential derivative is e^x, which equals the cached output
-            Activation::Exponential.backward(output, grad_output)
-        } else {
-            Err(Error::forward_pass_not_run("Exponential"))
-        }
-    }
-
-    fn layer_type(&self) -> &str {
-        "Exponential"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        cached_shape(&self.output_cache)
-    }
-
-    no_trainable_parameters_layer_functions!();
 }

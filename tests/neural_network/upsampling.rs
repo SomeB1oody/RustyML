@@ -5,6 +5,7 @@
 //! values against finite differences. This file does not duplicate them.
 
 use ndarray::{Array3, Array4, Array5, IxDyn};
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
@@ -19,7 +20,7 @@ use rustyml::neural_network::layers::upsampling::{
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::SequentialBuilder;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
@@ -70,7 +71,7 @@ const MODES: [Interpolation; 5] = [
 fn up_sampling_1d_repeats_each_step_in_place() {
     let x = t3(1, 3, 2, vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
     let mut layer = UpSampling1D::new(3).unwrap();
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     assert_eq!(out.shape(), &[1, 9, 2]);
     // Pinned against reference values
@@ -91,9 +92,10 @@ fn up_sampling_1d_repeats_each_step_in_place() {
 fn up_sampling_1d_size_one_returns_the_input_values() {
     let x = ramp_of(&[2, 3, 2]);
     let mut layer = UpSampling1D::new(1).unwrap();
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     assert_eq!(out, x);
+    // The build shape reports a free batch axis, because 1 layer serves every batch size
     assert_eq!(layer.output_shape(), "(None, 3, 2)");
 }
 
@@ -102,7 +104,7 @@ fn up_sampling_1d_size_one_returns_the_input_values() {
 fn up_sampling_2d_nearest_expands_each_pixel_into_a_block() {
     let x = t4(1, 2, 2, 2, vec![1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 4.0, -4.0]);
     let mut layer = UpSampling2D::new(2, Interpolation::Nearest).unwrap();
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     assert_eq!(out.shape(), &[1, 4, 4, 2]);
     for row in 0..4 {
@@ -118,7 +120,9 @@ fn up_sampling_2d_nearest_expands_each_pixel_into_a_block() {
 #[test]
 fn up_sampling_2d_pair_names_1_factor_per_axis() {
     let mut layer = UpSampling2D::new((2, 3), Interpolation::Nearest).unwrap();
-    let out = layer.forward(&ramp_of(&[2, 4, 5, 3])).unwrap();
+    let out = layer
+        .forward_mut(&ramp_of(&[2, 4, 5, 3]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(out.shape(), &[2, 8, 15, 3]);
 }
 
@@ -127,7 +131,7 @@ fn up_sampling_2d_pair_names_1_factor_per_axis() {
 fn up_sampling_3d_grows_each_spatial_axis_by_its_own_factor() {
     let x = t5(1, 2, 1, 1, 2, vec![1.0, 2.0, 3.0, 4.0]);
     let mut layer = UpSampling3D::new((2, 3, 1)).unwrap();
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     assert_eq!(out.shape(), &[1, 4, 3, 1, 2]);
     for first in 0..4 {
@@ -143,7 +147,9 @@ fn up_sampling_3d_grows_each_spatial_axis_by_its_own_factor() {
 #[test]
 fn up_sampling_3d_integer_grows_every_axis_equally() {
     let mut layer = UpSampling3D::new(2).unwrap();
-    let out = layer.forward(&ramp_of(&[2, 2, 3, 1, 2])).unwrap();
+    let out = layer
+        .forward_mut(&ramp_of(&[2, 2, 3, 1, 2]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(out.shape(), &[2, 4, 6, 2, 2]);
 }
 
@@ -188,7 +194,7 @@ fn up_sampling_2d_interpolated_modes_match_reference() {
 
     for (mode, want) in expected {
         let mut layer = UpSampling2D::new(2, mode).unwrap();
-        let out = layer.forward(&x).unwrap();
+        let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
         assert_eq!(out.shape(), &[1, 4, 4, 1], "{mode:?}");
         assert_allclose(&out, &t4(1, 4, 4, 1, want.to_vec()), 2e-5);
     }
@@ -203,7 +209,7 @@ fn up_sampling_2d_keeps_a_constant_image_constant() {
         for factor in [2usize, 3, 5] {
             let x = Tensor::from_elem(IxDyn(&[1, 4, 3, 2]), 7.5);
             let mut layer = UpSampling2D::new(factor, mode).unwrap();
-            let out = layer.forward(&x).unwrap();
+            let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
             for (index, &value) in out.iter().enumerate() {
                 assert!(
                     (value - 7.5).abs() < 1e-5,
@@ -225,7 +231,7 @@ fn up_sampling_2d_only_the_wide_kernels_overshoot() {
 
     for mode in MODES {
         let mut layer = UpSampling2D::new(3, mode).unwrap();
-        let out = layer.forward(&x).unwrap();
+        let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
         let lowest = out.iter().fold(f32::MAX, |m, &v| m.min(v));
         match mode {
             Interpolation::Nearest | Interpolation::Bilinear => {
@@ -243,10 +249,11 @@ fn up_sampling_2d_only_the_wide_kernels_overshoot() {
 fn up_sampling_1d_backward_sums_each_repeated_run() {
     let x = ramp_of(&[1, 2, 2]);
     let mut layer = UpSampling1D::new(3).unwrap();
-    layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    layer.forward_mut(&x, &mut ctx).unwrap();
 
     // 1 distinct value per output position, so a gradient landing on the wrong step shows up
-    let grad = layer.backward(&ramp_of(&[1, 6, 2])).unwrap();
+    let grad = layer.backward(&ramp_of(&[1, 6, 2]), &mut ctx).unwrap();
 
     assert_eq!(grad.shape(), &[1, 2, 2]);
     // Steps 0, 1, 2 feed input step 0, and their first features are 1, 3, 5
@@ -263,9 +270,12 @@ fn up_sampling_1d_backward_sums_each_repeated_run() {
 fn up_sampling_2d_bilinear_backward_matches_reference() {
     let x = t4(1, 2, 2, 1, vec![1.0, 2.0, 3.0, 4.0]);
     let mut layer = UpSampling2D::new(2, Interpolation::Bilinear).unwrap();
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
 
-    let grad = layer.backward(&Tensor::ones(out.raw_dim())).unwrap();
+    let grad = layer
+        .backward(&Tensor::ones(out.raw_dim()), &mut ctx)
+        .unwrap();
 
     // Pinned against reference values through `jax.vjp`
     assert_allclose(&grad, &t4(1, 2, 2, 1, vec![4.0; 4]), 1e-5);
@@ -286,14 +296,15 @@ fn up_sampling_2d_backward_is_the_transpose_of_forward() {
         for (shape, factors) in &cases {
             let x = ramp_of(shape);
             let mut layer = UpSampling2D::new(*factors, mode).unwrap();
-            let out = layer.forward(&x).unwrap();
+            let mut ctx = Ctx::training();
+            let out = layer.forward_mut(&x, &mut ctx).unwrap();
 
             // A varied upstream, so no symmetry can hide a misplaced weight
             let upstream_values: Vec<f32> = (0..out.len())
                 .map(|k| ((k % 17) as f32 - 8.0) * 0.125)
                 .collect();
             let upstream = Tensor::from_shape_vec(out.raw_dim(), upstream_values).unwrap();
-            let grad = layer.backward(&upstream).unwrap();
+            let grad = layer.backward(&upstream, &mut ctx).unwrap();
 
             let forward_product: f32 = out.iter().zip(&upstream).map(|(&a, &b)| a * b).sum();
             let backward_product: f32 = x.iter().zip(&grad).map(|(&a, &b)| a * b).sum();
@@ -309,7 +320,10 @@ fn up_sampling_2d_backward_is_the_transpose_of_forward() {
 #[test]
 fn up_sampling_rejects_a_factor_that_overflows_the_output() {
     let mut layer = UpSampling2D::new((usize::MAX, 1), Interpolation::Nearest).unwrap();
-    match layer.forward(&ramp_of(&[2, 3, 4, 2])).unwrap_err() {
+    match layer
+        .forward_mut(&ramp_of(&[2, 3, 4, 2]), &mut Ctx::training())
+        .unwrap_err()
+    {
         Error::InvalidInput(message) => {
             assert!(
                 message.contains("does not fit"),
@@ -331,12 +345,12 @@ fn up_sampling_2d_accepts_an_input_that_is_not_in_c_order() {
     assert!(!permuted.is_standard_layout());
 
     let mut layer = UpSampling2D::new(2, Interpolation::Bilinear).unwrap();
-    let from_view = layer.forward(&permuted).unwrap();
+    let from_view = layer.forward_mut(&permuted, &mut Ctx::training()).unwrap();
 
     let mut contiguous = Tensor::zeros(permuted.raw_dim());
     contiguous.assign(&permuted);
     let mut twin = UpSampling2D::new(2, Interpolation::Bilinear).unwrap();
-    let from_contiguous = twin.forward(&contiguous).unwrap();
+    let from_contiguous = twin.forward_mut(&contiguous, &mut Ctx::training()).unwrap();
 
     assert_eq!(from_view, from_contiguous);
     assert!(from_view.is_standard_layout());
@@ -346,16 +360,28 @@ fn up_sampling_2d_accepts_an_input_that_is_not_in_c_order() {
 #[test]
 fn up_sampling_layers_emit_gradients_in_c_order() {
     let mut first = UpSampling1D::new(2).unwrap();
-    let out = first.forward(&ramp_of(&[2, 3, 2])).unwrap();
-    assert!(first.backward(&out).unwrap().is_standard_layout());
+    let mut ctx = Ctx::training();
+    let out = first.forward_mut(&ramp_of(&[2, 3, 2]), &mut ctx).unwrap();
+    assert!(first.backward(&out, &mut ctx).unwrap().is_standard_layout());
 
     let mut second = UpSampling2D::new((2, 3), Interpolation::Lanczos3).unwrap();
-    let out = second.forward(&ramp_of(&[2, 3, 4, 2])).unwrap();
-    assert!(second.backward(&out).unwrap().is_standard_layout());
+    let mut ctx = Ctx::training();
+    let out = second
+        .forward_mut(&ramp_of(&[2, 3, 4, 2]), &mut ctx)
+        .unwrap();
+    assert!(
+        second
+            .backward(&out, &mut ctx)
+            .unwrap()
+            .is_standard_layout()
+    );
 
     let mut third = UpSampling3D::new(2).unwrap();
-    let out = third.forward(&ramp_of(&[1, 2, 2, 2, 3])).unwrap();
-    assert!(third.backward(&out).unwrap().is_standard_layout());
+    let mut ctx = Ctx::training();
+    let out = third
+        .forward_mut(&ramp_of(&[1, 2, 2, 2, 3]), &mut ctx)
+        .unwrap();
+    assert!(third.backward(&out, &mut ctx).unwrap().is_standard_layout());
 }
 
 // Serial and parallel agreement
@@ -383,12 +409,13 @@ fn up_sampling_repeat_parallel_path_matches_the_serial_path() {
             .collect();
         let x = Tensor::from_shape_vec(IxDyn(&[count, steps, channels]), x_values).unwrap();
         let mut layer = UpSampling1D::new(factor).unwrap();
-        let out = layer.forward(&x).unwrap();
+        let mut ctx = Ctx::training();
+        let out = layer.forward_mut(&x, &mut ctx).unwrap();
         let upstream_values: Vec<f32> = (0..out.len())
             .map(|k| ((k + offset * factor) % 13) as f32 - 6.0)
             .collect();
         let upstream = Tensor::from_shape_vec(out.raw_dim(), upstream_values).unwrap();
-        let grad = layer.backward(&upstream).unwrap();
+        let grad = layer.backward(&upstream, &mut ctx).unwrap();
         (
             out.as_slice().unwrap().to_vec(),
             grad.as_slice().unwrap().to_vec(),
@@ -433,12 +460,13 @@ fn up_sampling_weighted_parallel_path_matches_the_serial_path() {
             .collect();
         let x = Tensor::from_shape_vec(IxDyn(&[count, side, side, channels]), x_values).unwrap();
         let mut layer = UpSampling2D::new(2, Interpolation::Lanczos5).unwrap();
-        let out = layer.forward(&x).unwrap();
+        let mut ctx = Ctx::training();
+        let out = layer.forward_mut(&x, &mut ctx).unwrap();
         let upstream_values: Vec<f32> = (0..out.len())
             .map(|k| ((k + offset * 4) % 19) as f32 * 0.5 - 4.5)
             .collect();
         let upstream = Tensor::from_shape_vec(out.raw_dim(), upstream_values).unwrap();
-        let grad = layer.backward(&upstream).unwrap();
+        let grad = layer.backward(&upstream, &mut ctx).unwrap();
         (
             out.as_slice().unwrap().to_vec(),
             grad.as_slice().unwrap().to_vec(),
@@ -495,9 +523,12 @@ fn up_sampling_rejects_the_wrong_rank() {
         (Box::new(UpSampling3D::new(2).unwrap()), ramp_of(&[2, 3, 4])),
     ];
     for (mut layer, x) in cases {
-        match layer.forward(&x).unwrap_err() {
+        let mut ctx = Ctx::training();
+        match layer.forward_many_mut(&[&x], &mut ctx).unwrap_err() {
+            // The build of an unbuilt layer runs first and refuses the rank through the
+            // shared shape algebra, which names the layer, the rank it takes, and the shape
             Error::InvalidInput(message) => {
-                assert!(message.contains("D input"), "unexpected message {message}")
+                assert!(message.contains("rank"), "unexpected message {message}")
             }
             other => panic!("expected InvalidInput, got {other:?}"),
         }
@@ -510,7 +541,7 @@ fn up_sampling_rejects_an_empty_input() {
     let mut layer = UpSampling2D::new(2, Interpolation::Nearest).unwrap();
     let empty = Tensor::zeros(IxDyn(&[2, 0, 4, 3]));
     assert!(matches!(
-        layer.forward(&empty).unwrap_err(),
+        layer.forward_mut(&empty, &mut Ctx::training()).unwrap_err(),
         Error::EmptyInput(_)
     ));
 }
@@ -518,9 +549,11 @@ fn up_sampling_rejects_an_empty_input() {
 /// The backward pass needs the shape the forward pass saw
 #[test]
 fn up_sampling_backward_before_forward_is_an_error() {
-    let mut layer = UpSampling2D::new(2, Interpolation::Nearest).unwrap();
+    let layer = UpSampling2D::new(2, Interpolation::Nearest).unwrap();
     assert!(matches!(
-        layer.backward(&ramp_of(&[1, 2, 2, 1])).unwrap_err(),
+        layer
+            .backward(&ramp_of(&[1, 2, 2, 1]), &mut Ctx::training())
+            .unwrap_err(),
         Error::NeuralNetwork(NnError::ForwardPassNotRun(_))
     ));
 }
@@ -529,9 +562,15 @@ fn up_sampling_backward_before_forward_is_an_error() {
 #[test]
 fn up_sampling_backward_checks_the_gradient_shape() {
     let mut layer = UpSampling2D::new(2, Interpolation::Nearest).unwrap();
-    layer.forward(&ramp_of(&[1, 2, 2, 1])).unwrap();
+    let mut ctx = Ctx::training();
+    layer
+        .forward_mut(&ramp_of(&[1, 2, 2, 1]), &mut ctx)
+        .unwrap();
 
-    match layer.backward(&ramp_of(&[1, 4, 3, 1])).unwrap_err() {
+    match layer
+        .backward(&ramp_of(&[1, 4, 3, 1]), &mut ctx)
+        .unwrap_err()
+    {
         Error::ShapeMismatch { expected, found } => {
             assert_eq!(expected, vec![1, 4, 4, 1]);
             assert_eq!(found, vec![1, 4, 3, 1]);
@@ -555,22 +594,27 @@ fn up_sampling_layers_hold_no_parameter() {
     for (layer, name) in layers.iter_mut().zip(names) {
         assert_eq!(layer.param_count(), ParamCounts::none());
         assert!(layer.weights().is_empty());
-        assert!(layer.parameters().is_empty());
+        assert!(layer.parameters_mut().is_empty());
         // No forward pass has run, so the layer cannot know its output shape yet
         assert_eq!(layer.output_shape(), "Unknown");
         assert_eq!(layer.layer_type(), name);
     }
 }
 
-/// After a forward pass the summary prints the enlarged shape, with the batch axis as "None"
+/// After the first forward pass the summary prints the shape the layer built for, with the
+/// batch axis freed
 #[test]
 fn up_sampling_output_shape_reports_the_enlarged_shape() {
     let mut layer = UpSampling2D::new((2, 3), Interpolation::Nearest).unwrap();
-    layer.forward(&ramp_of(&[4, 5, 6, 2])).unwrap();
+    layer
+        .forward_mut(&ramp_of(&[4, 5, 6, 2]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(layer.output_shape(), "(None, 10, 18, 2)");
 
     let mut volume = UpSampling3D::new((1, 2, 3)).unwrap();
-    volume.forward(&ramp_of(&[2, 2, 3, 4, 1])).unwrap();
+    volume
+        .forward_mut(&ramp_of(&[2, 2, 3, 4, 1]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(volume.output_shape(), "(None, 2, 6, 12, 1)");
 }
 

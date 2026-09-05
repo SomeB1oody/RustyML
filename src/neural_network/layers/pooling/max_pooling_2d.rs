@@ -2,21 +2,21 @@
 //! height and width.
 
 use crate::error::Error;
-use crate::neural_network::Shape;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::build_on_forward;
 use crate::neural_network::layers::convolution::PaddingType;
-use crate::neural_network::layers::pooling::layer_functions_2d_pooling;
 use crate::neural_network::layers::pooling::pooling_engine::{
     PoolKind, windowed_pool_backward, windowed_pool_forward,
 };
 use crate::neural_network::layers::pooling::validation::{
     validate_pool_size_2d, validate_strides_2d,
 };
+use crate::neural_network::layers::pooling::{
+    layer_base_functions_pooling, layer_functions_2d_pooling,
+};
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_2d_pooling;
 use crate::neural_network::layers::validation::validate_built_input;
-use crate::neural_network::traits::Layer;
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// 2D max pooling layer
 ///
@@ -89,10 +89,6 @@ pub struct MaxPooling2D {
     built: Option<Shape>,
     /// Padding mode applied around the input before pooling
     padding: PaddingType,
-    /// Shape of the most recent forward input, cached for the backward pass
-    forward_input_shape: Option<Vec<usize>>,
-    /// Cached flat per-output arg-max indices used for the backward pass
-    argmax: Option<Vec<usize>>,
 }
 
 impl MaxPooling2D {
@@ -117,8 +113,6 @@ impl MaxPooling2D {
             strides: pool_size,
             built: None,
             padding: PaddingType::Valid,
-            forward_input_shape: None,
-            argmax: None,
         }
     }
 
@@ -153,13 +147,25 @@ impl MaxPooling2D {
     }
 }
 
-impl Layer for MaxPooling2D {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        build_on_forward!(self, input);
-        validate_built_input(&self.built, "MaxPooling2D", input.shape())?;
+/// What the forward pass of [`MaxPooling2D`] parks for its backward pass
+struct MaxPooling2DCache {
+    /// Shape of the tensor that entered the layer, to restore the rank of the gradient
+    input_shape: Vec<usize>,
+    /// Flat per-output arg-max index of each pooling window, to route the gradient back
+    argmax: Vec<usize>,
+}
 
-        // Cache the input shape and arg-max positions for the backward pass
-        self.forward_input_shape = Some(input.shape().to_vec());
+impl LayerBase for MaxPooling2D {
+    fn layer_type(&self) -> &str {
+        "MaxPooling2D"
+    }
+
+    layer_base_functions_pooling!();
+}
+
+impl UnaryLayer for MaxPooling2D {
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        validate_built_input(&self.built, "MaxPooling2D", input.shape())?;
 
         let (output, argmax) = windowed_pool_forward(
             input,
@@ -168,47 +174,29 @@ impl Layer for MaxPooling2D {
             PoolKind::Max,
             self.padding,
         );
-        self.argmax = argmax;
+
+        if ctx.is_training() {
+            ctx.push_cache(MaxPooling2DCache {
+                input_shape: input.shape().to_vec(),
+                argmax: argmax.expect("PoolKind::Max always tracks the arg-max"),
+            });
+        }
+
         Ok(output)
     }
 
-    /// Runs the forward pass for inference. Writes no cache. See [`Layer::predict`].
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_built_input(&self.built, "MaxPooling2D", input.shape())?;
-
-        let (output, _) = windowed_pool_forward(
-            input,
-            &[self.pool_size.0, self.pool_size.1],
-            &[self.strides.0, self.strides.1],
-            PoolKind::Max,
-            self.padding,
-        );
-        Ok(output)
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        let input_shape = self
-            .forward_input_shape
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("MaxPooling2D"))?;
-        let argmax = self
-            .argmax
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("MaxPooling2D"))?;
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let cache: MaxPooling2DCache = ctx.pop_cache("MaxPooling2D")?;
 
         Ok(windowed_pool_backward(
             grad_output,
-            input_shape,
+            &cache.input_shape,
             &[self.pool_size.0, self.pool_size.1],
             &[self.strides.0, self.strides.1],
             PoolKind::Max,
-            Some(argmax),
+            Some(&cache.argmax),
             self.padding,
         ))
-    }
-
-    fn layer_type(&self) -> &str {
-        "MaxPooling2D"
     }
 
     layer_functions_2d_pooling!("MaxPooling2D");

@@ -3,8 +3,7 @@
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
-use crate::neural_network::layers::named_weight_layer_functions;
-use crate::neural_network::layers::recurrent::gate::{FusedGates, project_input, take_cache};
+use crate::neural_network::layers::recurrent::gate::{FusedGates, project_input};
 use crate::neural_network::layers::recurrent::validation::{
     split_grad_output, validate_dimension_greater_than_zero, validate_input_3d,
     validate_recurrent_dimensions,
@@ -12,9 +11,9 @@ use crate::neural_network::layers::recurrent::validation::{
 use crate::neural_network::layers::recurrent::{apply_sigmoid, input_step};
 use crate::neural_network::layers::validation::start_build;
 use crate::neural_network::layers::validation::validate_weight_shape;
-use crate::neural_network::layers::{build_config_function, build_on_forward};
-use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::{built_layer_shape_functions, named_weight_layer_functions};
+use crate::neural_network::traits::{LayerBase, ParamRef, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Bias, Parallelism};
 use ndarray::{Array2, Array3, ArrayView3, Axis, Ix2, Ix3, concatenate, s};
@@ -64,7 +63,7 @@ use ndarray::{Array2, Array3, ArrayView3, Axis, Ix2, Ix3, concatenate, s};
 /// ```
 #[derive(Debug)]
 pub struct LSTM {
-    /// Feature count per timestep, which [`Layer::build`] reads from the input shape
+    /// Feature count per timestep, which [`UnaryLayer::build`] reads from the input shape
     input_dim: usize,
     /// Shape the gates depend on, which is `(None, None, input_dim)`. `None` before the build
     built: Option<Shape>,
@@ -76,12 +75,6 @@ pub struct LSTM {
     /// Fused gate weights, column blocks in the order `[i | f | g | o]`
     gates: FusedGates,
 
-    /// Cached input tensor for backward propagation
-    input_cache: Option<Array3<f32>>,
-    /// Per-timestep forward values recorded by `forward` for the backward pass. This is `None`
-    /// until the first training forward. `predict` never sets it.
-    caches: Option<LstmCaches>,
-
     /// Activation applied to the candidate and to the cell state each timestep (Keras-style)
     activation: Activation,
     /// Returns the full sequence of hidden states when true, or only the last one when false
@@ -90,10 +83,14 @@ pub struct LSTM {
     go_backwards: bool,
 }
 
-/// Per-timestep forward values an [`LSTM`] records so its backward pass can recompute the gate
-/// gradients without re-running the forward recurrence
+/// What the forward pass of [`LSTM`] parks for its backward pass
+///
+/// The per-timestep values let the backward pass recompute the gate gradients without a second
+/// run of the forward recurrence
 #[derive(Debug)]
 struct LstmCaches {
+    /// The input of the pass, with shape (batch_size, timesteps, input_dim)
+    input: Array3<f32>,
     /// Hidden states `h_t`, with `h_0 = 0` prepended (length `timesteps + 1`)
     hs: Vec<Array2<f32>>,
     /// Cell states `c_t`, with `c_0 = 0` prepended (length `timesteps + 1`)
@@ -125,7 +122,7 @@ impl LSTM {
     ///
     /// # Notes
     ///
-    /// The constructor draws nothing. [`Layer::build`] reads the feature count from the input
+    /// The constructor draws nothing. [`UnaryLayer::build`] reads the feature count from the input
     /// shape and draws the gates then. The draw takes the global seed or entropy by default.
     /// For reproducible initialization, set a seed with [`LSTM::with_random_state`].
     ///
@@ -145,8 +142,6 @@ impl LSTM {
             random_state: None,
             units,
             gates: FusedGates::empty(),
-            input_cache: None,
-            caches: None,
             activation,
             return_sequences: false,
             go_backwards: false,
@@ -387,16 +382,17 @@ impl LSTM {
         self.set_weights(kernel, recurrent_kernel, bias)
     }
 
-    /// Runs the recurrence and returns the layer output. This is the shared numeric body of
-    /// [`Layer::forward`] and [`Layer::predict`].
+    /// Runs the recurrence and returns the layer output. This is the numeric body of
+    /// [`UnaryLayer::forward`].
     ///
     /// The output is the last hidden state, with shape (batch_size, units). With
     /// `return_sequences` set, it is instead every hidden state in processing order, with shape
     /// (batch_size, timesteps, units).
     ///
     /// When `caches` is `Some`, the pass records every per-timestep value the backward pass
-    /// needs: the hidden and cell states, `activation(c_t)`, and the 4 gate activations.
-    /// `predict` passes `None` and skips the recording. Every record stays in processing order.
+    /// needs: the hidden and cell states, `activation(c_t)`, and the 4 gate activations. An
+    /// inference pass passes `None` and skips the recording. Every record stays in processing
+    /// order.
     ///
     /// Each timestep computes all 4 gate pre-activations with 1 fused GEMM. The recurrent
     /// product accumulates onto the pre-projected `x_t @ kernel` slice, and the epilogue adds
@@ -494,7 +490,35 @@ impl LSTM {
     }
 }
 
-impl Layer for LSTM {
+impl LayerBase for LSTM {
+    fn layer_type(&self) -> &str {
+        "LSTM"
+    }
+
+    fn param_count(&self) -> ParamCounts {
+        // Read the arrays the layer holds rather than the configuration, so a change to
+        // the roster corrects the count with no second formula to keep in step
+        ParamCounts::trainable(
+            self.gates.kernel.len() + self.gates.recurrent_kernel.len() + self.gates.bias.len(),
+        )
+    }
+
+    fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
+        self.gates.parameters_mut()
+    }
+
+    // The layer keeps no input shape. It knows the feature count of 1 timestep, and it
+    // serves every batch size and every sequence length, so both of those axes are free
+    built_layer_shape_functions!();
+
+    named_weight_layer_functions!(
+        trainable "kernel" => gates.kernel,
+        trainable "recurrent_kernel" => gates.recurrent_kernel,
+        trainable "bias" => gates.bias,
+    );
+}
+
+impl UnaryLayer for LSTM {
     /// Reads the feature count from the last axis, and draws the fused gates
     ///
     /// The gates depend on the feature count and on the unit count, and on no other extent. The
@@ -519,14 +543,21 @@ impl Layer for LSTM {
         Ok(())
     }
 
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+    /// An inference pass records no per-timestep value at all, and it parks no cache
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        if !self.is_built() {
+            return Err(Error::not_built("LSTM"));
+        }
         validate_input_3d(input)?;
-        build_on_forward!(self, input);
         let x3 = input.view().into_dimensionality::<Ix3>().unwrap();
-        let timesteps = x3.shape()[1];
-        self.input_cache = Some(x3.to_owned());
 
+        if !ctx.is_training() {
+            return self.run(&x3, None);
+        }
+
+        let timesteps = x3.shape()[1];
         let mut caches = LstmCaches {
+            input: x3.to_owned(),
             hs: Vec::with_capacity(timesteps + 1),
             cs: Vec::with_capacity(timesteps + 1),
             cs_activated: Vec::with_capacity(timesteps),
@@ -536,26 +567,16 @@ impl Layer for LSTM {
             o: Vec::with_capacity(timesteps),
         };
         let output = self.run(&x3, Some(&mut caches))?;
-        self.caches = Some(caches);
+        ctx.push_cache(caches);
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if self.built.is_none() {
-            return Err(Error::not_built("LSTM"));
-        }
-        validate_input_3d(input)?;
-        let x3 = input.view().into_dimensionality::<Ix3>().unwrap();
-        self.run(&x3, None)
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         // Configurable activation, used for the candidate and cell-state derivatives
         let act = self.activation;
 
-        let x3 = take_cache(&mut self.input_cache, "LSTM")?;
         let LstmCaches {
+            input: x3,
             hs,
             cs,
             cs_activated,
@@ -563,7 +584,7 @@ impl Layer for LSTM {
             f: f_vals,
             g: g_vals,
             o: o_vals,
-        } = take_cache(&mut self.caches, "LSTM")?;
+        } = ctx.pop_cache("LSTM")?;
 
         let batch = x3.shape()[0];
         let timesteps = x3.shape()[1];
@@ -676,22 +697,17 @@ impl Layer for LSTM {
             (batch, timesteps, feat),
         );
 
-        self.gates
-            .store_gradients(grad_kernel, grad_recurrent, grad_bias);
+        ctx.add_grad(
+            "kernel",
+            grad_kernel.as_standard_layout().to_owned().into_dyn(),
+        )?;
+        ctx.add_grad(
+            "recurrent_kernel",
+            grad_recurrent.as_standard_layout().to_owned().into_dyn(),
+        )?;
+        ctx.add_grad("bias", grad_bias.as_standard_layout().to_owned().into_dyn())?;
 
         Ok(grad_x3.into_dyn())
-    }
-
-    fn layer_type(&self) -> &str {
-        "LSTM"
-    }
-
-    build_config_function!();
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        // The layer keeps no input shape. It knows the feature count of 1 timestep, and it
-        // serves every batch size and every sequence length, so both of those axes are free
-        self.built.clone()
     }
 
     /// A returned sequence keeps the time axis, and a returned final state drops it
@@ -715,22 +731,4 @@ impl Layer for LSTM {
             Shape::new(vec![axes[0], Some(self.units)])
         })
     }
-
-    fn param_count(&self) -> ParamCounts {
-        // Read the arrays the layer holds rather than the configuration, so a change to
-        // the roster corrects the count with no second formula to keep in step
-        ParamCounts::trainable(
-            self.gates.kernel.len() + self.gates.recurrent_kernel.len() + self.gates.bias.len(),
-        )
-    }
-
-    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
-        self.gates.parameters()
-    }
-
-    named_weight_layer_functions!(
-        trainable "kernel" => gates.kernel,
-        trainable "recurrent_kernel" => gates.recurrent_kernel,
-        trainable "bias" => gates.bias,
-    );
 }

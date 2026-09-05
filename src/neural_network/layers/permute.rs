@@ -1,11 +1,14 @@
-//! Permute layer that reorders the axes after the batch axis, and caches the input shape for
+//! Permute layer that reorders the axes after the batch axis, and parks the input shape for
 //! backpropagation
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 use ndarray::IxDyn;
 
 /// Reorders the axes after the batch axis
@@ -67,8 +70,8 @@ pub struct Permute {
     forward_axes: Vec<usize>,
     /// Axis order the backward pass applies, the inverse of `forward_axes`
     backward_axes: Vec<usize>,
-    /// Shape of the most recent forward input. The backward pass needs it to check the gradient
-    input_shape: Option<Vec<usize>>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
 }
 
 impl Permute {
@@ -135,7 +138,7 @@ impl Permute {
         Ok(Permute {
             forward_axes,
             backward_axes,
-            input_shape: None,
+            built: None,
         })
     }
 
@@ -178,25 +181,42 @@ fn permute_into(input: &Tensor, axes: &[usize]) -> Tensor {
     output
 }
 
-impl Layer for Permute {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        self.validate(input)?;
-        self.input_shape = Some(input.shape().to_vec());
-        Ok(permute_into(input, &self.forward_axes))
+impl LayerBase for Permute {
+    fn layer_type(&self) -> &str {
+        "Permute"
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        self.validate(input)?;
-        Ok(permute_into(input, &self.forward_axes))
-    }
+    built_layer_shape_functions!();
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        let Some(input_shape) = &self.input_shape else {
-            return Err(Error::forward_pass_not_run("Permute"));
+    no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for Permute {
+    /// Records the shape the layer reorders. The layer holds no array, so nothing is allocated.
+    /// The shape algebra checks the rank
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "Permute", input)? else {
+            return Ok(());
         };
+        self.compute_output_shape(&built)?;
+        self.built = Some(built);
+        Ok(())
+    }
 
-        let expected = self.permuted_shape(input_shape);
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        self.validate(input)?;
+
+        if ctx.is_training() {
+            ctx.push_cache(input.shape().to_vec());
+        }
+
+        Ok(permute_into(input, &self.forward_axes))
+    }
+
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let input_shape: Vec<usize> = ctx.pop_cache("Permute")?;
+
+        let expected = self.permuted_shape(&input_shape);
         if grad_output.shape() != expected.as_slice() {
             return Err(Error::shape_mismatch(expected, grad_output.shape()));
         }
@@ -204,14 +224,6 @@ impl Layer for Permute {
         // A permute moves each value to 1 new position, so the gradient runs back through the
         // inverse order
         Ok(permute_into(grad_output, &self.backward_axes))
-    }
-
-    fn layer_type(&self) -> &str {
-        "Permute"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        self.input_shape.as_deref().map(Shape::with_free_batch)
     }
 
     /// The layer moves axes and changes no extent, so the output axes are the input axes in
@@ -223,6 +235,4 @@ impl Layer for Permute {
             self.forward_axes.iter().map(|&axis| axes[axis]).collect(),
         ))
     }
-
-    no_trainable_parameters_layer_functions!();
 }

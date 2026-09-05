@@ -83,7 +83,7 @@ use rustyml::neural_network::layers::convolution::depthwise_conv_1d::DepthwiseCo
 use rustyml::neural_network::layers::convolution::depthwise_conv_2d::DepthwiseConv2D;
 use rustyml::neural_network::layers::convolution::separable_conv_1d::SeparableConv1D;
 use rustyml::neural_network::layers::convolution::separable_conv_2d::SeparableConv2D;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, UnaryLayer};
 
 /// Every layer type of the conv family, in the order the data file records them.
 fn fixtures() -> Vec<LayerFixture> {
@@ -110,7 +110,7 @@ fn golden_conv_family() {
 /// The parameter names of a layer that carries 1 kernel and 1 bias.
 const KERNEL_AND_BIAS: [&str; 2] = ["kernel", "bias"];
 
-/// The parameter names of a separable layer, in `Layer::parameters` order.
+/// The parameter names of a separable layer, in `LayerBase::parameters_mut` order.
 const SEPARABLE_PARAMETERS: [&str; 3] = ["depthwise_kernel", "pointwise_kernel", "bias"];
 
 /// The rank-3 input shape that every 1D case uses, as \[batch, length, channels\].

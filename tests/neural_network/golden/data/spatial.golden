@@ -19,6 +19,7 @@
 # Regeneration history, newest first. Each line holds the reason of 1 run that wrote
 # this file.
 #
+# reason the pure known_input_shapes reports the build shape with a free batch axis
 # reason the checkpoint is addressed by name, so the layer supplies every recorded parameter name and the parameter count records both halves
 #
 # Each value line holds the raw f32 bits from to_bits, in 8 lowercase hexadecimal
@@ -28,11 +29,11 @@
 
 format 6
 family spatial
-content_digest 92c34a4506b4b92d cases 52 values 12013
+content_digest 8977cc6a19b63a3e cases 52 values 12013
 
 case MaxPooling1D pool2_stride2
 mode training
-output_shape "(2, 4, 3)"
+output_shape "(None, 4, 3)"
 param_count trainable 0 non_trainable 0
 tensor input 2 8 3
   c0000000  # -2.0
@@ -186,7 +187,7 @@ end
 
 case MaxPooling1D pool3_stride2_remainder
 mode training
-output_shape "(2, 3, 4)"
+output_shape "(None, 3, 4)"
 param_count trainable 0 non_trainable 0
 tensor input 2 7 4
   c0000000  # -2.0
@@ -356,7 +357,7 @@ end
 
 case MaxPooling1D handbuilt_tie_pool3
 mode training
-output_shape "(1, 2, 2)"
+output_shape "(None, 2, 2)"
 param_count trainable 0 non_trainable 0
 tensor input 1
   c0000000  # -2.0
@@ -387,7 +388,7 @@ end
 
 case MaxPooling1D handbuilt_nan_wins_window
 mode training
-output_shape "(1, 2, 1)"
+output_shape "(None, 2, 1)"
 param_count trainable 0 non_trainable 0
 tensor input 1
   c0000000  # -2.0
@@ -408,7 +409,7 @@ end
 
 case MaxPooling1D handbuilt_all_negative_infinity
 mode training
-output_shape "(1, 2, 1)"
+output_shape "(None, 2, 1)"
 param_count trainable 0 non_trainable 0
 tensor input 1
   c0000000  # -2.0
@@ -427,7 +428,7 @@ end
 
 case MaxPooling2D pool2x2_stride2x2
 mode training
-output_shape "(2, 3, 3, 3)"
+output_shape "(None, 3, 3, 3)"
 param_count trainable 0 non_trainable 0
 tensor input 2 6 6 3
   c0000000  # -2.0
@@ -977,7 +978,7 @@ end
 
 case MaxPooling2D same_remainder_5x5
 mode training
-output_shape "(2, 3, 3, 2)"
+output_shape "(None, 3, 3, 2)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5 5 2
   c0000000  # -2.0
@@ -1259,7 +1260,7 @@ end
 
 case MaxPooling2D handbuilt_tie_row_major
 mode training
-output_shape "(1, 2, 2, 1)"
+output_shape "(None, 2, 2, 1)"
 param_count trainable 0 non_trainable 0
 tensor input 1
   c0000000  # -2.0
@@ -1294,7 +1295,7 @@ end
 
 case MaxPooling2D handbuilt_all_negative_infinity
 mode training
-output_shape "(1, 1, 2, 1)"
+output_shape "(None, 1, 2, 1)"
 param_count trainable 0 non_trainable 0
 tensor input 1
   c0000000  # -2.0
@@ -1317,7 +1318,7 @@ end
 
 case MaxPooling3D pool2x2x2_valid
 mode training
-output_shape "(2, 2, 2, 2, 1)"
+output_shape "(None, 2, 2, 2, 1)"
 param_count trainable 0 non_trainable 0
 tensor input 2 4 4 4 1
   c0000000  # -2.0
@@ -1615,7 +1616,7 @@ end
 
 case MaxPooling3D depth_remainder
 mode training
-output_shape "(2, 2, 1, 1, 1)"
+output_shape "(None, 2, 1, 1, 1)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5 3 3 1
   c0000000  # -2.0
@@ -1813,7 +1814,7 @@ end
 
 case MaxPooling3D handbuilt_tie_across_depth
 mode training
-output_shape "(1, 1, 1, 2, 1)"
+output_shape "(None, 1, 1, 2, 1)"
 param_count trainable 0 non_trainable 0
 tensor input 1
   c0000000  # -2.0
@@ -1844,7 +1845,7 @@ end
 
 case MaxPooling3D handbuilt_all_negative_infinity
 mode training
-output_shape "(1, 1, 1, 2, 1)"
+output_shape "(None, 1, 1, 2, 1)"
 param_count trainable 0 non_trainable 0
 tensor input 1
   c0000000  # -2.0
@@ -1875,7 +1876,7 @@ end
 
 case AveragePooling1D pool3_stride3
 mode training
-output_shape "(2, 2, 2)"
+output_shape "(None, 2, 2)"
 param_count trainable 0 non_trainable 0
 tensor input 2 6 2
   c0000000  # -2.0
@@ -1949,7 +1950,7 @@ end
 
 case AveragePooling1D pool3_stride2_same
 mode training
-output_shape "(2, 4, 2)"
+output_shape "(None, 4, 2)"
 param_count trainable 0 non_trainable 0
 tensor input 2 7 2
   c0000000  # -2.0
@@ -2047,7 +2048,7 @@ end
 
 case AveragePooling1D handbuilt_nan_in_window
 mode training
-output_shape "(1, 2, 1)"
+output_shape "(None, 2, 1)"
 param_count trainable 0 non_trainable 0
 tensor input 1
   c0000000  # -2.0
@@ -2066,7 +2067,7 @@ end
 
 case AveragePooling2D pool3x2_nonsquare
 mode training
-output_shape "(2, 2, 2, 2)"
+output_shape "(None, 2, 2, 2)"
 param_count trainable 0 non_trainable 0
 tensor input 2 6 4 2
   c0000000  # -2.0
@@ -2300,7 +2301,7 @@ end
 
 case AveragePooling2D overlap_stride1x1
 mode training
-output_shape "(2, 4, 4, 2)"
+output_shape "(None, 4, 4, 2)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5 5 2
   c0000000  # -2.0
@@ -2638,7 +2639,7 @@ end
 
 case AveragePooling3D same_depth_remainder
 mode training
-output_shape "(2, 3, 2, 2, 1)"
+output_shape "(None, 3, 2, 2, 1)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5 4 4 1
   c0000000  # -2.0
@@ -3016,7 +3017,7 @@ end
 
 case AveragePooling3D overlap_stride
 mode training
-output_shape "(2, 3, 3, 3, 1)"
+output_shape "(None, 3, 3, 3, 1)"
 param_count trainable 0 non_trainable 0
 tensor input 2 4 4 4 1
   c0000000  # -2.0
@@ -3390,7 +3391,7 @@ end
 
 case GlobalMaxPooling1D default
 mode training
-output_shape "(2, 3)"
+output_shape "(None, 3)"
 param_count trainable 0 non_trainable 0
 tensor input 2 7 3
   c0000000  # -2.0
@@ -3496,7 +3497,7 @@ end
 
 case GlobalMaxPooling1D handbuilt_tie_first_position
 mode training
-output_shape "(1, 2)"
+output_shape "(None, 2)"
 param_count trainable 0 non_trainable 0
 tensor input 1
   c0000000  # -2.0
@@ -3519,7 +3520,7 @@ end
 
 case GlobalMaxPooling1D handbuilt_nan_wins_channel
 mode training
-output_shape "(1, 1)"
+output_shape "(None, 1)"
 param_count trainable 0 non_trainable 0
 tensor input 1
   c0000000  # -2.0
@@ -3536,7 +3537,7 @@ end
 
 case GlobalMaxPooling1D handbuilt_all_negative_infinity
 mode training
-output_shape "(1, 2)"
+output_shape "(None, 2)"
 param_count trainable 0 non_trainable 0
 tensor input 1
   c0000000  # -2.0
@@ -3559,7 +3560,7 @@ end
 
 case GlobalMaxPooling2D default
 mode training
-output_shape "(2, 3)"
+output_shape "(None, 3)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5 4 3
   c0000000  # -2.0
@@ -3821,7 +3822,7 @@ end
 
 case GlobalMaxPooling2D handbuilt_all_negative_infinity
 mode training
-output_shape "(1, 2)"
+output_shape "(None, 2)"
 param_count trainable 0 non_trainable 0
 tensor input 1
   c0000000  # -2.0
@@ -3844,7 +3845,7 @@ end
 
 case GlobalMaxPooling3D default
 mode training
-output_shape "(2, 2)"
+output_shape "(None, 2)"
 param_count trainable 0 non_trainable 0
 tensor input 2 3 3 2 2
   c0000000  # -2.0
@@ -4006,7 +4007,7 @@ end
 
 case GlobalMaxPooling3D handbuilt_all_negative_infinity
 mode training
-output_shape "(1, 2)"
+output_shape "(None, 2)"
 param_count trainable 0 non_trainable 0
 tensor input 1
   c0000000  # -2.0
@@ -4029,7 +4030,7 @@ end
 
 case GlobalAveragePooling1D default
 mode training
-output_shape "(2, 3)"
+output_shape "(None, 3)"
 param_count trainable 0 non_trainable 0
 tensor input 2 7 3
   c0000000  # -2.0
@@ -4135,7 +4136,7 @@ end
 
 case GlobalAveragePooling2D default
 mode training
-output_shape "(2, 3)"
+output_shape "(None, 3)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5 4 3
   c0000000  # -2.0
@@ -4397,7 +4398,7 @@ end
 
 case GlobalAveragePooling3D default
 mode training
-output_shape "(2, 2)"
+output_shape "(None, 2)"
 param_count trainable 0 non_trainable 0
 tensor input 2 3 3 2 2
   c0000000  # -2.0

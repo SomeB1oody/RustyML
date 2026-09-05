@@ -19,6 +19,7 @@
 # Regeneration history, newest first. Each line holds the reason of 1 run that wrote
 # this file.
 #
+# reason the pure known_input_shapes reports the build shape with a free batch axis
 # reason the checkpoint is addressed by name, so the layer supplies every recorded parameter name and the parameter count records both halves
 #
 # Each value line holds the raw f32 bits from to_bits, in 8 lowercase hexadecimal
@@ -28,11 +29,11 @@
 
 format 6
 family conv
-content_digest cdef563a58959d24 cases 32 values 8224
+content_digest 15a9a8f767f8eba4 cases 32 values 8224
 
 case Conv1D valid_stride_1
 mode training
-output_shape "(2, 4, 3)"
+output_shape "(None, 4, 3)"
 param_count trainable 21 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -190,7 +191,7 @@ end
 
 case Conv1D same_stride_2
 mode training
-output_shape "(2, 3, 3)"
+output_shape "(None, 3, 3)"
 param_count trainable 21 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -336,7 +337,7 @@ end
 
 case Conv1D valid_dilation_2
 mode training
-output_shape "(2, 2, 3)"
+output_shape "(None, 2, 3)"
 param_count trainable 21 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -470,7 +471,7 @@ end
 
 case Conv1D causal_dilation_1
 mode training
-output_shape "(2, 6, 3)"
+output_shape "(None, 6, 3)"
 param_count trainable 21 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -652,7 +653,7 @@ end
 
 case Conv1D causal_dilation_3
 mode training
-output_shape "(2, 6, 3)"
+output_shape "(None, 6, 3)"
 param_count trainable 21 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -834,7 +835,7 @@ end
 
 case Conv2D valid_kernel_3x2
 mode training
-output_shape "(2, 3, 3, 3)"
+output_shape "(None, 3, 3, 3)"
 param_count trainable 39 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -1200,7 +1201,7 @@ end
 
 case Conv2D same_stride_2
 mode training
-output_shape "(2, 3, 2, 3)"
+output_shape "(None, 3, 2, 3)"
 param_count trainable 57 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -1566,7 +1567,7 @@ end
 
 case Conv2D valid_dilation_2x1
 mode training
-output_shape "(2, 3, 3, 3)"
+output_shape "(None, 3, 3, 3)"
 param_count trainable 27 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -1908,7 +1909,7 @@ end
 
 case Conv2D same_dilation_2
 mode training
-output_shape "(2, 5, 4, 3)"
+output_shape "(None, 5, 4, 3)"
 param_count trainable 57 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -2442,7 +2443,7 @@ end
 
 case Conv3D valid_stride_1
 mode training
-output_shape "(2, 2, 2, 2, 2)"
+output_shape "(None, 2, 2, 2, 2)"
 param_count trainable 34 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -2810,7 +2811,7 @@ end
 
 case Conv3D same_stride_2
 mode training
-output_shape "(2, 2, 2, 2, 2)"
+output_shape "(None, 2, 2, 2, 2)"
 param_count trainable 34 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -3178,7 +3179,7 @@ end
 
 case Conv3D valid_dilation_2x1x1
 mode training
-output_shape "(2, 2, 2, 2, 2)"
+output_shape "(None, 2, 2, 2, 2)"
 param_count trainable 34 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -3618,7 +3619,7 @@ end
 
 case Conv3D same_dilation_2
 mode training
-output_shape "(2, 3, 3, 3, 2)"
+output_shape "(None, 3, 3, 3, 2)"
 param_count trainable 34 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -4138,7 +4139,7 @@ end
 
 case Conv1DTranspose valid_stride_2_kernel_4
 mode training
-output_shape "(2, 8, 2)"
+output_shape "(None, 8, 2)"
 param_count trainable 18 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -4282,7 +4283,7 @@ end
 
 case Conv1DTranspose same_stride_3_kernel_4
 mode training
-output_shape "(2, 9, 2)"
+output_shape "(None, 9, 2)"
 param_count trainable 18 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -4434,7 +4435,7 @@ end
 
 case Conv2DTranspose valid_stride_2_kernel_2
 mode training
-output_shape "(2, 6, 6, 2)"
+output_shape "(None, 6, 6, 2)"
 param_count trainable 18 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -4850,7 +4851,7 @@ end
 
 case Conv2DTranspose same_stride_2_kernel_3
 mode training
-output_shape "(2, 6, 6, 2)"
+output_shape "(None, 6, 6, 2)"
 param_count trainable 38 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -5306,7 +5307,7 @@ end
 
 case Conv3DTranspose valid_stride_2_kernel_2
 mode training
-output_shape "(2, 4, 4, 4, 1)"
+output_shape "(None, 4, 4, 4, 1)"
 param_count trainable 17 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -5680,7 +5681,7 @@ end
 
 case Conv3DTranspose same_stride_2_kernel_3
 mode training
-output_shape "(2, 4, 4, 4, 1)"
+output_shape "(None, 4, 4, 4, 1)"
 param_count trainable 55 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -6130,7 +6131,7 @@ end
 
 case DepthwiseConv1D valid_multiplier_1
 mode training
-output_shape "(2, 4, 2)"
+output_shape "(None, 4, 2)"
 param_count trainable 8 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -6246,7 +6247,7 @@ end
 
 case DepthwiseConv1D same_multiplier_2_stride_2
 mode training
-output_shape "(2, 3, 4)"
+output_shape "(None, 3, 4)"
 param_count trainable 16 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -6394,7 +6395,7 @@ end
 
 case DepthwiseConv1D valid_dilation_2
 mode training
-output_shape "(2, 2, 2)"
+output_shape "(None, 2, 2)"
 param_count trainable 8 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -6494,7 +6495,7 @@ end
 
 case DepthwiseConv1D same_dilation_3_stride_2
 mode training
-output_shape "(2, 3, 2)"
+output_shape "(None, 3, 2)"
 param_count trainable 8 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -6602,7 +6603,7 @@ end
 
 case DepthwiseConv2D valid_multiplier_2_kernel_2x3
 mode training
-output_shape "(2, 4, 2, 4)"
+output_shape "(None, 4, 2, 4)"
 param_count trainable 28 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -6966,7 +6967,7 @@ end
 
 case DepthwiseConv2D same_stride_2
 mode training
-output_shape "(2, 3, 2, 2)"
+output_shape "(None, 3, 2, 2)"
 param_count trainable 20 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -7234,7 +7235,7 @@ end
 
 case DepthwiseConv2D valid_dilation_1x2
 mode training
-output_shape "(2, 4, 2, 2)"
+output_shape "(None, 4, 2, 2)"
 param_count trainable 10 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -7498,7 +7499,7 @@ end
 
 case SeparableConv1D valid_multiplier_1
 mode training
-output_shape "(2, 4, 3)"
+output_shape "(None, 4, 3)"
 param_count trainable 15 non_trainable 0
 param_name depthwise_kernel layer
 param_name pointwise_kernel layer
@@ -7649,7 +7650,7 @@ end
 
 case SeparableConv1D same_multiplier_2_stride_2
 mode training
-output_shape "(2, 3, 3)"
+output_shape "(None, 3, 3)"
 param_count trainable 27 non_trainable 0
 param_name depthwise_kernel layer
 param_name pointwise_kernel layer
@@ -7812,7 +7813,7 @@ end
 
 case SeparableConv1D valid_dilation_2
 mode training
-output_shape "(2, 2, 3)"
+output_shape "(None, 2, 3)"
 param_count trainable 15 non_trainable 0
 param_name depthwise_kernel layer
 param_name pointwise_kernel layer
@@ -7939,7 +7940,7 @@ end
 
 case SeparableConv2D valid_kernel_3x2
 mode training
-output_shape "(2, 3, 3, 3)"
+output_shape "(None, 3, 3, 3)"
 param_count trainable 21 non_trainable 0
 param_name depthwise_kernel layer
 param_name pointwise_kernel layer
@@ -8274,7 +8275,7 @@ end
 
 case SeparableConv2D same_multiplier_2_stride_2
 mode training
-output_shape "(2, 3, 2, 2)"
+output_shape "(None, 3, 2, 2)"
 param_count trainable 46 non_trainable 0
 param_name depthwise_kernel layer
 param_name pointwise_kernel layer
@@ -8599,7 +8600,7 @@ end
 
 case SeparableConv2D valid_dilation_2x1
 mode training
-output_shape "(2, 3, 3, 3)"
+output_shape "(None, 3, 3, 3)"
 param_count trainable 17 non_trainable 0
 param_name depthwise_kernel layer
 param_name pointwise_kernel layer

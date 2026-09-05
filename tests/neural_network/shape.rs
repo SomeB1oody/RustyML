@@ -1,4 +1,4 @@
-//! Integration tests for [`Shape`] and for `Layer::compute_output_shape`.
+//! Integration tests for [`Shape`] and for the pure output-shape method of a layer.
 //!
 //! 2 properties matter here. The first is purity: the answer is a function of the layer
 //! configuration and of the shape the caller passes, and of nothing a forward pass wrote. The
@@ -10,10 +10,10 @@
 //! this file threads such a stack by hand, with no tensor anywhere.
 
 use ndarray::{Array, ArrayD, IxDyn};
-use rustyml::neural_network::Shape;
 use rustyml::neural_network::layers::*;
 use rustyml::neural_network::sequential::SequentialBuilder;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, UnaryLayer};
+use rustyml::neural_network::{Ctx, Shape};
 use std::collections::BTreeSet;
 
 // Purity: the answer comes from the configuration and the argument alone
@@ -43,8 +43,8 @@ fn the_pooling_family_answers_before_any_forward_pass() {
         .unwrap();
     assert_eq!(computed.to_string(), "(4, 2, 1)");
 
-    // A global pooling layer keeps no input shape until a forward pass gives it one, so its
-    // own `output_shape()` still reads "Unknown" here
+    // A global pooling layer keeps no input shape until a build gives it one, so its own
+    // `output_shape()` still reads "Unknown" here
     let global = GlobalMaxPooling1D::new();
     assert_eq!(global.output_shape(), "Unknown");
     let computed = global
@@ -61,7 +61,7 @@ fn the_pooling_family_answers_before_any_forward_pass() {
 fn a_layer_answers_for_a_shape_it_was_not_built_for() {
     let mut layer = MaxPooling1D::new(2).with_stride(2).unwrap();
     layer.build(&Shape::known(&[1, 8, 2])).unwrap();
-    assert_eq!(layer.output_shape(), "(1, 4, 2)");
+    assert_eq!(layer.output_shape(), "(None, 4, 2)");
 
     let computed = layer
         .compute_output_shape(&Shape::with_free_batch(&[64, 20, 2]))
@@ -79,7 +79,9 @@ fn a_forward_pass_changes_no_answer() {
     let asked = Shape::with_free_batch(&[2, 10, 10, 3]);
 
     let before = layer.compute_output_shape(&asked).unwrap();
-    layer.forward(&ArrayD::zeros(IxDyn(&[2, 8, 8, 3]))).unwrap();
+    layer
+        .forward_mut(&ArrayD::zeros(IxDyn(&[2, 8, 8, 3])), &mut Ctx::inference())
+        .unwrap();
     let after = layer.compute_output_shape(&asked).unwrap();
 
     assert_eq!(before, after);
@@ -125,8 +127,8 @@ fn a_recurrent_layer_keeps_a_free_time_axis() {
 
 /// A layer that learns its shape from data still answers before it sees any
 ///
-/// `UpSampling2D` reports "Unknown" until a forward pass, because it holds no input shape.
-/// Its shape algebra needs no such state
+/// `UpSampling2D` reports "Unknown" until its build, because it holds no input shape. Its
+/// shape algebra needs no such state
 #[test]
 fn a_data_driven_layer_answers_with_no_data() {
     let layer = UpSampling2D::new((2, 3), Interpolation::Nearest).unwrap();
@@ -320,7 +322,7 @@ fn valid_convolutions_that_cannot_fit() -> Vec<(Box<dyn Layer>, Shape, &'static 
 #[test]
 fn every_valid_convolution_refuses_a_kernel_larger_than_the_input() {
     for (layer, input, name) in valid_convolutions_that_cannot_fit() {
-        let message = match layer.compute_output_shape(&input) {
+        let message = match layer.compute_output_shape_many(std::slice::from_ref(&input)) {
             Ok(answer) => panic!("{name} answered {answer}, and it must refuse the shape {input}"),
             Err(error) => error.to_string(),
         };
@@ -336,12 +338,15 @@ fn every_valid_convolution_refuses_a_kernel_larger_than_the_input() {
 
 /// The same refusal reaches the build, so no oversized layer ever holds a weight
 ///
-/// [`Layer::build`] is the step that allocates. It applies the same shape algebra first, so a
-/// layer that cannot run draws nothing at all
+/// [`Layer::build_many`] is the step that allocates. It applies the same shape algebra first, so
+/// a layer that cannot run draws nothing at all
 #[test]
 fn every_valid_convolution_refuses_the_build_as_well() {
     for (mut layer, input, name) in valid_convolutions_that_cannot_fit() {
-        let message = layer.build(&input).unwrap_err().to_string();
+        let message = layer
+            .build_many(std::slice::from_ref(&input))
+            .unwrap_err()
+            .to_string();
 
         assert!(message.contains(name), "{name}: {message}");
         assert!(
@@ -492,7 +497,7 @@ fn a_whole_stack_answers_before_any_tensor_exists() {
     let mut shape = Shape::with_free_batch(&[1, 8, 8, 1]);
     for (position, layer) in layers.iter().enumerate() {
         shape = layer
-            .compute_output_shape(&shape)
+            .compute_output_shape_many(std::slice::from_ref(&shape))
             .unwrap_or_else(|error| panic!("layer {position} ({}): {error}", layer.layer_type()));
     }
     assert_eq!(shape.to_string(), "(None, 5)");
@@ -512,7 +517,7 @@ fn a_bad_stack_names_the_layer_that_refuses() {
     let mut shape = Shape::with_free_batch(&[1, 4, 4, 1]);
     let mut refused = None;
     for (position, layer) in layers.iter().enumerate() {
-        match layer.compute_output_shape(&shape) {
+        match layer.compute_output_shape_many(std::slice::from_ref(&shape)) {
             Ok(next) => shape = next,
             Err(error) => {
                 refused = Some(format!(
@@ -532,20 +537,24 @@ fn a_bad_stack_names_the_layer_that_refuses() {
 
 /// `output_shape` runs the pure method against the shape the layer holds
 ///
-/// The 3 layers below cover the 3 sources of that shape: the build, the last forward input,
-/// and nothing at all
+/// The 3 layers below cover the 3 sources of that shape: a build the caller ran, a build that
+/// `forward_mut` ran from the tensor, and nothing at all
 #[test]
 fn output_shape_reads_the_shape_the_layer_holds() {
     // Taken from the build, and reported with the batch extent the build named
     let mut declared = AveragePooling1D::new(2);
     declared.build(&Shape::known(&[1, 6, 1])).unwrap();
-    assert_eq!(declared.output_shape(), "(1, 3, 1)");
+    assert_eq!(declared.output_shape(), "(None, 3, 1)");
 
-    // Learned from the last forward input, and reported with a free batch axis
+    // Taken from the build that `forward_mut` ran. That build reads the whole shape of the
+    // tensor, batch extent included, so the report names the batch extent as well
     let mut learned = UpSampling2D::new(2, Interpolation::Nearest).unwrap();
     assert_eq!(learned.output_shape(), "Unknown");
     learned
-        .forward(&Array::zeros(IxDyn(&[1, 3, 3, 2])).into_dyn())
+        .forward_mut(
+            &Array::zeros(IxDyn(&[1, 3, 3, 2])).into_dyn(),
+            &mut Ctx::inference(),
+        )
         .unwrap();
     assert_eq!(learned.output_shape(), "(None, 6, 6, 2)");
 
@@ -568,16 +577,16 @@ fn a_built_layer_refuses_the_extents_its_summary_does_not_name() {
     layer
         .build(&rustyml::neural_network::Shape::known(&[2, 4, 4, 2]))
         .unwrap();
-    assert_eq!(layer.output_shape(), "(2, 3, 3, 3)");
+    assert_eq!(layer.output_shape(), "(None, 3, 3, 3)");
 
     // The same layer used to accept any spatial extent, and its summary went on printing the
     // declared one
     let wider = Array4::<f32>::ones((2, 6, 6, 2)).into_dyn();
-    assert!(layer.forward(&wider).is_err());
+    assert!(layer.forward(&wider, &mut Ctx::inference()).is_err());
 
     // A different batch size still passes, because the batch axis is never checked
     let bigger_batch = Array4::<f32>::ones((5, 4, 4, 2)).into_dyn();
-    assert!(layer.forward(&bigger_batch).is_ok());
+    assert!(layer.forward(&bigger_batch, &mut Ctx::inference()).is_ok());
 }
 
 // The whole roster: every layer type answers before its build
@@ -927,9 +936,11 @@ fn every_layer_type_answers_before_its_build() {
             "{name} must hold no build in this table"
         );
 
-        let computed = layer.compute_output_shape(&input).unwrap_or_else(|error| {
-            panic!("{name} refused the shape {input} before its build: {error}")
-        });
+        let computed = layer
+            .compute_output_shape_many(std::slice::from_ref(&input))
+            .unwrap_or_else(|error| {
+                panic!("{name} refused the shape {input} before its build: {error}")
+            });
         assert_eq!(computed.to_string(), expected, "{name}");
 
         assert!(
@@ -963,14 +974,16 @@ fn every_layer_type_answers_before_its_build() {
 fn a_build_changes_no_answer() {
     for (input, mut layer, expected) in unbuilt_layers() {
         let name = layer.layer_type().to_string();
-        let before = layer.compute_output_shape(&input).unwrap();
+        let before = layer
+            .compute_output_shape_many(std::slice::from_ref(&input))
+            .unwrap();
 
         layer
-            .build(&input)
+            .build_many(std::slice::from_ref(&input))
             .unwrap_or_else(|error| panic!("{name} refused to build for {input}: {error}"));
 
         let after = layer
-            .compute_output_shape(&input)
+            .compute_output_shape_many(std::slice::from_ref(&input))
             .unwrap_or_else(|error| panic!("{name} refused {input} after its build: {error}"));
         assert_eq!(before, after, "{name}");
         assert_eq!(after.to_string(), expected, "{name}");

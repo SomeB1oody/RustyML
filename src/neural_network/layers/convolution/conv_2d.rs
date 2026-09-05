@@ -1,6 +1,6 @@
 //! 2D convolutional layer for grid-like data such as images
 //!
-//! Holds the layer weights, activation, and caches, and delegates the forward/backward
+//! Holds the layer weights and the activation, and delegates the forward/backward
 //! numerics to the dimension-generic convolution engine
 
 use crate::error::Error;
@@ -17,11 +17,9 @@ use crate::neural_network::layers::convolution::validation::{
 use crate::neural_network::layers::validation::{
     start_build, validate_built_input, validate_optional_weight, validate_weight_shape,
 };
-use crate::neural_network::layers::{
-    build_on_forward, built_layer_shape_functions, named_weight_layer_functions,
-};
-use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Fans, Initializer, Shape, Tensor};
+use crate::neural_network::layers::{built_layer_shape_functions, named_weight_layer_functions};
+use crate::neural_network::traits::{LayerBase, ParamRef, UnaryLayer};
+use crate::neural_network::{Ctx, Fans, Initializer, Shape, Tensor};
 use ndarray::{Array1, Array4};
 
 /// A 2D convolutional layer for neural networks
@@ -33,7 +31,7 @@ use ndarray::{Array1, Array4};
 ///
 /// The dimension-generic convolution math lives in
 /// [`convolution_engine`](crate::neural_network::layers::convolution). This layer holds the
-/// weights, activation, and caches, and delegates the forward/backward numerics to it.
+/// weights and the activation, and delegates the forward/backward numerics to it.
 ///
 /// # Examples
 ///
@@ -99,20 +97,12 @@ pub struct Conv2D {
     bias: Array1<f32>,
     /// Activation applied to the convolution output
     activation: Activation,
-    /// Cached activated output, used by the activation backward pass
-    output_cache: Option<Tensor>,
-    /// Cached input from the forward pass, used during backpropagation
-    input_cache: Option<Tensor>,
     /// Shape the layer was built for, batch axis first. `None` before the build
     built: Option<Shape>,
-    /// Input channels, which [`Layer::build`] reads from the input shape
+    /// Input channels, which [`UnaryLayer::build`] reads from the input shape
     channels: usize,
     /// Seed of the weight draw, or `None` to take the global seed or entropy
     random_state: Option<u64>,
-    /// Gradients for the weights, computed during backpropagation
-    weight_gradients: Option<Array4<f32>>,
-    /// Gradients for the biases, computed during backpropagation
-    bias_gradients: Option<Array1<f32>>,
     /// Whether the layer adds a bias to the convolution output
     use_bias: bool,
 }
@@ -120,7 +110,7 @@ pub struct Conv2D {
 impl Conv2D {
     /// Creates a new 2D convolutional layer with the specified parameters
     ///
-    /// The constructor draws nothing. [`Layer::build`] reads the channel count from the input
+    /// The constructor draws nothing. [`UnaryLayer::build`] reads the channel count from the input
     /// shape, draws the kernel with Xavier (Glorot) uniform initialization, and sets the bias
     /// to 0
     ///
@@ -139,7 +129,7 @@ impl Conv2D {
     ///
     /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
     /// [`Conv2D::with_padding`]. The kernel is solid by default. Space its taps out with
-    /// [`Conv2D::with_dilation_rate`]. By default, the draw of [`Layer::build`] takes the
+    /// [`Conv2D::with_dilation_rate`]. By default, the draw of [`UnaryLayer::build`] takes the
     /// global seed or entropy. For reproducible initialization, set a seed with
     /// [`Conv2D::with_random_state`].
     ///
@@ -170,13 +160,9 @@ impl Conv2D {
             weights: Array4::zeros((0, 0, 0, 0)),
             bias: Array1::zeros(0),
             activation,
-            output_cache: None,
-            input_cache: None,
             built: None,
             channels: 0,
             random_state: None,
-            weight_gradients: None,
-            bias_gradients: None,
             use_bias: true,
         })
     }
@@ -320,11 +306,6 @@ impl Conv2D {
     /// - `Self` - The updated layer
     pub fn with_use_bias(mut self, use_bias: bool) -> Self {
         self.use_bias = use_bias;
-        if !use_bias {
-            // Drop any gradient a previous backward pass left, so the bias cannot reach
-            // `parameters` after the layer stops holding it
-            self.bias_gradients = None;
-        }
         self
     }
 
@@ -362,7 +343,55 @@ impl Conv2D {
     }
 }
 
-impl Layer for Conv2D {
+/// What the forward pass of [`Conv2D`] parks for its backward pass
+struct Conv2DCache {
+    /// The input tensor the forward pass received
+    input: Tensor,
+    /// The activated output, to backpropagate through the activation
+    output: Tensor,
+}
+
+impl LayerBase for Conv2D {
+    fn layer_type(&self) -> &str {
+        "Conv2D"
+    }
+
+    fn param_count(&self) -> ParamCounts {
+        // Read the arrays the layer holds rather than the configuration, so dropping the
+        // bias corrects the count with no second formula to keep in step
+        let bias = if self.use_bias { self.bias.len() } else { 0 };
+        ParamCounts::trainable(self.weights.len() + bias)
+    }
+
+    fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
+        let Self {
+            weights,
+            bias,
+            use_bias,
+            ..
+        } = self;
+        let mut params = vec![ParamRef::weight(
+            "kernel",
+            weights.as_slice_mut().expect("weights must be contiguous"),
+        )];
+        if *use_bias {
+            params.push(ParamRef::no_decay(
+                "bias",
+                bias.as_slice_mut().expect("bias must be contiguous"),
+            ));
+        }
+        params
+    }
+
+    built_layer_shape_functions!();
+
+    named_weight_layer_functions!(
+        trainable "kernel" => weights,
+        trainable "bias" => bias if use_bias,
+    );
+}
+
+impl UnaryLayer for Conv2D {
     /// Reads the channel count from the input shape, and draws the kernel and the bias
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "Conv2D", input)? else {
@@ -384,31 +413,7 @@ impl Layer for Conv2D {
         Ok(())
     }
 
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        build_on_forward!(self, input);
-        validate_built_input(&self.built, "Conv2D", input.shape())?;
-
-        // Cache input for backpropagation
-        self.input_cache = Some(input.clone());
-
-        // Convolution (dimension-generic engine), then activation
-        let output = conv_forward(
-            input,
-            self.weights.as_slice().expect("weights must be contiguous"),
-            self.weights.shape(),
-            self.use_bias
-                .then(|| self.bias.as_slice().expect("bias must be contiguous")),
-            &[self.strides.0, self.strides.1],
-            &[self.dilation_rate.0, self.dilation_rate.1],
-            self.padding.into(),
-        )?;
-        let activated = self.activation.forward(&output)?;
-        self.output_cache = Some(activated.clone());
-        Ok(activated)
-    }
-
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         validate_built_input(&self.built, "Conv2D", input.shape())?;
 
         // Convolution (dimension-generic engine), then activation
@@ -423,25 +428,26 @@ impl Layer for Conv2D {
             self.padding.into(),
         )?;
         let activated = self.activation.forward(&output)?;
+
+        if ctx.is_training() {
+            ctx.push_cache(Conv2DCache {
+                input: input.clone(),
+                output: activated.clone(),
+            });
+        }
+
         Ok(activated)
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let cache: Conv2DCache = ctx.pop_cache("Conv2D")?;
+
         // Activation backward pass first
-        let activated = self
-            .output_cache
-            .take()
-            .ok_or_else(|| Error::forward_pass_not_run("Conv2D"))?;
-        let grad_upstream = self.activation.backward(&activated, grad_output)?;
-
-        let input = self
-            .input_cache
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("Conv2D"))?;
+        let grad_upstream = self.activation.backward(&cache.output, grad_output)?;
 
         let grads = conv_backward(
             &grad_upstream,
-            input,
+            &cache.input,
             self.weights.as_slice().expect("weights must be contiguous"),
             self.weights.shape(),
             &[self.strides.0, self.strides.1],
@@ -449,25 +455,25 @@ impl Layer for Conv2D {
             self.padding.into(),
         )?;
 
-        self.weight_gradients = Some(
+        ctx.add_grad(
+            "kernel",
             Array4::from_shape_vec(self.weights.raw_dim(), grads.weight_grad)
-                .expect("weight gradient shape matches weights"),
-        );
-        // A bias-free layer keeps no bias gradient, so `parameters` yields none and no
+                .expect("weight gradient shape matches weights")
+                .into_dyn(),
+        )?;
+        // A bias-free layer computes no bias gradient, so the store holds none and no
         // optimizer state is ever keyed on a bias that the layer does not hold
-        self.bias_gradients = self.use_bias.then(|| {
-            Array1::from_shape_vec(self.bias.raw_dim(), grads.bias_grad)
-                .expect("bias gradient shape matches bias")
-        });
+        if self.use_bias {
+            ctx.add_grad(
+                "bias",
+                Array1::from_shape_vec(self.bias.raw_dim(), grads.bias_grad)
+                    .expect("bias gradient shape matches bias")
+                    .into_dyn(),
+            )?;
+        }
 
         Ok(grads.input_grad)
     }
-
-    fn layer_type(&self) -> &str {
-        "Conv2D"
-    }
-
-    built_layer_shape_functions!();
 
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         input.check_rank("Conv2D", 4)?;
@@ -480,44 +486,4 @@ impl Layer for Conv2D {
             &self.calculate_output_shape(&dims)?[1..],
         ))
     }
-
-    fn param_count(&self) -> ParamCounts {
-        // Read the arrays the layer holds rather than the configuration, so dropping the
-        // bias corrects the count with no second formula to keep in step
-        let bias = if self.use_bias { self.bias.len() } else { 0 };
-        ParamCounts::trainable(self.weights.len() + bias)
-    }
-
-    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
-        let Self {
-            weights,
-            bias,
-            weight_gradients,
-            bias_gradients,
-            ..
-        } = self;
-        let mut params = Vec::new();
-        // Each tensor is pushed on its own, so a tensor without a gradient holds back no other
-        if let Some(grad) = weight_gradients.as_ref() {
-            params.push(ParamGrad::weight(
-                "kernel",
-                weights.as_slice_mut().expect("weights must be contiguous"),
-                grad.as_slice()
-                    .expect("weight_gradients must be contiguous"),
-            ));
-        }
-        if let Some(grad) = bias_gradients.as_ref() {
-            params.push(ParamGrad::no_decay(
-                "bias",
-                bias.as_slice_mut().expect("bias must be contiguous"),
-                grad.as_slice().expect("bias_gradients must be contiguous"),
-            ));
-        }
-        params
-    }
-
-    named_weight_layer_functions!(
-        trainable "kernel" => weights,
-        trainable "bias" => bias if use_bias,
-    );
 }

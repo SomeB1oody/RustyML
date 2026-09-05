@@ -13,6 +13,7 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array3, Array4, array};
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::activation::relu::ReLU;
@@ -21,7 +22,7 @@ use rustyml::neural_network::layers::convolution::conv_1d::{Conv1D, ConvPadding}
 use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
 use rustyml::neural_network::layers::convolution::depthwise_conv_1d::DepthwiseConv1D;
 use rustyml::neural_network::layers::convolution::separable_conv_1d::SeparableConv1D;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{LayerBase, ParamId, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::{assert_allclose, named};
@@ -40,7 +41,8 @@ fn conv1d_all_ones_kernel_windowed_sums() {
     let input = Array::from_shape_vec((1, 5, 1), vec![1.0f32, 2.0, 3.0, 4.0, 5.0])
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 1]);
     // Windowed sums of [1,2,3,4,5]: 1+2+3, 2+3+4, 3+4+5
@@ -62,7 +64,8 @@ fn conv1d_stride2_windowed_sums() {
     let input = Array::from_shape_vec((1, 6, 1), vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0])
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 2, 1]);
     // Windows start at 0 and 2: 1+2+3=6, 3+4+5=12
@@ -85,7 +88,8 @@ fn conv1d_asymmetric_kernel_values() {
     let input = Array::from_shape_vec((1, 5, 1), vec![1.0f32, 2.0, 3.0, 4.0, 5.0])
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 1]);
     // Cross-correlation, no kernel flip: out[i] = 2*x[i] + 0*x[i+1] + 1*x[i+2]
@@ -109,7 +113,8 @@ fn conv1d_bias_offset_adds_to_every_output() {
     let input = Array::from_shape_vec((1, 5, 1), vec![1.0f32, 2.0, 3.0, 4.0, 5.0])
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 4, 1]);
     let expected = Array::from_shape_vec((1, 4, 1), vec![6.0f32, 7.0, 8.0, 9.0])
@@ -132,7 +137,8 @@ fn conv1d_two_filters_independent_outputs() {
     let input = Array::from_shape_vec((1, 5, 1), vec![1.0f32, 2.0, 3.0, 4.0, 5.0])
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 4, 2]);
 
@@ -158,7 +164,8 @@ fn conv1d_relu_activation_clips_negatives() {
     let input = Array::from_shape_vec((1, 5, 1), vec![-1.0f32, -2.0, 1.0, 2.0, 3.0])
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 1]);
     // Pre-activation windowed sums are -2, 1, 6. ReLU clips the first value to 0.
@@ -182,7 +189,8 @@ fn conv1d_same_padding_forward_values() {
     let input = Array::from_shape_vec((1, 5, 1), vec![1.0f32, 2.0, 3.0, 4.0, 5.0])
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 5, 1]);
     // pad_total = (5-1)*1 + 3 - 5 = 2, so pad_before = pad_after = 1: [0,1,2,3,4,5,0]
@@ -207,7 +215,8 @@ fn conv1d_same_padding_stride2_output_length_and_values() {
     let input = Array::from_shape_vec((1, 6, 1), vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0])
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 1]);
     // out_len = ceil(6/2) = 3. pad_total = (3-1)*2 + 3 - 6 = 1, all on the trailing edge.
@@ -231,7 +240,8 @@ fn conv1d_batch_forward_independent_samples() {
     let input = Array::from_shape_vec((2, 4, 1), vec![1.0f32, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[2, 3, 1]);
     // Both samples produce the same output
@@ -254,7 +264,8 @@ fn conv1d_input_equals_kernel_produces_single_output() {
     let input = Array::from_shape_vec((1, 3, 1), vec![10.0f32, 20.0, 30.0])
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 1, 1]);
     assert_abs_diff_eq!(output[[0, 0, 0]], 60.0f32, epsilon = 1e-6f32);
@@ -276,7 +287,8 @@ fn conv1d_two_input_channels_cross_channel_sum() {
     let input = Array::from_shape_vec((1, 3, 2), vec![1.0f32, 10.0, 2.0, 20.0, 3.0, 30.0])
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 2, 1]);
     // out[0] = 1*(1+2) + 2*(10+20) = 3 + 60 = 63
@@ -321,7 +333,8 @@ fn conv1d_set_weights_correct_shape_succeeds() {
     let input = Array::from_shape_vec((1, 5, 1), vec![1.0f32, 2.0, 3.0, 4.0, 5.0])
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     let expected = Array::from_shape_vec((1, 3, 1), vec![12.0f32, 18.0, 24.0])
         .unwrap()
@@ -423,7 +436,7 @@ fn conv1d_build_rejects_invalid_input_shape() {
 fn conv1d_forward_wrong_ndim_errors() {
     let mut layer = Conv1D::new(1, 3, 1, Linear::new()).unwrap();
     let bad_input = Array::zeros((1_usize, 5_usize)).into_dyn();
-    let result = layer.forward(&bad_input);
+    let result = layer.forward_mut(&bad_input, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for 2D tensor, got {:?}",
@@ -434,9 +447,9 @@ fn conv1d_forward_wrong_ndim_errors() {
 /// backward() before forward() returns ForwardPassNotRun
 #[test]
 fn conv1d_backward_before_forward_errors() {
-    let mut layer = Conv1D::new(1, 3, 1, Linear::new()).unwrap();
+    let layer = Conv1D::new(1, 3, 1, Linear::new()).unwrap();
     let grad = Array::ones((1_usize, 3_usize, 1_usize)).into_dyn();
-    let result = layer.backward(&grad);
+    let result = layer.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -462,8 +475,8 @@ fn conv1d_predict_equals_forward() {
         .unwrap()
         .into_dyn();
 
-    let forward_output = layer.forward(&input).unwrap();
-    let predict_output = layer.predict(&input).unwrap();
+    let forward_output = layer.forward(&input, &mut Ctx::training()).unwrap();
+    let predict_output = layer.forward(&input, &mut Ctx::inference()).unwrap();
 
     assert_allclose(&predict_output, &forward_output, 1e-7f32);
 }
@@ -481,8 +494,8 @@ fn conv1d_predict_deterministic() {
         .unwrap()
         .into_dyn();
 
-    let out1 = layer.predict(&input).unwrap();
-    let out2 = layer.predict(&input).unwrap();
+    let out1 = layer.forward(&input, &mut Ctx::inference()).unwrap();
+    let out2 = layer.forward(&input, &mut Ctx::inference()).unwrap();
     assert_allclose(&out1, &out2, 0.0f32);
 }
 
@@ -513,7 +526,8 @@ fn conv2d_all_ones_kernel_windowed_sums() {
     let input = Array::from_shape_vec((1, 4, 4, 1), input_data)
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 3, 1]);
 
@@ -539,7 +553,8 @@ fn conv2d_1x1_kernel_scalar_multiply() {
     let input = Array::from_shape_vec((1, 3, 3, 1), input_data)
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 3, 1]);
     for i in 0..3 {
@@ -562,7 +577,8 @@ fn conv2d_bias_shifts_all_outputs() {
     let input = Array::from_shape_vec((1, 2, 2, 1), vec![1.0f32, 2.0, 3.0, 4.0])
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 2, 2, 1]);
     let expected = Array::from_shape_vec((1, 2, 2, 1), vec![4.0f32, 5.0, 6.0, 7.0])
@@ -584,7 +600,8 @@ fn conv2d_stride2_valid_output_shape_and_values() {
     let input = Array::from_shape_vec((1, 4, 4, 1), input_data)
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 2, 2, 1]);
     // Windows anchored at rows/cols {0, 2}
@@ -614,7 +631,8 @@ fn conv2d_two_filters_independent_outputs() {
     let input = Array::from_shape_vec((1, 3, 3, 1), input_data)
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 2, 2, 2]);
 
@@ -649,7 +667,8 @@ fn conv2d_two_input_channels_cross_channel_sum() {
     )
     .unwrap()
     .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 2, 2, 1]);
     // out[h,w] = 1*x[h,w,0] + 10*x[h,w,1]. The per-channel weights and the per-channel data
@@ -672,7 +691,8 @@ fn conv2d_relu_clips_negatives() {
     let input = Array::from_shape_vec((1, 3, 1, 1), vec![-3.0f32, 1.0, 2.0])
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 2, 1, 1]);
     // Pre-activations: -3+1 = -2 (clipped) and 1+2 = 3
@@ -688,7 +708,7 @@ fn conv2d_same_padding_output_shapes() {
         .unwrap()
         .with_padding(PaddingType::Same);
     let x1 = Array::ones((1, 5, 5, 1)).into_dyn();
-    let out1 = layer1.forward(&x1).unwrap();
+    let out1 = layer1.forward_mut(&x1, &mut Ctx::training()).unwrap();
     assert_eq!(out1.shape(), &[1, 5, 5, 1]);
 
     // Case 2: stride=(2,2): ceil(4/2)=2
@@ -696,7 +716,7 @@ fn conv2d_same_padding_output_shapes() {
         .unwrap()
         .with_padding(PaddingType::Same);
     let x2 = Array::ones((1, 4, 4, 1)).into_dyn();
-    let out2 = layer2.forward(&x2).unwrap();
+    let out2 = layer2.forward_mut(&x2, &mut Ctx::training()).unwrap();
     assert_eq!(out2.shape(), &[1, 2, 2, 1]);
 }
 
@@ -712,7 +732,8 @@ fn conv2d_same_padding_all_ones_values() {
     layer.set_weights(weights, bias).unwrap();
 
     let input = Array::ones((1, 3, 3, 1)).into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 3, 1]);
     // pad_total = (3-1)*1 + 3 - 3 = 2 per axis, 1 row/column of zeros on each side
@@ -766,7 +787,8 @@ fn conv2d_set_weights_correct_shape_succeeds() {
     let input = Array::from_shape_vec((1, 3, 3, 1), input_data)
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 3, 1]);
     for i in 0..3 {
@@ -873,7 +895,7 @@ fn conv2d_build_rejects_invalid_input_shape() {
 fn conv2d_forward_wrong_ndim_errors() {
     let mut layer = Conv2D::new(1, (3, 3), (1, 1), Linear::new()).unwrap();
     let bad_input = Array::zeros((1_usize, 5_usize, 5_usize)).into_dyn();
-    let result = layer.forward(&bad_input);
+    let result = layer.forward_mut(&bad_input, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for 3D tensor, got {:?}",
@@ -884,9 +906,9 @@ fn conv2d_forward_wrong_ndim_errors() {
 /// backward() before forward() returns ForwardPassNotRun
 #[test]
 fn conv2d_backward_before_forward_errors() {
-    let mut layer = Conv2D::new(1, (2, 2), (1, 1), Linear::new()).unwrap();
+    let layer = Conv2D::new(1, (2, 2), (1, 1), Linear::new()).unwrap();
     let grad = Array::ones((1_usize, 3_usize, 3_usize, 1_usize)).into_dyn();
-    let result = layer.backward(&grad);
+    let result = layer.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -913,8 +935,8 @@ fn conv2d_predict_equals_forward() {
         .unwrap()
         .into_dyn();
 
-    let forward_output = layer.forward(&input).unwrap();
-    let predict_output = layer.predict(&input).unwrap();
+    let forward_output = layer.forward(&input, &mut Ctx::training()).unwrap();
+    let predict_output = layer.forward(&input, &mut Ctx::inference()).unwrap();
 
     assert_allclose(&predict_output, &forward_output, 1e-7f32);
 }
@@ -933,8 +955,8 @@ fn conv2d_predict_deterministic() {
         .unwrap()
         .into_dyn();
 
-    let out1 = layer.predict(&input).unwrap();
-    let out2 = layer.predict(&input).unwrap();
+    let out1 = layer.forward(&input, &mut Ctx::inference()).unwrap();
+    let out2 = layer.forward(&input, &mut Ctx::inference()).unwrap();
     assert_allclose(&out1, &out2, 0.0f32);
 }
 
@@ -965,7 +987,8 @@ fn conv1d_valid_output_length_cases() {
     for (len, kernel, stride, expected) in cases {
         let mut conv = Conv1D::new(1, kernel, stride, Linear::new()).unwrap();
         let x = Array::ones((1, len, 1)).into_dyn();
-        let out = conv.forward(&x).unwrap();
+        let mut ctx = Ctx::training();
+        let out = conv.forward_mut(&x, &mut ctx).unwrap();
         assert_eq!(
             out.shape(),
             &[1, expected, 1],
@@ -991,7 +1014,8 @@ fn conv1d_same_output_length_cases() {
             .unwrap()
             .with_padding(PaddingType::Same);
         let x = Array::ones((1, len, 1)).into_dyn();
-        let out = conv.forward(&x).unwrap();
+        let mut ctx = Ctx::training();
+        let out = conv.forward_mut(&x, &mut ctx).unwrap();
         assert_eq!(
             out.shape(),
             &[1, expected, 1],
@@ -1019,7 +1043,8 @@ fn conv2d_valid_output_shape_cases() {
     for (h, w, kh, kw, sh, sw, out_h, out_w) in cases {
         let mut conv = Conv2D::new(1, (kh, kw), (sh, sw), Linear::new()).unwrap();
         let x = Array::ones((1, h, w, 1)).into_dyn();
-        let out = conv.forward(&x).unwrap();
+        let mut ctx = Ctx::training();
+        let out = conv.forward_mut(&x, &mut ctx).unwrap();
         assert_eq!(
             out.shape(),
             &[1, out_h, out_w, 1],
@@ -1063,7 +1088,8 @@ fn conv2d_parallel_forward_windowed_sums() {
             }
         }
     }
-    let output = layer.forward(&input.into_dyn()).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input.into_dyn(), &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[2, 354, 354, 2]);
 
@@ -1108,15 +1134,15 @@ fn conv2d_parallel_weight_grad_constant_count() {
     layer.set_weights(weights, bias).unwrap();
 
     let input = Array::ones((4, 120, 120, 2)).into_dyn();
-    let _ = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let _ = layer.forward(&input, &mut ctx).unwrap();
 
     // gradient of the conv output: all ones, shape [batch, out_h, out_w, filters]
     let grad = Array::ones((4, 118, 118, 1)).into_dyn();
-    let _input_grad = layer.backward(&grad).unwrap();
+    let _input_grad = layer.backward(&grad, &mut ctx).unwrap();
 
-    // parameters() returns weights first. Its `.grad` field holds the flat weight gradient.
-    let params = layer.parameters();
-    let weight_grad = params[0].grad;
+    // The gradient store holds the weight gradient under its parameter name.
+    let weight_grad = ctx.grads().get(ParamId::new(0, "kernel")).unwrap();
     // 3*3 taps * 2 input channels * 1 filter
     assert_eq!(weight_grad.len(), 18, "expected 18 weight-grad entries");
     // dL/dw[kh,kw,c,f] = sum_{b,oh,ow} grad * x = 4 batches * 118*118 positions * 1 * 1 = 55_696
@@ -1145,7 +1171,8 @@ fn conv1d_dilation_spaces_the_taps_out() {
     let input = Array::from_shape_vec((1, 9, 1), (1..=9).map(|v| v as f32).collect::<Vec<f32>>())
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 5, 1], "keff = 5 leaves 5 windows");
     let expected = Array::from_shape_vec((1, 5, 1), vec![9.0f32, 12.0, 15.0, 18.0, 21.0])
@@ -1173,7 +1200,8 @@ fn conv1d_dilated_same_padding_keeps_the_length() {
             .unwrap();
 
         let input = Array::ones((1, 8, 1)).into_dyn();
-        let output = layer.forward(&input).unwrap();
+        let mut ctx = Ctx::training();
+        let output = layer.forward(&input, &mut ctx).unwrap();
         assert_eq!(
             output.shape(),
             &[1, 8, 1],
@@ -1199,14 +1227,18 @@ fn a_dilated_kernel_longer_than_the_input_fails_only_under_valid() {
     };
     let input = Array::ones((1, 6, 1)).into_dyn();
 
-    let err = build(ConvPadding::Valid).forward(&input).unwrap_err();
+    let err = build(ConvPadding::Valid)
+        .forward_mut(&input, &mut Ctx::training())
+        .unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "expected InvalidInput under Valid, got {err:?}"
     );
 
     for padding in [ConvPadding::Same, ConvPadding::Causal] {
-        let output = build(padding).forward(&input).unwrap();
+        let output = build(padding)
+            .forward_mut(&input, &mut Ctx::training())
+            .unwrap();
         assert_eq!(
             output.shape(),
             &[1, 6, 1],
@@ -1216,7 +1248,12 @@ fn a_dilated_kernel_longer_than_the_input_fails_only_under_valid() {
 
     // The same kernel at dilation 2 spans 5 cells, which fits under Valid as well
     let mut fits = build_dilation_2();
-    assert_eq!(fits.forward(&input).unwrap().shape(), &[1, 2, 1]);
+    assert_eq!(
+        fits.forward_mut(&input, &mut Ctx::training())
+            .unwrap()
+            .shape(),
+        &[1, 2, 1]
+    );
 }
 
 /// A Conv1D at a dilation of 2, used by the padding-mode case above
@@ -1283,7 +1320,8 @@ fn conv2d_dilation_is_per_axis() {
     let input = Array::from_shape_vec((1, 4, 7, 1), values)
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 4, 1], "keff is 2 by 4");
     let expected = Array::from_shape_vec(
@@ -1322,7 +1360,8 @@ fn depthwise_conv1d_keeps_the_stride_and_the_dilation_independent() {
     let input = Array::from_shape_vec((1, 8, 1), (1..=8).map(|v| v as f32).collect::<Vec<f32>>())
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 1]);
     // x[0] + 10 * x[3], x[2] + 10 * x[5], x[4] + 10 * x[7]
@@ -1355,7 +1394,8 @@ fn separable_conv1d_dilates_the_depthwise_stage() {
     let input = Array::from_shape_vec((1, 8, 1), (1..=8).map(|v| v as f32).collect::<Vec<f32>>())
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 1]);
     let expected = Array::from_shape_vec((1, 3, 1), vec![41.0f32, 63.0, 85.0])
@@ -1390,7 +1430,8 @@ fn conv1d_causal_padding_is_all_on_the_leading_edge() {
     let input = Array::from_shape_vec((1, 6, 1), (1..=6).map(|v| v as f32).collect::<Vec<f32>>())
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 6, 1], "causal keeps the length");
     let expected = Array::from_shape_vec((1, 6, 1), vec![1.0f32, 2.0, 3.0, 14.0, 25.0, 36.0])
@@ -1430,7 +1471,7 @@ fn conv1d_causal_output_never_reads_a_later_input() {
     let base_input = Array::from_shape_vec((1, length, channels), base_values.clone())
         .unwrap()
         .into_dyn();
-    let base_output = layer.predict(&base_input).unwrap();
+    let base_output = layer.forward(&base_input, &mut Ctx::inference()).unwrap();
 
     for position in 0..length {
         let mut values = base_values.clone();
@@ -1440,7 +1481,7 @@ fn conv1d_causal_output_never_reads_a_later_input() {
         let input = Array::from_shape_vec((1, length, channels), values)
             .unwrap()
             .into_dyn();
-        let output = layer.predict(&input).unwrap();
+        let output = layer.forward(&input, &mut Ctx::inference()).unwrap();
 
         for earlier in 0..position {
             for f in 0..filters {
@@ -1484,8 +1525,12 @@ fn conv1d_causal_matches_same_in_length_only() {
         .unwrap()
         .into_dyn();
 
-    let causal = build(ConvPadding::Causal).predict(&input).unwrap();
-    let same = build(ConvPadding::Same).predict(&input).unwrap();
+    let causal = build(ConvPadding::Causal)
+        .forward(&input, &mut Ctx::inference())
+        .unwrap();
+    let same = build(ConvPadding::Same)
+        .forward(&input, &mut Ctx::inference())
+        .unwrap();
 
     assert_eq!(causal.shape(), same.shape(), "both keep the input length");
     // Causal reads xpad = [0, 0, 1..6], so output 0 is 4 * 1 = 4. Same reads [0, 1..6, 0], so
@@ -1502,7 +1547,7 @@ fn conv1d_causal_strided_output_length() {
         .with_padding(ConvPadding::Causal);
     layer.build(&Shape::known(&[1, 7, 1])).unwrap();
     let input = Array::ones((1, 7, 1)).into_dyn();
-    let output = layer.predict(&input).unwrap();
+    let output = layer.forward(&input, &mut Ctx::inference()).unwrap();
     assert_eq!(output.shape(), &[1, 4, 1]);
 }
 
@@ -1535,18 +1580,17 @@ fn conv1d_causal_dilated_gradients_match_a_finite_difference() {
         .unwrap()
         .into_dyn();
 
-    let mut layer = build(&weights, &bias);
-    layer.forward(&input).unwrap();
-    let input_grad = layer.backward(&upstream).unwrap();
-    let params = layer.parameters();
-    let weight_grad = params[0].grad.to_vec();
-    let bias_grad = params[1].grad.to_vec();
-    drop(params);
+    let layer = build(&weights, &bias);
+    let mut ctx = Ctx::training();
+    layer.forward(&input, &mut ctx).unwrap();
+    let input_grad = layer.backward(&upstream, &mut ctx).unwrap();
+    let weight_grad = flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap());
+    let bias_grad = flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap());
 
     // Loss is `sum(output * upstream)`, whose gradient of the output is `upstream`
     let loss = |layer: &Conv1D, input: &ndarray::ArrayD<f32>| -> f32 {
         layer
-            .predict(input)
+            .forward(input, &mut Ctx::inference())
             .unwrap()
             .iter()
             .zip(upstream.iter())
@@ -1662,7 +1706,8 @@ fn conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_same() {
     let input = Array::from_shape_vec((1, 5, 1), ramp_input(5))
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
     assert_eq!(output.shape(), &[1, 5, 2]);
     assert_flat_close(
         &flat(&output),
@@ -1673,19 +1718,22 @@ fn conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_same() {
     let upstream = Array::from_shape_vec((1, 5, 2), ramp_upstream(10))
         .unwrap()
         .into_dyn();
-    let grad_input = layer.backward(&upstream).unwrap();
+    let grad_input = layer.backward(&upstream, &mut ctx).unwrap();
     assert_flat_close(
         &flat(&grad_input),
         &[0.125, -0.625, -0.15625, -0.125, 0.125],
         "grad_input",
     );
-    let params = layer.parameters();
     assert_flat_close(
-        params[0].grad,
+        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
         &[-0.3125, -1.1875, 0.0, 0.0, 0.1875, 0.0625],
         "grad_weights",
     );
-    assert_flat_close(params[1].grad, &[0.625, 0.625], "grad_bias");
+    assert_flat_close(
+        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &[0.625, 0.625],
+        "grad_bias",
+    );
 }
 
 /// A Conv1D whose dilated kernel is longer than the input matches Keras under `Causal`
@@ -1710,7 +1758,8 @@ fn conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_causal() {
     let input = Array::from_shape_vec((1, 5, 1), ramp_input(5))
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
     assert_eq!(output.shape(), &[1, 5, 2]);
     assert_flat_close(
         &flat(&output),
@@ -1723,19 +1772,22 @@ fn conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_causal() {
     let upstream = Array::from_shape_vec((1, 5, 2), ramp_upstream(10))
         .unwrap()
         .into_dyn();
-    let grad_input = layer.backward(&upstream).unwrap();
+    let grad_input = layer.backward(&upstream, &mut ctx).unwrap();
     assert_flat_close(
         &flat(&grad_input),
         &[-0.125, 0.125, -0.03125, 0.03125, 0.40625],
         "grad_input",
     );
-    let params = layer.parameters();
     assert_flat_close(
-        params[0].grad,
+        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
         &[0.0, 0.0, -0.3125, -1.1875, 0.0, 0.0],
         "grad_weights",
     );
-    assert_flat_close(params[1].grad, &[0.625, 0.625], "grad_bias");
+    assert_flat_close(
+        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &[0.625, 0.625],
+        "grad_bias",
+    );
 }
 
 /// A Conv1D whose solid kernel is longer than the input matches Keras under `Same`
@@ -1758,7 +1810,8 @@ fn conv1d_plain_kernel_longer_than_the_input_matches_keras_under_same() {
     let input = Array::from_shape_vec((1, 5, 1), ramp_input(5))
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
     assert_eq!(output.shape(), &[1, 5, 2]);
     assert_flat_close(
         &flat(&output),
@@ -1771,22 +1824,25 @@ fn conv1d_plain_kernel_longer_than_the_input_matches_keras_under_same() {
     let upstream = Array::from_shape_vec((1, 5, 2), ramp_upstream(10))
         .unwrap()
         .into_dyn();
-    let grad_input = layer.backward(&upstream).unwrap();
+    let grad_input = layer.backward(&upstream, &mut ctx).unwrap();
     assert_flat_close(
         &flat(&grad_input),
         &[-0.09375, -0.5625, 0.5, -0.1875, 0.09375],
         "grad_input",
     );
-    let params = layer.parameters();
     assert_flat_close(
-        params[0].grad,
+        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
         &[
             -0.3125, -1.1875, -1.4375, -0.0625, -1.25, -0.625, 0.0, 0.0, 0.125, 0.0, 0.3125,
             -0.0625, 0.1875, 0.0625,
         ],
         "grad_weights",
     );
-    assert_flat_close(params[1].grad, &[0.625, 0.625], "grad_bias");
+    assert_flat_close(
+        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &[0.625, 0.625],
+        "grad_bias",
+    );
 }
 
 /// A Conv2D whose dilated kernel is longer than both input axes matches Keras under `Same`
@@ -1808,7 +1864,8 @@ fn conv2d_dilated_kernel_longer_than_the_input_matches_keras_under_same() {
     let input = Array::from_shape_vec((1, 3, 3, 1), ramp_input(9))
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
     assert_eq!(output.shape(), &[1, 3, 3, 1]);
     assert_flat_close(
         &flat(&output),
@@ -1819,7 +1876,7 @@ fn conv2d_dilated_kernel_longer_than_the_input_matches_keras_under_same() {
     let upstream = Array::from_shape_vec((1, 3, 3, 1), ramp_upstream(9))
         .unwrap()
         .into_dyn();
-    let grad_input = layer.backward(&upstream).unwrap();
+    let grad_input = layer.backward(&upstream, &mut ctx).unwrap();
     assert_flat_close(
         &flat(&grad_input),
         &[
@@ -1827,13 +1884,16 @@ fn conv2d_dilated_kernel_longer_than_the_input_matches_keras_under_same() {
         ],
         "grad_input",
     );
-    let params = layer.parameters();
     assert_flat_close(
-        params[0].grad,
+        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
         &[-0.75, -0.4375, 0.0625, -0.75],
         "grad_weights",
     );
-    assert_flat_close(params[1].grad, &[0.625], "grad_bias");
+    assert_flat_close(
+        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &[0.625],
+        "grad_bias",
+    );
 }
 
 /// A DepthwiseConv1D whose dilated kernel is longer than the input matches Keras under `Same`
@@ -1855,7 +1915,8 @@ fn depthwise_conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_sam
     let input = Array::from_shape_vec((1, 5, 2), ramp_input(10))
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
     assert_eq!(output.shape(), &[1, 5, 2]);
     assert_flat_close(
         &flat(&output),
@@ -1866,7 +1927,7 @@ fn depthwise_conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_sam
     let upstream = Array::from_shape_vec((1, 5, 2), ramp_upstream(10))
         .unwrap()
         .into_dyn();
-    let grad_input = layer.backward(&upstream).unwrap();
+    let grad_input = layer.backward(&upstream, &mut ctx).unwrap();
     assert_flat_close(
         &flat(&grad_input),
         &[
@@ -1874,13 +1935,16 @@ fn depthwise_conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_sam
         ],
         "grad_input",
     );
-    let params = layer.parameters();
     assert_flat_close(
-        params[0].grad,
+        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
         &[-0.125, -0.5, 1.25, -1.25, -0.125, -0.9375],
         "grad_weights",
     );
-    assert_flat_close(params[1].grad, &[0.625, 0.625], "grad_bias");
+    assert_flat_close(
+        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &[0.625, 0.625],
+        "grad_bias",
+    );
 }
 
 /// A SeparableConv1D whose dilated depthwise kernel is longer than the input matches Keras
@@ -1904,7 +1968,8 @@ fn separable_conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_sam
     let input = Array::from_shape_vec((1, 5, 2), ramp_input(10))
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
     assert_eq!(output.shape(), &[1, 5, 2]);
     assert_flat_close(
         &flat(&output),
@@ -1915,7 +1980,7 @@ fn separable_conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_sam
     let upstream = Array::from_shape_vec((1, 5, 2), ramp_upstream(10))
         .unwrap()
         .into_dyn();
-    let grad_input = layer.backward(&upstream).unwrap();
+    let grad_input = layer.backward(&upstream, &mut ctx).unwrap();
     assert_flat_close(
         &flat(&grad_input),
         &[
@@ -1924,18 +1989,29 @@ fn separable_conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_sam
         ],
         "grad_input",
     );
-    let params = layer.parameters();
     assert_flat_close(
-        params[0].grad,
+        &flat(
+            ctx.grads()
+                .get(ParamId::new(0, "depthwise_kernel"))
+                .unwrap(),
+        ),
         &[0.5625, -0.25, -1.875, -0.625, -0.1875, -0.46875],
         "grad_depthwise_weights",
     );
     assert_flat_close(
-        params[1].grad,
+        &flat(
+            ctx.grads()
+                .get(ParamId::new(0, "pointwise_kernel"))
+                .unwrap(),
+        ),
         &[-0.25, 0.5, -0.40625, -0.21875],
         "grad_pointwise_weights",
     );
-    assert_flat_close(params[2].grad, &[0.625, 0.625], "grad_bias");
+    assert_flat_close(
+        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &[0.625, 0.625],
+        "grad_bias",
+    );
 }
 
 /// Conv2D dilated gradients under `Valid` match Keras 3.15.1
@@ -1960,7 +2036,8 @@ fn conv2d_dilated_gradients_match_keras_under_valid() {
     let input = Array::from_shape_vec((1, 5, 6, 1), ramp_input(30))
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
     assert_eq!(output.shape(), &[1, 3, 3, 2]);
     assert_flat_close(
         &flat(&output),
@@ -1974,7 +2051,7 @@ fn conv2d_dilated_gradients_match_keras_under_valid() {
     let upstream = Array::from_shape_vec((1, 3, 3, 2), ramp_upstream(18))
         .unwrap()
         .into_dyn();
-    let grad_input = layer.backward(&upstream).unwrap();
+    let grad_input = layer.backward(&upstream, &mut ctx).unwrap();
     assert_flat_close(
         &flat(&grad_input),
         &[
@@ -1985,13 +2062,16 @@ fn conv2d_dilated_gradients_match_keras_under_valid() {
         ],
         "grad_input",
     );
-    let params = layer.parameters();
     assert_flat_close(
-        params[0].grad,
+        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
         &[-0.5, 0.75, 1.375, -1.125, 1.375, -1.125, -0.125, -0.75],
         "grad_weights",
     );
-    assert_flat_close(params[1].grad, &[0.875, 0.625], "grad_bias");
+    assert_flat_close(
+        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &[0.875, 0.625],
+        "grad_bias",
+    );
 }
 
 /// Conv2D dilated gradients under `Same` match Keras 3.15.1
@@ -2016,7 +2096,8 @@ fn conv2d_dilated_gradients_match_keras_under_same() {
     let input = Array::from_shape_vec((1, 5, 6, 1), ramp_input(30))
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
     assert_eq!(output.shape(), &[1, 5, 6, 2]);
     assert_flat_close(
         &flat(&output),
@@ -2033,7 +2114,7 @@ fn conv2d_dilated_gradients_match_keras_under_same() {
     let upstream = Array::from_shape_vec((1, 5, 6, 2), ramp_upstream(60))
         .unwrap()
         .into_dyn();
-    let grad_input = layer.backward(&upstream).unwrap();
+    let grad_input = layer.backward(&upstream, &mut ctx).unwrap();
     assert_flat_close(
         &flat(&grad_input),
         &[
@@ -2044,15 +2125,18 @@ fn conv2d_dilated_gradients_match_keras_under_same() {
         ],
         "grad_input",
     );
-    let params = layer.parameters();
     assert_flat_close(
-        params[0].grad,
+        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
         &[
             -2.4375, 0.3125, 1.1875, -1.1875, -0.6875, 0.4375, -1.875, -0.25,
         ],
         "grad_weights",
     );
-    assert_flat_close(params[1].grad, &[3.75, 3.75], "grad_bias");
+    assert_flat_close(
+        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &[3.75, 3.75],
+        "grad_bias",
+    );
 }
 
 /// DepthwiseConv1D gradients at a stride of 2 and a dilation of 3 match Keras 3.15.1
@@ -2078,7 +2162,8 @@ fn depthwise_conv1d_stride_and_dilation_gradients_match_keras() {
     let input = Array::from_shape_vec((1, 9, 2), ramp_input(18))
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
     assert_eq!(output.shape(), &[1, 3, 4]);
     assert_flat_close(
         &flat(&output),
@@ -2091,7 +2176,7 @@ fn depthwise_conv1d_stride_and_dilation_gradients_match_keras() {
     let upstream = Array::from_shape_vec((1, 3, 4), ramp_upstream(12))
         .unwrap()
         .into_dyn();
-    let grad_input = layer.backward(&upstream).unwrap();
+    let grad_input = layer.backward(&upstream, &mut ctx).unwrap();
     assert_flat_close(
         &flat(&grad_input),
         &[
@@ -2100,13 +2185,16 @@ fn depthwise_conv1d_stride_and_dilation_gradients_match_keras() {
         ],
         "grad_input",
     );
-    let params = layer.parameters();
     assert_flat_close(
-        params[0].grad,
+        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
         &[1.5, 1.5, 0.5, -0.25, -1.125, 0.75, -0.0625, 0.3125],
         "grad_weights",
     );
-    assert_flat_close(params[1].grad, &[0.625, 0.125, -0.375, 0.375], "grad_bias");
+    assert_flat_close(
+        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &[0.625, 0.125, -0.375, 0.375],
+        "grad_bias",
+    );
 }
 
 /// SeparableConv1D gradients at a stride of 2 and a dilation of 3 match Keras 3.15.1
@@ -2128,7 +2216,8 @@ fn separable_conv1d_stride_and_dilation_gradients_match_keras() {
     let input = Array::from_shape_vec((1, 9, 2), ramp_input(18))
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&input, &mut ctx).unwrap();
     assert_eq!(output.shape(), &[1, 3, 2]);
     assert_flat_close(
         &flat(&output),
@@ -2139,7 +2228,7 @@ fn separable_conv1d_stride_and_dilation_gradients_match_keras() {
     let upstream = Array::from_shape_vec((1, 3, 2), ramp_upstream(6))
         .unwrap()
         .into_dyn();
-    let grad_input = layer.backward(&upstream).unwrap();
+    let grad_input = layer.backward(&upstream, &mut ctx).unwrap();
     assert_flat_close(
         &flat(&grad_input),
         &[
@@ -2148,16 +2237,27 @@ fn separable_conv1d_stride_and_dilation_gradients_match_keras() {
         ],
         "grad_input",
     );
-    let params = layer.parameters();
     assert_flat_close(
-        params[0].grad,
+        &flat(
+            ctx.grads()
+                .get(ParamId::new(0, "depthwise_kernel"))
+                .unwrap(),
+        ),
         &[-1.75, 0.5625, 0.6875, -0.46875],
         "grad_depthwise_weights",
     );
     assert_flat_close(
-        params[1].grad,
+        &flat(
+            ctx.grads()
+                .get(ParamId::new(0, "pointwise_kernel"))
+                .unwrap(),
+        ),
         &[-1.4375, 0.59375, 0.3125, -0.5625],
         "grad_pointwise_weights",
     );
-    assert_flat_close(params[2].grad, &[0.375, -0.125], "grad_bias");
+    assert_flat_close(
+        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &[0.375, -0.125],
+        "grad_bias",
+    );
 }

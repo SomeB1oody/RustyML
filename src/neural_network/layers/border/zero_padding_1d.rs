@@ -6,9 +6,12 @@ use crate::neural_network::layers::border::Border1D;
 use crate::neural_network::layers::border::pad_crop_engine::{
     pad_backward, pad_forward, pad_output_shape,
 };
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Adds zero steps at each end of the step axis of a rank-3 tensor
 ///
@@ -54,8 +57,8 @@ use crate::neural_network::{Shape, Tensor};
 pub struct ZeroPadding1D {
     /// Zero steps to add at each end of the step axis
     padding: Border1D,
-    /// Shape of the most recent forward input. The backward pass needs it to size the gradient
-    input_shape: Option<Vec<usize>>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
 }
 
 impl ZeroPadding1D {
@@ -72,43 +75,57 @@ impl ZeroPadding1D {
     pub fn new(padding: impl Into<Border1D>) -> Self {
         ZeroPadding1D {
             padding: padding.into(),
-            input_shape: None,
+            built: None,
         }
     }
 }
 
-impl Layer for ZeroPadding1D {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+impl LayerBase for ZeroPadding1D {
+    fn layer_type(&self) -> &str {
+        "ZeroPadding1D"
+    }
+
+    built_layer_shape_functions!();
+
+    no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for ZeroPadding1D {
+    /// Records the shape the pad runs over. The layer holds no array, so nothing is
+    /// allocated. The shape algebra checks the rank
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "ZeroPadding1D", input)? else {
+            return Ok(());
+        };
+        self.compute_output_shape(&built)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("ZeroPadding1D"));
+        }
         let output = pad_forward(input, &self.padding.0, 3, "ZeroPadding1D")?;
-        self.input_shape = Some(input.shape().to_vec());
+
+        if ctx.is_training() {
+            ctx.push_cache(input.shape().to_vec());
+        }
+
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        pad_forward(input, &self.padding.0, 3, "ZeroPadding1D")
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let input_shape: Vec<usize> = ctx.pop_cache("ZeroPadding1D")?;
         pad_backward(
             grad_output,
-            self.input_shape.as_deref(),
+            Some(input_shape.as_slice()),
             &self.padding.0,
             "ZeroPadding1D",
         )
     }
 
-    fn layer_type(&self) -> &str {
-        "ZeroPadding1D"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        self.input_shape.as_deref().map(Shape::with_free_batch)
-    }
-
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         pad_output_shape(input, &self.padding.0, "ZeroPadding1D")
     }
-
-    no_trainable_parameters_layer_functions!();
 }

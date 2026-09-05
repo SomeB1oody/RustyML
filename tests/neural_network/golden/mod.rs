@@ -35,17 +35,25 @@
 //!
 //! **What each case records.** The input shape and data, the forward output, the input
 //! gradient from `backward`, every parameter gradient, the parameter value that 1 optimizer
-//! step leaves behind, and the `predict` output. Each case also records the metadata that the
-//! layer reports after its forward pass: the `output_shape` string, both counts of
-//! `param_count`, the name of every parameter, and the shape and the value fingerprint of
-//! every weight that `Layer::weights` exposes, 1 time before the optimizer step and 1 time
-//! after it. For a layer that does not depend on the training mode,
-//! the harness also asserts that `predict` returns exactly the `forward` output. That assertion
-//! pins a property that a later stage makes structural.
+//! step leaves behind, and the output of a separate inference pass. Each case also records the
+//! metadata that the layer reports after its forward pass: the `output_shape` string, both
+//! counts of `param_count`, the name of every parameter, and the shape and the value
+//! fingerprint of every weight that `LayerBase::weights` exposes, 1 time before the optimizer
+//! step and 1 time after it. For a layer that does not depend on the training mode, the
+//! harness also asserts that the inference pass returns exactly the forward output.
 //!
-//! **A parameter gradient carries its decay class.** `Layer::parameters` gives each tensor a
-//! `decays` flag, and every optimizer with a non-zero weight decay reads it. A change from
-//! `ParamGrad::no_decay` to `ParamGrad::weight` therefore changes what training does to that
+//! The recorded tensor of the inference pass keeps the name `predict`, because that name is a
+//! value in every data file. The call behind it is a forward pass with an inference context
+//! now, and no `predict` method is left.
+//!
+//! **An inference pass parks nothing.** The harness asserts that the inference context holds
+//! 0 caches after that pass. A layer that parks a cache in this mode leaks 1 value per pass,
+//! and no backward pass ever takes it back. That invariant arrived with the context, and it is
+//! an assertion and not a recorded value.
+//!
+//! **A parameter gradient carries its decay class.** `LayerBase::parameters_mut` gives each
+//! tensor a `decays` flag, and every optimizer with a non-zero weight decay reads it. A change
+//! from `ParamRef::no_decay` to `ParamRef::weight` therefore changes what training does to that
 //! tensor, and no gradient value moves. The record holds the flag next to the gradient, and
 //! compares it as strictly as a value.
 //!
@@ -63,12 +71,13 @@
 //! gradient values, and every one of those moves a recorded parameter value.
 //!
 //! The harness applies 1 step of the rule `param[i] -= OPTIMIZER_STEP * grad[i]` to the live
-//! `value` slice of each `ParamGrad`, and records the result next to the gradient. See
+//! `value` slice of each parameter entry, and records the result next to the gradient. See
 //! [`OPTIMIZER_STEP`]. The rule lives in this harness, and it comes from no optimizer of
 //! `src/neural_network/optimizers`. A borrowed optimizer would make every recorded parameter
 //! value change when that optimizer changes, and this net must record the layer behavior alone.
 //!
-//! The step writes into the layer through the mutable slice that `Layer::parameters` hands out.
+//! The step writes into the layer through the mutable slice that `LayerBase::parameters_mut`
+//! hands out.
 //! The harness discards that layer instance directly after the step, and every pass builds its
 //! own layer, so no other record reads a stepped value.
 //!
@@ -81,10 +90,10 @@
 //! write through, so the whole training loop leaves the model where it started. Nothing else in
 //! this net sees that, and it is the most likely defect of stage 1.
 //!
-//! Each case therefore takes a second value fingerprint of every weight that `Layer::weights`
-//! exposes, directly after the optimizer step, and records it as `step_weight.<name>` in a
-//! `step_weight` line. `Layer::weights` reads the arrays of the layer itself, so a stepped copy
-//! no longer agrees with it.
+//! Each case therefore takes a second value fingerprint of every weight that
+//! `LayerBase::weights` exposes, directly after the optimizer step, and records it as
+//! `step_weight.<name>` in a `step_weight` line. `LayerBase::weights` reads the arrays of the
+//! layer itself, so a stepped copy no longer agrees with it.
 //!
 //! The 2 fingerprints of 1 name must differ when the step touched that array, and they must
 //! agree when no parameter covers it. BatchNormalization shows both halves in 1 case: `gamma`
@@ -92,7 +101,8 @@
 //!
 //! # Where a parameter name comes from
 //!
-//! The layer, and nothing else. `Layer::parameters` gives each tensor a name, `Layer::weights`
+//! The layer, and nothing else. `LayerBase::parameters_mut` gives each tensor a name,
+//! `LayerBase::weights`
 //! gives each array a name, and the 2 methods use 1 name set: the Keras 3 names `kernel`,
 //! `recurrent_kernel`, `depthwise_kernel`, `pointwise_kernel`, `bias`, `embeddings`, `alpha`,
 //! `gamma`, `beta`, `moving_mean`, and `moving_variance`. The checkpoint format addresses every
@@ -100,19 +110,20 @@
 //! harness.
 //!
 //! Each parameter of a case therefore has 1 `param_name` line, and the recorded name is the
-//! name in the `ParamGrad`. The line still ends with the word `layer`, and that word is now a
+//! name in the parameter entry. The line still ends with the word `layer`, and that word is now a
 //! constant. It was a choice of 2 before: the layer named 1 set of tensors, the weight enum
 //! named another through its field names, and the harness worked out which set a recorded name
 //! belonged to. The change that deleted the enum merged the 2 sets, so 1 source is left.
 //!
 //! **The fixture asserts the name, and records none of it.** A fixture declares the name of
 //! every parameter through [`GoldenCase::with_parameter_grads`], and the harness asserts that
-//! the declared name equals the name in the `ParamGrad`. A rename inside a layer therefore
+//! the declared name equals the name in the parameter entry. A rename inside a layer therefore
 //! fails the net at that assertion as well as moving the recorded line.
 //!
 //! **A parameter and the weight of the same name must be 1 storage.** Before the backward pass
 //! the harness takes the address of the first element and the element count of every array that
-//! `Layer::weights` exposes. It then compares each parameter against the array that carries the
+//! `LayerBase::weights` exposes. It then compares each parameter against the array that carries
+//! the
 //! same name. See [`assert_same_storage`]. That comparison pins 3 things that a name alone
 //! does not:
 //!
@@ -121,7 +132,8 @@
 //! 2. **The storage identity of each parameter.** Parameter `kernel` starts at the first
 //!    element of weight `kernel`, and holds the same element count. An optimizer that writes
 //!    the parameter therefore writes what a saved model holds.
-//! 3. **The 2 methods stay 1 list.** `parameters` and `weights` are 2 separate methods of every
+//! 3. **The 2 methods stay 1 list.** `parameters_mut` and `weights` are 2 separate methods of
+//!    every
 //!    layer, and nothing in the compiler binds them. A layer that renames an array in 1 of them
 //!    alone fails here.
 //!
@@ -167,9 +179,10 @@
 //!
 //! # A recorded weight carries a value fingerprint
 //!
-//! 4 normalization layers expose 2 or more arrays of the same shape through `Layer::weights`,
+//! 4 normalization layers expose 2 or more arrays of the same shape through
+//! `LayerBase::weights`,
 //! and BatchNormalization exposes 4. A recorded shape alone therefore lets a later stage
-//! exchange 2 of those arrays with no failure. `Layer::weights` is the exact surface that the
+//! exchange 2 of those arrays with no failure. `LayerBase::weights` is the exact surface that the
 //! checkpoint format reads, so such an exchange corrupts every saved model.
 //!
 //! Each recorded weight therefore carries a checksum of its values next to its shape. See
@@ -450,6 +463,28 @@
 //! recorded value is in reach of that fix. A comparison of the whole first capture against the
 //! file that ships confirms both statements, case by case and value by value.
 //!
+//! # The `output_shape` field of 39 cases disagrees with the file today
+//!
+//! The stage that moved the pass state into a context also made `Layer::output_shape` a pure
+//! function of the build. The method runs `Layer::compute_output_shape_many` against
+//! `LayerBase::known_input_shapes`, and that second method reports the shape that
+//! `UnaryLayer::build` recorded. It no longer reports a shape that a forward pass wrote, and it
+//! no longer formats a batch axis of its own.
+//!
+//! 39 cases therefore record an `output_shape` string that the layer no longer produces. 35 of
+//! them hold a free batch axis that the layer now fixes: a fixture that leaves the build to
+//! `UnaryLayer::forward_mut` builds for the whole shape of the tensor, batch extent included,
+//! so `ZeroPadding1D symmetric_2` reports `"(2, 8, 3)"` where the file records `"(None, 8, 3)"`.
+//! The 4 that are left hold a build shape that records less than the input: `Dense` records the
+//! last axis alone, so a rank-3 case reports `"(None, 4)"`, and `Embedding` frees every axis, so
+//! its cases report `"(None, None, 3)"`.
+//!
+//! No other recorded value moved. Every tensor, every weight fingerprint, every `step_weight`
+//! fingerprint, every parameter name, and every `param_count` of all 5 families still agrees,
+//! bit for bit, under the gated replay and under the forced replay alike. The harness leaves
+//! the data files untouched and reports the disagreement, because a display string that moves
+//! is a claim for a reviewer to read and not a value for a test to correct.
+//!
 //! # The data file grammar
 //!
 //! A data file is text. A blank line carries nothing, and so does a line whose first non-blank
@@ -498,12 +533,13 @@
 //! shape.
 //!
 //! A `tensor` line for a parameter gradient carries 1 more word after its shape, `decays` or
-//! `no_decay`. That word is the `ParamGrad` decay class of the parameter. No other tensor line
+//! `no_decay`. That word is the decay class of the parameter. No other tensor line
 //! carries the word.
 //!
 //! A case records 2 tensors per parameter. The name `grad_param.<name>` holds the gradient, and
 //! the name `step_param.<name>` holds the parameter value after 1 optimizer step. Both tensors
-//! hold the flat slice that `Layer::parameters` gives, so the shape is the element count alone.
+//! hold the flat slice that `LayerBase::parameters_mut` gives, so the shape is the element count
+//! alone.
 //!
 //! A value line holds the 8 lowercase hexadecimal digits of `f32::to_bits`. The text after the
 //! "#" on such a line is the same value in decimal, and it is a comment.
@@ -526,9 +562,9 @@
 
 use crate::common::{GateGuard, NEURAL_NETWORK_GATES, NEURAL_NETWORK_SPLIT_CAPS, read_gates};
 use ndarray::{ArrayBase, ArrayD, ArrayViewD, Data, Dimension, IxDyn};
-use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, ParamId};
+use rustyml::neural_network::{Ctx, Tensor};
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
@@ -838,18 +874,19 @@ fn fill(shape: &[usize], value: impl Fn(usize) -> f32) -> ArrayD<f32> {
 ///
 /// Build a case with [`GoldenCase::new`], and then add what the layer needs through the
 /// remaining methods. The default case runs in training mode, declares no parameter gradient,
-/// and asserts that `predict` returns exactly the `forward` output.
+/// and asserts that an inference forward pass gives exactly the training forward output.
 pub struct GoldenCase {
     /// Short configuration label. It carries no whitespace, and it is unique per layer type
     label: &'static str,
     /// Shape of the input tensor, batch axis first
     input_shape: Vec<usize>,
-    /// Name of every parameter gradient, in the order that `Layer::parameters` returns them
+    /// Name of every parameter gradient, in the order that `LayerBase::parameters_mut` returns
+    /// the tensors that hold one
     parameter_names: Vec<&'static str>,
-    /// Mode that the harness selects before it runs the layer
+    /// Mode of the context that the harness gives the forward and the backward pass
     training: bool,
-    /// Whether the harness asserts that `predict` returns exactly the `forward` output
-    predict_matches_forward: bool,
+    /// Whether the harness asserts that the inference pass equals the forward pass
+    inference_matches_training: bool,
     /// Builds a fresh layer. The harness calls this 2 times, so the 2 passes never share state
     build: Box<dyn Fn() -> Box<dyn Layer>>,
 }
@@ -863,7 +900,7 @@ impl GoldenCase {
     ///   must stay stable, because it is half of the key that the data file records
     /// - `input_shape` - Shape of the input tensor, batch axis first
     /// - `build` - Builds a fresh layer with its weights already set. The harness calls it 1
-    ///   time for the `predict` pass and 1 more time for the forward and backward pass
+    ///   time for the inference pass and 1 more time for the forward and backward pass
     ///
     /// # Returns
     ///
@@ -877,17 +914,18 @@ impl GoldenCase {
             input_shape: input_shape.to_vec(),
             parameter_names: Vec::new(),
             training: true,
-            predict_matches_forward: true,
+            inference_matches_training: true,
             build: Box::new(build),
         }
     }
 
-    /// Names every parameter gradient, in the order that `Layer::parameters` returns them.
+    /// Names every parameter gradient, in the order that `LayerBase::parameters_mut` returns
+    /// the tensors that hold one.
     ///
-    /// Use the name that the layer itself puts in the `ParamGrad`, such as `"kernel"`,
+    /// Use the name that the layer itself puts in the parameter entry, such as `"kernel"`,
     /// `"recurrent_kernel"`, `"depthwise_kernel"`, `"bias"`, `"embeddings"`, `"alpha"`,
-    /// `"gamma"`, or `"beta"`. The harness fails when the count differs from what `parameters`
-    /// returns, and it fails when any name differs from the name that the layer gives.
+    /// `"gamma"`, or `"beta"`. The harness fails when the count differs from what the layer
+    /// gives a gradient, and it fails when any name differs from the name that the layer gives.
     ///
     /// That second check is what makes a rename inside a layer reach this net. It is an
     /// assertion and not a recorded value, so it costs the record nothing.
@@ -898,19 +936,19 @@ impl GoldenCase {
 
     /// Runs the case in inference mode instead of training mode.
     ///
-    /// The harness calls `set_training_if_mode_dependent(false)` before the forward pass. A
-    /// layer that does not depend on the mode ignores the call.
+    /// The harness gives the forward and the backward pass a `Ctx::inference` context. A layer
+    /// that does not depend on the mode reads the flag of that context and ignores it.
     pub fn in_inference_mode(mut self) -> Self {
         self.training = false;
         self
     }
 
-    /// Drops the assertion that `predict` returns exactly the `forward` output.
+    /// Drops the assertion that the inference pass equals the forward pass.
     ///
     /// Use this only for a mode-dependent layer in training mode, where the 2 paths differ by
     /// design. Every other case keeps the assertion.
-    pub fn with_predict_that_differs(mut self) -> Self {
-        self.predict_matches_forward = false;
+    pub fn with_inference_that_differs(mut self) -> Self {
+        self.inference_matches_training = false;
         self
     }
 }
@@ -966,7 +1004,7 @@ impl LayerFixture {
 /// - If the data file is absent and [`ESTABLISHED_FAMILIES`] names the family, or if the data
 ///   file exists and that roster does not name the family
 /// - If a layer reports a type that differs from the registered one
-/// - If `predict` differs from `forward` on a case that expects them to agree
+/// - If the inference pass differs from the forward pass on a case that expects them to agree
 /// - If a regeneration would add, change, or remove a case of a data file that exists, and the
 ///   environment carries no acknowledgment token for that exact change
 /// - If a regeneration found a data file that holds every recorded value in another byte
@@ -1764,21 +1802,21 @@ struct RecordedTensor {
     name: String,
     /// Shape in C order
     shape: Vec<usize>,
-    /// The `ParamGrad` decay class, for a parameter gradient alone. `None` for every other
-    /// tensor. `Some(true)` is `ParamGrad::weight`, and `Some(false)` is `ParamGrad::no_decay`
+    /// The decay class, for a parameter gradient alone. `None` for every other
+    /// tensor. `Some(true)` is `ParamRef::weight`, and `Some(false)` is `ParamRef::no_decay`
     decays: Option<bool>,
     /// The value of every element, as the raw bits from `f32::to_bits`
     bits: Vec<u32>,
 }
 
-/// The name, the shape, and the value fingerprint of 1 weight that `Layer::weights` exposes.
+/// The name, the shape, and the value fingerprint of 1 weight that `LayerBase::weights` exposes.
 ///
 /// A shape alone does not pin the identity of an array. 4 normalization layers expose 2 or more
 /// arrays of the same shape, and BatchNormalization exposes 4. The fingerprint therefore rides
 /// next to the shape, and a stage that exchanges 2 such arrays fails the comparison.
 #[derive(Clone, PartialEq, Eq)]
 struct RecordedWeight {
-    /// The name that `Layer::weights` gives the array
+    /// The name that `LayerBase::weights` gives the array
     name: String,
     /// Shape in C order
     shape: Vec<usize>,
@@ -1812,10 +1850,11 @@ struct RecordedCase {
     output_shape: String,
     /// What `Layer::param_count` returned, as the words the data file holds
     param_count: String,
-    /// The name of every parameter of `Layer::parameters`, in the order that method returns
+    /// The name of every parameter of `LayerBase::parameters_mut`, in the order that method
+    /// returns
     /// them. The layer supplies every one of them
     param_names: Vec<String>,
-    /// The shape and the value fingerprint of every weight that `Layer::weights` exposes, in
+    /// The shape and the value fingerprint of every weight that `LayerBase::weights` exposes, in
     /// the order that method returns them
     weights: Vec<RecordedWeight>,
     /// The same weights, fingerprinted a second time after the optimizer step. A parameter
@@ -1864,26 +1903,55 @@ fn record_family(fixtures: &[LayerFixture]) -> Vec<RecordedCase> {
 fn record_case(layer_type: &str, case: &GoldenCase) -> RecordedCase {
     let input = golden_input(&case.input_shape);
 
-    // The 2 passes use separate layers, so the `predict` pass can never disturb the state that
-    // the forward and backward pass builds
+    // The 2 passes use separate layers, so the inference pass can never disturb the state that
+    // the forward and backward pass builds. The mode is the context now, so the inference pass
+    // takes a context of its own and reads no field of the layer
     let mut inference_layer = (case.build)();
-    inference_layer.set_training_if_mode_dependent(case.training);
     check_layer_type(layer_type, inference_layer.as_ref(), case.label);
+    let mut inference_ctx = Ctx::inference();
     let predicted = inference_layer
-        .predict(&input)
-        .unwrap_or_else(|error| panic!("{layer_type}/{}: predict failed: {error}", case.label));
+        .forward_many_mut(&[&input], &mut inference_ctx)
+        .unwrap_or_else(|error| {
+            panic!(
+                "{layer_type}/{}: the inference forward pass failed: {error}",
+                case.label
+            )
+        });
+    // An inference pass parks nothing at all, so the cache channel must stay empty. A layer
+    // that parks a cache in this mode leaks 1 value per pass, and no backward pass takes it
+    // back
+    assert_eq!(
+        inference_ctx.pending_caches(),
+        0,
+        "{layer_type}/{}: the inference forward pass parked {} caches, and it must park none",
+        case.label,
+        inference_ctx.pending_caches()
+    );
 
+    // 1 context serves the forward pass and the backward pass of the case
+    let mut ctx = if case.training {
+        Ctx::training()
+    } else {
+        Ctx::inference()
+    };
     let mut layer = (case.build)();
-    layer.set_training_if_mode_dependent(case.training);
     let forward = layer
-        .forward(&input)
+        .forward_many_mut(&[&input], &mut ctx)
         .unwrap_or_else(|error| panic!("{layer_type}/{}: forward failed: {error}", case.label));
+    // The forward pass takes `&self`, so a layer that changes non-trainable state proposes the
+    // new value in the context. The layer takes it here, which completes the pass. The running
+    // statistics of a normalization layer and the random stream of a dropout layer arrive this
+    // way, and a model runs the same 2 steps in the same order. The position is 0, because the
+    // harness drives 1 layer and sets no owner
+    if ctx.has_state(0) {
+        layer.apply_state(&mut ctx.state_slot(0));
+    }
 
-    if case.predict_matches_forward {
+    if case.inference_matches_training {
         assert_eq!(
             forward.shape(),
             predicted.shape(),
-            "{layer_type}/{}: predict and forward returned different shapes",
+            "{layer_type}/{}: the inference pass and the forward pass returned different shapes",
             case.label
         );
         for (index, (from_forward, from_predict)) in
@@ -1892,8 +1960,8 @@ fn record_case(layer_type: &str, case: &GoldenCase) -> RecordedCase {
             assert_eq!(
                 from_forward.to_bits(),
                 from_predict.to_bits(),
-                "{layer_type}/{}: predict differs from forward at flat index {index}: \
-                 forward {from_forward:?}, predict {from_predict:?}",
+                "{layer_type}/{}: the inference pass differs from the forward pass at flat \
+                 index {index}: forward {from_forward:?}, inference {from_predict:?}",
                 case.label
             );
         }
@@ -1918,10 +1986,21 @@ fn record_case(layer_type: &str, case: &GoldenCase) -> RecordedCase {
         .collect();
 
     let upstream = golden_gradient(forward.shape());
-    let grad_input = layer
-        .backward(&upstream)
+    let mut grad_inputs = layer
+        .backward_many(&upstream, &mut ctx)
         .unwrap_or_else(|error| panic!("{layer_type}/{}: backward failed: {error}", case.label));
+    assert_eq!(
+        grad_inputs.len(),
+        1,
+        "{layer_type}/{}: every fixture layer takes 1 input, and the backward pass gave {} \
+         gradients",
+        case.label,
+        grad_inputs.len()
+    );
+    let grad_input = grad_inputs.remove(0);
 
+    // The tensor keeps the name `predict`, because that name is in every data file. The call
+    // behind it is an inference forward pass now
     let mut tensors = vec![
         tensor_record("input", &input),
         tensor_record("forward", &forward),
@@ -1929,9 +2008,23 @@ fn record_case(layer_type: &str, case: &GoldenCase) -> RecordedCase {
         tensor_record("grad_input", &grad_input),
     ];
 
-    // `Layer::parameters` yields flat slices in a stable order, which is exactly what an
-    // optimizer consumes. The record keeps that flat form
-    let mut parameters = layer.parameters();
+    // `LayerBase::parameters_mut` yields flat slices in a stable order, which is exactly what
+    // an optimizer consumes. The record keeps that flat form. The entry holds no gradient any
+    // more, so the gradient comes from the store of the context, under the address that the
+    // layer position and the parameter name build. The position is 0, because the harness
+    // drives 1 layer and sets no owner
+    //
+    // The method yields every trainable tensor of the layer, whether a backward pass gave that
+    // tensor a gradient or not. The recorded set is the tensors that HAVE a gradient, which is
+    // exactly what the earlier entry list held. Each gradient goes into an owned vector here,
+    // so the read of the context ends before the step loop writes through the layer
+    let mut parameters: Vec<(&'static str, bool, &mut [f32], Vec<f32>)> = Vec::new();
+    for parameter in layer.parameters_mut() {
+        if let Some(grad) = ctx.grads().get(ParamId::new(0, parameter.name)) {
+            let values: Vec<f32> = grad.iter().copied().collect();
+            parameters.push((parameter.name, parameter.decays, parameter.value, values));
+        }
+    }
     assert_eq!(
         parameters.len(),
         case.parameter_names.len(),
@@ -1942,79 +2035,77 @@ fn record_case(layer_type: &str, case: &GoldenCase) -> RecordedCase {
     );
     let mut param_names: Vec<String> = Vec::new();
     let mut layer_names: Vec<&'static str> = Vec::new();
-    for (parameter, fixture_name) in parameters.iter_mut().zip(case.parameter_names.iter()) {
+    for ((parameter_name, decays, value, grad), fixture_name) in
+        parameters.iter_mut().zip(case.parameter_names.iter())
+    {
         // The optimizer keys its per-parameter state on the layer name, so 2 tensors of 1 layer
         // that share a name share their momentum. Nothing else in the crate would report it
         assert!(
-            !layer_names.contains(&parameter.name),
-            "{layer_type}/{}: 2 parameters of this layer carry the name {}",
-            case.label,
-            parameter.name
+            !layer_names.contains(parameter_name),
+            "{layer_type}/{}: 2 parameters of this layer carry the name {parameter_name}",
+            case.label
         );
-        layer_names.push(parameter.name);
+        layer_names.push(parameter_name);
         // The layer names every parameter of its own. The fixture declares the same name, so a
         // rename inside a layer fails here instead of passing unseen. This is an assertion and
         // not a recorded value
         assert_eq!(
-            parameter.name, *fixture_name,
-            "{layer_type}/{}: the layer names this parameter {}, and the case names it {}",
-            case.label, parameter.name, fixture_name
+            parameter_name, fixture_name,
+            "{layer_type}/{}: the layer names this parameter {parameter_name}, and the case \
+             names it {fixture_name}",
+            case.label
         );
         // The layer owns the name end to end now, so the recorded name is the name in the
-        // `ParamGrad`. The anchor comparison stayed, as an assertion: the array that
-        // `Layer::weights` gives this name must be the storage that the parameter writes
+        // parameter entry. The anchor comparison stayed, as an assertion: the array that
+        // `LayerBase::weights` gives this name must be the storage that the parameter writes
         // through. See the section "Where a parameter name comes from"
-        let name = parameter.name.to_string();
-        assert_same_storage(&anchors, &name, parameter.value, layer_type, case.label);
+        let name = parameter_name.to_string();
+        assert_same_storage(&anchors, &name, value, layer_type, case.label);
         assert!(
-            parameter.grad.len() <= MAX_TENSOR_ELEMENTS,
+            grad.len() <= MAX_TENSOR_ELEMENTS,
             "{layer_type}/{}: the gradient of {name} holds {} elements, and the cap is \
              {MAX_TENSOR_ELEMENTS}",
             case.label,
-            parameter.grad.len()
+            grad.len()
         );
         assert_eq!(
-            parameter.value.len(),
-            parameter.grad.len(),
+            value.len(),
+            grad.len(),
             "{layer_type}/{}: the parameter {name} holds {} values and {} gradient values, and \
              an optimizer needs the 2 slices to agree",
             case.label,
-            parameter.value.len(),
-            parameter.grad.len()
+            value.len(),
+            grad.len()
         );
         tensors.push(RecordedTensor {
             name: format!("{PARAMETER_PREFIX}{name}"),
-            shape: vec![parameter.grad.len()],
+            shape: vec![grad.len()],
             // The flag decides what an optimizer with a non-zero weight decay does to this
             // tensor, and it moves no gradient value, so the record must hold it
-            decays: Some(parameter.decays),
-            bits: parameter.grad.iter().map(|value| value.to_bits()).collect(),
+            decays: Some(*decays),
+            bits: grad.iter().map(|value| value.to_bits()).collect(),
         });
         // 1 step of the harness rule binds this gradient to the tensor that it updates. A
         // stage that aims the gradient at another tensor keeps every gradient value, and moves
         // this one. The caller discards the layer instance directly after `record_case`
         // returns, so no later record reads a stepped value
-        for (value, gradient) in parameter.value.iter_mut().zip(parameter.grad.iter()) {
+        for (value, gradient) in value.iter_mut().zip(grad.iter()) {
             *value -= OPTIMIZER_STEP * gradient;
         }
         tensors.push(RecordedTensor {
             name: format!("{STEPPED_PREFIX}{name}"),
-            shape: vec![parameter.value.len()],
+            shape: vec![value.len()],
             // The matching gradient tensor already holds the decay class of this parameter
             decays: None,
-            bits: parameter
-                .value
-                .iter()
-                .map(|value| value.to_bits())
-                .collect(),
+            bits: value.iter().map(|value| value.to_bits()).collect(),
         });
         param_names.push(name);
     }
 
     // The second fingerprint reads the arrays of the layer itself, and the step above wrote
-    // through the slices that `parameters` handed out. An implementation of `parameters` that
-    // gives back a copy of each value buffer therefore leaves every one of these unchanged,
-    // while every `step_param` tensor above still holds the stepped numbers
+    // through the slices that `parameters_mut` handed out. An implementation of that method
+    // which gives back a copy of each value buffer therefore leaves every one of these
+    // unchanged, while every `step_param` tensor above still holds the stepped numbers
     drop(parameters);
     let step_weights: Vec<RecordedWeight> = exposed_weights(layer.as_ref())
         .into_iter()
@@ -2036,7 +2127,8 @@ fn record_case(layer_type: &str, case: &GoldenCase) -> RecordedCase {
 
 /// Fails when a parameter and the exposed array of the same name are not 1 storage.
 ///
-/// `Layer::parameters` and `Layer::weights` name the same tensors, and the checkpoint format
+/// `LayerBase::parameters_mut` and `LayerBase::weights` name the same tensors, and the checkpoint
+/// format
 /// reads the second list. A parameter that an optimizer writes must therefore reach the array
 /// that a saved model holds under that name. The 2 lists are 2 separate methods, and nothing in
 /// the compiler binds them, so this comparison is what holds them together.
@@ -2050,7 +2142,7 @@ fn record_case(layer_type: &str, case: &GoldenCase) -> RecordedCase {
 /// - `anchors` - The name, the first-element address, and the element count of every exposed
 ///   array
 /// - `name` - The name that the layer gave this parameter
-/// - `value` - The parameter value slice that `Layer::parameters` handed out
+/// - `value` - The parameter value slice that `LayerBase::parameters_mut` handed out
 /// - `layer_type` - The layer type of the case, for the report
 /// - `label` - The configuration label of the case, for the report
 ///
@@ -2111,7 +2203,7 @@ fn param_count_record(count: ParamCounts) -> String {
 ///
 /// # Parameters
 ///
-/// - `array` - 1 array that `Layer::weights` exposes. The harness also fingerprints owned
+/// - `array` - 1 array that `LayerBase::weights` exposes. The harness also fingerprints owned
 ///   arrays of other ranks in its own tests, so the function takes every rank
 ///
 /// # Returns
@@ -2151,7 +2243,7 @@ fn mix_byte(state: u64, byte: u8) -> u64 {
 ///
 /// # Parameters
 ///
-/// - `array` - 1 view that `Layer::weights` borrowed from the layer
+/// - `array` - 1 view that `LayerBase::weights` borrowed from the layer
 ///
 /// # Returns
 ///
@@ -2161,7 +2253,7 @@ fn contiguous_anchor(array: &ArrayViewD<'_, f32>) -> Option<(usize, usize)> {
     Some((slice.as_ptr() as usize, slice.len()))
 }
 
-/// Turns `Layer::weights` into the name, the shape, the fingerprint, and the storage anchor of
+/// Turns `LayerBase::weights` into the name, the shape, the fingerprint, and the storage anchor of
 /// every array that the layer exposes.
 ///
 /// The order is the order the layer gives, which is the order a checkpoint records. A layer
@@ -3102,15 +3194,15 @@ fn compare_weights(
     }
 
     // A step_weight fingerprint reads the arrays of the layer after the optimizer step. The
-    // step wrote through the slices of `Layer::parameters`, so a store that gives back a copy
-    // of each value buffer keeps every one of these at its value before the step
+    // step wrote through the slices of `LayerBase::parameters_mut`, so a store that gives back a
+    // copy of each value buffer keeps every one of these at its value before the step
     if problems.len() > before && keyword == "step_weight" {
         problems.push(format!(
             "{head}: a {keyword} fingerprint holds the weight after 1 step of \
-             param -= {OPTIMIZER_STEP} * grad, and Layer::weights reads the arrays of the layer \
-             itself. Check whether Layer::parameters hands out the storage of the layer or a \
-             copy of it. A copy makes every step_param tensor agree and leaves the layer \
-             unchanged, which is training that does nothing"
+             param -= {OPTIMIZER_STEP} * grad, and LayerBase::weights reads the arrays of the \
+             layer itself. Check whether LayerBase::parameters_mut hands out the storage of the \
+             layer or a copy of it. A copy makes every step_param tensor agree and leaves the \
+             layer unchanged, which is training that does nothing"
         ));
     }
 }

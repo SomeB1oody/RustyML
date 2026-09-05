@@ -10,11 +10,12 @@
 //! channels across every spatial position.
 
 use ndarray::Array;
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::regularization::normalization::group_normalization::GroupNormalization;
 use rustyml::neural_network::layers::regularization::normalization::instance_normalization::InstanceNormalization;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::UnaryLayer;
 use rustyml::{error::Error, neural_network::NnError};
 
 use crate::common::assert_allclose;
@@ -42,7 +43,7 @@ fn group_norm_single_group_forward_values() {
         .unwrap()
         .into_dyn();
 
-    let output = gn.forward(&input).unwrap();
+    let output = gn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     // The single group holds all 6 values {1..6}: mean 3.5.
     // Population variance is (2.5^2 + 1.5^2 + 0.5^2 + 0.5^2 + 1.5^2 + 2.5^2) / 6 = 17.5 / 6.
@@ -74,7 +75,7 @@ fn group_norm_two_groups_forward_values() {
         .unwrap()
         .into_dyn();
 
-    let output = gn.forward(&input).unwrap();
+    let output = gn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     // Group 0: mean 2.5. Group 1: mean 6.5. Both have the same spread.
     // Population variance is (1.5^2 + 0.5^2 + 0.5^2 + 1.5^2) / 4 = 1.25, and both center to
@@ -120,7 +121,7 @@ fn group_norm_two_batches_forward_values() {
     .unwrap()
     .into_dyn();
 
-    let output = gn.forward(&input).unwrap();
+    let output = gn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     // Group 0 of batch 0 is channels 0-1 = {1,2,3,4,5,6} (mean 3.5).
     // Group 1 is channels 2-3 = {7..12} (mean 9.5).
@@ -162,7 +163,7 @@ fn group_norm_custom_gamma_beta_forward_values() {
         .unwrap()
         .into_dyn();
 
-    let output = gn.forward(&input).unwrap();
+    let output = gn.forward(&input, &mut Ctx::training()).unwrap();
 
     // Both groups have variance 1.25 and center to [-1.5,-0.5,0.5,1.5]
     let std_val = (1.25_f32 + 1e-5).sqrt();
@@ -193,7 +194,7 @@ fn group_norm_constant_input_yields_zero_output() {
     let mut gn = GroupNormalization::new(1, 1e-5).unwrap();
 
     let input = Array::from_elem((1, 3, 4), 5.0_f32).into_dyn();
-    let output = gn.forward(&input).unwrap();
+    let output = gn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     let expected = Array::zeros((1, 3, 4)).into_dyn();
     assert_allclose(&output, &expected, 1e-6_f32);
@@ -214,7 +215,7 @@ fn group_norm_channel_axis_is_last() {
     .unwrap()
     .into_dyn();
 
-    let output = gn.forward(&input).unwrap();
+    let output = gn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     // Group 0 (channels 0-1) = {2, 4, 6, 8}: mean 5, variance (9 + 1 + 1 + 9) / 4 = 5
     let inv0 = 1.0 / (5.0_f32 + 1e-5).sqrt();
@@ -239,15 +240,14 @@ fn group_norm_channel_axis_is_last() {
     assert_allclose(&output, &expected, 1e-5_f32);
 }
 
-// GroupNormalization - predict == forward in eval mode
+// GroupNormalization - an inference pass matches a training pass
 
-/// `predict` matches `forward`: GN always computes from-data statistics, with no
-/// running mean/var and no mode dependence
+/// An inference pass matches a training pass: GN always computes from-data statistics, with no
+/// running mean/var and no dependence on the context
 #[test]
 fn group_norm_predict_equals_forward() {
     let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
     gn.build(&Shape::known(&[1, 4, 4])).unwrap();
-    gn.set_training_if_mode_dependent(false);
 
     let input = Array::from_shape_vec(
         (1, 4, 4),
@@ -256,8 +256,8 @@ fn group_norm_predict_equals_forward() {
     .unwrap()
     .into_dyn();
 
-    let out_fwd = gn.forward(&input).unwrap();
-    let out_pred = gn.predict(&input).unwrap();
+    let out_fwd = gn.forward(&input, &mut Ctx::training()).unwrap();
+    let out_pred = gn.forward(&input, &mut Ctx::inference()).unwrap();
 
     assert_allclose(&out_pred, &out_fwd, 1e-6_f32);
 }
@@ -298,13 +298,15 @@ fn group_norm_error_empty_input_shape() {
     );
 }
 
-/// forward() returns InvalidParameter when num_groups does not divide num_channels
+/// A pass returns InvalidParameter when num_groups does not divide num_channels
+///
+/// The build reads the channel count, so it is the step that refuses the layer
 #[test]
 fn group_norm_error_channels_not_divisible_by_groups_at_forward() {
     // Trailing axis is the channel axis: 3 channels, 2 groups, and 3 % 2 != 0
     let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
     let input = Array::ones((1, 4, 3)).into_dyn();
-    let err = gn.forward(&input).unwrap_err();
+    let err = gn.forward_mut(&input, &mut Ctx::training()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter for non-divisible channels/groups, got {:?}",
@@ -315,9 +317,9 @@ fn group_norm_error_channels_not_divisible_by_groups_at_forward() {
 /// `backward` before `forward` returns `NnError::ForwardPassNotRun`
 #[test]
 fn group_norm_error_backward_before_forward() {
-    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
+    let gn = GroupNormalization::new(2, 1e-5).unwrap();
     let grad = Array::ones((1, 4, 4)).into_dyn();
-    let err = gn.backward(&grad).unwrap_err();
+    let err = gn.backward(&grad, &mut Ctx::training()).unwrap_err();
     assert!(
         matches!(
             err,
@@ -358,7 +360,7 @@ fn instance_norm_forward_values() {
         .unwrap()
         .into_dyn();
 
-    let output = inn.forward(&input).unwrap();
+    let output = inn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     // ch0 mean 2.5, ch1 mean 6.5. Both have population variance
     // (1.5^2 + 0.5^2 + 0.5^2 + 1.5^2) / 4 = 1.25 and center to [-1.5,-0.5,0.5,1.5]
@@ -385,7 +387,7 @@ fn instance_norm_custom_gamma_beta_forward_values() {
         .unwrap()
         .into_dyn();
 
-    let output = inn.forward(&input).unwrap();
+    let output = inn.forward(&input, &mut Ctx::training()).unwrap();
 
     let std_val = (1.25_f32 + 1e-5).sqrt();
     let c = [-1.5_f32, -0.5, 0.5, 1.5].map(|v| v / std_val);
@@ -427,7 +429,7 @@ fn instance_norm_multiple_batches_forward_values() {
     .into_dyn();
 
     let mut inn = InstanceNormalization::new(1e-5).unwrap();
-    let output = inn.forward(&input).unwrap();
+    let output = inn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     // Every instance is a unit-step ramp of 3 values, so var = ((-1)^2 + 0^2 + 1^2) / 3 = 2/3
     let var = 2.0_f32 / 3.0;
@@ -456,7 +458,7 @@ fn instance_norm_multiple_batches_forward_values() {
 fn instance_norm_constant_input_yields_zero_output() {
     let mut inn = InstanceNormalization::new(1e-5).unwrap();
     let input = Array::from_elem((2, 3, 4), 7.0_f32).into_dyn();
-    let output = inn.forward(&input).unwrap();
+    let output = inn.forward_mut(&input, &mut Ctx::training()).unwrap();
     let expected = Array::zeros((2, 3, 4)).into_dyn();
     assert_allclose(&output, &expected, 1e-6_f32);
 }
@@ -472,7 +474,7 @@ fn instance_norm_channel_axis_is_last() {
         .unwrap()
         .into_dyn();
 
-    let output = inn.forward(&input).unwrap();
+    let output = inn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     // ch0: mean 2, variance (1 + 0 + 1) / 3 = 2/3
     let inv0 = 1.0 / (2.0_f32 / 3.0 + 1e-5).sqrt();
@@ -512,8 +514,8 @@ fn group_norm_full_groups_equals_instance_norm() {
     let mut gn = GroupNormalization::new(3, 1e-5).unwrap();
     let mut inn = InstanceNormalization::new(1e-5).unwrap();
 
-    let out_gn = gn.forward(&input).unwrap();
-    let out_in = inn.forward(&input).unwrap();
+    let out_gn = gn.forward_mut(&input, &mut Ctx::training()).unwrap();
+    let out_in = inn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     // The outputs should be numerically identical (same algorithm)
     assert_allclose(&out_gn, &out_in, 1e-6_f32);
@@ -555,19 +557,18 @@ fn group_norm_full_groups_equals_instance_norm_with_affine() {
     inn.build(&Shape::known(&[1, 4, 2])).unwrap();
     inn.set_weights(gamma, beta).unwrap();
 
-    let out_gn = gn.forward(&input).unwrap();
-    let out_in = inn.forward(&input).unwrap();
+    let out_gn = gn.forward(&input, &mut Ctx::training()).unwrap();
+    let out_in = inn.forward(&input, &mut Ctx::training()).unwrap();
 
     assert_allclose(&out_gn, &out_in, 1e-6_f32);
 }
 
-// InstanceNormalization - predict == forward in eval mode
+// InstanceNormalization - an inference pass matches a training pass
 
 #[test]
 fn instance_norm_predict_equals_forward() {
     let mut inn = InstanceNormalization::new(1e-5).unwrap();
     inn.build(&Shape::known(&[2, 3, 4])).unwrap();
-    inn.set_training_if_mode_dependent(false);
 
     let input = Array::from_shape_vec(
         (2, 3, 4),
@@ -576,26 +577,25 @@ fn instance_norm_predict_equals_forward() {
     .unwrap()
     .into_dyn();
 
-    let out_fwd = inn.forward(&input).unwrap();
-    let out_pred = inn.predict(&input).unwrap();
+    let out_fwd = inn.forward(&input, &mut Ctx::training()).unwrap();
+    let out_pred = inn.forward(&input, &mut Ctx::inference()).unwrap();
 
     assert_allclose(&out_pred, &out_fwd, 1e-6_f32);
 }
 
-/// predict() matches forward() in TRAINING mode too, since statistics are always
-/// recomputed from the input regardless of mode
+/// An inference pass matches a training pass, since statistics are always
+/// recomputed from the input regardless of the context
 #[test]
 fn instance_norm_predict_equals_forward_training_mode() {
     let mut inn = InstanceNormalization::new(1e-5).unwrap();
     inn.build(&Shape::known(&[1, 4, 2])).unwrap();
-    inn.set_training_if_mode_dependent(true);
 
     let input = Array::from_shape_vec((1, 4, 2), vec![1.0_f32, 5.0, 2.0, 6.0, 3.0, 7.0, 4.0, 8.0])
         .unwrap()
         .into_dyn();
 
-    let out_fwd = inn.forward(&input).unwrap();
-    let out_pred = inn.predict(&input).unwrap();
+    let out_fwd = inn.forward(&input, &mut Ctx::training()).unwrap();
+    let out_pred = inn.forward(&input, &mut Ctx::inference()).unwrap();
 
     assert_allclose(&out_pred, &out_fwd, 1e-6_f32);
 }
@@ -634,9 +634,9 @@ fn instance_norm_error_empty_input_shape() {
 /// `backward` before `forward` returns `NnError::ForwardPassNotRun`
 #[test]
 fn instance_norm_error_backward_before_forward() {
-    let mut inn = InstanceNormalization::new(1e-5).unwrap();
+    let inn = InstanceNormalization::new(1e-5).unwrap();
     let grad = Array::ones((1, 3, 4)).into_dyn();
-    let err = inn.backward(&grad).unwrap_err();
+    let err = inn.backward(&grad, &mut Ctx::training()).unwrap_err();
     assert!(
         matches!(
             err,
@@ -670,7 +670,7 @@ fn group_norm_output_shape_matches_input() {
     // [batch=2, positions=5, channels=6] split into 3 groups of 2 channels
     let mut gn = GroupNormalization::new(3, 1e-5).unwrap();
     let input = Array::ones((2, 5, 6)).into_dyn();
-    let output = gn.forward(&input).unwrap();
+    let output = gn.forward_mut(&input, &mut Ctx::training()).unwrap();
     assert_eq!(output.shape(), &[2, 5, 6]);
 }
 
@@ -680,26 +680,26 @@ fn group_norm_output_shape_matches_input() {
 fn instance_norm_output_shape_matches_input() {
     let mut inn = InstanceNormalization::new(1e-5).unwrap();
     let input = Array::ones((2, 4, 6)).into_dyn();
-    let output = inn.forward(&input).unwrap();
+    let output = inn.forward_mut(&input, &mut Ctx::training()).unwrap();
     assert_eq!(output.shape(), &[2, 4, 6]);
 }
-// EVAL-mode backward: gradient passes through unchanged
+// The backward pass of an inference context: the gradient passes through unchanged
 
-/// GroupNormalization::backward in EVAL mode returns grad_output unchanged (bit-exact
-/// copy, compared with eps=0)
+/// GroupNormalization::backward in an inference pass returns grad_output unchanged
+/// (bit-exact copy, compared with eps=0)
 #[test]
 fn group_norm_backward_eval_mode_passes_gradient_through() {
     let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
-    gn.set_training_if_mode_dependent(false);
+    let mut ctx = Ctx::inference();
 
-    // Forward in eval mode (still computes from-data stats), irrelevant to passthrough
+    // An inference forward (which still computes from-data stats), irrelevant to passthrough
     let input = Array::from_shape_vec(
         (1, 4, 4),
         (0..16).map(|v| 0.5 * v as f32 - 3.75).collect::<Vec<_>>(),
     )
     .unwrap()
     .into_dyn();
-    gn.forward(&input).unwrap();
+    gn.forward_mut(&input, &mut ctx).unwrap();
 
     // Distinct per-element gradient
     let grad = Array::from_shape_vec(
@@ -708,17 +708,17 @@ fn group_norm_backward_eval_mode_passes_gradient_through() {
     )
     .unwrap()
     .into_dyn();
-    let grad_input = gn.backward(&grad).unwrap();
+    let grad_input = gn.backward(&grad, &mut ctx).unwrap();
 
     assert_allclose(&grad_input, &grad, 0.0_f32);
 }
 
-/// InstanceNormalization::backward in EVAL mode returns grad_output unchanged
+/// InstanceNormalization::backward in an inference pass returns grad_output unchanged
 /// (bit-exact copy, asserted with exact equality)
 #[test]
 fn instance_norm_backward_eval_mode_passes_gradient_through() {
     let mut inn = InstanceNormalization::new(1e-5).unwrap();
-    inn.set_training_if_mode_dependent(false);
+    let mut ctx = Ctx::inference();
 
     let input = Array::from_shape_vec(
         (1, 3, 4),
@@ -726,7 +726,7 @@ fn instance_norm_backward_eval_mode_passes_gradient_through() {
     )
     .unwrap()
     .into_dyn();
-    inn.forward(&input).unwrap();
+    inn.forward_mut(&input, &mut ctx).unwrap();
 
     let grad = Array::from_shape_vec(
         (1, 3, 4),
@@ -734,7 +734,7 @@ fn instance_norm_backward_eval_mode_passes_gradient_through() {
     )
     .unwrap()
     .into_dyn();
-    let grad_input = inn.backward(&grad).unwrap();
+    let grad_input = inn.backward(&grad, &mut ctx).unwrap();
 
     assert_allclose(&grad_input, &grad, 0.0_f32);
 }
@@ -747,7 +747,7 @@ fn instance_norm_backward_eval_mode_passes_gradient_through() {
 fn group_norm_forward_below_3d_input_errors() {
     let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
     let input = Array::ones((4, 8)).into_dyn();
-    let err = gn.forward(&input).unwrap_err();
+    let err = gn.forward_mut(&input, &mut Ctx::training()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "expected InvalidInput for <3D input, got {:?}",
@@ -761,7 +761,7 @@ fn group_norm_forward_below_3d_input_errors() {
 fn instance_norm_forward_below_3d_input_errors() {
     let mut inn = InstanceNormalization::new(1e-5).unwrap();
     let input = Array::ones((4, 8)).into_dyn();
-    let err = inn.forward(&input).unwrap_err();
+    let err = inn.forward_mut(&input, &mut Ctx::training()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "expected InvalidInput for <3D input, got {:?}",

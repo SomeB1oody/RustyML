@@ -167,7 +167,7 @@ pub use upsampling::*;
 
 /// Generates the trait method stubs for layers without trainable parameters
 ///
-/// Such layers rely on the default [`Layer::parameters`] (an empty list, so the optimizer
+/// Such layers rely on the default [`LayerBase::parameters_mut`] (an empty list, so the optimizer
 /// skips them). This macro supplies the remaining required `param_count`, `weights`, and
 /// `weights_mut` methods
 ///
@@ -178,7 +178,7 @@ pub use upsampling::*;
 /// The generated `param_count` returns `ParamCounts::none()`, and both weight methods return
 /// the empty vector, so such a layer contributes no path to a checkpoint
 ///
-/// [`Layer::parameters`]: crate::neural_network::traits::Layer::parameters
+/// [`LayerBase::parameters_mut`]: crate::neural_network::traits::LayerBase::parameters_mut
 macro_rules! no_trainable_parameters_layer_functions {
     () => {
         fn param_count(&self) -> ParamCounts {
@@ -214,14 +214,14 @@ pub(in crate::neural_network::layers) use no_trainable_parameters_layer_function
 /// exposes the kernel alone and its checkpoint holds 1 path. An optional entry moves no other
 /// entry, because a checkpoint addresses an array by name and never by position
 ///
-/// Give an array the same name that [`Layer::parameters`] gives it. Nothing in the compiler
+/// Give an array the same name that [`LayerBase::parameters_mut`] gives it. Nothing in the compiler
 /// binds the 2, and the golden-fixture net asserts that a parameter and the array of the same
 /// name are 1 storage
 ///
 /// It is path-exported like `no_trainable_parameters_layer_functions`:
 /// `use crate::neural_network::layers::named_weight_layer_functions;`
 ///
-/// [`Layer::parameters`]: crate::neural_network::traits::Layer::parameters
+/// [`LayerBase::parameters_mut`]: crate::neural_network::traits::LayerBase::parameters_mut
 macro_rules! named_weight_layer_functions {
     ($($kind:ident $name:literal => $($field:ident).+ $(if $flag:ident)?),+ $(,)?) => {
         fn weights(&self) -> Vec<$crate::neural_network::traits::WeightRef<'_>> {
@@ -264,11 +264,13 @@ pub(in crate::neural_network::layers) use named_weight_layer_functions;
 /// `use crate::neural_network::layers::built_layer_shape_functions;`
 ///
 /// [`Layer::known_input_shape`]: crate::neural_network::traits::Layer::known_input_shape
-/// [`Layer::build_config`]: crate::neural_network::traits::Layer::build_config
+/// [`Layer::build_config`]: crate::neural_network::traits::UnaryLayer::build_config
 macro_rules! built_layer_shape_functions {
     () => {
-        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
-            self.built.clone()
+        fn known_input_shapes(&self) -> Option<Vec<$crate::neural_network::Shape>> {
+            self.built
+                .as_ref()
+                .map(|shape| vec![$crate::neural_network::Shape::free_batch(shape)])
         }
 
         $crate::neural_network::layers::build_config_function!();
@@ -278,41 +280,21 @@ pub(in crate::neural_network::layers) use built_layer_shape_functions;
 
 /// Generates [`Layer::build_config`] of a layer that holds a `built: Option<Shape>` field
 ///
-/// [`Layer::build_config`]: crate::neural_network::traits::Layer::build_config
+/// [`Layer::build_config`]: crate::neural_network::traits::UnaryLayer::build_config
 macro_rules! build_config_function {
     () => {
+        fn is_built(&self) -> bool {
+            self.built.is_some()
+        }
+
         fn build_config(&self) -> Option<$crate::neural_network::layers::checkpoint::BuildConfig> {
             self.built
                 .as_ref()
-                .map($crate::neural_network::layers::checkpoint::BuildConfig::new)
+                .map($crate::neural_network::layers::checkpoint::BuildConfig::unary)
         }
     };
 }
 pub(in crate::neural_network::layers) use build_config_function;
-
-/// Builds a layer from the tensor that reached its forward pass, when it holds no build yet
-///
-/// A caller that drives 1 layer by hand never calls [`Layer::build`], so the forward pass
-/// builds the layer from the shape it receives. The whole shape goes in, batch extent
-/// included, so the layer reports the shape it was really given.
-/// [`Layer::predict`] takes `&self` and cannot do this, and it refuses an unbuilt layer
-///
-/// It is path-exported like `no_trainable_parameters_layer_functions`:
-/// `use crate::neural_network::layers::build_on_forward;`
-///
-/// [`Layer::build`]: crate::neural_network::traits::Layer::build
-/// [`Layer::predict`]: crate::neural_network::traits::Layer::predict
-macro_rules! build_on_forward {
-    ($layer:expr, $input:expr) => {
-        if $layer.built.is_none() {
-            $crate::neural_network::traits::Layer::build(
-                $layer,
-                &$crate::neural_network::Shape::known($input.shape()),
-            )?;
-        }
-    };
-}
-pub(in crate::neural_network::layers) use build_on_forward;
 
 /// Wraps 1 named array as the `Option` that `named_weight_layer_functions` collects
 ///

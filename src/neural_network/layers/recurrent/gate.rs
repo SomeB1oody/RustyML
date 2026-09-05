@@ -1,17 +1,16 @@
 //! Fused gate parameters and shared helpers for the GRU and LSTM recurrent cells
 //!
-//! Defines the `FusedGates` weight and gradient container. Provides the batched input-projection
-//! and reshape helpers shared by all 3 recurrent layers. Also provides a cache-extraction helper
-//! used by the GRU and LSTM cells.
+//! Defines the `FusedGates` weight container. Provides the batched input-projection and reshape
+//! helpers shared by all 3 recurrent layers.
 
 use crate::error::Error;
 use crate::neural_network::layers::recurrent::validation::validate_dimension_greater_than_zero;
-use crate::neural_network::traits::ParamGrad;
+use crate::neural_network::traits::ParamRef;
 use crate::neural_network::{Fans, Initializer};
 use ndarray::{Array2, Array3, ArrayView3, s};
 use ndarray_rand::rand::rngs::StdRng;
 
-/// Fused gate parameters and gradients for recurrent cells
+/// Fused gate parameters for recurrent cells
 ///
 /// Packs every gate's weights side by side into single matrices. Column blocks follow a fixed,
 /// layer-defined gate order: LSTM uses `[i | f | g | o]` and GRU uses `[z | r | h]`. This lets
@@ -21,7 +20,7 @@ use ndarray_rand::rand::rngs::StdRng;
 /// depend on each other. GRU's candidate gate depends on the reset gate's output, so GRU still
 /// needs 2 recurrent GEMMs per timestep instead of 1.
 ///
-/// The optimizer holds its own state, not the gates. See [`FusedGates::parameters`].
+/// The optimizer holds its own state, not the gates. See [`FusedGates::parameters_mut`].
 #[derive(Debug)]
 pub struct FusedGates {
     /// Fused input kernel with shape (input_dim, n_gates * units)
@@ -30,18 +29,12 @@ pub struct FusedGates {
     pub recurrent_kernel: Array2<f32>,
     /// Fused bias with shape (1, n_gates * units)
     pub bias: Array2<f32>,
-    /// Optional gradient for the fused input kernel, stored during backpropagation
-    pub grad_kernel: Option<Array2<f32>>,
-    /// Optional gradient for the fused recurrent kernel, stored during backpropagation
-    pub grad_recurrent_kernel: Option<Array2<f32>>,
-    /// Optional gradient for the fused bias, stored during backpropagation
-    pub grad_bias: Option<Array2<f32>>,
 }
 
 impl FusedGates {
     /// Fused gates that hold no weight at all
     ///
-    /// A layer holds this until [`Layer::build`](crate::neural_network::traits::Layer::build)
+    /// A layer holds this until [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build)
     /// reads the feature count from the input shape and replaces it with a drawn set
     ///
     /// # Returns
@@ -52,9 +45,6 @@ impl FusedGates {
             kernel: Array2::zeros((0, 0)),
             recurrent_kernel: Array2::zeros((0, 0)),
             bias: Array2::zeros((0, 0)),
-            grad_kernel: None,
-            grad_recurrent_kernel: None,
-            grad_bias: None,
         }
     }
 
@@ -118,79 +108,42 @@ impl FusedGates {
             kernel,
             recurrent_kernel,
             bias,
-            grad_kernel: None,
-            grad_recurrent_kernel: None,
-            grad_bias: None,
         })
     }
 
-    /// Exposes the 3 fused trainable tensors (kernel, recurrent kernel, bias) and their gradients
-    /// as flat [`ParamGrad`] slices for the optimizer to update
+    /// Exposes the 3 fused trainable tensors (kernel, recurrent kernel, bias) as flat
+    /// [`ParamRef`] slices for the optimizer to update
+    ///
+    /// The gates hold no gradient. A backward pass adds every gradient to the store of the
+    /// context, under these same 3 names
     ///
     /// # Returns
     ///
-    /// - `Vec<ParamGrad<'_>>` - The 3 tensors with their gradients, or an empty vector if
-    ///   gradients have not been computed yet
-    pub fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
+    /// - `Vec<ParamRef<'_>>` - The 3 tensors, in kernel, recurrent kernel, bias order
+    pub fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
         let Self {
             kernel,
             recurrent_kernel,
             bias,
-            grad_kernel,
-            grad_recurrent_kernel,
-            grad_bias,
-            ..
         } = self;
-        let mut params = Vec::new();
-        // Each tensor is pushed on its own, so a tensor without a gradient holds back no other
-        if let Some(grad) = grad_kernel.as_ref() {
-            params.push(ParamGrad::weight(
+        vec![
+            ParamRef::weight(
                 "kernel",
                 kernel
                     .as_slice_mut()
                     .expect("fused kernel must be contiguous"),
-                grad.as_slice()
-                    .expect("fused kernel gradient must be contiguous"),
-            ));
-        }
-        if let Some(grad) = grad_recurrent_kernel.as_ref() {
-            params.push(ParamGrad::weight(
+            ),
+            ParamRef::weight(
                 "recurrent_kernel",
                 recurrent_kernel
                     .as_slice_mut()
                     .expect("fused recurrent kernel must be contiguous"),
-                grad.as_slice()
-                    .expect("fused recurrent kernel gradient must be contiguous"),
-            ));
-        }
-        if let Some(grad) = grad_bias.as_ref() {
-            params.push(ParamGrad::no_decay(
+            ),
+            ParamRef::no_decay(
                 "bias",
                 bias.as_slice_mut().expect("fused bias must be contiguous"),
-                grad.as_slice()
-                    .expect("fused bias gradient must be contiguous"),
-            ));
-        }
-        params
-    }
-
-    /// Stores gradients for the fused tensors (replace semantics, matching Dense/SimpleRNN)
-    ///
-    /// # Parameters
-    ///
-    /// - `grad_kernel` - Gradient for the fused input kernel `[input_dim, n_gates * units]`
-    /// - `grad_recurrent` - Gradient for the fused recurrent kernel `[units, n_gates * units]`
-    /// - `grad_bias` - Gradient for the fused bias `[1, n_gates * units]`
-    #[inline]
-    pub fn store_gradients(
-        &mut self,
-        grad_kernel: Array2<f32>,
-        grad_recurrent: Array2<f32>,
-        grad_bias: Array2<f32>,
-    ) {
-        self.grad_kernel = Some(grad_kernel);
-        self.grad_recurrent_kernel = Some(grad_recurrent);
-        self.grad_bias = Some(grad_bias);
+            ),
+        ]
     }
 }
 
@@ -245,35 +198,11 @@ pub fn reshape_2d_to_3d(m: Array2<f32>, dims: (usize, usize, usize)) -> Array3<f
         .expect("row-major [d0*d1, d2] reshapes to [d0, d1, d2]")
 }
 
-/// Extracts the cached value, or returns an error if it is absent
-///
-/// The backward pass calls this to confirm the forward pass ran first
-///
-/// # Parameters
-///
-/// - `cache` - Cache container to take ownership from
-/// - `layer` - Name of the layer, used to build the error when the cache is empty
-///
-/// # Returns
-///
-/// - `crate::error::RustymlResult<T>` - The cached value if present
-///
-/// # Errors
-///
-/// - `Error::NeuralNetwork(NnError::ForwardPassNotRun)` - If the cache is empty
-#[inline]
-pub fn take_cache<T>(cache: &mut Option<T>, layer: &'static str) -> crate::error::RustymlResult<T> {
-    cache
-        .take()
-        .ok_or_else(|| Error::forward_pass_not_run(layer))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::neural_network::NnError;
     use approx::assert_abs_diff_eq;
-    use ndarray::{Array2, Array3, array};
+    use ndarray::{Array3, array};
 
     // FusedGates::new
 
@@ -334,78 +263,30 @@ mod tests {
         assert!(FusedGates::new(3, 0, &[0.0], &mut rng).is_err());
     }
 
-    // FusedGates::parameters (empty branch)
+    // FusedGates::parameters_mut
 
-    /// Freshly-constructed gates have all gradients `None`, so `parameters()` is empty
+    /// `parameters_mut` exposes the 3 fused tensors under their fixed names, on every call
     #[test]
-    fn parameters_empty_when_gradients_none() {
+    fn parameters_mut_three_named_entries() {
         let mut rng = crate::random::make_rng(Some(3));
         let mut gates = FusedGates::new(2, 2, &[0.0, 0.0], &mut rng).unwrap();
-        assert!(
-            gates.parameters().is_empty(),
-            "parameters() must be empty before gradients are computed"
-        );
+        let params = gates.parameters_mut();
+        assert_eq!(params.len(), 3);
+        let names: Vec<&str> = params.iter().map(|param| param.name).collect();
+        assert_eq!(names, vec!["kernel", "recurrent_kernel", "bias"]);
     }
 
-    /// After storing gradients, `parameters()` exposes the 3 fused tensors
+    /// Decoupled weight decay applies to the 2 kernels, and it skips the bias
     #[test]
-    fn parameters_three_entries_after_gradients() {
+    fn parameters_mut_decay_flags() {
         let mut rng = crate::random::make_rng(Some(3));
         let mut gates = FusedGates::new(2, 2, &[0.0, 0.0], &mut rng).unwrap();
-        gates.store_gradients(
-            Array2::zeros((2, 4)),
-            Array2::zeros((2, 4)),
-            Array2::zeros((1, 4)),
-        );
-        assert_eq!(gates.parameters().len(), 3);
-    }
-
-    // store_gradients (replace semantics, no clipping)
-
-    /// `store_gradients` stores gradients exactly as computed, with no clipping
-    #[test]
-    fn store_gradients_stores_unchanged() {
-        let mut rng = crate::random::make_rng(Some(5));
-        let mut gates = FusedGates::new(2, 1, &[0.0, 0.0], &mut rng).unwrap();
-
-        // Large values must be preserved verbatim (no clipping)
-        let grad_kernel = array![[10.0_f32, -100.0], [3.0, 42.0]];
-        let grad_recurrent = array![[5.0_f32, -5.0]];
-        let grad_bias = array![[8.0_f32, -8.0]];
-
-        gates.store_gradients(
-            grad_kernel.clone(),
-            grad_recurrent.clone(),
-            grad_bias.clone(),
-        );
-
-        for (got, exp) in gates
-            .grad_kernel
-            .as_ref()
-            .unwrap()
+        let decays: Vec<bool> = gates
+            .parameters_mut()
             .iter()
-            .zip(grad_kernel.iter())
-        {
-            assert_abs_diff_eq!(got, exp, epsilon = 1e-6);
-        }
-        for (got, exp) in gates
-            .grad_recurrent_kernel
-            .as_ref()
-            .unwrap()
-            .iter()
-            .zip(grad_recurrent.iter())
-        {
-            assert_abs_diff_eq!(got, exp, epsilon = 1e-6);
-        }
-        for (got, exp) in gates
-            .grad_bias
-            .as_ref()
-            .unwrap()
-            .iter()
-            .zip(grad_bias.iter())
-        {
-            assert_abs_diff_eq!(got, exp, epsilon = 1e-6);
-        }
+            .map(|param| param.decays)
+            .collect();
+        assert_eq!(decays, vec![true, true, false]);
     }
 
     // project_input
@@ -431,32 +312,5 @@ mod tests {
         assert_abs_diff_eq!(out[[0, 1, 1]], 4.0_f32, epsilon = 1e-6);
         assert_abs_diff_eq!(out[[0, 1, 2]], 6.0_f32, epsilon = 1e-6);
         assert_abs_diff_eq!(out[[0, 1, 3]], 8.0_f32, epsilon = 1e-6);
-    }
-
-    // take_cache
-
-    /// `take_cache` maps a `None` cache to `ForwardPassNotRun` carrying the layer name verbatim
-    #[test]
-    fn take_cache_none_returns_forward_pass_not_run() {
-        let mut cache: Option<Array2<f32>> = None;
-        let err = take_cache(&mut cache, "Gate").unwrap_err();
-        assert!(
-            matches!(
-                err,
-                Error::NeuralNetwork(NnError::ForwardPassNotRun("Gate"))
-            ),
-            "expected ForwardPassNotRun(\"Gate\"), got: {err:?}"
-        );
-    }
-
-    /// When the cache is populated, `take_cache` returns the inner value and leaves `None` behind
-    #[test]
-    fn take_cache_some_returns_value_and_empties() {
-        let mut cache: Option<Array2<f32>> = Some(array![[7.0_f32, 8.0]]);
-        let value = take_cache(&mut cache, "Gate").expect("value present");
-        assert_eq!(value.shape(), &[1, 2]);
-        assert_abs_diff_eq!(value[[0, 0]], 7.0_f32, epsilon = 1e-6);
-        assert_abs_diff_eq!(value[[0, 1]], 8.0_f32, epsilon = 1e-6);
-        assert!(cache.is_none(), "take_cache must leave None behind");
     }
 }

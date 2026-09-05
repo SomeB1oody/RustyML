@@ -8,6 +8,7 @@
 //! "different" assertions require the max absolute difference to clear a small threshold.
 
 use ndarray::Array2;
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::Activation;
@@ -16,7 +17,7 @@ use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
 use rustyml::neural_network::sequential::SequentialBuilder;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::UnaryLayer;
 
 use super::common::{GlobalSeedGuard, assert_allclose};
 
@@ -62,8 +63,8 @@ fn same_seed_same_init() {
     let b = dense_4_3(Some(7));
 
     let x = fixed_input_4();
-    let pa = a.predict(&x).unwrap();
-    let pb = b.predict(&x).unwrap();
+    let pa = a.forward(&x, &mut Ctx::inference()).unwrap();
+    let pb = b.forward(&x, &mut Ctx::inference()).unwrap();
 
     // Identical seed => identical weights => identical predict output, zero epsilon
     assert_allclose(&pa, &pb, 0.0_f32);
@@ -77,8 +78,8 @@ fn different_seed_differs() {
     let b = dense_4_3(Some(2));
 
     let x = fixed_input_4();
-    let pa = a.predict(&x).unwrap();
-    let pb = b.predict(&x).unwrap();
+    let pa = a.forward(&x, &mut Ctx::inference()).unwrap();
+    let pb = b.forward(&x, &mut Ctx::inference()).unwrap();
 
     let diff = max_abs_diff(&pa, &pb);
     assert!(
@@ -95,12 +96,12 @@ fn global_seed_reproducible() {
 
     let _seed = GlobalSeedGuard::set(123);
     let first = dense_4_3(None); // unseeded: draws from the global stream
-    let p_first = first.predict(&x).unwrap();
+    let p_first = first.forward(&x, &mut Ctx::inference()).unwrap();
 
     // Reset the global to the same value and rebuild the identical unseeded model
     rustyml::set_global_seed(123);
     let second = dense_4_3(None);
-    let p_second = second.predict(&x).unwrap();
+    let p_second = second.forward(&x, &mut Ctx::inference()).unwrap();
 
     // `_seed` clears the global on drop, even if this assertion panics
     assert_allclose(&p_first, &p_second, 0.0_f32);
@@ -116,11 +117,15 @@ fn local_overrides_global() {
     // panic.
     let p_with_global = {
         let _seed = GlobalSeedGuard::set(999);
-        dense_4_3(Some(5)).predict(&x).unwrap()
+        dense_4_3(Some(5))
+            .forward(&x, &mut Ctx::inference())
+            .unwrap()
     };
 
     // Built with no global seed active
-    let p_without_global = dense_4_3(Some(5)).predict(&x).unwrap();
+    let p_without_global = dense_4_3(Some(5))
+        .forward(&x, &mut Ctx::inference())
+        .unwrap();
 
     // Local Some(5) ignores the global => identical weights => identical output, zero epsilon
     assert_allclose(&p_with_global, &p_without_global, 0.0_f32);
@@ -183,7 +188,10 @@ fn global_seed_advances_between_unseeded_draws() {
         first.build(&Shape::known(&[1, 4])).unwrap(); // sub-seed #1 from the global
         let mut second = Dense::new(3, Activation::Linear).unwrap();
         second.build(&Shape::known(&[1, 4])).unwrap(); // sub-seed #2, must differ
-        (first.predict(&x).unwrap(), second.predict(&x).unwrap())
+        (
+            first.forward(&x, &mut Ctx::inference()).unwrap(),
+            second.forward(&x, &mut Ctx::inference()).unwrap(),
+        )
         // `_seed` clears the global here, before the assertion below
     };
 
@@ -213,8 +221,8 @@ fn cleared_global_seed_unseeded_layers_differ() {
     a.build(&Shape::known(&[1, 4])).unwrap();
     let mut b = Dense::new(3, Activation::Linear).unwrap();
     b.build(&Shape::known(&[1, 4])).unwrap();
-    let pa = a.predict(&x).unwrap();
-    let pb = b.predict(&x).unwrap();
+    let pa = a.forward(&x, &mut Ctx::inference()).unwrap();
+    let pb = b.forward(&x, &mut Ctx::inference()).unwrap();
 
     let diff = max_abs_diff(&pa, &pb);
     assert!(

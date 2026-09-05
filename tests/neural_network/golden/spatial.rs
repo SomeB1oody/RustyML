@@ -5,7 +5,8 @@
 //! `golden/data/spatial.golden`.
 //!
 //! None of these layers holds a parameter, so every case records only `input`, `forward`,
-//! `predict`, and `grad_input`. See the module doc comment of the parent module for the
+//! `predict`, and `grad_input`. The tensor named `predict` holds the output of an inference
+//! forward pass, and that name is a value in the data file. See the module doc comment of the parent module for the
 //! contract, and see `misc.rs` for a worked family.
 //!
 //! Coverage notes:
@@ -31,8 +32,6 @@
 use super::{GoldenCase, LayerFixture};
 use ndarray::IxDyn;
 use rustyml::error::Error;
-use rustyml::neural_network::Shape;
-use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::border::{Cropping1D, Cropping2D, Cropping3D};
 use rustyml::neural_network::layers::border::{ZeroPadding1D, ZeroPadding2D, ZeroPadding3D};
@@ -50,7 +49,10 @@ use rustyml::neural_network::layers::pooling::{MaxPooling1D, MaxPooling2D, MaxPo
 use rustyml::neural_network::layers::upsampling::{
     Interpolation, UpSampling1D, UpSampling2D, UpSampling3D,
 };
-use rustyml::neural_network::traits::{Layer, ParamGrad, WeightMut, WeightRef};
+use rustyml::neural_network::traits::{
+    Layer, LayerBase, ParamRef, UnaryLayer, WeightMut, WeightRef,
+};
+use rustyml::neural_network::{Ctx, Shape, Tensor};
 
 /// Every layer type of the spatial family, in the order the data file records them.
 fn fixtures() -> Vec<LayerFixture> {
@@ -151,33 +153,17 @@ impl HandBuiltInput {
     }
 }
 
-impl Layer for HandBuiltInput {
-    fn forward(&mut self, _harness_input: &Tensor) -> Result<Tensor, Error> {
-        self.inner.forward(&self.input)
-    }
-
-    fn predict(&self, _harness_input: &Tensor) -> Result<Tensor, Error> {
-        self.inner.predict(&self.input)
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        self.inner.backward(grad_output)
-    }
-
+impl LayerBase for HandBuiltInput {
     fn layer_type(&self) -> &str {
         self.inner.layer_type()
-    }
-
-    fn output_shape(&self) -> String {
-        self.inner.output_shape()
     }
 
     fn param_count(&self) -> ParamCounts {
         self.inner.param_count()
     }
 
-    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
-        self.inner.parameters()
+    fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
+        self.inner.parameters_mut()
     }
 
     fn weights(&self) -> Vec<WeightRef<'_>> {
@@ -188,8 +174,38 @@ impl Layer for HandBuiltInput {
         self.inner.weights_mut()
     }
 
-    fn set_training_if_mode_dependent(&mut self, is_training: bool) {
-        self.inner.set_training_if_mode_dependent(is_training);
+    /// Gives the shapes of the layer under test, so the wrapper reports the output shape of
+    /// that layer and never a shape of the placeholder
+    fn known_input_shapes(&self) -> Option<Vec<Shape>> {
+        self.inner.known_input_shapes()
+    }
+
+    fn is_built(&self) -> bool {
+        self.inner.is_built()
+    }
+}
+
+impl UnaryLayer for HandBuiltInput {
+    /// Builds the layer under test for the hand-built tensor, and not for the placeholder that
+    /// the harness offers
+    fn build(&mut self, _placeholder: &Shape) -> Result<(), Error> {
+        self.inner.build_many(&[Shape::known(self.input.shape())])
+    }
+
+    fn forward(&self, _harness_input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        self.inner.forward_many(&[&self.input], ctx)
+    }
+
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let mut gradients = self.inner.backward_many(grad_output, ctx)?;
+        Ok(gradients.remove(0))
+    }
+
+    /// Answers for the layer under test, because the wrapper reports the input shapes of that
+    /// layer as well
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        self.inner
+            .compute_output_shape_many(std::slice::from_ref(input))
     }
 }
 

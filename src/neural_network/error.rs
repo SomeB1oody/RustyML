@@ -44,9 +44,9 @@ pub enum NnError {
     /// A layer was used before `build` gave it the arrays it holds
     ///
     /// A layer allocates every array it owns in
-    /// [`Layer::build`](crate::neural_network::traits::Layer::build), from the shape of the
+    /// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build), from the shape of the
     /// input. Until then it holds no kernel, no bias, and no shape to check an input against.
-    /// [`Layer::forward`](crate::neural_network::traits::Layer::forward) builds the layer from
+    /// [`UnaryLayer::forward`](crate::neural_network::traits::UnaryLayer::forward) builds the layer from
     /// the tensor it receives, so only the paths that take `&self` can report this
     ///
     /// The payload is the layer's name (e.g. `"Dense"`, `"Conv2D"`)

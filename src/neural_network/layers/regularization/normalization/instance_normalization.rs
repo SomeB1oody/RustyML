@@ -2,11 +2,9 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::build_on_forward;
+use crate::neural_network::layers::built_layer_shape_functions;
 use crate::neural_network::layers::named_weight_layer_functions;
-use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
-use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
-use crate::neural_network::layers::regularization::normalization::normalization_layer_shape_functions;
+use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape_function;
 use crate::neural_network::layers::regularization::normalization::{
     group_norm_backward_core, group_norm_forward_core,
 };
@@ -16,8 +14,8 @@ use crate::neural_network::layers::regularization::validation::{
 use crate::neural_network::layers::validation::{
     start_build, validate_built_input, validate_optional_weight, validate_weight_shape,
 };
-use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::traits::{LayerBase, ParamRef, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Instance Normalization layer for neural networks
 ///
@@ -31,8 +29,9 @@ use crate::neural_network::{Shape, Tensor};
 /// # Examples
 ///
 /// ```rust
+/// use rustyml::neural_network::Ctx;
 /// use rustyml::neural_network::layers::*;
-/// use rustyml::neural_network::traits::Layer;
+/// use rustyml::neural_network::traits::UnaryLayer;
 /// use ndarray::Array3;
 ///
 /// // Create an InstanceNormalization layer for input shape [batch, spatial, channels]
@@ -41,8 +40,9 @@ use crate::neural_network::{Shape, Tensor};
 /// // Create input tensor
 /// let input = Array3::ones((4, 32, 3)).into_dyn();
 ///
-/// // During training, normalizes each channel of each sample independently
-/// let output = in_layer.forward(&input).unwrap();
+/// // A training pass normalizes each channel of each sample independently
+/// let mut ctx = Ctx::training();
+/// let output = in_layer.forward_mut(&input, &mut ctx).unwrap();
 /// ```
 #[derive(Debug)]
 pub struct InstanceNormalization {
@@ -62,16 +62,6 @@ pub struct InstanceNormalization {
     /// of 0 changes every value except a negative zero, which it turns into a positive zero.
     /// `weights` hides the array and `parameters` never yields it
     beta: Tensor,
-    /// Whether the layer is in training mode or inference mode
-    training: bool,
-    /// Normalized input, cached for the backward pass
-    x_normalized: Option<Tensor>,
-    /// Per-instance `1 / sqrt(var + epsilon)` from the forward pass, cached for the backward pass
-    inv_std: Option<Tensor>,
-    /// Gradient for the gamma parameter
-    grad_gamma: Option<Tensor>,
-    /// Gradient for the beta parameter
-    grad_beta: Option<Tensor>,
     /// Whether the layer adds the shift `beta`
     center: bool,
     /// Whether the layer applies the scale `gamma`
@@ -100,17 +90,10 @@ impl InstanceNormalization {
             built: None,
             gamma: Tensor::ones([0].as_slice()),
             beta: Tensor::zeros([0].as_slice()),
-            training: true,
-            x_normalized: None,
-            inv_std: None,
-            grad_gamma: None,
-            grad_beta: None,
             center: true,
             scale: true,
         })
     }
-
-    mode_dependent_layer_set_training!();
 
     /// Sets whether the layer adds the shift `beta` (defaults to `true`)
     ///
@@ -128,10 +111,9 @@ impl InstanceNormalization {
     pub fn with_center(mut self, center: bool) -> Self {
         self.center = center;
         if !center {
-            // Put the array back at the identity shift and drop any gradient a previous
-            // backward pass left, so nothing the layer no longer holds can reach a result
+            // Put the array back at the identity shift, so an array the layer no longer holds
+            // reaches no result
             self.beta = Tensor::zeros(self.beta.shape());
-            self.grad_beta = None;
         }
         self
     }
@@ -153,10 +135,9 @@ impl InstanceNormalization {
     pub fn with_scale(mut self, scale: bool) -> Self {
         self.scale = scale;
         if !scale {
-            // Put the array back at the identity scale and drop any gradient a previous
-            // backward pass left, so nothing the layer no longer holds can reach a result
+            // Put the array back at the identity scale, so an array the layer no longer holds
+            // reaches no result
             self.gamma = Tensor::ones(self.gamma.shape());
-            self.grad_gamma = None;
         }
         self
     }
@@ -200,7 +181,61 @@ impl InstanceNormalization {
     }
 }
 
-impl Layer for InstanceNormalization {
+/// What the forward pass of [`InstanceNormalization`] parks for its backward pass
+struct InstanceNormalizationCache {
+    /// The normalized input, before the scale and the shift
+    x_normalized: Tensor,
+    /// Per-instance `1 / sqrt(var + epsilon)`, 1 value per batch item and channel
+    inv_std: Tensor,
+}
+
+impl LayerBase for InstanceNormalization {
+    fn layer_type(&self) -> &str {
+        "InstanceNormalization"
+    }
+
+    fn param_count(&self) -> ParamCounts {
+        // Read the arrays the layer holds rather than the configuration, so dropping
+        // `gamma` or `beta` corrects the count with no second formula to keep in step
+        let gamma = if self.scale { self.gamma.len() } else { 0 };
+        let beta = if self.center { self.beta.len() } else { 0 };
+        ParamCounts::trainable(gamma + beta)
+    }
+
+    fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
+        let Self {
+            gamma,
+            beta,
+            center,
+            scale,
+            ..
+        } = self;
+        let mut params = Vec::new();
+        // Each tensor is pushed on its own, so a tensor the layer drops holds back no other
+        if *scale {
+            params.push(ParamRef::no_decay(
+                "gamma",
+                gamma.as_slice_mut().expect("gamma must be contiguous"),
+            ));
+        }
+        if *center {
+            params.push(ParamRef::no_decay(
+                "beta",
+                beta.as_slice_mut().expect("beta must be contiguous"),
+            ));
+        }
+        params
+    }
+
+    built_layer_shape_functions!();
+
+    named_weight_layer_functions!(
+        trainable "gamma" => gamma if scale,
+        trainable "beta" => beta if center,
+    );
+}
+
+impl UnaryLayer for InstanceNormalization {
     /// Allocates the per-channel arrays from the trailing axis of the input
     ///
     /// The channel axis is the last axis. An input of rank 1 has no channel axis, so the
@@ -226,8 +261,7 @@ impl Layer for InstanceNormalization {
         Ok(())
     }
 
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        build_on_forward!(self, input);
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         validate_built_input(&self.built, "InstanceNormalization", input.shape())?;
         validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;
         // 1 group per channel makes group normalization equal to instance normalization
@@ -236,107 +270,46 @@ impl Layer for InstanceNormalization {
         let (output, x_normalized, inv_std) =
             group_norm_forward_core(input, num_channels, &self.gamma, &self.beta, self.epsilon);
 
-        self.x_normalized = Some(x_normalized);
-        self.inv_std = Some(inv_std);
+        if ctx.is_training() {
+            ctx.push_cache(InstanceNormalizationCache {
+                x_normalized,
+                inv_std,
+            });
+        }
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the input shape or dimensionality is invalid
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_built_input(&self.built, "InstanceNormalization", input.shape())?;
-        validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;
-        let num_channels = input.shape()[input.ndim() - 1];
-
-        let (output, _x_normalized, _inv_std) =
-            group_norm_forward_core(input, num_channels, &self.gamma, &self.beta, self.epsilon);
-
-        Ok(output)
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        if !self.training {
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        if !ctx.is_training() {
             // During inference, pass the gradient through unchanged
             return Ok(grad_output.clone());
         }
 
-        // The channel axis is last, matching the cached forward intermediates
+        // The channel axis is last, matching the parked forward intermediates
         let num_channels = grad_output.shape()[grad_output.ndim() - 1];
 
-        let x_normalized = self
-            .x_normalized
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("InstanceNormalization"))?;
-        let inv_std = self
-            .inv_std
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("InstanceNormalization"))?;
+        let cache: InstanceNormalizationCache = ctx.pop_cache("InstanceNormalization")?;
 
         let (grad_input, grad_gamma, grad_beta) = group_norm_backward_core(
             grad_output,
-            x_normalized,
-            inv_std,
+            &cache.x_normalized,
+            &cache.inv_std,
             num_channels,
             &self.gamma,
         );
 
-        // An array the layer does not hold keeps no gradient, so `parameters` yields
-        // none for it and no optimizer state is ever keyed on it
-        self.grad_gamma = self.scale.then_some(grad_gamma);
-        self.grad_beta = self.center.then_some(grad_beta);
+        // An array the layer does not hold gets no gradient, so the store holds none and no
+        // optimizer state is ever keyed on it
+        if self.scale {
+            ctx.add_grad("gamma", grad_gamma)?;
+        }
+        if self.center {
+            ctx.add_grad("beta", grad_beta)?;
+        }
 
         Ok(grad_input)
     }
 
-    fn layer_type(&self) -> &str {
-        "InstanceNormalization"
-    }
-
-    normalization_layer_shape_functions!("InstanceNormalization");
-
-    fn param_count(&self) -> ParamCounts {
-        // Read the arrays the layer holds rather than the configuration, so dropping
-        // `gamma` or `beta` corrects the count with no second formula to keep in step
-        let gamma = if self.scale { self.gamma.len() } else { 0 };
-        let beta = if self.center { self.beta.len() } else { 0 };
-        ParamCounts::trainable(gamma + beta)
-    }
-
-    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
-        let Self {
-            gamma,
-            beta,
-            grad_gamma,
-            grad_beta,
-            ..
-        } = self;
-        let mut params = Vec::new();
-        // Each tensor is pushed on its own, so a tensor without a gradient holds back no other
-        if let Some(grad) = grad_gamma.as_ref() {
-            params.push(ParamGrad::no_decay(
-                "gamma",
-                gamma.as_slice_mut().expect("gamma must be contiguous"),
-                grad.as_slice().expect("grad_gamma must be contiguous"),
-            ));
-        }
-        if let Some(grad) = grad_beta.as_ref() {
-            params.push(ParamGrad::no_decay(
-                "beta",
-                beta.as_slice_mut().expect("beta must be contiguous"),
-                grad.as_slice().expect("grad_beta must be contiguous"),
-            ));
-        }
-        params
-    }
-
-    named_weight_layer_functions!(
-        trainable "gamma" => gamma if scale,
-        trainable "beta" => beta if center,
-    );
-
-    mode_dependent_layer_trait!();
+    normalization_layer_output_shape_function!("InstanceNormalization");
 }

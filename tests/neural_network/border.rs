@@ -4,6 +4,7 @@
 //! `gradient_check.rs` covers gradient values. This file does not duplicate them.
 
 use ndarray::{Array3, Array4, Array5, IxDyn};
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
@@ -17,7 +18,7 @@ use rustyml::neural_network::layers::flatten::Flatten;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::SequentialBuilder;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
@@ -62,7 +63,9 @@ fn ramp_of(shape: &[usize]) -> Tensor {
 #[test]
 fn zero_padding_1d_integer_pads_both_ends_equally() {
     let mut pad = ZeroPadding1D::new(2);
-    let out = pad.forward(&ramp_of(&[1, 3, 2])).unwrap();
+    let out = pad
+        .forward_mut(&ramp_of(&[1, 3, 2]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(out.shape(), &[1, 7, 2]);
 }
 
@@ -70,7 +73,9 @@ fn zero_padding_1d_integer_pads_both_ends_equally() {
 #[test]
 fn zero_padding_1d_pair_names_each_end() {
     let mut pad = ZeroPadding1D::new((1, 3));
-    let out = pad.forward(&ramp_of(&[1, 3, 2])).unwrap();
+    let out = pad
+        .forward_mut(&ramp_of(&[1, 3, 2]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(out.shape(), &[1, 7, 2]);
 
     // The first step is padding and the last 3 are padding, so only step 1 holds the first row
@@ -84,7 +89,9 @@ fn zero_padding_1d_pair_names_each_end() {
 #[test]
 fn zero_padding_2d_integer_pads_all_4_edges() {
     let mut pad = ZeroPadding2D::new(1);
-    let out = pad.forward(&ramp_of(&[1, 3, 4, 2])).unwrap();
+    let out = pad
+        .forward_mut(&ramp_of(&[1, 3, 4, 2]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(out.shape(), &[1, 5, 6, 2]);
 }
 
@@ -92,7 +99,9 @@ fn zero_padding_2d_integer_pads_all_4_edges() {
 #[test]
 fn zero_padding_2d_pair_gives_one_amount_per_axis() {
     let mut pad = ZeroPadding2D::new((1, 2));
-    let out = pad.forward(&ramp_of(&[1, 3, 4, 2])).unwrap();
+    let out = pad
+        .forward_mut(&ramp_of(&[1, 3, 4, 2]), &mut Ctx::training())
+        .unwrap();
 
     // Height grows by 1 at each end and width by 2 at each end
     assert_eq!(out.shape(), &[1, 5, 8, 2]);
@@ -102,7 +111,9 @@ fn zero_padding_2d_pair_gives_one_amount_per_axis() {
 #[test]
 fn zero_padding_2d_pair_of_pairs_names_all_4_edges() {
     let mut pad = ZeroPadding2D::new(((1, 0), (0, 2)));
-    let out = pad.forward(&ramp_of(&[1, 3, 4, 2])).unwrap();
+    let out = pad
+        .forward_mut(&ramp_of(&[1, 3, 4, 2]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(out.shape(), &[1, 4, 6, 2]);
 }
 
@@ -110,7 +121,9 @@ fn zero_padding_2d_pair_of_pairs_names_all_4_edges() {
 #[test]
 fn zero_padding_3d_integer_pads_all_6_faces() {
     let mut pad = ZeroPadding3D::new(1);
-    let out = pad.forward(&ramp_of(&[1, 2, 3, 4, 2])).unwrap();
+    let out = pad
+        .forward_mut(&ramp_of(&[1, 2, 3, 4, 2]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(out.shape(), &[1, 4, 5, 6, 2]);
 }
 
@@ -118,7 +131,9 @@ fn zero_padding_3d_integer_pads_all_6_faces() {
 #[test]
 fn zero_padding_3d_triple_gives_one_amount_per_axis() {
     let mut pad = ZeroPadding3D::new((1, 2, 0));
-    let out = pad.forward(&ramp_of(&[1, 2, 3, 4, 2])).unwrap();
+    let out = pad
+        .forward_mut(&ramp_of(&[1, 2, 3, 4, 2]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(out.shape(), &[1, 4, 7, 4, 2]);
 }
 
@@ -126,7 +141,9 @@ fn zero_padding_3d_triple_gives_one_amount_per_axis() {
 #[test]
 fn zero_padding_3d_triple_of_pairs_names_all_6_faces() {
     let mut pad = ZeroPadding3D::new(((1, 0), (0, 2), (1, 1)));
-    let out = pad.forward(&ramp_of(&[1, 2, 3, 4, 2])).unwrap();
+    let out = pad
+        .forward_mut(&ramp_of(&[1, 2, 3, 4, 2]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(out.shape(), &[1, 3, 5, 6, 2]);
 }
 
@@ -134,7 +151,9 @@ fn zero_padding_3d_triple_of_pairs_names_all_6_faces() {
 #[test]
 fn cropping_2d_pair_gives_one_amount_per_axis() {
     let mut crop = Cropping2D::new((1, 2));
-    let out = crop.forward(&ramp_of(&[1, 5, 8, 2])).unwrap();
+    let out = crop
+        .forward_mut(&ramp_of(&[1, 5, 8, 2]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(out.shape(), &[1, 3, 4, 2]);
 }
 
@@ -142,7 +161,9 @@ fn cropping_2d_pair_gives_one_amount_per_axis() {
 #[test]
 fn cropping_3d_triple_gives_one_amount_per_axis() {
     let mut crop = Cropping3D::new((1, 2, 0));
-    let out = crop.forward(&ramp_of(&[1, 4, 7, 4, 2])).unwrap();
+    let out = crop
+        .forward_mut(&ramp_of(&[1, 4, 7, 4, 2]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(out.shape(), &[1, 2, 3, 4, 2]);
 }
 
@@ -153,7 +174,7 @@ fn cropping_3d_triple_gives_one_amount_per_axis() {
 fn zero_padding_1d_forward_places_values_and_zeros() {
     let mut pad = ZeroPadding1D::new((1, 2));
     let x = t3(1, 2, 2, vec![1.0, 2.0, 3.0, 4.0]);
-    let out = pad.forward(&x).unwrap();
+    let out = pad.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     let want = t3(
         1,
@@ -169,7 +190,7 @@ fn zero_padding_1d_forward_places_values_and_zeros() {
 fn zero_padding_2d_forward_places_values_and_zeros() {
     let mut pad = ZeroPadding2D::new(((1, 0), (0, 1)));
     let x = t4(1, 2, 2, 1, vec![1.0, 2.0, 3.0, 4.0]);
-    let out = pad.forward(&x).unwrap();
+    let out = pad.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     let want = t4(
         1,
@@ -186,7 +207,7 @@ fn zero_padding_2d_forward_places_values_and_zeros() {
 fn zero_padding_3d_forward_places_values_and_zeros() {
     let mut pad = ZeroPadding3D::new(((1, 0), (0, 1), (0, 0)));
     let x = t5(1, 1, 1, 2, 1, vec![1.0, 2.0]);
-    let out = pad.forward(&x).unwrap();
+    let out = pad.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     assert_eq!(out.shape(), &[1, 2, 2, 2, 1]);
     let want = t5(1, 2, 2, 2, 1, vec![0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 0.0, 0.0]);
@@ -198,7 +219,7 @@ fn zero_padding_3d_forward_places_values_and_zeros() {
 fn cropping_1d_forward_keeps_interior() {
     let mut crop = Cropping1D::new((1, 2));
     let x = t3(1, 6, 1, ramp(6));
-    let out = crop.forward(&x).unwrap();
+    let out = crop.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     let want = t3(1, 3, 1, vec![2.0, 3.0, 4.0]);
     assert_allclose(&out, &want, 1e-6_f32);
@@ -209,7 +230,7 @@ fn cropping_1d_forward_keeps_interior() {
 fn cropping_2d_forward_keeps_interior() {
     let mut crop = Cropping2D::new(((1, 0), (0, 1)));
     let x = t4(1, 3, 3, 1, ramp(9));
-    let out = crop.forward(&x).unwrap();
+    let out = crop.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     let want = t4(1, 2, 2, 1, vec![4.0, 5.0, 7.0, 8.0]);
     assert_allclose(&out, &want, 1e-6_f32);
@@ -220,7 +241,7 @@ fn cropping_2d_forward_keeps_interior() {
 fn cropping_3d_forward_keeps_interior() {
     let mut crop = Cropping3D::new(1);
     let x = t5(1, 3, 3, 3, 1, ramp(27));
-    let out = crop.forward(&x).unwrap();
+    let out = crop.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     // Only the center position of a 3x3x3 volume survives a 1-plane crop at every face
     let want = t5(1, 1, 1, 1, 1, vec![14.0]);
@@ -232,7 +253,7 @@ fn cropping_3d_forward_keeps_interior() {
 fn zero_padding_2d_with_zero_amounts_copies_input() {
     let mut pad = ZeroPadding2D::new(0);
     let x = ramp_of(&[2, 3, 4, 2]);
-    let out = pad.forward(&x).unwrap();
+    let out = pad.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_allclose(&out, &x, 1e-6_f32);
 }
 
@@ -241,25 +262,27 @@ fn zero_padding_2d_with_zero_amounts_copies_input() {
 fn cropping_2d_with_zero_amounts_copies_input() {
     let mut crop = Cropping2D::new(0);
     let x = ramp_of(&[2, 3, 4, 2]);
-    let out = crop.forward(&x).unwrap();
+    let out = crop.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_allclose(&out, &x, 1e-6_f32);
 }
 
-/// predict gives the same output as forward, and writes no cache
+/// A forward pass with an inference context matches one with a training context. A layer now
+/// builds itself from the first tensor it receives no matter which context that pass runs in,
+/// so `output_shape` is known right after the first pass, and not only after a later one
 #[test]
-fn predict_matches_forward_and_leaves_output_shape_unknown() {
+fn predict_matches_forward_and_the_first_pass_builds_the_layer() {
     let x = ramp_of(&[2, 4, 4, 3]);
 
     let mut pad = ZeroPadding2D::new(((0, 2), (1, 0)));
-    let from_predict = pad.predict(&x).unwrap();
-    assert_eq!(pad.output_shape(), "Unknown");
-    let from_forward = pad.forward(&x).unwrap();
+    let from_predict = pad.forward_mut(&x, &mut Ctx::inference()).unwrap();
+    assert_eq!(pad.output_shape(), "(None, 6, 5, 3)");
+    let from_forward = pad.forward(&x, &mut Ctx::training()).unwrap();
     assert_allclose(&from_predict, &from_forward, 1e-6_f32);
 
     let mut crop = Cropping2D::new(((0, 2), (1, 0)));
-    let from_predict = crop.predict(&x).unwrap();
-    assert_eq!(crop.output_shape(), "Unknown");
-    let from_forward = crop.forward(&x).unwrap();
+    let from_predict = crop.forward_mut(&x, &mut Ctx::inference()).unwrap();
+    assert_eq!(crop.output_shape(), "(None, 2, 3, 3)");
+    let from_forward = crop.forward(&x, &mut Ctx::training()).unwrap();
     assert_allclose(&from_predict, &from_forward, 1e-6_f32);
 }
 
@@ -270,11 +293,12 @@ fn predict_matches_forward_and_leaves_output_shape_unknown() {
 fn zero_padding_2d_backward_returns_interior_of_gradient() {
     let mut pad = ZeroPadding2D::new(1);
     let x = t4(1, 2, 2, 1, ramp(4));
-    pad.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    pad.forward_mut(&x, &mut ctx).unwrap();
 
     // The output is 4x4, and the interior 2x2 holds 6, 7, 10 and 11 of a 1-based ramp
     let grad = t4(1, 4, 4, 1, ramp(16));
-    let grad_input = pad.backward(&grad).unwrap();
+    let grad_input = pad.backward(&grad, &mut ctx).unwrap();
 
     let want = t4(1, 2, 2, 1, vec![6.0, 7.0, 10.0, 11.0]);
     assert_allclose(&grad_input, &want, 1e-6_f32);
@@ -285,10 +309,11 @@ fn zero_padding_2d_backward_returns_interior_of_gradient() {
 fn cropping_2d_backward_scatters_gradient_and_zeros_border() {
     let mut crop = Cropping2D::new(((1, 0), (0, 1)));
     let x = t4(1, 3, 3, 1, ramp(9));
-    crop.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    crop.forward_mut(&x, &mut ctx).unwrap();
 
     let grad = t4(1, 2, 2, 1, ramp(4));
-    let grad_input = crop.backward(&grad).unwrap();
+    let grad_input = crop.backward(&grad, &mut ctx).unwrap();
 
     let want = t4(
         1,
@@ -308,10 +333,10 @@ fn pad_then_crop_restores_the_input() {
     let mut pad = ZeroPadding2D::new(((2, 1), (0, 3)));
     let mut crop = Cropping2D::new(((2, 1), (0, 3)));
 
-    let padded = pad.forward(&x).unwrap();
+    let padded = pad.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(padded.shape(), &[2, 6, 7, 2]);
 
-    let restored = crop.forward(&padded).unwrap();
+    let restored = crop.forward_mut(&padded, &mut Ctx::training()).unwrap();
     assert_allclose(&restored, &x, 1e-6_f32);
 }
 
@@ -323,7 +348,7 @@ fn zero_padding_rejects_wrong_rank() {
     let mut pad_1d = ZeroPadding1D::new(1);
     assert!(
         matches!(
-            pad_1d.forward(&ramp_of(&[2, 3, 4, 2])),
+            pad_1d.forward_mut(&ramp_of(&[2, 3, 4, 2]), &mut Ctx::training()),
             Err(Error::InvalidInput(_))
         ),
         "ZeroPadding1D must reject a rank-4 input"
@@ -332,7 +357,7 @@ fn zero_padding_rejects_wrong_rank() {
     let mut pad_2d = ZeroPadding2D::new(1);
     assert!(
         matches!(
-            pad_2d.forward(&ramp_of(&[2, 3, 4])),
+            pad_2d.forward_mut(&ramp_of(&[2, 3, 4]), &mut Ctx::training()),
             Err(Error::InvalidInput(_))
         ),
         "ZeroPadding2D must reject a rank-3 input"
@@ -341,7 +366,7 @@ fn zero_padding_rejects_wrong_rank() {
     let mut pad_3d = ZeroPadding3D::new(1);
     assert!(
         matches!(
-            pad_3d.forward(&ramp_of(&[2, 3, 4, 2])),
+            pad_3d.forward_mut(&ramp_of(&[2, 3, 4, 2]), &mut Ctx::training()),
             Err(Error::InvalidInput(_))
         ),
         "ZeroPadding3D must reject a rank-4 input"
@@ -354,7 +379,7 @@ fn cropping_rejects_wrong_rank() {
     let mut crop_1d = Cropping1D::new(1);
     assert!(
         matches!(
-            crop_1d.forward(&ramp_of(&[2, 5, 5, 2])),
+            crop_1d.forward_mut(&ramp_of(&[2, 5, 5, 2]), &mut Ctx::training()),
             Err(Error::InvalidInput(_))
         ),
         "Cropping1D must reject a rank-4 input"
@@ -363,7 +388,7 @@ fn cropping_rejects_wrong_rank() {
     let mut crop_2d = Cropping2D::new(1);
     assert!(
         matches!(
-            crop_2d.forward(&ramp_of(&[2, 5, 2])),
+            crop_2d.forward_mut(&ramp_of(&[2, 5, 2]), &mut Ctx::training()),
             Err(Error::InvalidInput(_))
         ),
         "Cropping2D must reject a rank-3 input"
@@ -372,7 +397,7 @@ fn cropping_rejects_wrong_rank() {
     let mut crop_3d = Cropping3D::new(1);
     assert!(
         matches!(
-            crop_3d.forward(&ramp_of(&[2, 5, 5, 2])),
+            crop_3d.forward_mut(&ramp_of(&[2, 5, 5, 2]), &mut Ctx::training()),
             Err(Error::InvalidInput(_))
         ),
         "Cropping3D must reject a rank-4 input"
@@ -386,13 +411,19 @@ fn border_layers_reject_empty_input() {
 
     let mut pad = ZeroPadding2D::new(1);
     assert!(
-        matches!(pad.forward(&empty), Err(Error::EmptyInput(_))),
+        matches!(
+            pad.forward_mut(&empty, &mut Ctx::training()),
+            Err(Error::EmptyInput(_))
+        ),
         "ZeroPadding2D must reject an empty input"
     );
 
     let mut crop = Cropping2D::new(1);
     assert!(
-        matches!(crop.forward(&empty), Err(Error::EmptyInput(_))),
+        matches!(
+            crop.forward_mut(&empty, &mut Ctx::training()),
+            Err(Error::EmptyInput(_))
+        ),
         "Cropping2D must reject an empty input"
     );
 }
@@ -404,7 +435,7 @@ fn cropping_rejects_a_border_that_removes_the_whole_axis() {
 
     // 2 + 3 removes all 5 steps
     let mut too_much = Cropping1D::new((2, 3));
-    let result = too_much.forward(&x);
+    let result = too_much.forward_mut(&x, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput when the crop leaves no step, got {result:?}"
@@ -412,7 +443,7 @@ fn cropping_rejects_a_border_that_removes_the_whole_axis() {
 
     // 2 + 2 leaves exactly 1 step, which is allowed
     let mut just_fits = Cropping1D::new((2, 2));
-    let out = just_fits.forward(&x).unwrap();
+    let out = just_fits.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[1, 1, 1]);
     assert_eq!(out[[0, 0, 0]], 3.0);
 }
@@ -420,8 +451,8 @@ fn cropping_rejects_a_border_that_removes_the_whole_axis() {
 /// backward before any forward pass reports ForwardPassNotRun
 #[test]
 fn border_layers_backward_before_forward_returns_err() {
-    let mut pad = ZeroPadding2D::new(1);
-    let result = pad.backward(&ramp_of(&[1, 4, 4, 1]));
+    let pad = ZeroPadding2D::new(1);
+    let result = pad.backward(&ramp_of(&[1, 4, 4, 1]), &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -430,8 +461,8 @@ fn border_layers_backward_before_forward_returns_err() {
         "expected ForwardPassNotRun from ZeroPadding2D, got {result:?}"
     );
 
-    let mut crop = Cropping2D::new(1);
-    let result = crop.backward(&ramp_of(&[1, 2, 2, 1]));
+    let crop = Cropping2D::new(1);
+    let result = crop.backward(&ramp_of(&[1, 2, 2, 1]), &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -445,8 +476,9 @@ fn border_layers_backward_before_forward_returns_err() {
 #[test]
 fn border_layers_backward_wrong_grad_shape_returns_err() {
     let mut pad = ZeroPadding2D::new(1);
-    pad.forward(&ramp_of(&[1, 2, 2, 1])).unwrap();
-    let result = pad.backward(&ramp_of(&[1, 2, 2, 1]));
+    let mut ctx = Ctx::training();
+    pad.forward_mut(&ramp_of(&[1, 2, 2, 1]), &mut ctx).unwrap();
+    let result = pad.backward(&ramp_of(&[1, 2, 2, 1]), &mut ctx);
     assert!(
         matches!(
             &result,
@@ -457,8 +489,9 @@ fn border_layers_backward_wrong_grad_shape_returns_err() {
     );
 
     let mut crop = Cropping2D::new(1);
-    crop.forward(&ramp_of(&[1, 4, 4, 1])).unwrap();
-    let result = crop.backward(&ramp_of(&[1, 4, 4, 1]));
+    let mut ctx = Ctx::training();
+    crop.forward_mut(&ramp_of(&[1, 4, 4, 1]), &mut ctx).unwrap();
+    let result = crop.backward(&ramp_of(&[1, 4, 4, 1]), &mut ctx);
     assert!(
         matches!(
             &result,
@@ -509,15 +542,19 @@ fn border_output_shape_is_unknown_before_forward() {
     assert_eq!(Cropping2D::new(1).output_shape(), "Unknown");
 }
 
-/// After a forward pass, output_shape reports the shape with the batch axis as "None"
+/// After the first forward pass, output_shape reports the shape the layer built for. A layer
+/// driven directly builds from the exact tensor it receives, so the batch axis prints its real
+/// extent and not "None"
 #[test]
 fn border_output_shape_after_forward() {
     let mut pad = ZeroPadding2D::new(((1, 2), (0, 1)));
-    pad.forward(&ramp_of(&[2, 3, 4, 5])).unwrap();
+    pad.forward_mut(&ramp_of(&[2, 3, 4, 5]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(pad.output_shape(), "(None, 6, 5, 5)");
 
     let mut crop = Cropping1D::new((1, 2));
-    crop.forward(&ramp_of(&[2, 8, 3])).unwrap();
+    crop.forward_mut(&ramp_of(&[2, 8, 3]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(crop.output_shape(), "(None, 5, 3)");
 }
 
@@ -531,14 +568,14 @@ fn one_instance_serves_every_batch_size() {
     for batch in [1_usize, 4, 7] {
         let x = ramp_of(&[batch, 3, 3, 2]);
 
-        let padded = pad.forward(&x).unwrap();
+        let padded = pad.forward_mut(&x, &mut Ctx::training()).unwrap();
         assert_eq!(
             padded.shape(),
             &[batch, 5, 5, 2],
             "wrong padded shape at batch size {batch}"
         );
 
-        let cropped = crop.forward(&x).unwrap();
+        let cropped = crop.forward_mut(&x, &mut Ctx::training()).unwrap();
         assert_eq!(
             cropped.shape(),
             &[batch, 1, 1, 2],

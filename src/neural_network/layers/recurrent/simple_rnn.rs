@@ -4,8 +4,6 @@
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
-use crate::neural_network::layers::named_weight_layer_functions;
-use crate::neural_network::layers::recurrent::gate::take_cache;
 use crate::neural_network::layers::recurrent::input_step;
 use crate::neural_network::layers::recurrent::validation::{
     split_grad_output, validate_dimension_greater_than_zero, validate_input_3d,
@@ -13,9 +11,9 @@ use crate::neural_network::layers::recurrent::validation::{
 };
 use crate::neural_network::layers::validation::start_build;
 use crate::neural_network::layers::validation::validate_weight_shape;
-use crate::neural_network::layers::{build_config_function, build_on_forward};
-use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Fans, Initializer, Shape, Tensor};
+use crate::neural_network::layers::{built_layer_shape_functions, named_weight_layer_functions};
+use crate::neural_network::traits::{LayerBase, ParamRef, UnaryLayer};
+use crate::neural_network::{Ctx, Fans, Initializer, Shape, Tensor};
 use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Activation as FusedActivation, Bias, Parallelism};
 use ndarray::{Array, Array2, Array3, Axis};
@@ -64,7 +62,7 @@ use ndarray::{Array, Array2, Array3, Axis};
 /// ```
 #[derive(Debug)]
 pub struct SimpleRNN {
-    /// Feature count per timestep, which [`Layer::build`] reads from the input shape
+    /// Feature count per timestep, which [`UnaryLayer::build`] reads from the input shape
     input_dim: usize,
     /// Shape the kernels depend on, which is `(None, None, input_dim)`. `None` before the
     /// build
@@ -79,16 +77,6 @@ pub struct SimpleRNN {
     recurrent_kernel: Array2<f32>,
     /// Bias vector for the layer with shape (1, units)
     bias: Array2<f32>,
-    /// Cached input tensor from the forward pass
-    input_cache: Option<Array3<f32>>,
-    /// Cached hidden states from the forward pass
-    hidden_state_cache: Option<Vec<Array2<f32>>>,
-    /// Gradient of the kernel weights
-    grad_kernel: Option<Array2<f32>>,
-    /// Gradient of the recurrent kernel weights
-    grad_recurrent_kernel: Option<Array2<f32>>,
-    /// Gradient of the bias
-    grad_bias: Option<Array2<f32>>,
     /// Activation function applied at each timestep of the recurrence
     activation: Activation,
     /// Returns the full sequence of hidden states when true, or only the last one when false
@@ -134,11 +122,6 @@ impl SimpleRNN {
             kernel: Array::zeros((0, 0)),
             recurrent_kernel: Array::zeros((0, 0)),
             bias: Array::zeros((0, 0)),
-            input_cache: None,
-            hidden_state_cache: None,
-            grad_kernel: None,
-            grad_recurrent_kernel: None,
-            grad_bias: None,
             activation,
             return_sequences: false,
             go_backwards: false,
@@ -279,17 +262,17 @@ impl SimpleRNN {
         crate::neural_network::layers::recurrent::gate::project_input(&self.kernel, x3)
     }
 
-    /// Runs the recurrence and returns the layer output, the shared numeric body of
-    /// [`Layer::forward`] and [`Layer::predict`]
+    /// Runs the recurrence and returns the layer output, the numeric body of
+    /// [`UnaryLayer::forward`]
     ///
     /// The output is the last hidden state, with shape (batch_size, units). With
     /// `return_sequences` set, it is instead every hidden state in processing order, with shape
     /// (batch_size, timesteps, units).
     ///
     /// When `hidden_states` is `Some`, this method records every hidden state, with `h_0 = 0`
-    /// prepended, for the backward pass. `predict` passes `None` and skips both the recording
-    /// and its clones. The record stays in processing order, so `hidden_states[k]` is the state
-    /// that enters processing step `k`.
+    /// prepended, for the backward pass. An inference pass passes `None` and skips both the
+    /// recording and its clones. The record stays in processing order, so `hidden_states[k]` is
+    /// the state that enters processing step `k`.
     ///
     /// A timestep needs 1 GEMM call and at most 1 activation sweep. The timestep buffer starts
     /// as the pre-projected `x_t @ kernel` slice. The recurrent product accumulates into it
@@ -371,7 +354,63 @@ impl SimpleRNN {
     }
 }
 
-impl Layer for SimpleRNN {
+/// What the forward pass of [`SimpleRNN`] parks for its backward pass
+#[derive(Debug)]
+struct SimpleRnnCache {
+    /// The input of the pass, with shape (batch_size, timesteps, input_dim)
+    input: Array3<f32>,
+    /// Every hidden state in processing order, with `h_0 = 0` prepended
+    hidden_states: Vec<Array2<f32>>,
+}
+
+impl LayerBase for SimpleRNN {
+    fn layer_type(&self) -> &str {
+        "SimpleRNN"
+    }
+
+    fn param_count(&self) -> ParamCounts {
+        // Read the arrays the layer holds rather than the configuration, so a change to
+        // the roster corrects the count with no second formula to keep in step
+        ParamCounts::trainable(self.kernel.len() + self.recurrent_kernel.len() + self.bias.len())
+    }
+
+    fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
+        let Self {
+            kernel,
+            recurrent_kernel,
+            bias,
+            ..
+        } = self;
+        vec![
+            ParamRef::weight(
+                "kernel",
+                kernel.as_slice_mut().expect("kernel must be contiguous"),
+            ),
+            ParamRef::weight(
+                "recurrent_kernel",
+                recurrent_kernel
+                    .as_slice_mut()
+                    .expect("recurrent kernel must be contiguous"),
+            ),
+            ParamRef::no_decay(
+                "bias",
+                bias.as_slice_mut().expect("bias must be contiguous"),
+            ),
+        ]
+    }
+
+    // The layer keeps no input shape. It knows the feature count of 1 timestep, and it
+    // serves every batch size and every sequence length, so both of those axes are free
+    built_layer_shape_functions!();
+
+    named_weight_layer_functions!(
+        trainable "kernel" => kernel,
+        trainable "recurrent_kernel" => recurrent_kernel,
+        trainable "bias" => bias,
+    );
+}
+
+impl UnaryLayer for SimpleRNN {
     /// Reads the feature count from the last axis, and draws both kernels and the bias
     ///
     /// 1 generator threads the input kernel and then the orthogonal recurrent kernel, in that
@@ -399,31 +438,32 @@ impl Layer for SimpleRNN {
         Ok(())
     }
 
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_input_3d(input)?;
-        build_on_forward!(self, input);
-        let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
-        self.input_cache = Some(x3.to_owned());
-
-        let mut hs = Vec::with_capacity(x3.shape()[1] + 1);
-        let output = self.run(&x3, Some(&mut hs))?;
-        self.hidden_state_cache = Some(hs);
-        Ok(output)
-    }
-
-    /// Inference forward pass. Runs in eval mode and writes no caches. See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if self.built.is_none() {
+    /// An inference pass records no hidden state at all, and it parks no cache
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        if !self.is_built() {
             return Err(Error::not_built("SimpleRNN"));
         }
         validate_input_3d(input)?;
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
-        self.run(&x3, None)
+
+        if !ctx.is_training() {
+            return self.run(&x3, None);
+        }
+
+        let mut hs = Vec::with_capacity(x3.shape()[1] + 1);
+        let output = self.run(&x3, Some(&mut hs))?;
+        ctx.push_cache(SimpleRnnCache {
+            input: x3.to_owned(),
+            hidden_states: hs,
+        });
+        Ok(output)
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        let x3 = take_cache(&mut self.input_cache, "SimpleRNN")?;
-        let hs = take_cache(&mut self.hidden_state_cache, "SimpleRNN")?;
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let SimpleRnnCache {
+            input: x3,
+            hidden_states: hs,
+        } = ctx.pop_cache("SimpleRNN")?;
 
         let batch = x3.shape()[0];
         let timesteps = x3.shape()[1];
@@ -498,23 +538,14 @@ impl Layer for SimpleRNN {
             (batch, timesteps, feat),
         );
 
-        self.grad_kernel = Some(grad_k);
-        self.grad_recurrent_kernel = Some(grad_rk);
-        self.grad_bias = Some(grad_b);
+        ctx.add_grad("kernel", grad_k.as_standard_layout().to_owned().into_dyn())?;
+        ctx.add_grad(
+            "recurrent_kernel",
+            grad_rk.as_standard_layout().to_owned().into_dyn(),
+        )?;
+        ctx.add_grad("bias", grad_b.as_standard_layout().to_owned().into_dyn())?;
 
         Ok(grad_x3.into_dyn())
-    }
-
-    fn layer_type(&self) -> &str {
-        "SimpleRNN"
-    }
-
-    build_config_function!();
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        // The layer keeps no input shape. It knows the feature count of 1 timestep, and it
-        // serves every batch size and every sequence length, so both of those axes are free
-        self.built.clone()
     }
 
     /// A returned sequence keeps the time axis, and a returned final state drops it
@@ -538,55 +569,4 @@ impl Layer for SimpleRNN {
             Shape::new(vec![axes[0], Some(self.units)])
         })
     }
-
-    fn param_count(&self) -> ParamCounts {
-        // Read the arrays the layer holds rather than the configuration, so a change to
-        // the roster corrects the count with no second formula to keep in step
-        ParamCounts::trainable(self.kernel.len() + self.recurrent_kernel.len() + self.bias.len())
-    }
-
-    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
-        let Self {
-            kernel,
-            recurrent_kernel,
-            bias,
-            grad_kernel,
-            grad_recurrent_kernel,
-            grad_bias,
-            ..
-        } = self;
-        let mut params = Vec::new();
-        // Each tensor is pushed on its own, so a tensor without a gradient holds back no other
-        if let Some(grad) = grad_kernel.as_ref() {
-            params.push(ParamGrad::weight(
-                "kernel",
-                kernel.as_slice_mut().expect("kernel must be contiguous"),
-                grad.as_slice().expect("kernel gradient must be contiguous"),
-            ));
-        }
-        if let Some(grad) = grad_recurrent_kernel.as_ref() {
-            params.push(ParamGrad::weight(
-                "recurrent_kernel",
-                recurrent_kernel
-                    .as_slice_mut()
-                    .expect("recurrent kernel must be contiguous"),
-                grad.as_slice()
-                    .expect("recurrent kernel gradient must be contiguous"),
-            ));
-        }
-        if let Some(grad) = grad_bias.as_ref() {
-            params.push(ParamGrad::no_decay(
-                "bias",
-                bias.as_slice_mut().expect("bias must be contiguous"),
-                grad.as_slice().expect("bias gradient must be contiguous"),
-            ));
-        }
-        params
-    }
-
-    named_weight_layer_functions!(
-        trainable "kernel" => kernel,
-        trainable "recurrent_kernel" => recurrent_kernel,
-        trainable "bias" => bias,
-    );
 }

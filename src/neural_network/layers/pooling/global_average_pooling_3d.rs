@@ -1,13 +1,15 @@
 //! Global average pooling layer for 3D inputs.
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::pooling::layer_functions_global_pooling;
 use crate::neural_network::layers::pooling::pooling_engine::{
     PoolKind, global_pool_backward, global_pool_forward,
 };
-use crate::neural_network::traits::Layer;
+use crate::neural_network::layers::pooling::{
+    layer_base_functions_pooling, layer_functions_global_pooling,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Global average pooling layer for 3D inputs
 ///
@@ -56,8 +58,8 @@ use crate::neural_network::traits::Layer;
 /// fixed shape.
 #[derive(Debug)]
 pub struct GlobalAveragePooling3D {
-    /// Shape of the input tensor cached during the forward pass
-    input_shape: Vec<usize>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
 }
 
 impl GlobalAveragePooling3D {
@@ -67,9 +69,7 @@ impl GlobalAveragePooling3D {
     ///
     /// - `GlobalAveragePooling3D` - New layer instance
     pub fn new() -> Self {
-        GlobalAveragePooling3D {
-            input_shape: Vec::new(),
-        }
+        GlobalAveragePooling3D { built: None }
     }
 }
 
@@ -79,45 +79,38 @@ impl Default for GlobalAveragePooling3D {
     }
 }
 
-impl Layer for GlobalAveragePooling3D {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.ndim() != 5 {
-            return Err(Error::invalid_input("input tensor is not 5D"));
-        }
-
-        // Cache the input shape for the backward pass
-        self.input_shape = input.shape().to_vec();
-
-        let (output, _) = global_pool_forward(input, PoolKind::Average);
-        Ok(output)
+impl LayerBase for GlobalAveragePooling3D {
+    fn layer_type(&self) -> &str {
+        "GlobalAveragePooling3D"
     }
 
-    /// Runs the forward pass for inference. Writes no cache. See [`Layer::predict`].
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
+    layer_base_functions_pooling!();
+}
+
+impl UnaryLayer for GlobalAveragePooling3D {
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if input.ndim() != 5 {
             return Err(Error::invalid_input("input tensor is not 5D"));
         }
 
         let (output, _) = global_pool_forward(input, PoolKind::Average);
+
+        if ctx.is_training() {
+            ctx.push_cache(input.shape().to_vec());
+        }
+
         Ok(output)
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // An empty shape means forward has not run
-        if self.input_shape.is_empty() {
-            return Err(Error::forward_pass_not_run("GlobalAveragePooling3D"));
-        }
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let input_shape: Vec<usize> = ctx.pop_cache("GlobalAveragePooling3D")?;
 
         Ok(global_pool_backward(
             grad_output,
-            &self.input_shape,
+            &input_shape,
             PoolKind::Average,
             None,
         ))
-    }
-
-    fn layer_type(&self) -> &str {
-        "GlobalAveragePooling3D"
     }
 
     layer_functions_global_pooling!("GlobalAveragePooling3D", 5);

@@ -1,11 +1,14 @@
-//! RepeatVector layer that repeats a feature vector into a sequence, and caches the input shape
+//! RepeatVector layer that repeats a feature vector into a sequence, and parks the input shape
 //! for backpropagation
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 use ndarray::{Axis, IxDyn};
 
 /// Repeats each feature vector `n` times along a new step axis
@@ -53,8 +56,8 @@ use ndarray::{Axis, IxDyn};
 pub struct RepeatVector {
     /// Number of steps the output holds
     n: usize,
-    /// Shape of the most recent forward input. The backward pass needs it to check the gradient
-    input_shape: Option<Vec<usize>>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
 }
 
 impl RepeatVector {
@@ -79,10 +82,7 @@ impl RepeatVector {
             ));
         }
 
-        Ok(RepeatVector {
-            n,
-            input_shape: None,
-        })
+        Ok(RepeatVector { n, built: None })
     }
 
     /// Checks the rank and the element count of a tensor entering the layer
@@ -114,23 +114,40 @@ impl RepeatVector {
     }
 }
 
-impl Layer for RepeatVector {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        self.validate(input)?;
-        self.input_shape = Some(input.shape().to_vec());
-        Ok(self.repeat(input))
+impl LayerBase for RepeatVector {
+    fn layer_type(&self) -> &str {
+        "RepeatVector"
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        self.validate(input)?;
-        Ok(self.repeat(input))
-    }
+    built_layer_shape_functions!();
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        let Some(input_shape) = &self.input_shape else {
-            return Err(Error::forward_pass_not_run("RepeatVector"));
+    no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for RepeatVector {
+    /// Records the shape the layer repeats. The layer holds no array, so nothing is allocated.
+    /// The shape algebra checks the rank
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "RepeatVector", input)? else {
+            return Ok(());
         };
+        self.compute_output_shape(&built)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        self.validate(input)?;
+
+        if ctx.is_training() {
+            ctx.push_cache(input.shape().to_vec());
+        }
+
+        Ok(self.repeat(input))
+    }
+
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let input_shape: Vec<usize> = ctx.pop_cache("RepeatVector")?;
 
         let expected = [input_shape[0], self.n, input_shape[1]];
         if grad_output.shape() != expected {
@@ -142,20 +159,10 @@ impl Layer for RepeatVector {
         Ok(grad_output.sum_axis(Axis(1)))
     }
 
-    fn layer_type(&self) -> &str {
-        "RepeatVector"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        self.input_shape.as_deref().map(Shape::with_free_batch)
-    }
-
     /// The layer inserts a step axis of `n` copies between the batch axis and the features
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         input.check_rank("RepeatVector", 2)?;
         let (batch, tail) = input.split_batch("RepeatVector")?;
         Ok(Shape::from_batch(batch, &[self.n, tail[0]]))
     }
-
-    no_trainable_parameters_layer_functions!();
 }

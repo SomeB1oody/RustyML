@@ -6,10 +6,9 @@
 //! [`GaussianNoise`](crate::neural_network::layers::regularization::noise_injection::gaussian_noise::GaussianNoise)
 //! adds zero-mean `N(0, stddev^2)` noise during training. Both are identity maps at inference.
 //!
-//! This file defines no shared infrastructure of its own. The 2 layers reuse the
-//! training-mode macros (`mode_dependent_layer_set_training` and `mode_dependent_layer_trait`)
-//! and the validation helpers from the parent
-//! [`regularization`](crate::neural_network::layers::regularization) module
+//! This file defines no shared infrastructure of its own. The 2 layers read the training flag
+//! of the [`Ctx`](crate::neural_network::Ctx), and they reuse the validation helpers from the
+//! parent [`regularization`](crate::neural_network::layers::regularization) module
 
 /// Gaussian Dropout layer for neural networks
 pub mod gaussian_dropout;

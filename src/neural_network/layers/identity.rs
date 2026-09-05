@@ -1,11 +1,14 @@
-//! Identity layer that passes its input through unchanged, and caches the input shape for
+//! Identity layer that passes its input through unchanged, and parks the input shape for
 //! backpropagation
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Passes its input through unchanged
 ///
@@ -54,8 +57,8 @@ use crate::neural_network::{Shape, Tensor};
 /// of keeping it
 #[derive(Debug, Default)]
 pub struct Identity {
-    /// Shape of the most recent forward input. The backward pass needs it to check the gradient
-    input_shape: Option<Vec<usize>>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
 }
 
 impl Identity {
@@ -95,41 +98,45 @@ fn copy_in_c_order(input: &Tensor) -> Tensor {
     input.as_standard_layout().into_owned()
 }
 
-impl Layer for Identity {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        Self::validate(input)?;
-        self.input_shape = Some(input.shape().to_vec());
-        Ok(copy_in_c_order(input))
-    }
-
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        Self::validate(input)?;
-        Ok(copy_in_c_order(input))
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        let Some(input_shape) = &self.input_shape else {
-            return Err(Error::forward_pass_not_run("Identity"));
-        };
-
-        if grad_output.shape() != input_shape.as_slice() {
-            return Err(Error::shape_mismatch(
-                input_shape.clone(),
-                grad_output.shape(),
-            ));
-        }
-
-        Ok(copy_in_c_order(grad_output))
-    }
-
+impl LayerBase for Identity {
     fn layer_type(&self) -> &str {
         "Identity"
     }
 
-    fn known_input_shape(&self) -> Option<Shape> {
-        self.input_shape.as_deref().map(Shape::with_free_batch)
-    }
+    built_layer_shape_functions!();
 
     no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for Identity {
+    /// Records the shape the layer passes through. The layer holds no array, so nothing is
+    /// allocated
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "Identity", input)? else {
+            return Ok(());
+        };
+        self.compute_output_shape(&built)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        Self::validate(input)?;
+
+        if ctx.is_training() {
+            ctx.push_cache(input.shape().to_vec());
+        }
+
+        Ok(copy_in_c_order(input))
+    }
+
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let input_shape: Vec<usize> = ctx.pop_cache("Identity")?;
+
+        if grad_output.shape() != input_shape.as_slice() {
+            return Err(Error::shape_mismatch(input_shape, grad_output.shape()));
+        }
+
+        Ok(copy_in_c_order(grad_output))
+    }
 }

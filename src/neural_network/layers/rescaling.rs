@@ -1,10 +1,10 @@
 //! Rescaling layer that applies a fixed affine map to every element of its input
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
-use crate::neural_network::traits::Layer;
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Tensor};
 use ndarray::Zip;
 
 /// Applies `y = x * scale + offset` to every element
@@ -13,10 +13,10 @@ use ndarray::Zip;
 /// parameter, so `scale` and `offset` stay at the values that the constructor got. Training
 /// never moves them
 ///
-/// The layer has no training mode and no inference mode. `predict` therefore returns exactly
-/// what `forward` returns. The backward pass multiplies the incoming gradient by `scale`,
-/// because the derivative of the map is `scale` at every element. The `offset` is a constant,
-/// so it has no part in the gradient
+/// The layer has no training mode and no inference mode. A training pass therefore returns
+/// exactly what an inference pass returns. The backward pass multiplies the incoming gradient by
+/// `scale`, because the derivative of the map is `scale` at every element. The `offset` is a
+/// constant, so it has no part in the gradient
 ///
 /// Its use is input normalization in front of a model. An 8-bit image scales into `[0, 1]`
 /// with `Rescaling::new(1.0 / 255.0)`, and into `[-1, 1]` with
@@ -28,9 +28,10 @@ use ndarray::Zip;
 ///
 /// # Notes
 ///
-/// The layer stores no cache, not even the shape of the last input. Nothing in the forward
-/// pass or the backward pass needs one. `known_input_shape` therefore reports `None` and
-/// `output_shape` reads "Unknown", and `backward` runs correctly before any forward pass.
+/// The layer parks no cache in the context, not even the shape of the last input. Nothing in
+/// the forward pass or the backward pass needs one. `known_input_shapes` therefore reports
+/// `None` and `output_shape` reads "Unknown", and `backward` runs correctly before any forward
+/// pass.
 /// `compute_output_shape` still answers for any shape a caller passes, because the layer
 /// changes values and not extents
 ///
@@ -132,29 +133,26 @@ fn map_in_c_order(t: &Tensor, f: impl Fn(f32) -> f32) -> Tensor {
     out
 }
 
-impl Layer for Rescaling {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // The layer keeps no cache and reads no training mode, so the 2 passes agree exactly
-        self.predict(input)
-    }
-
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        Self::validate(input)?;
-        let (scale, offset) = (self.scale, self.offset);
-        Ok(map_in_c_order(input, |x| x * scale + offset))
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        Self::validate(grad_output)?;
-        // d(x * scale + offset) / dx is scale, so the constant offset drops out
-        let scale = self.scale;
-        Ok(map_in_c_order(grad_output, |g| g * scale))
-    }
-
+impl LayerBase for Rescaling {
     fn layer_type(&self) -> &str {
         "Rescaling"
     }
 
     no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for Rescaling {
+    /// The layer keeps no cache and reads no training mode, so the 2 modes agree exactly
+    fn forward(&self, input: &Tensor, _ctx: &mut Ctx) -> Result<Tensor, Error> {
+        Self::validate(input)?;
+        let (scale, offset) = (self.scale, self.offset);
+        Ok(map_in_c_order(input, |x| x * scale + offset))
+    }
+
+    fn backward(&self, grad_output: &Tensor, _ctx: &mut Ctx) -> Result<Tensor, Error> {
+        Self::validate(grad_output)?;
+        // d(x * scale + offset) / dx is scale, so the constant offset drops out
+        let scale = self.scale;
+        Ok(map_in_c_order(grad_output, |g| g * scale))
+    }
 }

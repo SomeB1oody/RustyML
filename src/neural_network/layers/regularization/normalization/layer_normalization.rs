@@ -8,17 +8,15 @@ use super::folds::{
 use super::{col_fold_parallel_min_elems, row_pass_parallel_min_elems};
 use crate::error::{Context, Error};
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::build_on_forward;
+use crate::neural_network::layers::built_layer_shape_functions;
 use crate::neural_network::layers::named_weight_layer_functions;
-use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
-use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
-use crate::neural_network::layers::regularization::normalization::normalization_layer_shape_functions;
+use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape_function;
 use crate::neural_network::layers::regularization::validation::validate_epsilon;
 use crate::neural_network::layers::validation::{
     start_build, validate_built_input, validate_optional_weight, validate_weight_shape,
 };
-use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::traits::{LayerBase, ParamRef, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 use ndarray::{Array1, Axis, IxDyn};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
@@ -311,8 +309,9 @@ fn unmerge_normalized_axes(
 /// # Examples
 ///
 /// ```rust
+/// use rustyml::neural_network::Ctx;
 /// use rustyml::neural_network::layers::*;
-/// use rustyml::neural_network::traits::Layer;
+/// use rustyml::neural_network::traits::UnaryLayer;
 /// use ndarray::Array2;
 ///
 /// // Create a LayerNormalization layer
@@ -321,8 +320,9 @@ fn unmerge_normalized_axes(
 /// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
-/// // During training, normalizes the input
-/// let output = ln.forward(&input).unwrap();
+/// // A training pass normalizes the input
+/// let mut ctx = Ctx::training();
+/// let output = ln.forward_mut(&input, &mut ctx).unwrap();
 /// ```
 #[derive(Debug)]
 pub struct LayerNormalization {
@@ -344,20 +344,6 @@ pub struct LayerNormalization {
     /// of 0 changes every value except a negative zero, which it turns into a positive zero.
     /// `weights` hides the array and `parameters` never yields it
     beta: Tensor,
-    /// Whether the layer is in training mode or inference mode
-    training: bool,
-    /// Normalized input (cached for backward pass)
-    x_normalized: Option<Tensor>,
-    /// Centered input (cached for backward pass)
-    x_centered: Option<Tensor>,
-    /// Mean computed during forward pass (cached for backward pass)
-    mean: Option<Tensor>,
-    /// Standard deviation computed during forward pass (cached for backward pass)
-    std_dev: Option<Tensor>,
-    /// Gradient for the gamma parameter
-    grad_gamma: Option<Tensor>,
-    /// Gradient for the beta parameter
-    grad_beta: Option<Tensor>,
     /// Whether the layer adds the shift `beta`
     center: bool,
     /// Whether the layer applies the scale `gamma`
@@ -392,13 +378,6 @@ impl LayerNormalization {
             built: None,
             gamma: Tensor::ones([0].as_slice()),
             beta: Tensor::zeros([0].as_slice()),
-            training: true,
-            x_normalized: None,
-            x_centered: None,
-            mean: None,
-            std_dev: None,
-            grad_gamma: None,
-            grad_beta: None,
             center: true,
             scale: true,
         })
@@ -524,8 +503,6 @@ impl LayerNormalization {
         }
     }
 
-    mode_dependent_layer_set_training!();
-
     /// Sets whether the layer adds the shift `beta` (defaults to `true`)
     ///
     /// With `center` set to false the layer holds no `beta`: `param_count` counts none for it,
@@ -542,10 +519,9 @@ impl LayerNormalization {
     pub fn with_center(mut self, center: bool) -> Self {
         self.center = center;
         if !center {
-            // Put the array back at the identity shift and drop any gradient a previous
-            // backward pass left, so nothing the layer no longer holds can reach a result
+            // Put the array back at the identity shift, so an array the layer no longer holds
+            // reaches no result
             self.beta = Tensor::zeros(self.beta.shape());
-            self.grad_beta = None;
         }
         self
     }
@@ -567,10 +543,9 @@ impl LayerNormalization {
     pub fn with_scale(mut self, scale: bool) -> Self {
         self.scale = scale;
         if !scale {
-            // Put the array back at the identity scale and drop any gradient a previous
-            // backward pass left, so nothing the layer no longer holds can reach a result
+            // Put the array back at the identity scale, so an array the layer no longer holds
+            // reaches no result
             self.gamma = Tensor::ones(self.gamma.shape());
-            self.grad_gamma = None;
         }
         self
     }
@@ -662,12 +637,18 @@ impl LayerNormalization {
         }
     }
 
-    /// Training forward on the fused row path over the logically `[R, N]` input
-    fn forward_rows(&mut self, input: &Tensor, n: usize) -> Result<Tensor, Error> {
+    /// Forward on the fused row path over the logically `[R, N]` input
+    ///
+    /// An inference pass takes the twin that writes no cache
+    fn forward_rows(&self, input: &Tensor, n: usize, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        if !ctx.is_training() {
+            return self.predict_rows(input, n);
+        }
+
         let shape = input.shape().to_vec();
         let total = input.len();
         if total == 0 {
-            // Degenerate empty input: nothing to normalize (and no caches to write)
+            // Degenerate empty input: nothing to normalize (and no cache to park)
             return Ok(Tensor::zeros(IxDyn(&shape)));
         }
         let r = total / n;
@@ -702,16 +683,17 @@ impl LayerNormalization {
             std_dev.as_slice_mut().unwrap(),
         );
 
-        // Cache values for backward pass (mean/std as [R], 1 scalar per row)
-        self.x_normalized = Some(x_normalized);
-        self.x_centered = Some(x_centered);
-        self.mean = Some(mean.into_dyn());
-        self.std_dev = Some(std_dev.into_dyn());
+        // Park the values the backward pass needs (std as [R], 1 scalar per row)
+        ctx.push_cache(LayerNormalizationCache {
+            x_normalized,
+            x_centered,
+            std_dev: std_dev.into_dyn(),
+        });
 
         Ok(output)
     }
 
-    /// Inference forward on the row path (writes no caches, allocates only the output)
+    /// Inference forward on the row path (writes no cache, allocates only the output)
     fn predict_rows(&self, input: &Tensor, n: usize) -> Result<Tensor, Error> {
         let shape = input.shape().to_vec();
         if input.is_empty() {
@@ -741,7 +723,12 @@ impl LayerNormalization {
 
     /// Backward on the row path, mirroring [`Self::forward_rows`]: the gamma/beta gradients
     /// are column folds over `[R, N]` and the input gradient composes per row
-    fn backward_rows(&mut self, grad_output: &Tensor, n: usize) -> Result<Tensor, Error> {
+    fn backward_rows(
+        &self,
+        grad_output: &Tensor,
+        n: usize,
+        ctx: &mut Ctx,
+    ) -> Result<Tensor, Error> {
         let shape = grad_output.shape().to_vec();
         let total = grad_output.len();
         if total == 0 {
@@ -757,31 +744,22 @@ impl LayerNormalization {
             }
         };
 
-        let x_normalized = self
-            .x_normalized
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("LayerNormalization"))?;
-        let x_centered = self
-            .x_centered
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("LayerNormalization"))?;
-        let std_dev = self
-            .std_dev
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("LayerNormalization"))?;
-        // forward_rows builds the caches, so they are standard layout ([R] for std_dev)
-        let xn_s = x_normalized.as_slice().unwrap();
-        let xc_s = x_centered.as_slice().unwrap();
-        let std_s = std_dev.as_slice().unwrap();
+        let cache: LayerNormalizationCache = ctx.pop_cache("LayerNormalization")?;
+        // forward_rows builds the cache, so it is standard layout ([R] for std_dev)
+        let xn_s = cache.x_normalized.as_slice().unwrap();
+        let xc_s = cache.x_centered.as_slice().unwrap();
+        let std_s = cache.std_dev.as_slice().unwrap();
 
         // Gradients for gamma and beta: fused column folds over [R, N] (no product temporary).
-        // An array the layer does not hold keeps no gradient, so `parameters` yields none for
-        // it and no optimizer state is ever keyed on it
+        // An array the layer does not hold gets no gradient, so the store holds none and no
+        // optimizer state is ever keyed on it
         let col_parallel = total >= col_fold_parallel_min_elems();
-        self.grad_gamma = self
-            .scale
-            .then(|| par_col_dot(g, xn_s, n, col_parallel, 1.0));
-        self.grad_beta = self.center.then(|| par_col_sum(g, n, col_parallel, 1.0));
+        if self.scale {
+            ctx.add_grad("gamma", par_col_dot(g, xn_s, n, col_parallel, 1.0))?;
+        }
+        if self.center {
+            ctx.add_grad("beta", par_col_sum(g, n, col_parallel, 1.0))?;
+        }
 
         let row_parallel = total >= row_pass_parallel_min_elems();
         let mut grad_input = Tensor::zeros(IxDyn(&shape));
@@ -798,7 +776,67 @@ impl LayerNormalization {
     }
 }
 
-impl Layer for LayerNormalization {
+/// What the forward pass of [`LayerNormalization`] parks for its backward pass
+///
+/// The row path and the strided path park the same 3 values in their own layouts. The plan
+/// reads the configuration and the shape alone, so the backward pass takes the path that wrote
+/// them
+struct LayerNormalizationCache {
+    /// The normalized input, before the scale and the shift
+    x_normalized: Tensor,
+    /// The input with the mean of its group subtracted
+    x_centered: Tensor,
+    /// `sqrt(var + epsilon)` of each group
+    std_dev: Tensor,
+}
+
+impl LayerBase for LayerNormalization {
+    fn layer_type(&self) -> &str {
+        "LayerNormalization"
+    }
+
+    fn param_count(&self) -> ParamCounts {
+        // Read the arrays the layer holds rather than the configuration, so dropping
+        // `gamma` or `beta` corrects the count with no second formula to keep in step
+        let gamma = if self.scale { self.gamma.len() } else { 0 };
+        let beta = if self.center { self.beta.len() } else { 0 };
+        ParamCounts::trainable(gamma + beta)
+    }
+
+    fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
+        let Self {
+            gamma,
+            beta,
+            center,
+            scale,
+            ..
+        } = self;
+        let mut params = Vec::new();
+        // Each tensor is pushed on its own, so a tensor the layer drops holds back no other
+        if *scale {
+            params.push(ParamRef::no_decay(
+                "gamma",
+                gamma.as_slice_mut().expect("gamma must be contiguous"),
+            ));
+        }
+        if *center {
+            params.push(ParamRef::no_decay(
+                "beta",
+                beta.as_slice_mut().expect("beta must be contiguous"),
+            ));
+        }
+        params
+    }
+
+    built_layer_shape_functions!();
+
+    named_weight_layer_functions!(
+        trainable "gamma" => gamma if scale,
+        trainable "beta" => beta if center,
+    );
+}
+
+impl UnaryLayer for LayerNormalization {
     /// Allocates `gamma` and `beta` over the normalized axes of the input
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "LayerNormalization", input)? else {
@@ -813,111 +851,58 @@ impl Layer for LayerNormalization {
         Ok(())
     }
 
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        build_on_forward!(self, input);
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         validate_built_input(&self.built, "LayerNormalization", input.shape())?;
 
         match self.resolve_plan(input)? {
-            LayoutPlan::Rows { n } => self.forward_rows(input, n),
+            LayoutPlan::Rows { n } => self.forward_rows(input, n, ctx),
             LayoutPlan::MergedRows { axes, n } => {
                 let (merged, perm, permuted_shape) = merge_normalized_axes(input, &axes)?;
-                let output = self.forward_rows(&merged, n)?;
+                let output = self.forward_rows(&merged, n, ctx)?;
                 Ok(unmerge_normalized_axes(output, &perm, &permuted_shape))
             }
-            LayoutPlan::Strided { axis } => self.forward_strided(input, axis),
+            LayoutPlan::Strided { axis } => self.forward_strided(input, axis, ctx),
         }
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_built_input(&self.built, "LayerNormalization", input.shape())?;
-
-        match self.resolve_plan(input)? {
-            LayoutPlan::Rows { n } => self.predict_rows(input, n),
-            LayoutPlan::MergedRows { axes, n } => {
-                let (merged, perm, permuted_shape) = merge_normalized_axes(input, &axes)?;
-                let output = self.predict_rows(&merged, n)?;
-                Ok(unmerge_normalized_axes(output, &perm, &permuted_shape))
-            }
-            LayoutPlan::Strided { axis } => self.predict_strided(input, axis),
-        }
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        if !self.training {
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        if !ctx.is_training() {
             // During inference, pass gradient through unchanged
             return Ok(grad_output.clone());
         }
 
         // The plan depends only on configuration and shape, so it matches the forward pass
-        // that produced the caches
+        // that parked the cache
         match self.resolve_plan(grad_output)? {
-            LayoutPlan::Rows { n } => self.backward_rows(grad_output, n),
+            LayoutPlan::Rows { n } => self.backward_rows(grad_output, n, ctx),
             LayoutPlan::MergedRows { axes, n } => {
                 let (merged, perm, permuted_shape) = merge_normalized_axes(grad_output, &axes)?;
-                let grad_input = self.backward_rows(&merged, n)?;
+                let grad_input = self.backward_rows(&merged, n, ctx)?;
                 Ok(unmerge_normalized_axes(grad_input, &perm, &permuted_shape))
             }
-            LayoutPlan::Strided { axis } => self.backward_strided(grad_output, axis),
+            LayoutPlan::Strided { axis } => self.backward_strided(grad_output, axis, ctx),
         }
     }
 
-    fn layer_type(&self) -> &str {
-        "LayerNormalization"
-    }
-
-    normalization_layer_shape_functions!("LayerNormalization");
-
-    fn param_count(&self) -> ParamCounts {
-        // Read the arrays the layer holds rather than the configuration, so dropping
-        // `gamma` or `beta` corrects the count with no second formula to keep in step
-        let gamma = if self.scale { self.gamma.len() } else { 0 };
-        let beta = if self.center { self.beta.len() } else { 0 };
-        ParamCounts::trainable(gamma + beta)
-    }
-
-    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
-        let Self {
-            gamma,
-            beta,
-            grad_gamma,
-            grad_beta,
-            ..
-        } = self;
-        let mut params = Vec::new();
-        // Each tensor is pushed on its own, so a tensor without a gradient holds back no other
-        if let Some(grad) = grad_gamma.as_ref() {
-            params.push(ParamGrad::no_decay(
-                "gamma",
-                gamma.as_slice_mut().expect("gamma must be contiguous"),
-                grad.as_slice().expect("grad_gamma must be contiguous"),
-            ));
-        }
-        if let Some(grad) = grad_beta.as_ref() {
-            params.push(ParamGrad::no_decay(
-                "beta",
-                beta.as_slice_mut().expect("beta must be contiguous"),
-                grad.as_slice().expect("grad_beta must be contiguous"),
-            ));
-        }
-        params
-    }
-
-    named_weight_layer_functions!(
-        trainable "gamma" => gamma if scale,
-        trainable "beta" => beta if center,
-    );
-
-    mode_dependent_layer_trait!();
+    normalization_layer_output_shape_function!("LayerNormalization");
 }
 
 impl LayerNormalization {
-    /// Training forward for a non-trailing `Custom` axis: the broadcast ndarray path
+    /// Forward for a non-trailing `Custom` axis: the broadcast ndarray path
     ///
     /// The groups are strided mid-axis lanes that ndarray reduces in place, so this path stays
     /// transpose-free by construction. It remains serial because its access pattern, not
-    /// compute, is the cost
-    fn forward_strided(&mut self, input: &Tensor, axis_idx: usize) -> Result<Tensor, Error> {
+    /// compute, is the cost. An inference pass takes the twin that writes no cache
+    fn forward_strided(
+        &self,
+        input: &Tensor,
+        axis_idx: usize,
+        ctx: &mut Ctx,
+    ) -> Result<Tensor, Error> {
+        if !ctx.is_training() {
+            return self.predict_strided(input, axis_idx);
+        }
+
         // Mean along the axis, then insert the axis back so broadcasting works
         let mean = input.mean_axis(Axis(axis_idx)).unwrap();
         let mean = mean.insert_axis(Axis(axis_idx));
@@ -955,11 +940,12 @@ impl LayerNormalization {
 
         let output = &x_normalized * &gamma_broadcast + &beta_broadcast;
 
-        // Cache values for backward pass (broadcast-ready shapes with the axis kept)
-        self.x_normalized = Some(x_normalized);
-        self.x_centered = Some(x_centered);
-        self.mean = Some(mean);
-        self.std_dev = Some(std_dev);
+        // Park the values the backward pass needs (broadcast-ready shapes with the axis kept)
+        ctx.push_cache(LayerNormalizationCache {
+            x_normalized,
+            x_centered,
+            std_dev,
+        });
 
         Ok(output)
     }
@@ -1002,21 +988,16 @@ impl LayerNormalization {
     }
 
     /// Backward for a non-trailing `Custom` axis, mirroring [`Self::forward_strided`]
-    fn backward_strided(&mut self, grad_output: &Tensor, axis_idx: usize) -> Result<Tensor, Error> {
-        let x_normalized = self
-            .x_normalized
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("LayerNormalization"))?;
-
-        let x_centered = self
-            .x_centered
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("LayerNormalization"))?;
-
-        let std_dev = self
-            .std_dev
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("LayerNormalization"))?;
+    fn backward_strided(
+        &self,
+        grad_output: &Tensor,
+        axis_idx: usize,
+        ctx: &mut Ctx,
+    ) -> Result<Tensor, Error> {
+        let cache: LayerNormalizationCache = ctx.pop_cache("LayerNormalization")?;
+        let x_normalized = &cache.x_normalized;
+        let x_centered = &cache.x_centered;
+        let std_dev = &cache.std_dev;
 
         // gamma/beta are 1-D over the normalized axis, so reduce every other axis to leave a
         // gradient of shape `[axis_size]`
@@ -1035,10 +1016,14 @@ impl LayerNormalization {
             grad_beta = grad_beta.sum_axis(Axis(i));
         }
 
-        // An array the layer does not hold keeps no gradient, so `parameters` yields
-        // none for it and no optimizer state is ever keyed on it
-        self.grad_gamma = self.scale.then_some(grad_gamma);
-        self.grad_beta = self.center.then_some(grad_beta);
+        // An array the layer does not hold gets no gradient, so the store holds none and no
+        // optimizer state is ever keyed on it
+        if self.scale {
+            ctx.add_grad("gamma", grad_gamma)?;
+        }
+        if self.center {
+            ctx.add_grad("beta", grad_beta)?;
+        }
 
         // Gradient with respect to normalized input: reshape gamma for broadcasting
         let mut gamma_shape = vec![1; grad_output.ndim()];
@@ -1086,6 +1071,7 @@ impl LayerNormalization {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::neural_network::traits::ParamId;
     use ndarray::ArrayD;
 
     // Helper: build a Tensor from a flat Vec and shape
@@ -1290,7 +1276,8 @@ mod tests {
         ln.build(&Shape::known(&[r, n])).unwrap();
         ln.set_weights(gamma.clone().into_dyn(), beta.clone().into_dyn())
             .unwrap();
-        let out = ln.forward(&x).unwrap();
+        let mut ctx = Ctx::training();
+        let out = ln.forward_mut(&x, &mut ctx).unwrap();
 
         // This reference uses the broadcast approach. Exact statistics make the grouping choice
         // moot
@@ -1326,8 +1313,10 @@ mod tests {
             .unwrap();
         let mut ln_default = LayerNormalization::new(1e-5).unwrap();
 
-        let out_multi = ln_multi.forward(&x3).unwrap();
-        let out_default = ln_default.forward(&x2).unwrap();
+        let mut ctx_multi = Ctx::training();
+        let mut ctx_default = Ctx::training();
+        let out_multi = ln_multi.forward_mut(&x3, &mut ctx_multi).unwrap();
+        let out_default = ln_default.forward_mut(&x2, &mut ctx_default).unwrap();
         assert_eq!(out_multi.shape(), &[b, h, w]);
         assert_eq!(
             out_multi.as_slice().unwrap(),
@@ -1337,21 +1326,20 @@ mod tests {
 
         let grad: Vec<f32> = (0..b * n).map(|i| (i as f32 * 0.433).sin()).collect();
         let gi_multi = ln_multi
-            .backward(&make_tensor(grad.clone(), &[b, h, w]))
+            .backward(&make_tensor(grad.clone(), &[b, h, w]), &mut ctx_multi)
             .unwrap();
-        let gi_default = ln_default.backward(&make_tensor(grad, &[b, n])).unwrap();
+        let gi_default = ln_default
+            .backward(&make_tensor(grad, &[b, n]), &mut ctx_default)
+            .unwrap();
         assert_eq!(
             gi_multi.as_slice().unwrap(),
             gi_default.as_slice().unwrap(),
             "identity-perm Multiple backward must equal Default on the reshaped input"
         );
-        for (pg_m, pg_d) in ln_multi
-            .parameters()
-            .iter()
-            .zip(ln_default.parameters().iter())
-        {
+        for name in ["gamma", "beta"] {
             assert_eq!(
-                pg_m.grad, pg_d.grad,
+                ctx_multi.grads().get(ParamId::new(0, name)),
+                ctx_default.grads().get(ParamId::new(0, name)),
                 "parameter grads must match bit for bit"
             );
         }
@@ -1372,12 +1360,17 @@ mod tests {
             .unwrap()
             .with_normalized_axis(LayerNormalizationAxis::Multiple(axes.clone()))
             .unwrap();
-        let out_multi = ln_multi.forward(&x).unwrap();
+        let mut ctx_multi = Ctx::training();
+        let out_multi = ln_multi.forward_mut(&x, &mut ctx_multi).unwrap();
 
         let (merged, perm, permuted_shape) = merge_normalized_axes(&x, &axes).unwrap();
         let mut ln_default = LayerNormalization::new(1e-5).unwrap();
-        let expected =
-            unmerge_normalized_axes(ln_default.forward(&merged).unwrap(), &perm, &permuted_shape);
+        let mut ctx_default = Ctx::training();
+        let expected = unmerge_normalized_axes(
+            ln_default.forward_mut(&merged, &mut ctx_default).unwrap(),
+            &perm,
+            &permuted_shape,
+        );
 
         assert_eq!(
             out_multi, expected,

@@ -6,6 +6,7 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::elu::ELU;
@@ -69,15 +70,20 @@ use rustyml::neural_network::layers::reshape::Reshape;
 use rustyml::neural_network::layers::upsampling::{
     Interpolation, UpSampling1D, UpSampling2D, UpSampling3D,
 };
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{ParamId, UnaryLayer};
 
 /// Compares `layer.backward(ones)` against a central finite-difference estimate of
 /// d sum(output)/dx.
-fn check_input_gradient(layer: &mut dyn Layer, x: &Tensor, eps: f32, tol: f32) {
+///
+/// Every pass runs in a training context. The backward pass needs the cache that only a
+/// training forward pass writes, and a mode-dependent layer must take the same branch in the
+/// analytic pass and in each finite-difference probe.
+fn check_input_gradient(layer: &mut dyn UnaryLayer, x: &Tensor, eps: f32, tol: f32) {
     // With L = sum(output), the analytic input gradient is backward(ones)
-    let out = layer.forward(x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(x, &mut ctx).unwrap();
     let upstream = Tensor::ones(out.raw_dim());
-    let analytic = layer.backward(&upstream).unwrap();
+    let analytic = layer.backward(&upstream, &mut ctx).unwrap();
     assert_eq!(
         analytic.shape(),
         x.shape(),
@@ -92,11 +98,11 @@ fn check_input_gradient(layer: &mut dyn Layer, x: &Tensor, eps: f32, tol: f32) {
 
         x_flat[i] = orig + eps;
         let xp = Tensor::from_shape_vec(x.raw_dim(), x_flat.clone()).unwrap();
-        let l_plus: f32 = layer.forward(&xp).unwrap().sum();
+        let l_plus: f32 = layer.forward(&xp, &mut Ctx::training()).unwrap().sum();
 
         x_flat[i] = orig - eps;
         let xm = Tensor::from_shape_vec(x.raw_dim(), x_flat.clone()).unwrap();
-        let l_minus: f32 = layer.forward(&xm).unwrap().sum();
+        let l_minus: f32 = layer.forward(&xm, &mut Ctx::training()).unwrap().sum();
 
         x_flat[i] = orig;
 
@@ -386,7 +392,7 @@ fn conv1d_same_padding_output_length_is_ceil_of_input() {
             .unwrap()
             .with_padding(PaddingType::Same);
         let x = Array::ones((1, len, 1)).into_dyn();
-        let out = conv.forward(&x).unwrap();
+        let out = conv.forward_mut(&x, &mut Ctx::inference()).unwrap();
         // Channels-last output: [batch, out_len, filters]
         assert_eq!(
             out.shape(),
@@ -399,34 +405,59 @@ fn conv1d_same_padding_output_length_is_ceil_of_input() {
     }
 }
 
-/// Compares analytic gradients from `layer.parameters()` against a central finite-difference
-/// estimate of d sum(output)/d param, perturbing each value in place.
-fn check_weight_gradient(layer: &mut dyn Layer, x: &Tensor, eps: f32, tol: f32) {
-    let out = layer.forward(x).unwrap();
-    let upstream = Tensor::ones(out.raw_dim());
-    layer.backward(&upstream).unwrap();
-
-    // Snapshot each parameter tensor's current values and analytic gradients
-    let params: Vec<(Vec<f32>, Vec<f32>)> = layer
-        .parameters()
-        .into_iter()
-        .map(|pg| (pg.value.to_vec(), pg.grad.to_vec()))
+/// Snapshots the current values of every parameter of the layer, next to the analytic gradient
+/// that the backward pass put in the store.
+///
+/// The layer drives no model, so every gradient sits at layer position 0.
+fn param_snapshots(layer: &mut dyn UnaryLayer, ctx: &Ctx) -> Vec<(Vec<f32>, Vec<f32>)> {
+    let names: Vec<&'static str> = layer
+        .parameters_mut()
+        .iter()
+        .map(|param| param.name)
+        .collect();
+    let params: Vec<(Vec<f32>, Vec<f32>)> = names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let value = layer.parameters_mut()[index].value.to_vec();
+            let grad = ctx
+                .grads()
+                .get(ParamId::new(0, name))
+                .unwrap_or_else(|| panic!("the backward pass gave parameter `{name}` no gradient"))
+                .iter()
+                .cloned()
+                .collect();
+            (value, grad)
+        })
         .collect();
     assert!(!params.is_empty(), "layer exposes no parameters to check");
+    params
+}
+
+/// Compares the analytic gradients in `ctx.grads()` against a central finite-difference estimate
+/// of d sum(output)/d param, perturbing each value in place.
+fn check_weight_gradient(layer: &mut dyn UnaryLayer, x: &Tensor, eps: f32, tol: f32) {
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(x, &mut ctx).unwrap();
+    let upstream = Tensor::ones(out.raw_dim());
+    layer.backward(&upstream, &mut ctx).unwrap();
+
+    // Snapshot each parameter tensor's current values and analytic gradients
+    let params = param_snapshots(layer, &ctx);
 
     for (p_idx, (values, grads)) in params.iter().enumerate() {
         for i in 0..values.len() {
             let orig = values[i];
 
-            // `parameters()[p_idx].value` is a mutable view into the live weight array, so writing
-            // through it perturbs the actual parameter
-            layer.parameters()[p_idx].value[i] = orig + eps;
-            let l_plus: f32 = layer.forward(x).unwrap().sum();
+            // `parameters_mut()[p_idx].value` is a mutable view into the live weight array, so
+            // writing through it perturbs the actual parameter
+            layer.parameters_mut()[p_idx].value[i] = orig + eps;
+            let l_plus: f32 = layer.forward(x, &mut Ctx::training()).unwrap().sum();
 
-            layer.parameters()[p_idx].value[i] = orig - eps;
-            let l_minus: f32 = layer.forward(x).unwrap().sum();
+            layer.parameters_mut()[p_idx].value[i] = orig - eps;
+            let l_minus: f32 = layer.forward(x, &mut Ctx::training()).unwrap().sum();
 
-            layer.parameters()[p_idx].value[i] = orig;
+            layer.parameters_mut()[p_idx].value[i] = orig;
 
             let numeric = (l_plus - l_minus) / (2.0 * eps);
             assert_abs_diff_eq!(grads[i], numeric, epsilon = tol);
@@ -581,10 +612,11 @@ fn ramp(shape: &[usize]) -> Tensor {
 
 /// Like [`check_input_gradient`] but with a weighted loss L = sum(W * output), so it is
 /// non-degenerate for softmax and zero-mean normalization layers
-fn check_input_gradient_weighted(layer: &mut dyn Layer, x: &Tensor, eps: f32, tol: f32) {
-    let out = layer.forward(x).unwrap();
+fn check_input_gradient_weighted(layer: &mut dyn UnaryLayer, x: &Tensor, eps: f32, tol: f32) {
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(x, &mut ctx).unwrap();
     let w = loss_weights(&out);
-    let analytic = layer.backward(&w).unwrap();
+    let analytic = layer.backward(&w, &mut ctx).unwrap();
     assert_eq!(
         analytic.shape(),
         x.shape(),
@@ -598,11 +630,11 @@ fn check_input_gradient_weighted(layer: &mut dyn Layer, x: &Tensor, eps: f32, to
 
         x_flat[i] = orig + eps;
         let xp = Tensor::from_shape_vec(x.raw_dim(), x_flat.clone()).unwrap();
-        let l_plus: f32 = (&layer.forward(&xp).unwrap() * &w).sum();
+        let l_plus: f32 = (&layer.forward(&xp, &mut Ctx::training()).unwrap() * &w).sum();
 
         x_flat[i] = orig - eps;
         let xm = Tensor::from_shape_vec(x.raw_dim(), x_flat.clone()).unwrap();
-        let l_minus: f32 = (&layer.forward(&xm).unwrap() * &w).sum();
+        let l_minus: f32 = (&layer.forward(&xm, &mut Ctx::training()).unwrap() * &w).sum();
 
         x_flat[i] = orig;
 
@@ -1189,29 +1221,25 @@ fn embedding_repeated_index_weight_gradient_matches_finite_difference() {
 
 /// Like [`check_weight_gradient`] but with the weighted loss L = sum(W * output). This avoids
 /// the near-zero gamma gradient that an all-ones upstream gives normalization layers.
-fn check_weight_gradient_weighted(layer: &mut dyn Layer, x: &Tensor, eps: f32, tol: f32) {
-    let out = layer.forward(x).unwrap();
+fn check_weight_gradient_weighted(layer: &mut dyn UnaryLayer, x: &Tensor, eps: f32, tol: f32) {
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(x, &mut ctx).unwrap();
     let w = loss_weights(&out);
-    layer.backward(&w).unwrap();
+    layer.backward(&w, &mut ctx).unwrap();
 
-    let params: Vec<(Vec<f32>, Vec<f32>)> = layer
-        .parameters()
-        .into_iter()
-        .map(|pg| (pg.value.to_vec(), pg.grad.to_vec()))
-        .collect();
-    assert!(!params.is_empty(), "layer exposes no parameters to check");
+    let params = param_snapshots(layer, &ctx);
 
     for (p_idx, (values, grads)) in params.iter().enumerate() {
         for i in 0..values.len() {
             let orig = values[i];
 
-            layer.parameters()[p_idx].value[i] = orig + eps;
-            let l_plus: f32 = (&layer.forward(x).unwrap() * &w).sum();
+            layer.parameters_mut()[p_idx].value[i] = orig + eps;
+            let l_plus: f32 = (&layer.forward(x, &mut Ctx::training()).unwrap() * &w).sum();
 
-            layer.parameters()[p_idx].value[i] = orig - eps;
-            let l_minus: f32 = (&layer.forward(x).unwrap() * &w).sum();
+            layer.parameters_mut()[p_idx].value[i] = orig - eps;
+            let l_minus: f32 = (&layer.forward(x, &mut Ctx::training()).unwrap() * &w).sum();
 
-            layer.parameters()[p_idx].value[i] = orig;
+            layer.parameters_mut()[p_idx].value[i] = orig;
 
             let numeric = (l_plus - l_minus) / (2.0 * eps);
             assert_abs_diff_eq!(grads[i], numeric, epsilon = tol);
@@ -1226,7 +1254,6 @@ fn check_weight_gradient_weighted(layer: &mut dyn Layer, x: &Tensor, eps: f32, t
 #[test]
 fn layer_normalization_default_input_gradient_matches_finite_difference() {
     let mut ln = LayerNormalization::new(1e-5).unwrap();
-    ln.set_training_if_mode_dependent(true);
     let x = ramp(&[2, 4]);
     check_input_gradient_weighted(&mut ln, &x, 1e-3, 5e-2);
 }
@@ -1234,7 +1261,6 @@ fn layer_normalization_default_input_gradient_matches_finite_difference() {
 #[test]
 fn layer_normalization_default_weight_gradient_matches_finite_difference() {
     let mut ln = LayerNormalization::new(1e-5).unwrap();
-    ln.set_training_if_mode_dependent(true);
     let x = ramp(&[2, 4]);
     check_weight_gradient_weighted(&mut ln, &x, 1e-3, 5e-2);
 }
@@ -1245,7 +1271,6 @@ fn layer_normalization_custom_axis_input_gradient_matches_finite_difference() {
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Custom(0))
         .unwrap();
-    ln.set_training_if_mode_dependent(true);
     let x = ramp(&[3, 4]);
     check_input_gradient_weighted(&mut ln, &x, 1e-3, 5e-2);
 }
@@ -1254,7 +1279,6 @@ fn layer_normalization_custom_axis_input_gradient_matches_finite_difference() {
 fn layer_normalization_rank3_default_input_gradient_matches_finite_difference() {
     // Rank-3 Default exercises the fused row path with several rows per leading index
     let mut ln = LayerNormalization::new(1e-5).unwrap();
-    ln.set_training_if_mode_dependent(true);
     let x = ramp(&[2, 3, 4]);
     check_input_gradient_weighted(&mut ln, &x, 1e-3, 5e-2);
 }
@@ -1266,7 +1290,6 @@ fn layer_normalization_trailing_custom_weight_gradient_matches_finite_difference
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Custom(1))
         .unwrap();
-    ln.set_training_if_mode_dependent(true);
     let x = ramp(&[3, 4]);
     check_weight_gradient_weighted(&mut ln, &x, 1e-3, 5e-2);
 }
@@ -1278,7 +1301,6 @@ fn layer_normalization_multiple_trailing_input_gradient_matches_finite_differenc
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![1, 2]))
         .unwrap();
-    ln.set_training_if_mode_dependent(true);
     let x = ramp(&[2, 3, 4]);
     check_input_gradient_weighted(&mut ln, &x, 1e-3, 5e-2);
 }
@@ -1291,7 +1313,6 @@ fn layer_normalization_multiple_permuted_input_gradient_matches_finite_differenc
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![0, 2]))
         .unwrap();
-    ln.set_training_if_mode_dependent(true);
     let x = ramp(&[2, 3, 4]);
     check_input_gradient_weighted(&mut ln, &x, 1e-3, 5e-2);
 }
@@ -1299,7 +1320,6 @@ fn layer_normalization_multiple_permuted_input_gradient_matches_finite_differenc
 #[test]
 fn group_normalization_input_gradient_matches_finite_difference() {
     let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
-    gn.set_training_if_mode_dependent(true);
     let x = ramp(&[1, 4, 4]);
     check_input_gradient_weighted(&mut gn, &x, 1e-3, 5e-2);
 }
@@ -1307,7 +1327,6 @@ fn group_normalization_input_gradient_matches_finite_difference() {
 #[test]
 fn group_normalization_weight_gradient_matches_finite_difference() {
     let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
-    gn.set_training_if_mode_dependent(true);
     let x = ramp(&[1, 4, 4]);
     check_weight_gradient_weighted(&mut gn, &x, 1e-3, 5e-2);
 }
@@ -1317,7 +1336,6 @@ fn group_normalization_batched_input_gradient_matches_finite_difference() {
     // batch > 1: every sample gets its own per-group statistics, so a fold that leaked across
     // the batch axis shows up here
     let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
-    gn.set_training_if_mode_dependent(true);
     let x = ramp(&[2, 4, 4]);
     check_input_gradient_weighted(&mut gn, &x, 1e-3, 5e-2);
 }
@@ -1325,7 +1343,6 @@ fn group_normalization_batched_input_gradient_matches_finite_difference() {
 #[test]
 fn instance_normalization_input_gradient_matches_finite_difference() {
     let mut inn = InstanceNormalization::new(1e-5).unwrap();
-    inn.set_training_if_mode_dependent(true);
     let x = ramp(&[1, 3, 4]);
     check_input_gradient_weighted(&mut inn, &x, 1e-3, 5e-2);
 }
@@ -1333,7 +1350,6 @@ fn instance_normalization_input_gradient_matches_finite_difference() {
 #[test]
 fn instance_normalization_weight_gradient_matches_finite_difference() {
     let mut inn = InstanceNormalization::new(1e-5).unwrap();
-    inn.set_training_if_mode_dependent(true);
     let x = ramp(&[1, 3, 4]);
     check_weight_gradient_weighted(&mut inn, &x, 1e-3, 5e-2);
 }
@@ -1341,7 +1357,6 @@ fn instance_normalization_weight_gradient_matches_finite_difference() {
 #[test]
 fn batch_normalization_input_gradient_weighted_matches_finite_difference() {
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
-    bn.set_training_if_mode_dependent(true);
     let x = ramp(&[4, 3]);
     check_input_gradient_weighted(&mut bn, &x, 1e-3, 5e-2);
 }
@@ -1349,7 +1364,6 @@ fn batch_normalization_input_gradient_weighted_matches_finite_difference() {
 #[test]
 fn batch_normalization_weight_gradient_matches_finite_difference() {
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
-    bn.set_training_if_mode_dependent(true);
     let x = ramp(&[4, 3]);
     check_weight_gradient_weighted(&mut bn, &x, 1e-3, 5e-2);
 }
@@ -1360,7 +1374,6 @@ fn batch_normalization_spatial_input_gradient_matches_finite_difference() {
     // the batch and both spatial axes. It normalizes each of the 3 channels over
     // 2*2*2 = 8 elements rather than 2.
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
-    bn.set_training_if_mode_dependent(true);
     let x = ramp(&[2, 2, 2, 3]);
     check_input_gradient_weighted(&mut bn, &x, 1e-3, 5e-2);
 }
@@ -1368,7 +1381,6 @@ fn batch_normalization_spatial_input_gradient_matches_finite_difference() {
 #[test]
 fn batch_normalization_spatial_weight_gradient_matches_finite_difference() {
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
-    bn.set_training_if_mode_dependent(true);
     let x = ramp(&[2, 2, 2, 3]);
     check_weight_gradient_weighted(&mut bn, &x, 1e-3, 5e-2);
 }

@@ -8,6 +8,7 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::pooling::global_max_pooling_1d::GlobalMaxPooling1D;
@@ -16,7 +17,7 @@ use rustyml::neural_network::layers::pooling::global_max_pooling_3d::GlobalMaxPo
 use rustyml::neural_network::layers::pooling::max_pooling_1d::MaxPooling1D;
 use rustyml::neural_network::layers::pooling::max_pooling_2d::MaxPooling2D;
 use rustyml::neural_network::layers::pooling::max_pooling_3d::MaxPooling3D;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
@@ -32,7 +33,8 @@ fn max_pooling_1d_forward_values_pool2_stride2() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2, 1]);
 
     // Windows [3, 1] -> 3 and [4, 1] -> 4
@@ -51,7 +53,8 @@ fn max_pooling_1d_forward_values_pool3_stride1() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 4, 1]);
 
     // (6 - 3) / 1 + 1 = 4 windows: [0,1,2] -> 2, [1,2,3] -> 3, [2,3,4] -> 4, [3,4,5] -> 5
@@ -78,7 +81,8 @@ fn max_pooling_1d_forward_values_two_channels() {
     ];
     let x = Array::from_shape_vec((1, 6, 2), data).unwrap().into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 3, 2]);
 
     // ch0: max(0,1)=1, max(2,3)=3, max(4,5)=5. ch1: max(10,9)=10, max(8,7)=8, max(6,5)=6.
@@ -101,7 +105,8 @@ fn max_pooling_1d_forward_values_batch() {
     ];
     let x = Array::from_shape_vec((2, 4, 1), data).unwrap().into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[2, 2, 1]);
 
     // batch 0: max(5,3)=5, max(7,2)=7. batch 1: max(1,9)=9, max(4,6)=6.
@@ -122,8 +127,8 @@ fn max_pooling_1d_predict_equals_forward() {
     let data: Vec<f32> = vec![1.0, 5.0, 2.0, 4.0, 3.0, 6.0];
     let x = Array::from_shape_vec((1, 6, 1), data).unwrap().into_dyn();
 
-    let fwd = layer.forward(&x).unwrap();
-    let pred = layer.predict(&x).unwrap();
+    let fwd = layer.forward(&x, &mut Ctx::training()).unwrap();
+    let pred = layer.forward(&x, &mut Ctx::inference()).unwrap();
 
     assert_allclose(&pred, &fwd, 1e-6);
 }
@@ -137,7 +142,7 @@ fn max_pooling_1d_output_shape_string() {
     let mut layer = MaxPooling1D::new(2).with_stride(2).unwrap();
     layer.build(&Shape::known(&[1, 8, 2])).unwrap();
     let s = layer.output_shape();
-    assert_eq!(s, "(1, 4, 2)");
+    assert_eq!(s, "(None, 4, 2)");
 }
 
 /// Global pooling layers return "Unknown" for output_shape before any forward pass
@@ -185,9 +190,9 @@ fn max_pooling_1d_err_wrong_ndim() {
 
 #[test]
 fn max_pooling_1d_backward_before_forward_err() {
-    let mut layer = MaxPooling1D::new(2);
+    let layer = MaxPooling1D::new(2);
     let grad = Array::ones((1, 2, 1)).into_dyn();
-    let result = layer.backward(&grad);
+    let result = layer.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -205,7 +210,7 @@ fn max_pooling_1d_forward_wrong_ndim_err() {
     let mut layer = MaxPooling1D::new(2);
     // Pass a 2D tensor instead of 3D
     let x = Array::ones((1, 4)).into_dyn();
-    let result = layer.forward(&x);
+    let result = layer.forward_mut(&x, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for 2D input at forward, got {:?}",
@@ -226,7 +231,8 @@ fn max_pooling_2d_forward_values_4x4_pool2x2() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2, 2, 1]);
 
     // max(0,1,4,5)=5, max(2,3,6,7)=7, max(8,9,12,13)=13, max(10,11,14,15)=15
@@ -246,7 +252,8 @@ fn max_pooling_2d_forward_values_stride1() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 3, 3, 1]);
 
     // value(h, w) = 4h + w, so the window at (i, j) maxes at its bottom-right cell 4(i+1)+(j+1)
@@ -269,7 +276,8 @@ fn max_pooling_2d_forward_values_two_channels() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 1, 1, 2]);
 
     // ch0 plane max = 3, ch1 plane max = 7
@@ -291,8 +299,8 @@ fn max_pooling_2d_predict_equals_forward() {
         .unwrap()
         .into_dyn();
 
-    let fwd = layer.forward(&x).unwrap();
-    let pred = layer.predict(&x).unwrap();
+    let fwd = layer.forward(&x, &mut Ctx::training()).unwrap();
+    let pred = layer.forward(&x, &mut Ctx::inference()).unwrap();
 
     assert_allclose(&pred, &fwd, 1e-6);
 }
@@ -305,7 +313,7 @@ fn max_pooling_2d_output_shape_string() {
     // [batch, height, width, channels] = [1, 6, 6, 3]. 6 -> (6 - 2) / 2 + 1 = 3 on both axes.
     let mut layer = MaxPooling2D::new((2, 2));
     layer.build(&Shape::known(&[1, 6, 6, 3])).unwrap();
-    assert_eq!(layer.output_shape(), "(1, 3, 3, 3)");
+    assert_eq!(layer.output_shape(), "(None, 3, 3, 3)");
 }
 
 // MaxPooling2D - build error paths
@@ -361,9 +369,9 @@ fn max_pooling_2d_err_wrong_ndim() {
 
 #[test]
 fn max_pooling_2d_backward_before_forward_err() {
-    let mut layer = MaxPooling2D::new((2, 2));
+    let layer = MaxPooling2D::new((2, 2));
     let grad = Array::ones((1, 2, 2, 1)).into_dyn();
-    let result = layer.backward(&grad);
+    let result = layer.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -381,7 +389,7 @@ fn max_pooling_2d_forward_wrong_ndim_err() {
     let mut layer = MaxPooling2D::new((2, 2));
     // Pass a 3D tensor instead of 4D
     let x = Array::ones((1, 4, 4)).into_dyn();
-    let result = layer.forward(&x);
+    let result = layer.forward_mut(&x, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for 3D input at forward, got {:?}",
@@ -401,7 +409,8 @@ fn max_pooling_3d_forward_values_2x2x2_full_window() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 1, 1, 1, 1]);
 
     // The single window covers the whole volume, so the output is max(0..7) = 7
@@ -422,7 +431,8 @@ fn max_pooling_3d_forward_values_4x4x4_pool2x2x2() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2, 2, 2, 1]);
 
     // Window (i, j, k) maxes at (2i+1, 2j+1, 2k+1): 16(2i+1) + 4(2j+1) + (2k+1)
@@ -445,8 +455,8 @@ fn max_pooling_3d_predict_equals_forward() {
         .unwrap()
         .into_dyn();
 
-    let fwd = layer.forward(&x).unwrap();
-    let pred = layer.predict(&x).unwrap();
+    let fwd = layer.forward(&x, &mut Ctx::training()).unwrap();
+    let pred = layer.forward(&x, &mut Ctx::inference()).unwrap();
 
     assert_allclose(&pred, &fwd, 1e-6);
 }
@@ -459,7 +469,7 @@ fn max_pooling_3d_output_shape_string() {
     // [batch, depth, height, width, channels] = [1, 4, 4, 4, 2]. Each spatial axis 4 -> 2.
     let mut layer = MaxPooling3D::new((2, 2, 2));
     layer.build(&Shape::known(&[1, 4, 4, 4, 2])).unwrap();
-    assert_eq!(layer.output_shape(), "(1, 2, 2, 2, 2)");
+    assert_eq!(layer.output_shape(), "(None, 2, 2, 2, 2)");
 }
 
 // MaxPooling3D - build error paths
@@ -515,9 +525,9 @@ fn max_pooling_3d_err_wrong_ndim() {
 
 #[test]
 fn max_pooling_3d_backward_before_forward_err() {
-    let mut layer = MaxPooling3D::new((2, 2, 2));
+    let layer = MaxPooling3D::new((2, 2, 2));
     let grad = Array::ones((1, 2, 2, 2, 1)).into_dyn();
-    let result = layer.backward(&grad);
+    let result = layer.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -535,7 +545,7 @@ fn max_pooling_3d_forward_wrong_ndim_err() {
     let mut layer = MaxPooling3D::new((2, 2, 2));
     // Pass a 4D tensor instead of 5D
     let x = Array::ones((1, 4, 4, 1)).into_dyn();
-    let result = layer.forward(&x);
+    let result = layer.forward_mut(&x, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for 4D input at forward, got {:?}",
@@ -554,7 +564,8 @@ fn global_max_pooling_1d_forward_values() {
     let data: Vec<f32> = vec![0.0, 9.0, 1.0, 8.0, 2.0, 7.0, 3.0, 6.0, 4.0, 5.0];
     let x = Array::from_shape_vec((1, 5, 2), data).unwrap().into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2]);
 
     // ch0 max = 4, ch1 max = 9
@@ -586,7 +597,8 @@ fn global_max_pooling_1d_forward_values_batch() {
     ];
     let x = Array::from_shape_vec((2, 4, 3), data).unwrap().into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[2, 3]);
 
     // batch 0: [5, 8, 7]. batch 1: [9, 6, 10].
@@ -606,8 +618,8 @@ fn global_max_pooling_1d_predict_equals_forward() {
     let data: Vec<f32> = vec![0.0, 9.0, 1.0, 8.0, 2.0, 7.0, 3.0, 6.0, 4.0, 5.0];
     let x = Array::from_shape_vec((1, 5, 2), data).unwrap().into_dyn();
 
-    let fwd = layer.forward(&x).unwrap();
-    let pred = layer.predict(&x).unwrap();
+    let fwd = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
+    let pred = layer.forward(&x, &mut Ctx::inference()).unwrap();
 
     assert_allclose(&pred, &fwd, 1e-6);
 }
@@ -621,17 +633,17 @@ fn global_max_pooling_1d_output_shape_after_forward() {
     let x = Array::from_shape_vec((1, 5, 2), vec![0.0f32; 10])
         .unwrap()
         .into_dyn();
-    layer.forward(&x).unwrap();
-    assert_eq!(layer.output_shape(), "(1, 2)");
+    layer.forward_mut(&x, &mut Ctx::training()).unwrap();
+    assert_eq!(layer.output_shape(), "(None, 2)");
 }
 
 // GlobalMaxPooling1D - backward-before-forward error
 
 #[test]
 fn global_max_pooling_1d_backward_before_forward_err() {
-    let mut layer = GlobalMaxPooling1D::new();
+    let layer = GlobalMaxPooling1D::new();
     let grad = Array::ones((1, 2)).into_dyn();
-    let result = layer.backward(&grad);
+    let result = layer.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -649,7 +661,7 @@ fn global_max_pooling_1d_forward_wrong_ndim_err() {
     let mut layer = GlobalMaxPooling1D::new();
     // 2D instead of 3D
     let x = Array::ones((1, 5)).into_dyn();
-    let result = layer.forward(&x);
+    let result = layer.forward_mut(&x, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for 2D input, got {:?}",
@@ -671,7 +683,8 @@ fn global_max_pooling_2d_forward_values() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2]);
 
     // ch0 max = 8, ch1 max = 18
@@ -695,7 +708,8 @@ fn global_max_pooling_2d_forward_values_batch() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[2, 1]);
 
     // batch 0 max = 4, batch 1 max = 9
@@ -716,8 +730,8 @@ fn global_max_pooling_2d_predict_equals_forward() {
         .unwrap()
         .into_dyn();
 
-    let fwd = layer.forward(&x).unwrap();
-    let pred = layer.predict(&x).unwrap();
+    let fwd = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
+    let pred = layer.forward(&x, &mut Ctx::inference()).unwrap();
 
     assert_allclose(&pred, &fwd, 1e-6);
 }
@@ -730,17 +744,17 @@ fn global_max_pooling_2d_output_shape_after_forward() {
     let x = Array::from_shape_vec((2, 4, 4, 3), vec![0.0f32; 2 * 4 * 4 * 3])
         .unwrap()
         .into_dyn();
-    layer.forward(&x).unwrap();
-    assert_eq!(layer.output_shape(), "(2, 3)");
+    layer.forward_mut(&x, &mut Ctx::training()).unwrap();
+    assert_eq!(layer.output_shape(), "(None, 3)");
 }
 
 // GlobalMaxPooling2D - backward-before-forward error
 
 #[test]
 fn global_max_pooling_2d_backward_before_forward_err() {
-    let mut layer = GlobalMaxPooling2D::new();
+    let layer = GlobalMaxPooling2D::new();
     let grad = Array::ones((1, 2)).into_dyn();
-    let result = layer.backward(&grad);
+    let result = layer.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -758,7 +772,7 @@ fn global_max_pooling_2d_forward_wrong_ndim_err() {
     let mut layer = GlobalMaxPooling2D::new();
     // 3D instead of 4D
     let x = Array::ones((1, 3, 3)).into_dyn();
-    let result = layer.forward(&x);
+    let result = layer.forward_mut(&x, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for 3D input, got {:?}",
@@ -780,7 +794,8 @@ fn global_max_pooling_3d_forward_values() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2]);
 
     // ch0 max = 7, ch1 max = 15
@@ -801,7 +816,8 @@ fn global_max_pooling_3d_forward_values_batch() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[2, 1]);
 
     let expected = Array::from_shape_vec((2, 1), vec![7.0f32, 15.0])
@@ -821,8 +837,8 @@ fn global_max_pooling_3d_predict_equals_forward() {
         .unwrap()
         .into_dyn();
 
-    let fwd = layer.forward(&x).unwrap();
-    let pred = layer.predict(&x).unwrap();
+    let fwd = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
+    let pred = layer.forward(&x, &mut Ctx::inference()).unwrap();
 
     assert_allclose(&pred, &fwd, 1e-6);
 }
@@ -835,17 +851,17 @@ fn global_max_pooling_3d_output_shape_after_forward() {
     let x = Array::from_shape_vec((3, 2, 2, 2, 4), vec![0.0f32; 3 * 2 * 2 * 2 * 4])
         .unwrap()
         .into_dyn();
-    layer.forward(&x).unwrap();
-    assert_eq!(layer.output_shape(), "(3, 4)");
+    layer.forward_mut(&x, &mut Ctx::training()).unwrap();
+    assert_eq!(layer.output_shape(), "(None, 4)");
 }
 
 // GlobalMaxPooling3D - backward-before-forward error
 
 #[test]
 fn global_max_pooling_3d_backward_before_forward_err() {
-    let mut layer = GlobalMaxPooling3D::new();
+    let layer = GlobalMaxPooling3D::new();
     let grad = Array::ones((1, 2)).into_dyn();
-    let result = layer.backward(&grad);
+    let result = layer.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -863,7 +879,7 @@ fn global_max_pooling_3d_forward_wrong_ndim_err() {
     let mut layer = GlobalMaxPooling3D::new();
     // 4D instead of 5D
     let x = Array::ones((1, 2, 2, 2)).into_dyn();
-    let result = layer.forward(&x);
+    let result = layer.forward_mut(&x, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for 4D input, got {:?}",
@@ -882,7 +898,8 @@ fn max_pooling_1d_forward_negative_values() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2, 1]);
 
     // max(-3, -1) = -1 and max(-4, -2) = -2
@@ -906,7 +923,8 @@ fn max_pooling_2d_forward_non_square_spatial() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 1, 2, 1]);
 
     // max(0,1,4,5) = 5 and max(2,3,6,7) = 7
@@ -939,7 +957,8 @@ fn max_pooling_2d_parallel_forward_distinct_maxima() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     let out_side = side / 2;
     assert_eq!(out.shape(), &[1, out_side, out_side, channels]);
 
@@ -971,7 +990,8 @@ fn max_pooling_2d_parallel_backward_routes_per_window() {
         .unwrap()
         .into_dyn();
     // Forward to populate the arg-max cache: window (i, j) picks (2i + 1, 2j + 1) in every channel
-    layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    layer.forward_mut(&x, &mut ctx).unwrap();
 
     // Upstream gradient: a distinct value per (position, channel), grad(i, j, c) = flat index + 1
     let out_side = side / 2;
@@ -982,7 +1002,7 @@ fn max_pooling_2d_parallel_backward_routes_per_window() {
         .unwrap()
         .into_dyn();
 
-    let grad_in = layer.backward(&grad_out).unwrap();
+    let grad_in = layer.backward(&grad_out, &mut ctx).unwrap();
     assert_eq!(grad_in.shape(), &[1, side, side, channels]);
 
     // Max pooling routes each upstream value to the arg-max cell alone. The other 3 taps
@@ -1010,7 +1030,7 @@ fn max_pool_2d_same_padding_3x3() {
     let x = Array::from_shape_vec((1, 3, 3, 1), (1..=9).map(|v| v as f32).collect())
         .unwrap()
         .into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[1, 2, 2, 1]);
     // pad_total = (2 - 1) * 2 + 2 - 3 = 1, all of it trailing, so the windows start at 0 and 2
     assert_abs_diff_eq!(out[[0, 0, 0, 0]], 5.0, epsilon = 1e-6); // max(1,2,4,5)
@@ -1058,7 +1078,8 @@ fn max_pooling_1d_all_negative_infinity_window_keeps_gradient_inside_window() {
     .unwrap()
     .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2, 2]);
     // Window 0 keeps its maxima, and window 1 keeps the start value of the fold
     assert_abs_diff_eq!(out[[0, 0, 0]], 2.0, epsilon = 1e-6);
@@ -1069,7 +1090,7 @@ fn max_pooling_1d_all_negative_infinity_window_keeps_gradient_inside_window() {
     let grad_out = Array::from_shape_vec((1, 2, 2), vec![1.0f32, 2.0, 3.0, 4.0])
         .unwrap()
         .into_dyn();
-    let grad_in = layer.backward(&grad_out).unwrap();
+    let grad_in = layer.backward(&grad_out, &mut ctx).unwrap();
 
     // Window 1 starts at position 2, so its gradient lands there and not at position 0
     let expected =
@@ -1110,7 +1131,8 @@ fn max_pooling_2d_all_negative_infinity_window_keeps_gradient_inside_window() {
     .unwrap()
     .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2, 2, 1]);
     assert_abs_diff_eq!(out[[0, 0, 0, 0]], 9.0, epsilon = 1e-6);
     assert_eq!(out[[0, 0, 1, 0]], f32::NEG_INFINITY);
@@ -1120,7 +1142,7 @@ fn max_pooling_2d_all_negative_infinity_window_keeps_gradient_inside_window() {
     let grad_out = Array::from_shape_vec((1, 2, 2, 1), vec![1.0f32, 2.0, 3.0, 4.0])
         .unwrap()
         .into_dyn();
-    let grad_in = layer.backward(&grad_out).unwrap();
+    let grad_in = layer.backward(&grad_out, &mut ctx).unwrap();
 
     // Window (0, 0) ties at (0, 1) and (1, 0), and the first tie wins. Window (0, 1) covers
     // negative infinity alone, so its gradient lands on its own first cell (0, 2). Window
@@ -1154,7 +1176,8 @@ fn max_pooling_3d_all_negative_infinity_window_keeps_gradient_inside_window() {
     .unwrap()
     .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 1, 1, 2, 1]);
     assert_abs_diff_eq!(out[[0, 0, 0, 0, 0]], 8.0, epsilon = 1e-6);
     assert_eq!(out[[0, 0, 0, 1, 0]], f32::NEG_INFINITY);
@@ -1162,7 +1185,7 @@ fn max_pooling_3d_all_negative_infinity_window_keeps_gradient_inside_window() {
     let grad_out = Array::from_shape_vec((1, 1, 1, 2, 1), vec![1.0f32, 2.0])
         .unwrap()
         .into_dyn();
-    let grad_in = layer.backward(&grad_out).unwrap();
+    let grad_in = layer.backward(&grad_out, &mut ctx).unwrap();
 
     // Window 0 has its maximum 8.0 at depth 0, height 1, width 0. Window 1 covers widths 2 and
     // 3, and its first voxel in window order is depth 0, height 0, width 2
@@ -1183,7 +1206,8 @@ fn global_max_pooling_1d_all_negative_infinity_keeps_gradient_on_its_channel() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2]);
     assert_abs_diff_eq!(out[[0, 0]], 3.0, epsilon = 1e-6);
     assert_eq!(out[[0, 1]], f32::NEG_INFINITY);
@@ -1191,7 +1215,7 @@ fn global_max_pooling_1d_all_negative_infinity_keeps_gradient_on_its_channel() {
     let grad_out = Array::from_shape_vec((1, 2), vec![1.0f32, 2.0])
         .unwrap()
         .into_dyn();
-    let grad_in = layer.backward(&grad_out).unwrap();
+    let grad_in = layer.backward(&grad_out, &mut ctx).unwrap();
 
     // Channel 0 has its maximum at position 2. Channel 1 has no winner, so its gradient goes to
     // position 0 of channel 1, and never to channel 0
@@ -1219,14 +1243,15 @@ fn global_max_pooling_1d_all_negative_infinity_across_fold_blocks() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_abs_diff_eq!(out[[0, 0]], (positions - 1) as f32, epsilon = 1e-6);
     assert_eq!(out[[0, 1]], f32::NEG_INFINITY);
 
     let grad_out = Array::from_shape_vec((1, 2), vec![1.0f32, 2.0])
         .unwrap()
         .into_dyn();
-    let grad_in = layer.backward(&grad_out).unwrap();
+    let grad_in = layer.backward(&grad_out, &mut ctx).unwrap();
     assert_eq!(grad_in.shape(), &[1, positions, 2]);
 
     // Channel 0 peaks in the last block, and channel 1 keeps position 0 of its own channel
@@ -1246,7 +1271,8 @@ fn global_max_pooling_2d_all_negative_infinity_keeps_gradient_on_its_channel() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2]);
     assert_abs_diff_eq!(out[[0, 0]], 3.0, epsilon = 1e-6);
     assert_eq!(out[[0, 1]], f32::NEG_INFINITY);
@@ -1254,7 +1280,7 @@ fn global_max_pooling_2d_all_negative_infinity_keeps_gradient_on_its_channel() {
     let grad_out = Array::from_shape_vec((1, 2), vec![1.0f32, 2.0])
         .unwrap()
         .into_dyn();
-    let grad_in = layer.backward(&grad_out).unwrap();
+    let grad_in = layer.backward(&grad_out, &mut ctx).unwrap();
 
     let mut expected = Array::zeros((1, 2, 2, 2));
     expected[[0, 1, 0, 0]] = 1.0;
@@ -1272,7 +1298,8 @@ fn global_max_pooling_3d_all_negative_infinity_keeps_gradient_on_its_channel() {
         .unwrap()
         .into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2]);
     assert_abs_diff_eq!(out[[0, 0]], 3.0, epsilon = 1e-6);
     assert_eq!(out[[0, 1]], f32::NEG_INFINITY);
@@ -1280,7 +1307,7 @@ fn global_max_pooling_3d_all_negative_infinity_keeps_gradient_on_its_channel() {
     let grad_out = Array::from_shape_vec((1, 2), vec![1.0f32, 2.0])
         .unwrap()
         .into_dyn();
-    let grad_in = layer.backward(&grad_out).unwrap();
+    let grad_in = layer.backward(&grad_out, &mut ctx).unwrap();
 
     let mut expected = Array::zeros((1, 2, 1, 2, 2));
     expected[[0, 1, 0, 0, 0]] = 1.0;

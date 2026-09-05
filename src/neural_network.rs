@@ -51,7 +51,7 @@
 //! - [`Shape`](crate::neural_network::Shape): the shape of a tensor as a layer describes it,
 //!   with a free axis for an extent that no configuration fixes. Every layer maps an input
 //!   shape to an output shape through
-//!   [`Layer::compute_output_shape`](crate::neural_network::traits::Layer::compute_output_shape),
+//!   [`UnaryLayer::compute_output_shape`](crate::neural_network::traits::UnaryLayer::compute_output_shape),
 //!   which reads the layer configuration alone and answers before any tensor exists
 //!
 //! ## Weight initialization
@@ -109,6 +109,8 @@ use ndarray::ArrayD;
 /// N-dimensional array used as a tensor in the neural network
 pub type Tensor = ArrayD<f32>;
 
+/// The per-pass context that carries caches, gradients and state between layers
+pub mod ctx;
 /// Neural-network error type, aggregated into the crate-wide [`Error`](crate::error::Error)
 pub mod error;
 /// How a layer draws the starting values of a weight array
@@ -126,6 +128,7 @@ pub mod shape;
 /// Trait interfaces for neural network models
 pub mod traits;
 
+pub use ctx::{Ctx, Grads, LayerId, StateSlot};
 pub use error::NnError;
 pub use initializer::{Fans, Initializer};
 pub use shape::Shape;

@@ -12,26 +12,28 @@
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndarray::Array;
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::layers::*;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::SequentialBuilder;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::UnaryLayer;
 use std::hint::black_box;
 
 /// Dense inference on a batch large enough to engage the block-parallel GEMM
 ///
-/// This calls `predict`, not `forward`. `forward` writes an input cache and an output cache
-/// (`dense.rs`), so a timed loop over it holds 2 extra tensors live per iteration and measures
-/// the allocator as much as the kernel
+/// This runs an inference-mode pass, not a training-mode one. A training-mode pass writes an
+/// input cache and an output cache (`dense.rs`), so a timed loop over it holds 2 extra tensors
+/// live per iteration and measures the allocator as much as the kernel
 fn dense_forward(c: &mut Criterion) {
-    let layer = Dense::new(512, Activation::ReLU)
+    let mut layer = Dense::new(512, Activation::ReLU)
         .unwrap()
         .with_random_state(42);
     let x = Array::from_elem((256, 784), 0.5f32).into_dyn();
+    layer.build(&Shape::known(x.shape())).unwrap();
     c.bench_function("dense_predict_256x784x512", |b| {
-        b.iter(|| black_box(layer.predict(&x).unwrap()))
+        b.iter(|| black_box(layer.forward(&x, &mut Ctx::inference()).unwrap()))
     });
 }
 
@@ -41,8 +43,9 @@ fn conv2d_forward_batch1(c: &mut Criterion) {
         .unwrap()
         .with_random_state(42);
     let x = Array::from_elem((1, 96, 96, 32), 0.5f32).into_dyn();
+    layer.build(&Shape::known(x.shape())).unwrap();
     c.bench_function("conv2d_forward_1x32x96x96_64f", |b| {
-        b.iter(|| black_box(layer.forward(&x).unwrap()))
+        b.iter(|| black_box(layer.forward(&x, &mut Ctx::training()).unwrap()))
     });
 }
 
@@ -63,13 +66,15 @@ fn conv2d_backward(c: &mut Criterion) {
             .with_random_state(42);
         let x = Array::from_elem((batch, 64, 64, 32), 0.5f32).into_dyn();
         let grad = Array::from_elem((batch, 64, 64, 64), 0.3f32).into_dyn();
+        layer.build(&Shape::known(x.shape())).unwrap();
         group.bench_function(format!("conv2d_forward_{batch}x32x64x64_64f"), |b| {
-            b.iter(|| black_box(layer.forward(&x).unwrap()))
+            b.iter(|| black_box(layer.forward(&x, &mut Ctx::training()).unwrap()))
         });
         group.bench_function(format!("conv2d_fwd_bwd_{batch}x32x64x64_64f"), |b| {
             b.iter(|| {
-                layer.forward(&x).unwrap();
-                black_box(layer.backward(&grad).unwrap())
+                let mut ctx = Ctx::training();
+                layer.forward(&x, &mut ctx).unwrap();
+                black_box(layer.backward(&grad, &mut ctx).unwrap())
             })
         });
     }
@@ -82,8 +87,9 @@ fn lstm_forward(c: &mut Criterion) {
         .unwrap()
         .with_random_state(42);
     let x = Array::from_elem((32, 64, 64), 0.5f32).into_dyn();
+    layer.build(&Shape::known(x.shape())).unwrap();
     c.bench_function("lstm_forward_32x64x64_128u", |b| {
-        b.iter(|| black_box(layer.forward(&x).unwrap()))
+        b.iter(|| black_box(layer.forward(&x, &mut Ctx::training()).unwrap()))
     });
 }
 
@@ -95,26 +101,34 @@ fn batchnorm_forward_spatial(c: &mut Criterion) {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
     .into_dyn();
+    layer.build(&Shape::known(x.shape())).unwrap();
     c.bench_function("batchnorm_forward_32x64x64x64", |b| {
-        b.iter(|| black_box(layer.forward(&x).unwrap()))
+        b.iter(|| black_box(layer.forward(&x, &mut Ctx::training()).unwrap()))
     });
 }
 
 /// Spatial BatchNorm backward at the same scale: 5 per-channel column-stat folds plus 2
 /// elementwise passes over the cached forward tensors
+///
+/// A backward pass consumes the cache of its own matching forward pass, so this times the pair
+/// together, 1 fresh context per iteration
 fn batchnorm_backward_spatial(c: &mut Criterion) {
     let mut layer = BatchNormalization::new(0.99, 1e-5).unwrap();
     let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
     .into_dyn();
-    layer.forward(&x).unwrap();
+    layer.build(&Shape::known(x.shape())).unwrap();
     let grad = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 11 + ch * 5 + h * 7 + w) as f32 * 0.293).sin()
     })
     .into_dyn();
     c.bench_function("batchnorm_backward_32x64x64x64", |b| {
-        b.iter(|| black_box(layer.backward(&grad).unwrap()))
+        b.iter(|| {
+            let mut ctx = Ctx::training();
+            layer.forward(&x, &mut ctx).unwrap();
+            black_box(layer.backward(&grad, &mut ctx).unwrap())
+        })
     });
 }
 
@@ -126,26 +140,34 @@ fn layernorm_forward_default(c: &mut Criterion) {
         ((b * 7 + t * 13 + d * 3) as f32 * 0.137).sin()
     })
     .into_dyn();
+    layer.build(&Shape::known(x.shape())).unwrap();
     c.bench_function("layernorm_forward_32x512x768", |b| {
-        b.iter(|| black_box(layer.forward(&x).unwrap()))
+        b.iter(|| black_box(layer.forward(&x, &mut Ctx::training()).unwrap()))
     });
 }
 
 /// LayerNorm backward at the same scale: per-row gradient composition plus the gamma/beta
 /// column reductions
+///
+/// A backward pass consumes the cache of its own matching forward pass, so this times the pair
+/// together, 1 fresh context per iteration
 fn layernorm_backward_default(c: &mut Criterion) {
     let mut layer = LayerNormalization::new(1e-5).unwrap();
     let x = Array::from_shape_fn((32, 512, 768), |(b, t, d)| {
         ((b * 7 + t * 13 + d * 3) as f32 * 0.137).sin()
     })
     .into_dyn();
-    layer.forward(&x).unwrap();
+    layer.build(&Shape::known(x.shape())).unwrap();
     let grad = Array::from_shape_fn((32, 512, 768), |(b, t, d)| {
         ((b * 11 + t * 5 + d * 7) as f32 * 0.293).sin()
     })
     .into_dyn();
     c.bench_function("layernorm_backward_32x512x768", |b| {
-        b.iter(|| black_box(layer.backward(&grad).unwrap()))
+        b.iter(|| {
+            let mut ctx = Ctx::training();
+            layer.forward(&x, &mut ctx).unwrap();
+            black_box(layer.backward(&grad, &mut ctx).unwrap())
+        })
     });
 }
 
@@ -160,8 +182,9 @@ fn layernorm_forward_multi(c: &mut Criterion) {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
     .into_dyn();
+    layer.build(&Shape::known(x.shape())).unwrap();
     c.bench_function("layernorm_forward_multi_32x64x64x64", |b| {
-        b.iter(|| black_box(layer.forward(&x).unwrap()))
+        b.iter(|| black_box(layer.forward(&x, &mut Ctx::training()).unwrap()))
     });
 }
 
@@ -173,26 +196,34 @@ fn groupnorm_forward(c: &mut Criterion) {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
     .into_dyn();
+    layer.build(&Shape::known(x.shape())).unwrap();
     c.bench_function("groupnorm_forward_32x64x64x64_8g", |b| {
-        b.iter(|| black_box(layer.forward(&x).unwrap()))
+        b.iter(|| black_box(layer.forward(&x, &mut Ctx::training()).unwrap()))
     });
 }
 
 /// GroupNorm backward at the same scale: per-channel parameter folds plus the per-instance
 /// gradient composition
+///
+/// A backward pass consumes the cache of its own matching forward pass, so this times the pair
+/// together, 1 fresh context per iteration
 fn groupnorm_backward(c: &mut Criterion) {
     let mut layer = GroupNormalization::new(8, 1e-5).unwrap();
     let x = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
     .into_dyn();
-    layer.forward(&x).unwrap();
+    layer.build(&Shape::known(x.shape())).unwrap();
     let grad = Array::from_shape_fn((32, 64, 64, 64), |(n, h, w, ch)| {
         ((n * 11 + ch * 5 + h * 7 + w) as f32 * 0.293).sin()
     })
     .into_dyn();
     c.bench_function("groupnorm_backward_32x64x64x64_8g", |b| {
-        b.iter(|| black_box(layer.backward(&grad).unwrap()))
+        b.iter(|| {
+            let mut ctx = Ctx::training();
+            layer.forward(&x, &mut ctx).unwrap();
+            black_box(layer.backward(&grad, &mut ctx).unwrap())
+        })
     });
 }
 
@@ -203,8 +234,9 @@ fn instancenorm_forward(c: &mut Criterion) {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
     .into_dyn();
+    layer.build(&Shape::known(x.shape())).unwrap();
     c.bench_function("instancenorm_forward_32x64x64x64", |b| {
-        b.iter(|| black_box(layer.forward(&x).unwrap()))
+        b.iter(|| black_box(layer.forward(&x, &mut Ctx::training()).unwrap()))
     });
 }
 
@@ -213,8 +245,9 @@ fn instancenorm_forward(c: &mut Criterion) {
 fn spatial_dropout_1d_forward(c: &mut Criterion) {
     let mut layer = SpatialDropout1D::new(0.2).unwrap().with_random_state(42);
     let x = Array::from_elem((32, 64, 4096), 0.5f32).into_dyn();
+    layer.build(&Shape::known(x.shape())).unwrap();
     c.bench_function("spatial_dropout_1d_forward_32x64x4096", |b| {
-        b.iter(|| black_box(layer.forward(&x).unwrap()))
+        b.iter(|| black_box(layer.forward(&x, &mut Ctx::training()).unwrap()))
     });
 }
 
@@ -223,8 +256,9 @@ fn spatial_dropout_1d_forward(c: &mut Criterion) {
 fn spatial_dropout_2d_forward(c: &mut Criterion) {
     let mut layer = SpatialDropout2D::new(0.2).unwrap().with_random_state(42);
     let x = Array::from_elem((32, 64, 64, 64), 0.5f32).into_dyn();
+    layer.build(&Shape::known(x.shape())).unwrap();
     c.bench_function("spatial_dropout_2d_forward_32x64x64x64", |b| {
-        b.iter(|| black_box(layer.forward(&x).unwrap()))
+        b.iter(|| black_box(layer.forward(&x, &mut Ctx::training()).unwrap()))
     });
 }
 
@@ -233,36 +267,51 @@ fn spatial_dropout_2d_forward(c: &mut Criterion) {
 fn spatial_dropout_3d_forward(c: &mut Criterion) {
     let mut layer = SpatialDropout3D::new(0.2).unwrap().with_random_state(42);
     let x = Array::from_elem((8, 64, 16, 32, 32), 0.5f32).into_dyn();
+    layer.build(&Shape::known(x.shape())).unwrap();
     c.bench_function("spatial_dropout_3d_forward_8x64x16x32x32", |b| {
-        b.iter(|| black_box(layer.forward(&x).unwrap()))
+        b.iter(|| black_box(layer.forward(&x, &mut Ctx::training()).unwrap()))
     });
 }
 
 /// SpatialDropout2D backward at conv scale: applies the same per-channel mask to the gradient
+///
+/// A backward pass consumes the cache of its own matching forward pass, so this times the pair
+/// together, 1 fresh context per iteration
 fn spatial_dropout_2d_backward(c: &mut Criterion) {
     let mut layer = SpatialDropout2D::new(0.2).unwrap().with_random_state(42);
     let x = Array::from_elem((32, 64, 64, 64), 0.5f32).into_dyn();
-    layer.forward(&x).unwrap();
+    layer.build(&Shape::known(x.shape())).unwrap();
     let grad = Array::from_elem((32, 64, 64, 64), 0.3f32).into_dyn();
     c.bench_function("spatial_dropout_2d_backward_32x64x64x64", |b| {
-        b.iter(|| black_box(layer.backward(&grad).unwrap()))
+        b.iter(|| {
+            let mut ctx = Ctx::training();
+            layer.forward(&x, &mut ctx).unwrap();
+            black_box(layer.backward(&grad, &mut ctx).unwrap())
+        })
     });
 }
 
 /// SpatialDropout3D backward at conv scale
+///
+/// A backward pass consumes the cache of its own matching forward pass, so this times the pair
+/// together, 1 fresh context per iteration
 fn spatial_dropout_3d_backward(c: &mut Criterion) {
     let mut layer = SpatialDropout3D::new(0.2).unwrap().with_random_state(42);
     let x = Array::from_elem((8, 64, 16, 32, 32), 0.5f32).into_dyn();
-    layer.forward(&x).unwrap();
+    layer.build(&Shape::known(x.shape())).unwrap();
     let grad = Array::from_elem((8, 64, 16, 32, 32), 0.3f32).into_dyn();
     c.bench_function("spatial_dropout_3d_backward_8x64x16x32x32", |b| {
-        b.iter(|| black_box(layer.backward(&grad).unwrap()))
+        b.iter(|| {
+            let mut ctx = Ctx::training();
+            layer.forward(&x, &mut ctx).unwrap();
+            black_box(layer.backward(&grad, &mut ctx).unwrap())
+        })
     });
 }
 
 /// DepthwiseConv2D and SeparableConv2D at MobileNet-ish scale (64 channels over a 56x56 map).
-/// `forward` is the inference cost. `fwd_bwd` re-runs the forward then backward each
-/// iteration, so `fwd_bwd - forward` approximates the backward cost
+/// `forward` is the training-mode forward cost alone. `fwd_bwd` re-runs the forward then
+/// backward each iteration, so `fwd_bwd - forward` approximates the backward cost
 fn depthwise_separable_conv(c: &mut Criterion) {
     let mut group = c.benchmark_group("conv_depthwise_separable");
     group.sample_size(30);
@@ -275,13 +324,15 @@ fn depthwise_separable_conv(c: &mut Criterion) {
             .with_random_state(42);
         let x = Array::from_elem((8, 56, 56, 64), 0.5f32).into_dyn();
         let grad = Array::from_elem((8, 56, 56, 64), 0.3f32).into_dyn();
+        layer.build(&Shape::known(x.shape())).unwrap();
         group.bench_function("depthwise_forward_8x64x56x56_k3_same", |b| {
-            b.iter(|| black_box(layer.forward(&x).unwrap()))
+            b.iter(|| black_box(layer.forward(&x, &mut Ctx::training()).unwrap()))
         });
         group.bench_function("depthwise_fwd_bwd_8x64x56x56_k3_same", |b| {
             b.iter(|| {
-                layer.forward(&x).unwrap();
-                black_box(layer.backward(&grad).unwrap())
+                let mut ctx = Ctx::training();
+                layer.forward(&x, &mut ctx).unwrap();
+                black_box(layer.backward(&grad, &mut ctx).unwrap())
             })
         });
     }
@@ -294,13 +345,15 @@ fn depthwise_separable_conv(c: &mut Criterion) {
             .with_random_state(42);
         let x = Array::from_elem((8, 56, 56, 32), 0.5f32).into_dyn();
         let grad = Array::from_elem((8, 56, 56, 64), 0.3f32).into_dyn();
+        layer.build(&Shape::known(x.shape())).unwrap();
         group.bench_function("separable_forward_8x32x56x56_64f_k3_same", |b| {
-            b.iter(|| black_box(layer.forward(&x).unwrap()))
+            b.iter(|| black_box(layer.forward(&x, &mut Ctx::training()).unwrap()))
         });
         group.bench_function("separable_fwd_bwd_8x32x56x56_64f_k3_same", |b| {
             b.iter(|| {
-                layer.forward(&x).unwrap();
-                black_box(layer.backward(&grad).unwrap())
+                let mut ctx = Ctx::training();
+                layer.forward(&x, &mut ctx).unwrap();
+                black_box(layer.backward(&grad, &mut ctx).unwrap())
             })
         });
     }

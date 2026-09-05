@@ -21,8 +21,6 @@
 
 use super::{GoldenCase, LayerFixture, golden_input, golden_weights, golden_weights_from};
 use ndarray::IxDyn;
-use rustyml::neural_network::Shape;
-use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::regularization::dropout::{
     Dropout, SpatialDropout1D, SpatialDropout2D, SpatialDropout3D,
 };
@@ -30,7 +28,8 @@ use rustyml::neural_network::layers::regularization::noise_injection::{
     GaussianDropout, GaussianNoise,
 };
 use rustyml::neural_network::layers::regularization::normalization::BatchNormalization;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
+use rustyml::neural_network::{Ctx, Shape, Tensor};
 
 /// Every layer type of the stochastic family, in the order the data file records them.
 fn fixtures() -> Vec<LayerFixture> {
@@ -126,21 +125,23 @@ fn dropout_cases() -> Vec<GoldenCase> {
     }
 
     vec![
-        // `predict` is the inference path, so it differs from a masked training forward
+        // An inference pass takes the inference path, so it differs from a masked training
+        // forward
         GoldenCase::new("rate_0p5_training", &ELEMENTWISE_SHAPE, || build(0.5))
-            .with_predict_that_differs(),
+            .with_inference_that_differs(),
         GoldenCase::new("rate_0p5_inference", &ELEMENTWISE_SHAPE, || build(0.5))
             .in_inference_mode(),
-        // A rate of 0 makes the training forward the identity, so `predict` agrees with it
+        // A rate of 0 makes the training forward the identity, so an inference pass agrees
+        // with it
         GoldenCase::new("rate_0p0_training", &ELEMENTWISE_SHAPE, || build(0.0)),
         GoldenCase::new("rate_1p0_training", &ELEMENTWISE_SHAPE, || build(1.0))
-            .with_predict_that_differs(),
+            .with_inference_that_differs(),
         GoldenCase::new(
             "noise_shape_shared_batch_training",
             &ELEMENTWISE_SHAPE,
             build_shared_batch,
         )
-        .with_predict_that_differs(),
+        .with_inference_that_differs(),
         GoldenCase::new(
             "noise_shape_shared_batch_inference",
             &ELEMENTWISE_SHAPE,
@@ -168,7 +169,8 @@ fn spatial_dropout_1d_cases() -> Vec<GoldenCase> {
     }
 
     vec![
-        GoldenCase::new("rate_0p5_training", &SPATIAL_1D_SHAPE, build).with_predict_that_differs(),
+        GoldenCase::new("rate_0p5_training", &SPATIAL_1D_SHAPE, build)
+            .with_inference_that_differs(),
         GoldenCase::new("rate_0p5_inference", &SPATIAL_1D_SHAPE, build).in_inference_mode(),
     ]
 }
@@ -187,7 +189,8 @@ fn spatial_dropout_2d_cases() -> Vec<GoldenCase> {
     }
 
     vec![
-        GoldenCase::new("rate_0p5_training", &SPATIAL_2D_SHAPE, build).with_predict_that_differs(),
+        GoldenCase::new("rate_0p5_training", &SPATIAL_2D_SHAPE, build)
+            .with_inference_that_differs(),
         GoldenCase::new("rate_0p5_inference", &SPATIAL_2D_SHAPE, build).in_inference_mode(),
     ]
 }
@@ -206,7 +209,8 @@ fn spatial_dropout_3d_cases() -> Vec<GoldenCase> {
     }
 
     vec![
-        GoldenCase::new("rate_0p5_training", &SPATIAL_3D_SHAPE, build).with_predict_that_differs(),
+        GoldenCase::new("rate_0p5_training", &SPATIAL_3D_SHAPE, build)
+            .with_inference_that_differs(),
         GoldenCase::new("rate_0p5_inference", &SPATIAL_3D_SHAPE, build).in_inference_mode(),
     ]
 }
@@ -234,7 +238,7 @@ fn gaussian_noise_cases() -> Vec<GoldenCase> {
 
     vec![
         GoldenCase::new("stddev_0p5_training", &ELEMENTWISE_SHAPE, || build(0.5))
-            .with_predict_that_differs(),
+            .with_inference_that_differs(),
         GoldenCase::new("stddev_0p5_inference", &ELEMENTWISE_SHAPE, || build(0.5))
             .in_inference_mode(),
         // A standard deviation of 0 makes the training forward the identity
@@ -261,7 +265,7 @@ fn gaussian_dropout_cases() -> Vec<GoldenCase> {
 
     vec![
         GoldenCase::new("rate_0p3_training", &ELEMENTWISE_SHAPE, || build(0.3))
-            .with_predict_that_differs(),
+            .with_inference_that_differs(),
         GoldenCase::new("rate_0p3_inference", &ELEMENTWISE_SHAPE, || build(0.3))
             .in_inference_mode(),
         // A rate of 0 makes the training forward the identity and writes no noise cache
@@ -344,12 +348,16 @@ fn batch_norm_layer(input_shape: &[usize]) -> BatchNormalization {
 ///
 /// - `(Tensor, Tensor)` - The running mean and the running variance, each 1 value per channel
 fn batch_norm_running_statistics() -> (Tensor, Tensor) {
-    // `new` starts a mode-dependent layer in training mode, and only that mode updates the
-    // running statistics
+    // Only a training context updates the running statistics, so the pass below takes one
     let mut layer = batch_norm_layer(&BATCH_NORM_SHAPE);
+    let mut ctx = Ctx::training();
     layer
-        .forward(&golden_input(&BATCH_NORM_SHAPE))
+        .forward(&golden_input(&BATCH_NORM_SHAPE), &mut ctx)
         .expect("the fixture input has the declared shape");
+    // A forward pass proposes the new running statistics in the context, and never writes them
+    // into the layer. The layer takes them here, which is the step a model runs after every
+    // forward pass. The position is 0, because nothing set an owner
+    layer.apply_state(&mut ctx.state_slot(0));
     (
         layer
             .weight("moving_mean")
@@ -421,20 +429,21 @@ fn batch_normalization_cases() -> Vec<GoldenCase> {
             Box::new(batch_norm_layer(&BATCH_NORM_SHAPE))
         })
         .with_parameter_grads(&NAMES)
-        // A training forward reads the batch statistics, and `predict` reads the running ones
-        .with_predict_that_differs(),
+        // A training forward reads the batch statistics, and an inference pass reads the
+        // running ones
+        .with_inference_that_differs(),
         GoldenCase::new(
             "spatial_channels_3_training",
             &BATCH_NORM_SPATIAL_SHAPE,
             || Box::new(batch_norm_layer(&BATCH_NORM_SPATIAL_SHAPE)),
         )
         .with_parameter_grads(&NAMES)
-        .with_predict_that_differs(),
+        .with_inference_that_differs(),
         GoldenCase::new("rank_1_training", &BATCH_NORM_RANK_1_SHAPE, || {
             Box::new(batch_norm_layer(&BATCH_NORM_RANK_1_SHAPE))
         })
         .with_parameter_grads(&NAMES)
-        .with_predict_that_differs(),
+        .with_inference_that_differs(),
         GoldenCase::new("channels_4_inference", &BATCH_NORM_SHAPE, || {
             Box::new(batch_norm_layer(&BATCH_NORM_SHAPE))
         })

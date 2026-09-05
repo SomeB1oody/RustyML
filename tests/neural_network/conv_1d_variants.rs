@@ -9,13 +9,14 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array3};
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
 use rustyml::neural_network::layers::convolution::depthwise_conv_1d::DepthwiseConv1D;
 use rustyml::neural_network::layers::convolution::separable_conv_1d::SeparableConv1D;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 use crate::common::{assert_allclose, named};
@@ -100,7 +101,7 @@ fn depthwise_conv1d_forward_rejects_wrong_channels() {
     let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
     conv.build(&Shape::known(&[1, 5, 2])).unwrap();
     let x = Array::ones((1_usize, 5, 3)).into_dyn();
-    let err = conv.forward(&x).unwrap_err();
+    let err = conv.forward(&x, &mut Ctx::training()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "expected InvalidInput, got {err:?}"
@@ -112,7 +113,7 @@ fn depthwise_conv1d_forward_rejects_wrong_channels() {
 fn depthwise_conv1d_forward_rejects_non_3d_input() {
     let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
     let x = Array::ones((1_usize, 5, 2, 1)).into_dyn();
-    let err = conv.forward(&x).unwrap_err();
+    let err = conv.forward_mut(&x, &mut Ctx::training()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "expected InvalidInput, got {err:?}"
@@ -135,14 +136,14 @@ fn depthwise_conv1d_cross_channel_no_bleed() {
         .unwrap();
 
     let base = seq([1, 6, 3], ramp(18));
-    let baseline = conv.predict(&base).unwrap();
+    let baseline = conv.forward(&base, &mut Ctx::inference()).unwrap();
 
     // Perturb every position of channel 1 only
     let mut bumped = base.clone();
     for t in 0..6 {
         bumped[[0, t, 1]] += 3.0;
     }
-    let after = conv.predict(&bumped).unwrap();
+    let after = conv.forward(&bumped, &mut Ctx::inference()).unwrap();
 
     for t in 0..4 {
         assert_abs_diff_eq!(after[[0, t, 0]], baseline[[0, t, 0]], epsilon = 1e-6);
@@ -185,8 +186,8 @@ fn depthwise_conv1d_matches_a_block_diagonal_conv1d() {
 
     let x = seq([2, length, channels], ramp(2 * length * channels));
     assert_allclose(
-        &depthwise.predict(&x).unwrap(),
-        &plain.predict(&x).unwrap(),
+        &depthwise.forward(&x, &mut Ctx::inference()).unwrap(),
+        &plain.forward(&x, &mut Ctx::inference()).unwrap(),
         1e-5_f32,
     );
 }
@@ -211,7 +212,7 @@ fn depthwise_conv1d_output_length_rule() {
             .with_padding(padding);
         conv.build(&Shape::known(&[2, length, 3])).unwrap();
         let x = Array::ones((2_usize, length, 3)).into_dyn();
-        let out = conv.predict(&x).unwrap();
+        let out = conv.forward(&x, &mut Ctx::inference()).unwrap();
         assert_eq!(out.shape(), &[2, want, 3], "[{label}] output shape");
     }
 }
@@ -232,7 +233,7 @@ fn depthwise_conv1d_same_padding_splits_with_the_extra_cell_at_the_end() {
         .unwrap();
 
     let x = seq([1, 4, 1], vec![1.0, 2.0, 3.0, 4.0]);
-    let out = conv.predict(&x).unwrap();
+    let out = conv.forward(&x, &mut Ctx::inference()).unwrap();
     assert_eq!(out.shape(), &[1, 4, 1]);
 
     // pad_total = (4-1)*1 + 4 - 4 = 3, so 1 zero leads and 2 trail. The windows over
@@ -262,9 +263,9 @@ fn depthwise_conv1d_depth_multiplier_widens_every_shape() {
     assert_eq!(params_of(&conv), 3 * 4 * 3 + 12);
 
     let x = Array::ones((2_usize, 10, 4)).into_dyn();
-    let out = conv.forward(&x).unwrap();
+    let out = conv.forward(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[2, 8, 12], "output carries C * dm channels");
-    assert_eq!(conv.output_shape(), "(2, 8, 12)");
+    assert_eq!(conv.output_shape(), "(None, 8, 12)");
 }
 
 // DepthwiseConv1D - the remaining contract
@@ -276,23 +277,24 @@ fn depthwise_conv1d_predict_equals_forward() {
     conv.build(&Shape::known(&[2, 9, 2])).unwrap();
     let x = seq([2, 9, 2], ramp(36));
 
-    let predicted = conv.predict(&x).unwrap();
-    let forwarded = conv.forward(&x).unwrap();
+    let predicted = conv.forward(&x, &mut Ctx::inference()).unwrap();
+    let forwarded = conv.forward(&x, &mut Ctx::training()).unwrap();
     assert_allclose(&predicted, &forwarded, 0.0_f32);
 
     // `predict` left no cache, so a second `predict` cannot enable `backward`
     let mut fresh = DepthwiseConv1D::new(3, 2, Linear::new()).unwrap();
     fresh.build(&Shape::known(&[2, 9, 2])).unwrap();
-    fresh.predict(&x).unwrap();
-    assert!(fresh.backward(&predicted).is_err());
+    let mut fresh_ctx = Ctx::inference();
+    fresh.forward(&x, &mut fresh_ctx).unwrap();
+    assert!(fresh.backward(&predicted, &mut fresh_ctx).is_err());
 }
 
 /// `backward` before `forward` returns an error rather than reading an empty cache
 #[test]
 fn depthwise_conv1d_backward_before_forward_errors() {
-    let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
+    let conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
     let grad = Array::ones((1_usize, 4, 2)).into_dyn();
-    assert!(conv.backward(&grad).is_err());
+    assert!(conv.backward(&grad, &mut Ctx::training()).is_err());
 }
 
 /// A rejected input leaves no partial cache behind
@@ -301,11 +303,12 @@ fn depthwise_conv1d_rejected_forward_leaves_no_cache() {
     let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
     conv.build(&Shape::known(&[1, 5, 2])).unwrap();
     let wrong = Array::ones((1_usize, 5, 3)).into_dyn();
-    assert!(conv.forward(&wrong).is_err());
+    let mut ctx = Ctx::training();
+    assert!(conv.forward(&wrong, &mut ctx).is_err());
 
     let grad = Array::ones((1_usize, 4, 2)).into_dyn();
     assert!(
-        conv.backward(&grad).is_err(),
+        conv.backward(&grad, &mut ctx).is_err(),
         "a rejected forward must not enable backward"
     );
 }
@@ -347,13 +350,14 @@ fn depthwise_conv1d_emits_c_order_tensors_from_a_strided_input() {
     let mut conv = DepthwiseConv1D::new(2, 1, Linear::new())
         .unwrap()
         .with_random_state(7);
-    let out = conv.forward(&strided).unwrap();
+    let mut ctx = Ctx::training();
+    let out = conv.forward_mut(&strided, &mut ctx).unwrap();
     assert!(out.is_standard_layout(), "forward output must be C order");
 
     let grad_seed = Array::from_shape_vec((1_usize, 3, 6), ramp(18))
         .unwrap()
         .into_dyn();
-    let grad = conv.backward(&grad_seed).unwrap();
+    let grad = conv.backward(&grad_seed, &mut ctx).unwrap();
     assert!(grad.is_standard_layout(), "input gradient must be C order");
 
     // The values must not depend on the input layout either
@@ -361,8 +365,17 @@ fn depthwise_conv1d_emits_c_order_tensors_from_a_strided_input() {
     let mut twin = DepthwiseConv1D::new(2, 1, Linear::new())
         .unwrap()
         .with_random_state(7);
-    assert_allclose(&twin.forward(&repacked).unwrap(), &out, 0.0_f32);
-    assert_allclose(&twin.backward(&grad_seed).unwrap(), &grad, 0.0_f32);
+    let mut twin_ctx = Ctx::training();
+    assert_allclose(
+        &twin.forward_mut(&repacked, &mut twin_ctx).unwrap(),
+        &out,
+        0.0_f32,
+    );
+    assert_allclose(
+        &twin.backward(&grad_seed, &mut twin_ctx).unwrap(),
+        &grad,
+        0.0_f32,
+    );
 }
 
 /// The parallel branch and the serial branch return the same numbers
@@ -392,27 +405,41 @@ fn depthwise_conv1d_parallel_path_matches_the_serial_path() {
         .unwrap()
         .with_random_state(11);
 
+    let mut batch_ctx = Ctx::training();
     let batched_out = conv
-        .forward(&seq([samples, length, channels], data.clone()))
+        .forward_mut(
+            &seq([samples, length, channels], data.clone()),
+            &mut batch_ctx,
+        )
         .unwrap();
     let batched_grad = conv
-        .backward(&seq([samples, out_length, channels], grad_data.clone()))
+        .backward(
+            &seq([samples, out_length, channels], grad_data.clone()),
+            &mut batch_ctx,
+        )
         .unwrap();
 
     let in_stride = length * channels;
     let out_stride = out_length * channels;
     for sample in 0..samples {
+        let mut ctx = Ctx::training();
         let one_out = conv
-            .forward(&seq(
-                [1, length, channels],
-                data[sample * in_stride..(sample + 1) * in_stride].to_vec(),
-            ))
+            .forward(
+                &seq(
+                    [1, length, channels],
+                    data[sample * in_stride..(sample + 1) * in_stride].to_vec(),
+                ),
+                &mut ctx,
+            )
             .unwrap();
         let one_grad = conv
-            .backward(&seq(
-                [1, out_length, channels],
-                grad_data[sample * out_stride..(sample + 1) * out_stride].to_vec(),
-            ))
+            .backward(
+                &seq(
+                    [1, out_length, channels],
+                    grad_data[sample * out_stride..(sample + 1) * out_stride].to_vec(),
+                ),
+                &mut ctx,
+            )
             .unwrap();
 
         assert_eq!(
@@ -477,7 +504,7 @@ fn separable_conv1d_new_rejects_invalid_args() {
 fn separable_conv1d_forward_rejects_non_3d_input() {
     let mut conv = SeparableConv1D::new(2, 2, 1, 1, Linear::new()).unwrap();
     let x = Array::ones((1_usize, 5, 2, 1)).into_dyn();
-    let err = conv.forward(&x).unwrap_err();
+    let err = conv.forward_mut(&x, &mut Ctx::training()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "expected InvalidInput, got {err:?}"
@@ -494,13 +521,13 @@ fn separable_conv1d_forward_rejects_wrong_channels() {
     let mut conv = SeparableConv1D::new(2, 2, 1, 1, Linear::new()).unwrap();
     conv.build(&Shape::known(&[1_usize, 5, 2])).unwrap();
     let x = Array::ones((1_usize, 5, 3)).into_dyn();
-    let err = conv.forward(&x).unwrap_err();
+    let err = conv.forward(&x, &mut Ctx::training()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "expected InvalidInput, got {err:?}"
     );
     // `predict` guards the same way, so neither entry point can reach the kernel
-    let err = conv.predict(&x).unwrap_err();
+    let err = conv.forward(&x, &mut Ctx::inference()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "expected InvalidInput from predict, got {err:?}"
@@ -521,10 +548,13 @@ fn separable_conv1d_output_shape_and_param_count() {
         assert_eq!(params_of(&conv), want_params, "dm {dm} parameter count");
 
         let out = conv
-            .forward(&Array::ones((2_usize, 10, 3)).into_dyn())
+            .forward(
+                &Array::ones((2_usize, 10, 3)).into_dyn(),
+                &mut Ctx::training(),
+            )
             .unwrap();
         assert_eq!(out.shape(), &[2, 8, 5], "dm {dm} output shape");
-        assert_eq!(conv.output_shape(), "(2, 8, 5)");
+        assert_eq!(conv.output_shape(), "(None, 8, 5)");
     }
 }
 
@@ -543,7 +573,7 @@ fn separable_conv1d_identity_reproduces_input() {
     .unwrap();
 
     let x = seq([1, 5, 1], ramp(5));
-    let out = conv.forward(&x).unwrap();
+    let out = conv.forward(&x, &mut Ctx::training()).unwrap();
     assert_allclose(&out, &x, 1e-6_f32);
 }
 
@@ -560,7 +590,7 @@ fn separable_conv1d_known_weight_forward_values() {
     conv.set_weights(dw, pw, Array1::from_elem(1, 1.0)).unwrap();
 
     let x = seq([1, 5, 1], vec![1.0, 2.0, 3.0, 4.0, 5.0]);
-    let out = conv.forward(&x).unwrap();
+    let out = conv.forward(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[1, 3, 1]);
 
     // depthwise sums are 1+3, 2+4, 3+5, then scaled by 2 with bias 1
@@ -585,7 +615,7 @@ fn separable_conv1d_same_padding_zero_pads_depthwise() {
     .unwrap();
 
     let x = seq([1, 5, 1], vec![1.0, 2.0, 3.0, 4.0, 5.0]);
-    let out = conv.forward(&x).unwrap();
+    let out = conv.forward(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[1, 5, 1]);
 
     // pad_total = 2, so 1 zero sits on each edge. Each entry sums its in-bounds neighborhood
@@ -609,7 +639,7 @@ fn separable_conv1d_depth_multiplier_2_forward_values() {
 
     // 2 positions: [2, 3] then [1, 1]
     let x = seq([1, 2, 2], vec![2.0, 3.0, 1.0, 1.0]);
-    let out = conv.forward(&x).unwrap();
+    let out = conv.forward(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[1, 2, 1]);
 
     // position 0: 2*1*1 + 2*10*2 + 3*100*4 + 3*1000*8 = 25242
@@ -675,8 +705,15 @@ fn separable_conv1d_matches_a_depthwise_then_pointwise_stack() {
         .unwrap();
 
     let x = seq([2, length, channels], ramp(2 * length * channels));
-    let stacked = stage_2.predict(&stage_1.predict(&x).unwrap()).unwrap();
-    assert_allclose(&fused.predict(&x).unwrap(), &stacked, 1e-5_f32);
+    let stage_1_out = stage_1.forward(&x, &mut Ctx::inference()).unwrap();
+    let stacked = stage_2
+        .forward(&stage_1_out, &mut Ctx::inference())
+        .unwrap();
+    assert_allclose(
+        &fused.forward(&x, &mut Ctx::inference()).unwrap(),
+        &stacked,
+        1e-5_f32,
+    );
 }
 
 // SeparableConv1D - the remaining contract
@@ -687,17 +724,17 @@ fn separable_conv1d_predict_equals_forward() {
     let mut conv = SeparableConv1D::new(3, 3, 2, 2, Linear::new()).unwrap();
     conv.build(&Shape::known(&[2, 9, 2])).unwrap();
     let x = seq([2, 9, 2], ramp(36));
-    let predicted = conv.predict(&x).unwrap();
-    let forwarded = conv.forward(&x).unwrap();
+    let predicted = conv.forward(&x, &mut Ctx::inference()).unwrap();
+    let forwarded = conv.forward(&x, &mut Ctx::training()).unwrap();
     assert_allclose(&predicted, &forwarded, 0.0_f32);
 }
 
 /// `backward` before `forward` returns an error rather than reading an empty cache
 #[test]
 fn separable_conv1d_backward_before_forward_errors() {
-    let mut conv = SeparableConv1D::new(2, 2, 1, 1, Linear::new()).unwrap();
+    let conv = SeparableConv1D::new(2, 2, 1, 1, Linear::new()).unwrap();
     let grad = Array::ones((1_usize, 4, 2)).into_dyn();
-    assert!(conv.backward(&grad).is_err());
+    assert!(conv.backward(&grad, &mut Ctx::training()).is_err());
 }
 
 /// `set_weights` rejects any of the 3 arrays whose shape does not match the layer
@@ -738,21 +775,31 @@ fn separable_conv1d_emits_c_order_tensors_from_a_strided_input() {
     let mut conv = SeparableConv1D::new(2, 2, 1, 1, Linear::new())
         .unwrap()
         .with_random_state(3);
-    let out = conv.forward(&strided).unwrap();
+    let mut ctx = Ctx::training();
+    let out = conv.forward_mut(&strided, &mut ctx).unwrap();
     assert!(out.is_standard_layout(), "forward output must be C order");
 
     let grad_seed = Array::from_shape_vec((1_usize, 3, 2), ramp(6))
         .unwrap()
         .into_dyn();
-    let grad = conv.backward(&grad_seed).unwrap();
+    let grad = conv.backward(&grad_seed, &mut ctx).unwrap();
     assert!(grad.is_standard_layout(), "input gradient must be C order");
 
     let repacked = strided.as_standard_layout().into_owned();
     let mut twin = SeparableConv1D::new(2, 2, 1, 1, Linear::new())
         .unwrap()
         .with_random_state(3);
-    assert_allclose(&twin.forward(&repacked).unwrap(), &out, 0.0_f32);
-    assert_allclose(&twin.backward(&grad_seed).unwrap(), &grad, 0.0_f32);
+    let mut twin_ctx = Ctx::training();
+    assert_allclose(
+        &twin.forward_mut(&repacked, &mut twin_ctx).unwrap(),
+        &out,
+        0.0_f32,
+    );
+    assert_allclose(
+        &twin.backward(&grad_seed, &mut twin_ctx).unwrap(),
+        &grad,
+        0.0_f32,
+    );
 }
 
 // Named weights
@@ -782,11 +829,12 @@ fn conv_1d_variants_name_their_weights() {
 fn separable_conv1d_bias_is_exempt_from_weight_decay() {
     let mut conv = SeparableConv1D::new(2, 2, 1, 1, Linear::new()).unwrap();
     let x = seq([1, 5, 2], ramp(10));
-    conv.forward(&x).unwrap();
-    conv.backward(&Array::ones((1_usize, 4, 2)).into_dyn())
+    let mut ctx = Ctx::training();
+    conv.forward_mut(&x, &mut ctx).unwrap();
+    conv.backward(&Array::ones((1_usize, 4, 2)).into_dyn(), &mut ctx)
         .unwrap();
 
-    let params = conv.parameters();
+    let params = conv.parameters_mut();
     assert_eq!(params.len(), 3, "depthwise, pointwise, and bias");
     assert!(params[0].decays, "the depthwise kernel decays");
     assert!(params[1].decays, "the pointwise kernel decays");
@@ -798,11 +846,12 @@ fn separable_conv1d_bias_is_exempt_from_weight_decay() {
 fn depthwise_conv1d_bias_is_exempt_from_weight_decay() {
     let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
     let x = seq([1, 5, 2], ramp(10));
-    conv.forward(&x).unwrap();
-    conv.backward(&Array::ones((1_usize, 4, 2)).into_dyn())
+    let mut ctx = Ctx::training();
+    conv.forward_mut(&x, &mut ctx).unwrap();
+    conv.backward(&Array::ones((1_usize, 4, 2)).into_dyn(), &mut ctx)
         .unwrap();
 
-    let params = conv.parameters();
+    let params = conv.parameters_mut();
     assert_eq!(params.len(), 2, "kernel and bias");
     assert!(params[0].decays, "the kernel decays");
     assert!(!params[1].decays, "the bias does not decay");

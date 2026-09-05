@@ -1,8 +1,7 @@
-//! Regularization layers and the shared training-mode infrastructure that backs them
+//! Regularization layers
 //!
-//! Re-exports the 3 families of regularization layers. Defines the macros that generate their
-//! common training-mode methods, plus a private `validation` submodule of parameter and
-//! input-shape checks shared across the layers.
+//! Re-exports the 3 families of regularization layers, plus a private `validation` submodule
+//! of parameter and input-shape checks shared across the layers.
 //!
 //! The families are:
 //! - dropout: [`Dropout`](crate::neural_network::layers::regularization::dropout::dropout::Dropout)
@@ -18,10 +17,10 @@
 //!   and [`UnitNormalization`](crate::neural_network::layers::UnitNormalization)
 //!
 //! Every layer here behaves differently in training versus inference, except
-//! `UnitNormalization`, which reads no statistic of the batch and draws from no RNG. The module
-//! defines 2 macros to toggle the shared `training` field. `mode_dependent_layer_set_training`
-//! generates the inherent `set_training` method. `mode_dependent_layer_trait` generates the
-//! `set_training_if_mode_dependent` trait method that calls it.
+//! `UnitNormalization`, which reads no statistic of the batch and draws from no RNG. The mode
+//! is not a field of a layer. It is the training flag of the
+//! [`Ctx`](crate::neural_network::Ctx) that the pass carries, and every layer of this module
+//! reads it with [`Ctx::is_training`](crate::neural_network::Ctx::is_training).
 
 /// Dropout layers for neural networks
 pub mod dropout;
@@ -35,32 +34,3 @@ mod validation;
 pub use dropout::*;
 pub use noise_injection::*;
 pub use normalization::*;
-
-/// Defines a layer-specific `set_training` method for toggling training mode
-///
-/// The generated method sets the `training` field to `true` (training) or `false`
-/// (inference). This drives behavior in the forward and backward passes
-macro_rules! mode_dependent_layer_set_training {
-    () => {
-        /// Sets the training mode for the layer, updating its `training` field
-        ///
-        /// # Parameters
-        ///
-        /// - `is_training` - `true` for training mode, `false` for inference mode
-        pub fn set_training(&mut self, is_training: bool) {
-            self.training = is_training;
-        }
-    };
-}
-pub(in crate::neural_network::layers::regularization) use mode_dependent_layer_set_training;
-
-/// Defines the trait method `set_training_if_mode_dependent` for a layer whose behavior
-/// depends on training versus inference mode
-macro_rules! mode_dependent_layer_trait {
-    () => {
-        fn set_training_if_mode_dependent(&mut self, is_training: bool) {
-            self.set_training(is_training);
-        }
-    };
-}
-pub(in crate::neural_network::layers::regularization) use mode_dependent_layer_trait;

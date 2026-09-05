@@ -9,6 +9,7 @@
 //! the shortest decimal form that reads back as the same `f32`.
 
 use ndarray::{Array1, Array2, Array3, IxDyn};
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
@@ -19,7 +20,7 @@ use rustyml::neural_network::layers::flatten::Flatten;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::SequentialBuilder;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, LayerBase, ParamId, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::{assert_allclose, named};
@@ -92,10 +93,10 @@ fn embedding_forward_matches_the_keras_rank_2_reference() {
     let table = vec![
         -0.015, -0.383, 0.963, -0.741, -0.828, -0.583, -0.099, -0.909,
     ];
-    let mut layer = embedding_with_table(4, 2, table);
+    let layer = embedding_with_table(4, 2, table);
     let x = t2(2, 3, vec![0.0, 1.0, 2.0, 3.0, 0.0, 1.0]);
 
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward(&x, &mut Ctx::training()).unwrap();
     let expected = t3(
         2,
         3,
@@ -111,16 +112,23 @@ fn embedding_forward_matches_the_keras_rank_2_reference() {
 /// A rank-1 index vector gives a rank-2 output, and a rank-3 batch gives a rank-4 output
 #[test]
 fn embedding_forward_adds_exactly_1_axis_at_any_rank() {
-    let mut layer = embedding_with_table(4, 3, reference_table());
+    let layer = embedding_with_table(4, 3, reference_table());
+    let mut ctx = Ctx::training();
 
     let rank_1 = Array1::from_vec(vec![2.0f32, 0.0]).into_dyn();
-    assert_eq!(layer.forward(&rank_1).unwrap().shape(), &[2, 3]);
+    assert_eq!(layer.forward(&rank_1, &mut ctx).unwrap().shape(), &[2, 3]);
 
     let rank_2 = t2(2, 2, vec![0.0, 1.0, 2.0, 3.0]);
-    assert_eq!(layer.forward(&rank_2).unwrap().shape(), &[2, 2, 3]);
+    assert_eq!(
+        layer.forward(&rank_2, &mut ctx).unwrap().shape(),
+        &[2, 2, 3]
+    );
 
     let rank_3 = t3(2, 1, 2, vec![0.0, 1.0, 2.0, 3.0]);
-    assert_eq!(layer.forward(&rank_3).unwrap().shape(), &[2, 1, 2, 3]);
+    assert_eq!(
+        layer.forward(&rank_3, &mut ctx).unwrap().shape(),
+        &[2, 1, 2, 3]
+    );
 }
 
 /// An index truncates toward zero, exactly as the Keras cast to a whole number does
@@ -130,11 +138,11 @@ fn embedding_forward_truncates_an_index_toward_zero() {
         -0.352, 0.378, -0.549, 0.775, 0.492, 0.323, 0.203, -0.655, 0.872, 0.114, 0.373, -0.47,
         0.77, 0.008, 0.255,
     ];
-    let mut layer = embedding_with_table(5, 3, table.clone());
+    let layer = embedding_with_table(5, 3, table.clone());
     // Keras case `float_index_truncate_toward_zero`: these 5 values cast to 0, 0, 1, 2, and 4
     let x = Array1::from_vec(vec![-0.5f32, 0.5, 1.7, 2.9, 4.999]).into_dyn();
 
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward(&x, &mut Ctx::training()).unwrap();
     let mut expected = Vec::new();
     for row in [0usize, 0, 1, 2, 4] {
         expected.extend_from_slice(&table[row * 3..row * 3 + 3]);
@@ -142,14 +150,14 @@ fn embedding_forward_truncates_an_index_toward_zero() {
     assert_allclose(&out, &t2(5, 3, expected), 1e-6_f32);
 }
 
-/// The eval path gives the same values as the training path
+/// The inference path gives the same values as the training path
 #[test]
 fn embedding_predict_equals_forward() {
-    let mut layer = embedding_with_table(4, 3, reference_table());
+    let layer = embedding_with_table(4, 3, reference_table());
     let x = t2(2, 4, vec![1.0, 1.0, 0.0, 3.0, 3.0, 1.0, 2.0, 1.0]);
 
-    let training = layer.forward(&x).unwrap();
-    let inference = layer.predict(&x).unwrap();
+    let training = layer.forward(&x, &mut Ctx::training()).unwrap();
+    let inference = layer.forward(&x, &mut Ctx::inference()).unwrap();
     assert_allclose(&inference, &training, 0.0_f32);
 }
 
@@ -158,14 +166,14 @@ fn embedding_predict_equals_forward() {
 /// An index tensor whose memory is not in C order still gives the right values, in C order
 #[test]
 fn embedding_accepts_an_input_that_is_not_in_c_order() {
-    let mut layer = embedding_with_table(4, 3, reference_table());
+    let layer = embedding_with_table(4, 3, reference_table());
     let base = t2(2, 3, vec![0.0, 1.0, 2.0, 3.0, 0.0, 1.0]);
 
     // A transposed view holds the same values in a different memory order
     let transposed = base.clone().permuted_axes(IxDyn(&[1, 0]));
     assert!(!transposed.is_standard_layout());
 
-    let out = layer.forward(&transposed).unwrap();
+    let out = layer.forward(&transposed, &mut Ctx::training()).unwrap();
     assert!(out.is_standard_layout(), "the output must be in C order");
 
     // Row j of the transposed input holds column j of the base input
@@ -186,9 +194,10 @@ fn embedding_accepts_an_input_that_is_not_in_c_order() {
 /// row 1 4 times, row 3 twice, and rows 0 and 2 once each
 #[test]
 fn embedding_backward_matches_the_keras_scatter_add_reference() {
-    let mut layer = embedding_with_table(4, 3, reference_table());
+    let layer = embedding_with_table(4, 3, reference_table());
     let x = t2(2, 4, vec![1.0, 1.0, 0.0, 3.0, 3.0, 1.0, 2.0, 1.0]);
-    layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    layer.forward(&x, &mut ctx).unwrap();
 
     let upstream = t3(
         2,
@@ -200,7 +209,7 @@ fn embedding_backward_matches_the_keras_scatter_add_reference() {
             0.326,
         ],
     );
-    layer.backward(&upstream).unwrap();
+    layer.backward(&upstream, &mut ctx).unwrap();
 
     let expected = Array2::from_shape_vec(
         (4, 3),
@@ -211,9 +220,15 @@ fn embedding_backward_matches_the_keras_scatter_add_reference() {
     )
     .unwrap();
 
-    let params = layer.parameters();
-    assert_eq!(params.len(), 1, "the layer exposes exactly 1 tensor");
-    let grad = Array2::from_shape_vec((4, 3), params[0].grad.to_vec()).unwrap();
+    assert_eq!(ctx.grads().len(), 1, "the layer holds exactly 1 tensor");
+    let values: Vec<f32> = ctx
+        .grads()
+        .get(ParamId::new(0, "embeddings"))
+        .unwrap()
+        .iter()
+        .copied()
+        .collect();
+    let grad = Array2::from_shape_vec((4, 3), values).unwrap();
     assert_allclose(&grad, &expected, 1e-6_f32);
 }
 
@@ -223,18 +238,19 @@ fn embedding_backward_leaves_an_unused_row_at_zero() {
     let table = vec![
         -0.801, 0.112, -0.008, 0.734, -0.247, -0.6, 0.372, 0.384, -0.024, -0.424,
     ];
-    let mut layer = embedding_with_table(5, 2, table);
+    let layer = embedding_with_table(5, 2, table);
     // Keras case `grad_rank1_untouched_rows_stay_zero`: the index list never selects rows 1, 3,
     // and 4
     let x = Array1::from_vec(vec![2.0f32, 2.0, 2.0, 0.0]).into_dyn();
-    layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    layer.forward(&x, &mut ctx).unwrap();
 
     let upstream = t2(
         4,
         2,
         vec![-0.76, 0.854, -0.992, 0.408, 0.544, 0.466, -0.867, 0.282],
     );
-    layer.backward(&upstream).unwrap();
+    layer.backward(&upstream, &mut ctx).unwrap();
 
     let expected = Array2::from_shape_vec(
         (5, 2),
@@ -244,8 +260,14 @@ fn embedding_backward_leaves_an_unused_row_at_zero() {
     )
     .unwrap();
 
-    let params = layer.parameters();
-    let grad = Array2::from_shape_vec((5, 2), params[0].grad.to_vec()).unwrap();
+    let values: Vec<f32> = ctx
+        .grads()
+        .get(ParamId::new(0, "embeddings"))
+        .unwrap()
+        .iter()
+        .copied()
+        .collect();
+    let grad = Array2::from_shape_vec((5, 2), values).unwrap();
     assert_allclose(&grad, &expected, 1e-6_f32);
     for row in [1usize, 3, 4] {
         assert_eq!(grad[[row, 0]], 0.0, "row {row} must stay exactly 0");
@@ -253,23 +275,35 @@ fn embedding_backward_leaves_an_unused_row_at_zero() {
     }
 }
 
-/// A second backward pass replaces the first gradient rather than adding to it
+/// The second step gives the same gradient as the first, and adds nothing to it
 ///
-/// The layer keeps its gradient buffer allocated between steps. A buffer that is not cleared
-/// would double the gradient on the second step, and every later step would drift further
+/// Each step builds its own context, and the gradient of a step lives in that context alone. A
+/// store that carried a value over would double the gradient on the second step, and every
+/// later step would drift further
 #[test]
 fn embedding_backward_clears_the_gradient_of_the_previous_step() {
-    let mut layer = embedding_with_table(3, 2, vec![0.0, 1.0, 10.0, 11.0, 20.0, 21.0]);
+    let layer = embedding_with_table(3, 2, vec![0.0, 1.0, 10.0, 11.0, 20.0, 21.0]);
     let x = Array1::from_vec(vec![1.0f32, 1.0]).into_dyn();
     let upstream = t2(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
 
-    layer.forward(&x).unwrap();
-    layer.backward(&upstream).unwrap();
-    let first = layer.parameters()[0].grad.to_vec();
+    let table_gradient = |ctx: &Ctx| -> Vec<f32> {
+        ctx.grads()
+            .get(ParamId::new(0, "embeddings"))
+            .unwrap()
+            .iter()
+            .copied()
+            .collect()
+    };
 
-    layer.forward(&x).unwrap();
-    layer.backward(&upstream).unwrap();
-    let second = layer.parameters()[0].grad.to_vec();
+    let mut first_step = Ctx::training();
+    layer.forward(&x, &mut first_step).unwrap();
+    layer.backward(&upstream, &mut first_step).unwrap();
+    let first = table_gradient(&first_step);
+
+    let mut second_step = Ctx::training();
+    layer.forward(&x, &mut second_step).unwrap();
+    layer.backward(&upstream, &mut second_step).unwrap();
+    let second = table_gradient(&second_step);
 
     assert_eq!(first, vec![0.0, 0.0, 4.0, 6.0, 0.0, 0.0]);
     assert_eq!(
@@ -281,11 +315,14 @@ fn embedding_backward_clears_the_gradient_of_the_previous_step() {
 /// The gradient handed to the layer before this one is 0, and it has the input's shape
 #[test]
 fn embedding_backward_returns_a_zero_input_gradient() {
-    let mut layer = embedding_with_table(4, 3, reference_table());
+    let layer = embedding_with_table(4, 3, reference_table());
     let x = t2(2, 2, vec![0.0, 1.0, 2.0, 3.0]);
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward(&x, &mut ctx).unwrap();
 
-    let grad_input = layer.backward(&Tensor::ones(out.raw_dim())).unwrap();
+    let grad_input = layer
+        .backward(&Tensor::ones(out.raw_dim()), &mut ctx)
+        .unwrap();
     assert_eq!(grad_input.shape(), x.shape());
     assert!(
         grad_input.iter().all(|&v| v == 0.0),
@@ -320,7 +357,8 @@ fn embedding_parallel_gather_matches_the_serial_gather() {
     let mut layer = Embedding::new(input_dim, output_dim)
         .unwrap()
         .with_random_state(31);
-    let parallel = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let parallel = layer.forward_mut(&x, &mut ctx).unwrap();
 
     for sample in 0..samples {
         let row = t2(
@@ -328,7 +366,7 @@ fn embedding_parallel_gather_matches_the_serial_gather() {
             steps,
             indices[sample * steps..(sample + 1) * steps].to_vec(),
         );
-        let serial = layer.forward(&row).unwrap();
+        let serial = layer.forward(&row, &mut ctx).unwrap();
         let expected = parallel
             .slice(ndarray::s![sample..sample + 1, .., ..])
             .to_owned()
@@ -343,10 +381,11 @@ fn embedding_parallel_gather_matches_the_serial_gather() {
 #[test]
 fn embedding_rejects_an_index_outside_the_table() {
     let mut layer = Embedding::new(3, 2).unwrap();
+    let mut ctx = Ctx::training();
     for bad in [3.0f32, 3.5, 100.0, -1.0, -2.5] {
         let x = Array1::from_vec(vec![0.0f32, bad]).into_dyn();
         assert!(
-            matches!(layer.forward(&x), Err(Error::InvalidInput(_))),
+            matches!(layer.forward_mut(&x, &mut ctx), Err(Error::InvalidInput(_))),
             "the index {bad} must be rejected"
         );
     }
@@ -356,10 +395,11 @@ fn embedding_rejects_an_index_outside_the_table() {
 #[test]
 fn embedding_rejects_a_non_finite_index() {
     let mut layer = Embedding::new(3, 2).unwrap();
+    let mut ctx = Ctx::training();
     for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
         let x = Array1::from_vec(vec![0.0f32, bad]).into_dyn();
         assert!(
-            matches!(layer.forward(&x), Err(Error::InvalidInput(_))),
+            matches!(layer.forward_mut(&x, &mut ctx), Err(Error::InvalidInput(_))),
             "the index {bad} must be rejected"
         );
     }
@@ -370,7 +410,10 @@ fn embedding_rejects_a_non_finite_index() {
 fn embedding_rejects_an_empty_input() {
     let mut layer = Embedding::new(3, 2).unwrap();
     let x = t2(0, 4, Vec::new());
-    assert!(matches!(layer.forward(&x), Err(Error::EmptyInput(_))));
+    assert!(matches!(
+        layer.forward_mut(&x, &mut Ctx::training()),
+        Err(Error::EmptyInput(_))
+    ));
 }
 
 /// A scalar input would give an output with no batch axis
@@ -378,16 +421,19 @@ fn embedding_rejects_an_empty_input() {
 fn embedding_rejects_a_scalar_input() {
     let mut layer = Embedding::new(3, 2).unwrap();
     let x = Tensor::zeros(IxDyn(&[]));
-    assert!(matches!(layer.forward(&x), Err(Error::InvalidInput(_))));
+    assert!(matches!(
+        layer.forward_mut(&x, &mut Ctx::training()),
+        Err(Error::InvalidInput(_))
+    ));
 }
 
 /// The backward pass needs the indices the forward pass read
 #[test]
 fn embedding_backward_before_forward_is_an_error() {
-    let mut layer = Embedding::new(3, 2).unwrap();
+    let layer = Embedding::new(3, 2).unwrap();
     let grad = t2(2, 2, vec![1.0, 1.0, 1.0, 1.0]);
     assert!(matches!(
-        layer.backward(&grad),
+        layer.backward(&grad, &mut Ctx::training()),
         Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
     ));
 }
@@ -397,11 +443,12 @@ fn embedding_backward_before_forward_is_an_error() {
 fn embedding_backward_checks_the_gradient_shape() {
     let mut layer = Embedding::new(4, 3).unwrap();
     let x = t2(2, 2, vec![0.0, 1.0, 2.0, 3.0]);
-    layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    layer.forward_mut(&x, &mut ctx).unwrap();
 
     let wrong = t3(2, 2, 4, vec![0.0; 16]);
     assert!(matches!(
-        layer.backward(&wrong),
+        layer.backward(&wrong, &mut ctx),
         Err(Error::ShapeMismatch { .. })
     ));
 }
@@ -420,20 +467,26 @@ fn embedding_set_weights_checks_the_table_shape() {
 
 // Layer trait surface
 
-/// The layer names itself for `summary()`, and reports its shape once a forward pass has run
+/// The layer names itself for `summary()`, and reports the shape that its build settled
 #[test]
 fn embedding_reports_its_type_and_output_shape() {
     let mut layer = Embedding::new(4, 3).unwrap();
     assert_eq!(layer.layer_type(), "Embedding");
     assert_eq!(layer.output_shape(), "Unknown");
 
-    layer.forward(&t2(2, 5, vec![0.0; 10])).unwrap();
-    assert_eq!(layer.output_shape(), "(None, 5, 3)");
-
+    // The table depends on no extent of the input, so the build records the rank alone and
+    // leaves every axis free
+    let mut ctx = Ctx::training();
     layer
-        .forward(&Array1::from_vec(vec![0.0f32, 1.0]).into_dyn())
+        .forward_mut(&t2(2, 5, vec![0.0; 10]), &mut ctx)
         .unwrap();
-    assert_eq!(layer.output_shape(), "(None, 3)");
+    assert_eq!(layer.output_shape(), "(None, None, 3)");
+
+    // A later forward pass writes no shape, so the display value stays where the build put it
+    layer
+        .forward(&Array1::from_vec(vec![0.0f32, 1.0]).into_dyn(), &mut ctx)
+        .unwrap();
+    assert_eq!(layer.output_shape(), "(None, None, 3)");
 }
 
 /// The named weight borrows the live table
@@ -446,21 +499,24 @@ fn embedding_names_its_table_embeddings() {
     assert_eq!(table[[3, 2]], 0.491);
 }
 
-/// The layer exposes no parameter until a backward pass has produced a gradient
+/// The store holds no gradient until a backward pass has produced one
 #[test]
 fn embedding_exposes_no_parameter_before_the_backward_pass() {
     let mut layer = Embedding::new(4, 3).unwrap();
-    assert!(layer.parameters().is_empty());
+    let mut ctx = Ctx::training();
+    assert!(ctx.grads().get(ParamId::new(0, "embeddings")).is_none());
 
     let x = t2(2, 2, vec![0.0, 1.0, 2.0, 3.0]);
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert!(
-        layer.parameters().is_empty(),
+        ctx.grads().get(ParamId::new(0, "embeddings")).is_none(),
         "a forward pass alone produces no gradient"
     );
 
-    layer.backward(&Tensor::ones(out.raw_dim())).unwrap();
-    assert_eq!(layer.parameters().len(), 1);
+    layer
+        .backward(&Tensor::ones(out.raw_dim()), &mut ctx)
+        .unwrap();
+    assert_eq!(ctx.grads().len(), 1);
 }
 
 /// A seed makes the starting table reproducible, and the table stays inside the uniform range

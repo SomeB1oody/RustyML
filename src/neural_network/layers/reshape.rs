@@ -1,11 +1,14 @@
-//! Reshape layer that rewrites the axes after the batch axis into a target shape, and caches
+//! Reshape layer that rewrites the axes after the batch axis into a target shape, and parks
 //! the input shape for backpropagation
 
 use crate::error::{Context, Error};
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    build_config_function, no_trainable_parameters_layer_functions,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 use ndarray::IxDyn;
 
 /// Rewrites the axes after the batch axis into a target shape
@@ -24,8 +27,9 @@ use ndarray::IxDyn;
 /// positions. See [`Flatten`](crate::neural_network::layers::flatten::Flatten) for the same
 /// caution about ordering.
 ///
-/// Unlike `Flatten`, this layer takes no input shape. It needs none, because it derives the
-/// output shape from the tensor it receives
+/// Unlike `Flatten`, this layer derives the output shape from the tensor it receives. A target
+/// that names every extent therefore fixes the element count an input must carry, and the layer
+/// reports its own output shape before the build
 ///
 /// # Examples
 ///
@@ -60,8 +64,8 @@ use ndarray::IxDyn;
 pub struct Reshape {
     /// Target extent of every axis after the batch axis. At most 1 entry is `-1`
     target_shape: Vec<isize>,
-    /// Shape of the most recent forward input. The backward pass restores it
-    input_shape: Option<Vec<usize>>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
 }
 
 impl Reshape {
@@ -111,7 +115,7 @@ impl Reshape {
 
         Ok(Reshape {
             target_shape,
-            input_shape: None,
+            built: None,
         })
     }
 
@@ -180,41 +184,63 @@ impl Reshape {
     }
 }
 
-impl Layer for Reshape {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.is_empty() {
-            return Err(Error::empty_input("input tensor"));
-        }
-
-        let output_shape = self.resolve(input.shape())?;
-        self.input_shape = Some(input.shape().to_vec());
-
-        Ok(input
-            .to_shape(IxDyn(&output_shape))
-            .context("reshape input")?
-            .to_owned())
+impl LayerBase for Reshape {
+    fn layer_type(&self) -> &str {
+        "Reshape"
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.is_empty() {
-            return Err(Error::empty_input("input tensor"));
+    fn known_input_shapes(&self) -> Option<Vec<Shape>> {
+        match &self.built {
+            Some(shape) => Some(vec![shape.free_batch()]),
+            // A target that holds a -1 fixes no element count, so the layer knows nothing yet
+            None if self.target_shape.contains(&-1) => None,
+            // A target with no -1 fixes the element count an input must carry, so the layer
+            // describes its own output before any tensor arrives
+            None => Some(vec![Shape::new(vec![
+                None,
+                Some(self.target_shape.iter().map(|&e| e as usize).product()),
+            ])]),
         }
-
-        let output_shape = self.resolve(input.shape())?;
-
-        Ok(input
-            .to_shape(IxDyn(&output_shape))
-            .context("reshape input")?
-            .to_owned())
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        let Some(input_shape) = &self.input_shape else {
-            return Err(Error::forward_pass_not_run("Reshape"));
+    build_config_function!();
+
+    no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for Reshape {
+    /// Records the shape the layer rewrites. The layer holds no array, so nothing is allocated.
+    /// The shape algebra checks the element count against the target
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "Reshape", input)? else {
+            return Ok(());
         };
+        self.compute_output_shape(&built)?;
+        self.built = Some(built);
+        Ok(())
+    }
 
-        let expected = self.resolve(input_shape)?;
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        if input.is_empty() {
+            return Err(Error::empty_input("input tensor"));
+        }
+
+        let output_shape = self.resolve(input.shape())?;
+
+        if ctx.is_training() {
+            ctx.push_cache(input.shape().to_vec());
+        }
+
+        Ok(input
+            .to_shape(IxDyn(&output_shape))
+            .context("reshape input")?
+            .to_owned())
+    }
+
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let input_shape: Vec<usize> = ctx.pop_cache("Reshape")?;
+
+        let expected = self.resolve(&input_shape)?;
         if grad_output.shape() != expected.as_slice() {
             return Err(Error::shape_mismatch(expected, grad_output.shape()));
         }
@@ -226,32 +252,14 @@ impl Layer for Reshape {
             .to_owned())
     }
 
-    fn layer_type(&self) -> &str {
-        "Reshape"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        match &self.input_shape {
-            Some(shape) => Some(Shape::with_free_batch(shape)),
-            // A target that holds a -1 fixes no element count, so the layer knows nothing yet
-            None if self.target_shape.contains(&-1) => None,
-            // A target with no -1 fixes the element count an input must carry, so the layer
-            // describes its own output before any tensor arrives
-            None => Some(Shape::new(vec![
-                None,
-                Some(self.target_shape.iter().map(|&e| e as usize).product()),
-            ])),
-        }
-    }
-
     /// The batch axis passes through, and the target rewrites every later axis
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         let (batch, tail) = input.split_batch("Reshape")?;
-        // `resolve` reads the batch axis, so the list it takes starts with one
-        let mut dims = vec![0];
+        // `resolve` reads the batch axis, so the list it takes starts with one. A free batch
+        // takes 1, because `resolve` names the whole list in the message it gives for a count
+        // that does not agree, and a 0 there would read as a real extent
+        let mut dims = vec![batch.unwrap_or(1)];
         dims.extend(tail);
         Ok(Shape::from_batch(batch, &self.resolve(&dims)?[1..]))
     }
-
-    no_trainable_parameters_layer_functions!();
 }

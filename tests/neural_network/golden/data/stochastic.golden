@@ -19,6 +19,7 @@
 # Regeneration history, newest first. Each line holds the reason of 1 run that wrote
 # this file.
 #
+# reason the pure known_input_shapes reports the build shape with a free batch axis
 # reason the checkpoint is addressed by name, so the layer supplies every recorded parameter name and the parameter count records both halves
 #
 # Each value line holds the raw f32 bits from to_bits, in 8 lowercase hexadecimal
@@ -28,11 +29,11 @@
 
 format 6
 family stochastic
-content_digest 895f8767469c3b1b cases 24 values 2792
+content_digest a36e72219e069ee9 cases 24 values 2792
 
 case Dropout rate_0p5_training
 mode training
-output_shape "(2, 8)"
+output_shape "(None, 8)"
 param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
@@ -106,7 +107,7 @@ end
 
 case Dropout rate_0p5_inference
 mode inference
-output_shape "(2, 8)"
+output_shape "(None, 8)"
 param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
@@ -180,7 +181,7 @@ end
 
 case Dropout rate_0p0_training
 mode training
-output_shape "(2, 8)"
+output_shape "(None, 8)"
 param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
@@ -254,7 +255,7 @@ end
 
 case Dropout rate_1p0_training
 mode training
-output_shape "(2, 8)"
+output_shape "(None, 8)"
 param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
@@ -328,7 +329,7 @@ end
 
 case Dropout noise_shape_shared_batch_training
 mode training
-output_shape "(2, 8)"
+output_shape "(None, 8)"
 param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
@@ -402,7 +403,7 @@ end
 
 case Dropout noise_shape_shared_batch_inference
 mode inference
-output_shape "(2, 8)"
+output_shape "(None, 8)"
 param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
@@ -476,7 +477,7 @@ end
 
 case SpatialDropout1D rate_0p5_training
 mode training
-output_shape "(2, 4, 5)"
+output_shape "(None, 4, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 4 5
   c0000000  # -2.0
@@ -646,7 +647,7 @@ end
 
 case SpatialDropout1D rate_0p5_inference
 mode inference
-output_shape "(2, 4, 5)"
+output_shape "(None, 4, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 4 5
   c0000000  # -2.0
@@ -816,7 +817,7 @@ end
 
 case SpatialDropout2D rate_0p5_training
 mode training
-output_shape "(2, 3, 3, 4)"
+output_shape "(None, 3, 3, 4)"
 param_count trainable 0 non_trainable 0
 tensor input 2 3 3 4
   c0000000  # -2.0
@@ -1114,7 +1115,7 @@ end
 
 case SpatialDropout2D rate_0p5_inference
 mode inference
-output_shape "(2, 3, 3, 4)"
+output_shape "(None, 3, 3, 4)"
 param_count trainable 0 non_trainable 0
 tensor input 2 3 3 4
   c0000000  # -2.0
@@ -1412,7 +1413,7 @@ end
 
 case SpatialDropout3D rate_0p5_training
 mode training
-output_shape "(2, 2, 2, 3, 4)"
+output_shape "(None, 2, 2, 3, 4)"
 param_count trainable 0 non_trainable 0
 tensor input 2 2 2 3 4
   c0000000  # -2.0
@@ -1806,7 +1807,7 @@ end
 
 case SpatialDropout3D rate_0p5_inference
 mode inference
-output_shape "(2, 2, 2, 3, 4)"
+output_shape "(None, 2, 2, 3, 4)"
 param_count trainable 0 non_trainable 0
 tensor input 2 2 2 3 4
   c0000000  # -2.0
@@ -2200,7 +2201,7 @@ end
 
 case GaussianNoise stddev_0p5_training
 mode training
-output_shape "(2, 8)"
+output_shape "(None, 8)"
 param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
@@ -2274,7 +2275,7 @@ end
 
 case GaussianNoise stddev_0p5_inference
 mode inference
-output_shape "(2, 8)"
+output_shape "(None, 8)"
 param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
@@ -2348,7 +2349,7 @@ end
 
 case GaussianNoise stddev_0p0_training
 mode training
-output_shape "(2, 8)"
+output_shape "(None, 8)"
 param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
@@ -2422,7 +2423,7 @@ end
 
 case GaussianDropout rate_0p3_training
 mode training
-output_shape "(2, 8)"
+output_shape "(None, 8)"
 param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
@@ -2496,7 +2497,7 @@ end
 
 case GaussianDropout rate_0p3_inference
 mode inference
-output_shape "(2, 8)"
+output_shape "(None, 8)"
 param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
@@ -2570,7 +2571,7 @@ end
 
 case GaussianDropout rate_0p0_training
 mode training
-output_shape "(2, 8)"
+output_shape "(None, 8)"
 param_count trainable 0 non_trainable 0
 tensor input 2 8
   c0000000  # -2.0
@@ -2644,7 +2645,7 @@ end
 
 case BatchNormalization channels_4_training
 mode training
-output_shape "(2, 4)"
+output_shape "(None, 4)"
 param_count trainable 8 non_trainable 8
 param_name gamma layer
 param_name beta layer
@@ -2716,7 +2717,7 @@ end
 
 case BatchNormalization spatial_channels_3_training
 mode training
-output_shape "(2, 3, 3, 3)"
+output_shape "(None, 3, 3, 3)"
 param_count trainable 6 non_trainable 6
 param_name gamma layer
 param_name beta layer
@@ -2968,7 +2969,7 @@ end
 
 case BatchNormalization rank_1_training
 mode training
-output_shape "(4)"
+output_shape "(None,)"
 param_count trainable 2 non_trainable 2
 param_name gamma layer
 param_name beta layer
@@ -3012,7 +3013,7 @@ end
 
 case BatchNormalization channels_4_inference
 mode inference
-output_shape "(2, 4)"
+output_shape "(None, 4)"
 param_count trainable 8 non_trainable 8
 weight gamma 4 checksum 657ae2b486ecb3a5
 weight beta 4 checksum 956f95fd52284d8f
@@ -3062,7 +3063,7 @@ end
 
 case BatchNormalization running_mean_after_1_step
 mode inference
-output_shape "(1, 4)"
+output_shape "(None, 4)"
 param_count trainable 8 non_trainable 8
 weight gamma 4 checksum 05e723b2d47efa81
 weight beta 4 checksum 51f05b78ae07c9cc
@@ -3096,7 +3097,7 @@ end
 
 case BatchNormalization running_var_after_1_step
 mode inference
-output_shape "(1, 4)"
+output_shape "(None, 4)"
 param_count trainable 8 non_trainable 8
 weight gamma 4 checksum 05e723b2d47efa81
 weight beta 4 checksum 2b13f8605e2f3b32

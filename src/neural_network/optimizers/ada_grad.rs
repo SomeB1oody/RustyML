@@ -1,11 +1,12 @@
 //! AdaGrad optimizer that adapts per-parameter learning rates using accumulated squared gradients
 
 use crate::error::Error;
+use crate::neural_network::ctx::Grads;
 use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
     validate_global_clipnorm, validate_non_negative_finite, validate_positive_finite,
 };
-use crate::neural_network::traits::{Layer, Optimizer, ParamId};
+use crate::neural_network::traits::{LayerBase, Optimizer, ParamId};
 use std::collections::HashMap;
 
 /// AdaGrad (Adaptive Gradient Algorithm) optimizer
@@ -95,8 +96,15 @@ impl Optimizer for AdaGrad {
         self.learning_rate = learning_rate;
     }
 
-    fn update(&mut self, scope: usize, layer: &mut dyn Layer, grad_scale: f32) {
-        for pg in layer.parameters() {
+    fn update(&mut self, scope: usize, layer: &mut dyn LayerBase, grads: &Grads, grad_scale: f32) {
+        for pg in layer.parameters_mut() {
+            let Some(grad) = grads.get(ParamId::new(scope, pg.name)) else {
+                continue;
+            };
+            let grad = grad
+                .as_slice()
+                .expect("a stored gradient is in the standard memory order");
+            debug_assert_eq!(grad.len(), pg.value.len());
             let accumulator = self
                 .accumulators
                 .entry(ParamId::new(scope, pg.name))
@@ -105,7 +113,7 @@ impl Optimizer for AdaGrad {
                 // The tensor was resized under its own name: start the accumulator again
                 *accumulator = vec![0.0; pg.value.len()];
             }
-            let grad = kernels::scaled_grad(pg.grad, grad_scale);
+            let grad = kernels::scaled_grad(grad, grad_scale);
             // Decoupled weight decay shrinks the parameter before the adaptive step (weights
             // only, biases and normalization gamma/beta excluded)
             if pg.decays {

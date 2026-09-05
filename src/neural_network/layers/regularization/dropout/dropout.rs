@@ -5,15 +5,13 @@ use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::regularization::dropout::{
     broadcast_dropout_scale, dropout_backward,
 };
-use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
-use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::validation::validate_rate;
 use crate::neural_network::layers::validation::start_build;
 use crate::neural_network::layers::{
-    build_on_forward, built_layer_shape_functions, no_trainable_parameters_layer_functions,
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
 };
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, StateSlot, Tensor};
 use crate::parallel_gates::cheap_map_parallel_threshold;
 use ndarray::IxDyn;
 use ndarray_rand::rand::rngs::StdRng;
@@ -32,8 +30,8 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 ///
 /// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of
 /// any shape and of any rank, and 1 layer serves a rank-2 batch of feature vectors and a
-/// rank-4 batch of images alike. [`Layer::build`] records the shape it is given, and
-/// [`Layer::output_shape`] reports it, but no later input is checked against it. The 2 noise
+/// rank-4 batch of images alike. [`UnaryLayer::build`] records the shape it is given, and
+/// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape) reports it, but no later input is checked against it. The 2 noise
 /// layers,
 /// [`GaussianNoise`](crate::neural_network::layers::regularization::noise_injection::gaussian_noise::GaussianNoise)
 /// and
@@ -45,7 +43,8 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 ///
 /// ```rust
 /// use rustyml::neural_network::layers::*;
-/// use rustyml::neural_network::traits::Layer;
+/// use rustyml::neural_network::traits::UnaryLayer;
+/// use rustyml::neural_network::Ctx;
 /// use ndarray::Array2;
 ///
 /// // Create a Dropout layer with 50% dropout rate
@@ -54,7 +53,8 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
 /// // During training, about 50% of values are set to 0
-/// let output = dropout.forward(&input).unwrap();
+/// let mut ctx = Ctx::training();
+/// let output = dropout.forward_mut(&input, &mut ctx).unwrap();
 /// ```
 #[derive(Debug)]
 pub struct Dropout {
@@ -67,13 +67,6 @@ pub struct Dropout {
     /// An entry of `None` takes the extent of the input on that axis, and an entry of 1 makes
     /// the axis share 1 draw. A shorter vector lines up against the last axes of the input
     noise_shape: Option<Vec<Option<usize>>>,
-    /// Binary mask from the last training forward pass, reused in backward
-    ///
-    /// The mask is at the resolved noise shape, which is the input shape unless
-    /// [`Dropout::with_noise_shape`] set a smaller one. The layer never builds a full-size copy
-    mask: Option<Tensor>,
-    /// Whether the layer is in training mode (true) or inference mode (false)
-    training: bool,
     /// Random number generator used to sample the dropout mask
     rng: StdRng,
 }
@@ -104,8 +97,6 @@ impl Dropout {
             rate,
             built: None,
             noise_shape: None,
-            mask: None,
-            training: true,
             rng: crate::random::make_rng(None),
         })
     }
@@ -224,15 +215,34 @@ impl Dropout {
         }
         Ok(resolved)
     }
-
-    mode_dependent_layer_set_training!();
 }
 
-impl Layer for Dropout {
+impl LayerBase for Dropout {
+    fn layer_type(&self) -> &str {
+        "Dropout"
+    }
+
+    built_layer_shape_functions!();
+
+    no_trainable_parameters_layer_functions!();
+
+    /// Takes back the random stream that the forward pass advanced
+    ///
+    /// The stream is the only state of the layer that a forward pass changes. A training pass
+    /// leaves the advanced stream in the context, and this moves it into the layer, so the next
+    /// pass draws the values that follow
+    fn apply_state(&mut self, state: &mut StateSlot<'_>) {
+        if let Some(rng) = state.take::<StdRng>("rng") {
+            self.rng = rng;
+        }
+    }
+}
+
+impl UnaryLayer for Dropout {
     /// Records the shape the layer serves. The layer holds no array, so nothing is
     /// allocated
     ///
-    /// The recorded shape is what [`Layer::output_shape`] reports, and no more. The layer owns
+    /// The recorded shape is what [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape) reports, and no more. The layer owns
     /// no array and reads no extent, so it checks no later input against it. See the
     /// "Shape freedom" section of the type
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
@@ -245,11 +255,17 @@ impl Layer for Dropout {
     }
 
     /// Drops units of a tensor of any shape. See the "Shape freedom" section of the type
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+    ///
+    /// An inference pass draws nothing and passes the input through unchanged, which is what
+    /// inverted dropout needs. The input needs no check, and the layer takes a tensor of any
+    /// shape, but the pass still refuses a layer that holds no build
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         // `rate` was validated in `new()`
-        build_on_forward!(self, input);
+        if !self.is_built() {
+            return Err(Error::not_built("Dropout"));
+        }
 
-        if !self.training {
+        if !ctx.is_training() {
             // Inference passes the input through unchanged
             return Ok(input.clone());
         }
@@ -266,14 +282,21 @@ impl Layer for Dropout {
             return Ok(Tensor::zeros(input.raw_dim()));
         }
 
+        // The stream of the pass, which starts from the stream of the layer. The draw below
+        // advances the copy in the context, and `apply_state` moves it back into the layer
+        let mut rng = ctx
+            .take_state::<StdRng>("rng")
+            .unwrap_or_else(|| self.rng.clone());
+
         // Sample a uniform value per draw. With no noise shape this is 1 value per input
         // element. With one, the sampler runs at the smaller shape, so an axis of extent 1
         // takes 1 draw that every position of that axis then shares
         let mut mask = Tensor::random_using(
             IxDyn(&noise_shape),
             Uniform::new(0.0, 1.0).unwrap(),
-            &mut self.rng,
+            &mut rng,
         );
+        ctx.set_state("rng", rng);
 
         // Threshold into a binary mask, in parallel for large masks
         if mask.len() >= cheap_map_parallel_threshold() {
@@ -285,37 +308,17 @@ impl Layer for Dropout {
         // Inverted dropout: scale kept units by 1 / (1 - rate) to preserve the expected value
         let output = broadcast_dropout_scale(input, &mask, self.rate)?;
 
-        // Cache the mask, at its own shape, for backpropagation
-        self.mask = Some(mask);
+        // Park the mask, at its own shape, for backpropagation
+        ctx.push_cache(mask);
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    ///
-    /// The input needs no check, and the layer takes a tensor of any shape. `predict` cannot
-    /// build, so it still refuses a layer that holds no build
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` was validated in `new()`
-        if self.built.is_none() {
-            return Err(Error::not_built("Dropout"));
-        }
-
-        // Inverted dropout passes the input through unchanged during inference
-        Ok(input.clone())
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        // A pass that drew no mask parked none, and the helper reads the mode and the rate
+        // before it reads the mask. It reports the missing mask with the same error that
+        // `pop_cache` gives, so a backward pass with no forward pass behind it still refuses
+        let mask = ctx.pop_cache::<Tensor>("Dropout").ok();
+        dropout_backward(grad_output, &mask, ctx.is_training(), self.rate, "Dropout")
     }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        dropout_backward(grad_output, &self.mask, self.training, self.rate, "Dropout")
-    }
-
-    fn layer_type(&self) -> &str {
-        "Dropout"
-    }
-
-    built_layer_shape_functions!();
-
-    no_trainable_parameters_layer_functions!();
-
-    mode_dependent_layer_trait!();
 }

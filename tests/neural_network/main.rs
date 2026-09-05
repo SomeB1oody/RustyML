@@ -36,6 +36,8 @@ mod golden;
 mod identity;
 /// Tests for the loss functions: forward values, gradients, and error paths.
 mod losses;
+/// Bit-exact regression of 5 trained models, which the per-layer golden net cannot see.
+mod model_regression;
 /// Tests for GaussianNoise and GaussianDropout.
 mod noise;
 /// Tests for BatchNormalization and LayerNormalization.

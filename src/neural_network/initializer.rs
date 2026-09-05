@@ -306,7 +306,7 @@ impl Initializer {
 mod tests {
     use super::*;
     use crate::neural_network::layers::*;
-    use crate::neural_network::traits::Layer;
+    use crate::neural_network::traits::{LayerBase, UnaryLayer};
     use crate::random::make_rng;
     use approx::assert_abs_diff_eq;
     use ndarray::{Array3, Array4, Array5, ArrayD, IxDyn};
@@ -318,7 +318,7 @@ mod tests {
     /// Builds 1 layer for the given input shape, and gives it back
     ///
     /// A constructor draws nothing, so every case here builds before it reads an array
-    fn built<L: Layer>(mut layer: L, input_shape: &[usize]) -> L {
+    fn built<L: UnaryLayer>(mut layer: L, input_shape: &[usize]) -> L {
         layer
             .build(&crate::neural_network::Shape::known(input_shape))
             .expect("the layer accepts the shape of the case");
@@ -326,7 +326,7 @@ mod tests {
     }
 
     /// Reads 1 named array of a layer and returns it as a dynamic-rank copy
-    fn weight_of(layer: &dyn Layer, name: &str) -> ArrayD<f32> {
+    fn weight_of(layer: &dyn LayerBase, name: &str) -> ArrayD<f32> {
         let weights = layer.weights();
         let found = weights
             .iter()
@@ -343,7 +343,7 @@ mod tests {
     /// pins the shape, the fan sum, the distribution, and the position of the draw in the
     /// stream of the layer. It cannot see a swap of `fan_in` and `fan_out`, because the Glorot
     /// range reads only their sum. The `fans_*` tests below pin the 2 counts apart
-    fn assert_glorot<Sh, D>(layer: &dyn Layer, name: &str, shape: Sh, fans: Fans)
+    fn assert_glorot<Sh, D>(layer: &dyn LayerBase, name: &str, shape: Sh, fans: Fans)
     where
         Sh: ShapeBuilder<Dim = D>,
         D: Dimension,

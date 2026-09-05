@@ -8,12 +8,13 @@
 //! lazily-sized per-parameter moment buffers) lives here once
 
 use crate::error::Error;
+use crate::neural_network::ctx::Grads;
 use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
     validate_decay_rate, validate_epsilon, validate_global_clipnorm, validate_learning_rate,
     validate_non_negative_finite,
 };
-use crate::neural_network::traits::{Layer, ParamId};
+use crate::neural_network::traits::{LayerBase, ParamId};
 use std::collections::HashMap;
 
 /// Adam's per-parameter first/second moment buffers, sized lazily on first use
@@ -111,8 +112,21 @@ impl AdamCore {
     }
 
     /// Updates a layer's parameters, applying weight decay per the `decoupled` mode
-    pub(super) fn update(&mut self, scope: usize, layer: &mut dyn Layer, grad_scale: f32) {
-        for pg in layer.parameters() {
+    pub(super) fn update(
+        &mut self,
+        scope: usize,
+        layer: &mut dyn LayerBase,
+        grads: &Grads,
+        grad_scale: f32,
+    ) {
+        for pg in layer.parameters_mut() {
+            let Some(grad) = grads.get(ParamId::new(scope, pg.name)) else {
+                continue;
+            };
+            let grad = grad
+                .as_slice()
+                .expect("a stored gradient is in the standard memory order");
+            debug_assert_eq!(grad.len(), pg.value.len());
             let state = self.states.entry(ParamId::new(scope, pg.name)).or_default();
             if state.m.len() != pg.value.len() {
                 // The tensor was resized under its own name: start the moment buffers again
@@ -121,7 +135,7 @@ impl AdamCore {
                     v: vec![0.0; pg.value.len()],
                 };
             }
-            let grad = kernels::scaled_grad(pg.grad, grad_scale);
+            let grad = kernels::scaled_grad(grad, grad_scale);
 
             // Weight decay applies to weight tensors only. Biases and normalization gamma/beta
             // carry `decays = false` and are never decayed

@@ -1,12 +1,15 @@
-//! ReLU activation layer that applies `max(0, x)` elementwise and caches the output for
+//! ReLU activation layer that applies `max(0, x)` elementwise and parks the output for
 //! backpropagation
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::{Activation, cached_shape};
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// ReLU (Rectified Linear Unit) activation layer
 ///
@@ -45,8 +48,8 @@ use crate::neural_network::{Shape, Tensor};
 /// ```
 #[derive(Debug)]
 pub struct ReLU {
-    /// Cached activated output from the forward pass, used during backpropagation
-    output_cache: Option<Tensor>,
+    /// Shape the layer was built for. `None` before the build
+    built: Option<Shape>,
 }
 
 impl ReLU {
@@ -56,7 +59,7 @@ impl ReLU {
     ///
     /// - `Self` - A new `ReLU` layer
     pub fn new() -> Self {
-        ReLU { output_cache: None }
+        ReLU { built: None }
     }
 }
 
@@ -66,8 +69,29 @@ impl Default for ReLU {
     }
 }
 
-impl Layer for ReLU {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+impl LayerBase for ReLU {
+    fn layer_type(&self) -> &str {
+        "ReLU"
+    }
+
+    built_layer_shape_functions!();
+
+    no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for ReLU {
+    /// Records the shape the layer serves. The layer holds no array, so nothing is
+    /// allocated
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "ReLU", input)? else {
+            return Ok(());
+        };
+        self.compute_output_shape(&built)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
@@ -75,41 +99,22 @@ impl Layer for ReLU {
         let output = Activation::ReLU.forward(input)?;
 
         // Cache activated output for backpropagation
-        self.output_cache = Some(output.clone());
+        if ctx.is_training() {
+            ctx.push_cache(output.clone());
+        }
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.is_empty() {
-            return Err(Error::empty_input("input tensor"));
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let output: Tensor = ctx.pop_cache("ReLU")?;
+
+        // ReLU preserves shape, so gradient must match the cached output
+        if grad_output.shape() != output.shape() {
+            return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
         }
 
-        Activation::ReLU.forward(input)
+        // ReLU derivative is 1 for x > 0, and 0 for x <= 0
+        Activation::ReLU.backward(&output, grad_output)
     }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        if let Some(output) = &self.output_cache {
-            // ReLU preserves shape, so gradient must match the cached output
-            if grad_output.shape() != output.shape() {
-                return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
-            }
-
-            // ReLU derivative is 1 for x > 0, and 0 for x <= 0
-            Activation::ReLU.backward(output, grad_output)
-        } else {
-            Err(Error::forward_pass_not_run("ReLU"))
-        }
-    }
-
-    fn layer_type(&self) -> &str {
-        "ReLU"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        cached_shape(&self.output_cache)
-    }
-
-    no_trainable_parameters_layer_functions!();
 }

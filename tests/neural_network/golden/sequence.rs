@@ -17,7 +17,7 @@
 //! The LSTM and the GRU pack every gate into 1 fused matrix. The column blocks follow a fixed
 //! order, `[i | f | g | o]` for the LSTM and `[z | r | h]` for the GRU. Each layer records the
 //! gradient of the whole fused matrix, never a per-gate slice, because the fused matrix is what
-//! `Layer::parameters` hands to an optimizer. Each layer also records 1 case built through its
+//! `LayerBase::parameters_mut` hands to an optimizer. Each layer also records 1 case built through its
 //! per-gate `set_gate_weights` wrapper. That case pins the map from the argument order to the
 //! column-block order. The map is not the identity for the GRU, whose arguments stay in reset,
 //! update, candidate order while the columns pack update first.
@@ -52,8 +52,6 @@
 use super::{GoldenCase, LayerFixture, golden_weights, golden_weights_from};
 use ndarray::{Array2, ArrayD, Ix2};
 use rustyml::error::Error;
-use rustyml::neural_network::Shape;
-use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::Activation;
 use rustyml::neural_network::layers::embedding::Embedding;
@@ -62,7 +60,10 @@ use rustyml::neural_network::layers::regularization::normalization::{
     GroupNormalization, InstanceNormalization, LayerNormalization, LayerNormalizationAxis,
     UnitNormalization, UnitNormalizationAxis,
 };
-use rustyml::neural_network::traits::{Layer, ParamGrad, WeightMut, WeightRef};
+use rustyml::neural_network::traits::{
+    Layer, LayerBase, ParamRef, UnaryLayer, WeightMut, WeightRef,
+};
+use rustyml::neural_network::{Ctx, Shape, Tensor};
 
 /// Every layer type of the sequence family, in the order the data file records them.
 fn fixtures() -> Vec<LayerFixture> {
@@ -471,34 +472,17 @@ impl IndexedEmbedding {
     }
 }
 
-impl Layer for IndexedEmbedding {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        let indices = self.indices(input);
-        self.inner.forward(&indices)
-    }
-
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        self.inner.predict(&self.indices(input))
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        self.inner.backward(grad_output)
-    }
-
+impl LayerBase for IndexedEmbedding {
     fn layer_type(&self) -> &str {
         self.inner.layer_type()
-    }
-
-    fn output_shape(&self) -> String {
-        self.inner.output_shape()
     }
 
     fn param_count(&self) -> ParamCounts {
         self.inner.param_count()
     }
 
-    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
-        self.inner.parameters()
+    fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
+        self.inner.parameters_mut()
     }
 
     fn weights(&self) -> Vec<WeightRef<'_>> {
@@ -507,6 +491,36 @@ impl Layer for IndexedEmbedding {
 
     fn weights_mut(&mut self) -> Vec<WeightMut<'_>> {
         self.inner.weights_mut()
+    }
+
+    /// Gives the shapes of the layer under record, so the wrapper reports the output shape of
+    /// that layer
+    fn known_input_shapes(&self) -> Option<Vec<Shape>> {
+        self.inner.known_input_shapes()
+    }
+
+    fn is_built(&self) -> bool {
+        self.inner.is_built()
+    }
+}
+
+impl UnaryLayer for IndexedEmbedding {
+    /// The index map keeps the shape of the tensor, so the layer under record builds for the
+    /// shape that the wrapper received
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        self.inner.build(input)
+    }
+
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        self.inner.forward(&self.indices(input), ctx)
+    }
+
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        self.inner.backward(grad_output, ctx)
+    }
+
+    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+        self.inner.compute_output_shape(input)
     }
 }
 

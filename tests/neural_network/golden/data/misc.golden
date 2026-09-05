@@ -19,6 +19,7 @@
 # Regeneration history, newest first. Each line holds the reason of 1 run that wrote
 # this file.
 #
+# reason the pure known_input_shapes reports the build shape with a free batch axis
 # reason the checkpoint is addressed by name, so the layer supplies every recorded parameter name and the parameter count records both halves
 #
 # Each value line holds the raw f32 bits from to_bits, in 8 lowercase hexadecimal
@@ -28,7 +29,7 @@
 
 format 6
 family misc
-content_digest c36f966c98a31ac0 cases 35 values 2302
+content_digest c9c38803b00bf2b0 cases 35 values 2302
 
 case Dense units_4_linear
 mode training
@@ -272,7 +273,7 @@ end
 
 case Dense rank_3_linear
 mode training
-output_shape "(None, 4, 4)"
+output_shape "(None, 4)"
 param_count trainable 16 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -436,7 +437,7 @@ end
 
 case Dense rank_4_linear
 mode training
-output_shape "(None, 2, 2, 4)"
+output_shape "(None, 4)"
 param_count trainable 16 non_trainable 0
 param_name kernel layer
 param_name bias layer
@@ -1514,7 +1515,7 @@ end
 
 case ReLU default
 mode training
-output_shape "(2, 5)"
+output_shape "(None, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
@@ -1564,7 +1565,7 @@ end
 
 case LeakyReLU slope_0p3
 mode training
-output_shape "(2, 5)"
+output_shape "(None, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
@@ -1614,7 +1615,7 @@ end
 
 case LeakyReLU slope_0p01
 mode training
-output_shape "(2, 5)"
+output_shape "(None, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
@@ -1664,7 +1665,7 @@ end
 
 case ELU alpha_1p0
 mode training
-output_shape "(2, 5)"
+output_shape "(None, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
@@ -1714,7 +1715,7 @@ end
 
 case ELU alpha_0p5
 mode training
-output_shape "(2, 5)"
+output_shape "(None, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
@@ -1764,7 +1765,7 @@ end
 
 case SELU default
 mode training
-output_shape "(2, 5)"
+output_shape "(None, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
@@ -1814,7 +1815,7 @@ end
 
 case Softplus default
 mode training
-output_shape "(2, 5)"
+output_shape "(None, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
@@ -1864,7 +1865,7 @@ end
 
 case Softsign default
 mode training
-output_shape "(2, 5)"
+output_shape "(None, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
@@ -1914,7 +1915,7 @@ end
 
 case HardSigmoid default
 mode training
-output_shape "(2, 5)"
+output_shape "(None, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
@@ -1964,7 +1965,7 @@ end
 
 case Exponential default
 mode training
-output_shape "(2, 5)"
+output_shape "(None, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
@@ -2014,7 +2015,7 @@ end
 
 case Linear default
 mode training
-output_shape "(2, 5)"
+output_shape "(None, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
@@ -2064,7 +2065,7 @@ end
 
 case Sigmoid default
 mode training
-output_shape "(2, 5)"
+output_shape "(None, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
@@ -2114,7 +2115,7 @@ end
 
 case Tanh default
 mode training
-output_shape "(2, 5)"
+output_shape "(None, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
@@ -2164,7 +2165,7 @@ end
 
 case Softmax rank_2
 mode training
-output_shape "(2, 5)"
+output_shape "(None, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 5
   c0000000  # -2.0
@@ -2214,7 +2215,7 @@ end
 
 case Softmax rank_3
 mode training
-output_shape "(2, 2, 5)"
+output_shape "(None, 2, 5)"
 param_count trainable 0 non_trainable 0
 tensor input 2 2 5
   c0000000  # -2.0
@@ -2304,7 +2305,7 @@ end
 
 case PReLU per_feature
 mode training
-output_shape "(2, 5)"
+output_shape "(None, 5)"
 param_count trainable 5 non_trainable 0
 param_name alpha layer
 weight alpha 5 checksum d8c662c1f40b282a
@@ -2369,7 +2370,7 @@ end
 
 case PReLU shared_axis_1
 mode training
-output_shape "(2, 3, 4)"
+output_shape "(None, 3, 4)"
 param_count trainable 4 non_trainable 0
 param_name alpha layer
 weight alpha 1 4 checksum 657ae2b486ecb3a5

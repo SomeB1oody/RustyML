@@ -2,10 +2,13 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::{Activation, DEFAULT_SOFTMAX_AXIS, cached_shape};
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::activation::{Activation, DEFAULT_SOFTMAX_AXIS};
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Softmax activation layer
 ///
@@ -51,21 +54,23 @@ use crate::neural_network::{Shape, Tensor};
 ///
 /// ```rust
 /// use rustyml::neural_network::layers::activation::softmax::Softmax;
-/// use rustyml::neural_network::traits::Layer;
+/// use rustyml::neural_network::traits::UnaryLayer;
+/// use rustyml::neural_network::Ctx;
 /// use ndarray::Array3;
 ///
 /// // Each of the 3 channels of a position becomes a distribution over the 2 batch items
 /// let x = Array3::<f32>::zeros((2, 4, 3)).into_dyn();
 /// let mut layer = Softmax::new().with_axis(0);
-/// let output = layer.forward(&x).unwrap();
+/// let mut ctx = Ctx::inference();
+/// let output = layer.forward_mut(&x, &mut ctx).unwrap();
 /// assert_eq!(output.shape(), &[2, 4, 3]);
 /// ```
 #[derive(Debug)]
 pub struct Softmax {
     /// Axis to normalize. A negative value counts back from the end
     pub(super) axis: i32,
-    /// Cached output tensor from the forward pass, used during backpropagation
-    output_cache: Option<Tensor>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
 }
 
 impl Softmax {
@@ -77,7 +82,7 @@ impl Softmax {
     pub fn new() -> Self {
         Softmax {
             axis: DEFAULT_SOFTMAX_AXIS,
-            output_cache: None,
+            built: None,
         }
     }
 
@@ -107,8 +112,28 @@ impl Default for Softmax {
     }
 }
 
-impl Layer for Softmax {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+impl LayerBase for Softmax {
+    fn layer_type(&self) -> &str {
+        "Softmax"
+    }
+
+    built_layer_shape_functions!();
+
+    no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for Softmax {
+    /// Records the shape the layer serves. The layer holds no array, so nothing is allocated
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "Softmax", input)? else {
+            return Ok(());
+        };
+        self.compute_output_shape(&built)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
@@ -117,41 +142,21 @@ impl Layer for Softmax {
         let output = Activation::Softmax { axis: self.axis }.forward(input)?;
 
         // Cache output for backpropagation
-        self.output_cache = Some(output.clone());
+        if ctx.is_training() {
+            ctx.push_cache(output.clone());
+        }
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.is_empty() {
-            return Err(Error::empty_input("input tensor"));
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let output: Tensor = ctx.pop_cache("Softmax")?;
+
+        // Softmax preserves shape, so the gradient must match the cached output
+        if grad_output.shape() != output.shape() {
+            return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
         }
 
-        Activation::Softmax { axis: self.axis }.forward(input)
+        Activation::Softmax { axis: self.axis }.backward(&output, grad_output)
     }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        match &self.output_cache {
-            Some(output) => {
-                // Softmax preserves shape, so the gradient must match the cached output
-                if grad_output.shape() != output.shape() {
-                    return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
-                }
-
-                Activation::Softmax { axis: self.axis }.backward(output, grad_output)
-            }
-            None => Err(Error::forward_pass_not_run("Softmax")),
-        }
-    }
-
-    fn layer_type(&self) -> &str {
-        "Softmax"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        cached_shape(&self.output_cache)
-    }
-
-    no_trainable_parameters_layer_functions!();
 }

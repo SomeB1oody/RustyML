@@ -49,7 +49,7 @@ use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
 use rustyml::neural_network::sequential::SequentialBuilder;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::UnaryLayer;
 use rustyml::neural_network::traits::WeightKind;
 use std::borrow::Cow;
 use std::env;

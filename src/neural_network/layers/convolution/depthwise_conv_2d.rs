@@ -16,11 +16,9 @@ use crate::neural_network::layers::shape_helpers::calculate_output_shape_2d;
 use crate::neural_network::layers::validation::{
     start_build, validate_built_input, validate_optional_weight, validate_weight_shape,
 };
-use crate::neural_network::layers::{
-    build_on_forward, built_layer_shape_functions, named_weight_layer_functions,
-};
-use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Fans, Initializer, Shape, Tensor};
+use crate::neural_network::layers::{built_layer_shape_functions, named_weight_layer_functions};
+use crate::neural_network::traits::{LayerBase, ParamRef, UnaryLayer};
+use crate::neural_network::{Ctx, Fans, Initializer, Shape, Tensor};
 use ndarray::{Array1, Array4};
 
 /// A 2D depthwise convolutional layer
@@ -91,7 +89,7 @@ use ndarray::{Array1, Array4};
 /// ```
 #[derive(Debug)]
 pub struct DepthwiseConv2D {
-    /// Number of input channels, which [`Layer::build`] reads from the input shape
+    /// Number of input channels, which [`UnaryLayer::build`] reads from the input shape
     channels: usize,
     /// Kernels per input channel. The output carries `channels * depth_multiplier` of them
     depth_multiplier: usize,
@@ -113,18 +111,10 @@ pub struct DepthwiseConv2D {
     bias: Array1<f32>,
     /// Activation applied to the convolution output
     activation: Activation,
-    /// Cached post-activation output for the backward pass
-    output_cache: Option<Tensor>,
-    /// Cached input tensor for the backward pass
-    input: Option<Tensor>,
     /// Shape the layer was built for, batch axis first. `None` before the build
     built: Option<Shape>,
     /// Seed of the weight draw, or `None` to take the global seed or entropy
     random_state: Option<u64>,
-    /// Gradients with respect to weights
-    weight_gradients: Option<Array4<f32>>,
-    /// Gradients with respect to bias
-    bias_gradients: Option<Array1<f32>>,
     /// Whether the layer adds a bias to the convolution output
     use_bias: bool,
 }
@@ -179,12 +169,8 @@ impl DepthwiseConv2D {
             weights: Array4::zeros((0, 0, 0, 0)),
             bias: Array1::zeros(0),
             activation,
-            output_cache: None,
-            input: None,
             built: None,
             random_state: None,
-            weight_gradients: None,
-            bias_gradients: None,
             use_bias: true,
         })
     }
@@ -346,11 +332,6 @@ impl DepthwiseConv2D {
     /// - `Self` - The updated layer
     pub fn with_use_bias(mut self, use_bias: bool) -> Self {
         self.use_bias = use_bias;
-        if !use_bias {
-            // Drop any gradient a previous backward pass left, so the bias cannot reach
-            // `parameters` after the layer stops holding it
-            self.bias_gradients = None;
-        }
         self
     }
 
@@ -425,8 +406,8 @@ impl DepthwiseConv2D {
 
     /// Depthwise convolution over a channels-last tensor, followed by the activation
     ///
-    /// Shared numeric body of [`Layer::forward`] and [`Layer::predict`]. `forward` wraps this and
-    /// records the input/output caches. `predict` returns the result directly
+    /// The numeric body of [`UnaryLayer::forward`]. A training pass parks the input and the
+    /// output of this call in the context, and an inference pass parks nothing
     fn convolve(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_built_input(&self.built, "DepthwiseConv2D", input.shape())?;
         validate_valid_kernel_fits(
@@ -462,7 +443,55 @@ impl DepthwiseConv2D {
     }
 }
 
-impl Layer for DepthwiseConv2D {
+/// What the forward pass of [`DepthwiseConv2D`] parks for its backward pass
+struct DepthwiseConv2DCache {
+    /// The tensor the forward pass received
+    input: Tensor,
+    /// The activated output, to backpropagate through the activation
+    output: Tensor,
+}
+
+impl LayerBase for DepthwiseConv2D {
+    fn layer_type(&self) -> &str {
+        "DepthwiseConv2D"
+    }
+
+    fn param_count(&self) -> ParamCounts {
+        // Read the arrays the layer holds rather than the configuration, so dropping the
+        // bias corrects the count with no second formula to keep in step
+        let bias = if self.use_bias { self.bias.len() } else { 0 };
+        ParamCounts::trainable(self.weights.len() + bias)
+    }
+
+    fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
+        let Self {
+            weights,
+            bias,
+            use_bias,
+            ..
+        } = self;
+        let mut params = vec![ParamRef::weight(
+            "kernel",
+            weights.as_slice_mut().expect("weights must be contiguous"),
+        )];
+        if *use_bias {
+            params.push(ParamRef::no_decay(
+                "bias",
+                bias.as_slice_mut().expect("bias must be contiguous"),
+            ));
+        }
+        params
+    }
+
+    built_layer_shape_functions!();
+
+    named_weight_layer_functions!(
+        trainable "kernel" => weights,
+        trainable "bias" => bias if use_bias,
+    );
+}
+
+impl UnaryLayer for DepthwiseConv2D {
     /// Reads the channel count from the input shape, and draws the kernel and the bias
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "DepthwiseConv2D", input)? else {
@@ -484,31 +513,26 @@ impl Layer for DepthwiseConv2D {
         Ok(())
     }
 
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        build_on_forward!(self, input);
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        if !self.is_built() {
+            return Err(Error::not_built("DepthwiseConv2D"));
+        }
         let activated = self.convolve(input)?;
-        // Cache only after a successful convolution, so a rejected input leaves no partial state
-        self.input = Some(input.clone());
-        self.output_cache = Some(activated.clone());
+        // Park only after a successful convolution, so a rejected input leaves no partial state
+        if ctx.is_training() {
+            ctx.push_cache(DepthwiseConv2DCache {
+                input: input.clone(),
+                output: activated.clone(),
+            });
+        }
         Ok(activated)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        self.convolve(input)
-    }
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let cache: DepthwiseConv2DCache = ctx.pop_cache("DepthwiseConv2D")?;
+        let grad_upstream = self.activation.backward(&cache.output, grad_output)?;
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        let activated = self
-            .output_cache
-            .take()
-            .ok_or_else(|| Error::forward_pass_not_run("DepthwiseConv2D"))?;
-        let grad_upstream = self.activation.backward(&activated, grad_output)?;
-
-        let input = self
-            .input
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("DepthwiseConv2D"))?;
+        let input = &cache.input;
 
         let batch_size = input.shape()[0];
         let g = self.geometry(input.shape());
@@ -525,13 +549,17 @@ impl Layer for DepthwiseConv2D {
 
         let grads = depthwise_backward(&g, src, grad, ker, batch_size);
 
-        self.weight_gradients = Some(
+        ctx.add_grad(
+            "kernel",
             Array4::from_shape_vec(self.weights.raw_dim(), grads.weight)
-                .expect("weight gradient shape matches weights"),
-        );
-        // A bias-free layer keeps no bias gradient, so `parameters` yields none and no
+                .expect("weight gradient shape matches weights")
+                .into_dyn(),
+        )?;
+        // A bias-free layer writes no bias gradient, so the store holds none and no
         // optimizer state is ever keyed on a bias that the layer does not hold
-        self.bias_gradients = self.use_bias.then(|| Array1::from_vec(grads.bias));
+        if self.use_bias {
+            ctx.add_grad("bias", Array1::from_vec(grads.bias).into_dyn())?;
+        }
 
         Ok(
             Array4::from_shape_vec((batch_size, g.input.0, g.input.1, g.channels), grads.input)
@@ -539,12 +567,6 @@ impl Layer for DepthwiseConv2D {
                 .into_dyn(),
         )
     }
-
-    fn layer_type(&self) -> &str {
-        "DepthwiseConv2D"
-    }
-
-    built_layer_shape_functions!();
 
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         input.check_rank("DepthwiseConv2D", 4)?;
@@ -576,46 +598,6 @@ impl Layer for DepthwiseConv2D {
             &[out_height, out_width, channels * self.depth_multiplier],
         ))
     }
-
-    fn param_count(&self) -> ParamCounts {
-        // Read the arrays the layer holds rather than the configuration, so dropping the
-        // bias corrects the count with no second formula to keep in step
-        let bias = if self.use_bias { self.bias.len() } else { 0 };
-        ParamCounts::trainable(self.weights.len() + bias)
-    }
-
-    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
-        let Self {
-            weights,
-            bias,
-            weight_gradients,
-            bias_gradients,
-            ..
-        } = self;
-        let mut params = Vec::new();
-        // Each tensor is pushed on its own, so a tensor without a gradient holds back no other
-        if let Some(grad) = weight_gradients.as_ref() {
-            params.push(ParamGrad::weight(
-                "kernel",
-                weights.as_slice_mut().expect("weights must be contiguous"),
-                grad.as_slice()
-                    .expect("weight_gradients must be contiguous"),
-            ));
-        }
-        if let Some(grad) = bias_gradients.as_ref() {
-            params.push(ParamGrad::no_decay(
-                "bias",
-                bias.as_slice_mut().expect("bias must be contiguous"),
-                grad.as_slice().expect("bias_gradients must be contiguous"),
-            ));
-        }
-        params
-    }
-
-    named_weight_layer_functions!(
-        trainable "kernel" => weights,
-        trainable "bias" => bias if use_bias,
-    );
 }
 
 /// Unit tests for `DepthwiseConv2D`
@@ -652,7 +634,7 @@ mod tests {
         )
         .unwrap();
 
-        let out = layer.predict(&input).unwrap();
+        let out = layer.forward(&input, &mut Ctx::inference()).unwrap();
         assert_eq!(out.shape(), &[1, 2, 2, 2]);
         // Channel 0: the 4 window sums from the 2x2 kernel. Channel 1: 2 * 4 ones at every position
         assert_eq!(
@@ -679,7 +661,7 @@ mod tests {
         // 1 position holding [2, 3]
         let input = ArrayD::from_shape_vec(ndarray::IxDyn(&[1, 1, 1, 2]), vec![2.0, 3.0]).unwrap();
 
-        let out = layer.predict(&input).unwrap();
+        let out = layer.forward(&input, &mut Ctx::inference()).unwrap();
         assert_eq!(out.shape(), &[1, 1, 1, 4]);
         // [c0m0, c0m1, c1m0, c1m1] = [2*1, 2*10, 3*100, 3*1000]
         assert_eq!(

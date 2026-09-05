@@ -7,6 +7,7 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::convolution::PaddingType;
@@ -16,7 +17,7 @@ use rustyml::neural_network::layers::pooling::average_pooling_3d::AveragePooling
 use rustyml::neural_network::layers::pooling::global_average_pooling_1d::GlobalAveragePooling1D;
 use rustyml::neural_network::layers::pooling::global_average_pooling_2d::GlobalAveragePooling2D;
 use rustyml::neural_network::layers::pooling::global_average_pooling_3d::GlobalAveragePooling3D;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 // AveragePooling1D, input [batch, length, channels]
@@ -29,7 +30,8 @@ fn avg_pool_1d_forward_values_pool2_stride2() {
     let x: Tensor = Array::from_shape_vec((1, 6, 1), vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0])
         .unwrap()
         .into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 3, 1]);
     // (1+2)/2, (3+4)/2, (5+6)/2
     assert_abs_diff_eq!(out[[0, 0, 0]], 1.5_f32, epsilon = 1e-5);
@@ -49,7 +51,8 @@ fn avg_pool_1d_forward_values_pool3_stride1() {
         }
     }
     let x: Tensor = Array::from_shape_vec((1, 6, 2), data).unwrap().into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 4, 2]);
     for c in 0..2 {
         // (0+1+2)/3, (1+2+3)/3, (2+3+4)/3, (3+4+5)/3
@@ -68,7 +71,8 @@ fn avg_pool_1d_forward_multi_batch() {
         Array::from_shape_vec((2, 4, 1), vec![2.0f32, 4.0, 6.0, 8.0, 1.0, 3.0, 5.0, 7.0])
             .unwrap()
             .into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[2, 2, 1]);
     // Batch 0: (2+4)/2, (6+8)/2
     assert_abs_diff_eq!(out[[0, 0, 0]], 3.0_f32, epsilon = 1e-5);
@@ -85,11 +89,12 @@ fn avg_pool_1d_predict_equals_forward() {
     let x: Tensor = Array::from_shape_vec((1, 6, 1), vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0])
         .unwrap()
         .into_dyn();
-    let fwd = layer.forward(&x).unwrap();
-    // predict() is on &self, so a fresh layer (no forward cache) must still agree
+    let fwd = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
+    // A forward pass with Ctx::inference() is on &self, so a fresh layer (no forward cache) must
+    // still agree
     let mut layer_pred = AveragePooling1D::new(2).with_stride(2).unwrap();
     layer_pred.build(&Shape::known(&[1, 6, 1])).unwrap();
-    let pred = layer_pred.predict(&x).unwrap();
+    let pred = layer_pred.forward(&x, &mut Ctx::inference()).unwrap();
     assert_eq!(fwd.shape(), pred.shape());
     for (a, b) in fwd.iter().zip(pred.iter()) {
         assert_abs_diff_eq!(a, b, epsilon = 1e-6);
@@ -99,9 +104,9 @@ fn avg_pool_1d_predict_equals_forward() {
 /// backward() before forward() returns ForwardPassNotRun
 #[test]
 fn avg_pool_1d_backward_before_forward_errors() {
-    let mut layer = AveragePooling1D::new(2).with_stride(2).unwrap();
+    let layer = AveragePooling1D::new(2).with_stride(2).unwrap();
     let grad: Tensor = Array::ones((1, 2, 1)).into_dyn();
-    let result = layer.backward(&grad);
+    let result = layer.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -117,9 +122,9 @@ fn avg_pool_1d_backward_before_forward_errors() {
 fn avg_pool_1d_wrong_rank_input_errors() {
     let mut layer = AveragePooling1D::new(2).with_stride(2).unwrap();
     let bad: Tensor = Array::ones((4, 4)).into_dyn();
-    assert!(layer.forward(&bad).is_err());
+    assert!(layer.forward_mut(&bad, &mut Ctx::training()).is_err());
     let layer_pred = AveragePooling1D::new(2).with_stride(2).unwrap();
-    assert!(layer_pred.predict(&bad).is_err());
+    assert!(layer_pred.forward(&bad, &mut Ctx::inference()).is_err());
 }
 
 /// The build rejects a pool size of 0
@@ -157,7 +162,7 @@ fn avg_pool_1d_layer_type_and_output_shape() {
     layer.build(&Shape::known(&[1, 6, 1])).unwrap();
     assert_eq!(layer.layer_type(), "AveragePooling1D");
     let shape_str = layer.output_shape();
-    assert_eq!(shape_str, "(1, 3, 1)");
+    assert_eq!(shape_str, "(None, 3, 1)");
 }
 
 /// Stride defaults to pool_size when the caller passes None
@@ -165,7 +170,7 @@ fn avg_pool_1d_layer_type_and_output_shape() {
 fn avg_pool_1d_default_stride_equals_pool_size() {
     let mut layer = AveragePooling1D::new(3);
     layer.build(&Shape::known(&[1, 6, 1])).unwrap();
-    assert_eq!(layer.output_shape(), "(1, 2, 1)");
+    assert_eq!(layer.output_shape(), "(None, 2, 1)");
 }
 
 // AveragePooling2D, input [batch, height, width, channels]
@@ -180,7 +185,8 @@ fn avg_pool_2d_forward_values_pool2x2_stride2x2() {
     let x: Tensor = Array::from_shape_vec((1, 4, 4, 1), vals)
         .unwrap()
         .into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2, 2, 1]);
     // Rows are [0,1,2,3], [4,5,6,7], [8,9,10,11], [12,13,14,15]
     assert_abs_diff_eq!(out[[0, 0, 0, 0]], 2.5_f32, epsilon = 1e-5); // (0+1+4+5)/4
@@ -197,7 +203,8 @@ fn avg_pool_2d_forward_values_nonsquare_pool() {
     let x: Tensor = Array::from_shape_vec((1, 3, 5, 1), vals)
         .unwrap()
         .into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2, 3, 1]);
     // Rows are [0..4], [5..9], [10..14]. Each window is 2 rows x 3 cols.
     assert_abs_diff_eq!(out[[0, 0, 0, 0]], 3.5_f32, epsilon = 1e-5); // (0+1+2+5+6+7)/6
@@ -225,7 +232,8 @@ fn avg_pool_2d_forward_multi_channel_independence() {
     let x: Tensor = Array::from_shape_vec((1, 4, 4, 2), vals)
         .unwrap()
         .into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2, 2, 2]);
     // Channel 0 rows are [0,1,2,3], [4,5,6,7], [8,9,10,11], [12,13,14,15]
     assert_abs_diff_eq!(out[[0, 0, 0, 0]], 2.5_f32, epsilon = 1e-5); // (0+1+4+5)/4
@@ -247,10 +255,10 @@ fn avg_pool_2d_predict_equals_forward() {
     let x: Tensor = Array::from_shape_vec((1, 4, 4, 1), vals)
         .unwrap()
         .into_dyn();
-    let fwd = layer.forward(&x).unwrap();
+    let fwd = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     let mut layer_pred = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
     layer_pred.build(&Shape::known(&[1, 4, 4, 1])).unwrap();
-    let pred = layer_pred.predict(&x).unwrap();
+    let pred = layer_pred.forward(&x, &mut Ctx::inference()).unwrap();
     assert_eq!(fwd.shape(), pred.shape());
     for (a, b) in fwd.iter().zip(pred.iter()) {
         assert_abs_diff_eq!(a, b, epsilon = 1e-6);
@@ -260,9 +268,9 @@ fn avg_pool_2d_predict_equals_forward() {
 /// backward() before forward() returns ForwardPassNotRun
 #[test]
 fn avg_pool_2d_backward_before_forward_errors() {
-    let mut layer = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
+    let layer = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
     let grad: Tensor = Array::ones((1, 2, 2, 1)).into_dyn();
-    let result = layer.backward(&grad);
+    let result = layer.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -278,9 +286,9 @@ fn avg_pool_2d_backward_before_forward_errors() {
 fn avg_pool_2d_wrong_rank_input_errors() {
     let mut layer = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
     let bad: Tensor = Array::ones((4, 4, 4)).into_dyn();
-    assert!(layer.forward(&bad).is_err());
+    assert!(layer.forward_mut(&bad, &mut Ctx::training()).is_err());
     let layer_pred = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
-    assert!(layer_pred.predict(&bad).is_err());
+    assert!(layer_pred.forward(&bad, &mut Ctx::inference()).is_err());
 }
 
 /// The build rejects a shape that is not rank 4
@@ -329,7 +337,7 @@ fn avg_pool_2d_layer_type_and_output_shape() {
     let mut layer = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
     layer.build(&Shape::known(&[1, 4, 4, 1])).unwrap();
     assert_eq!(layer.layer_type(), "AveragePooling2D");
-    assert_eq!(layer.output_shape(), "(1, 2, 2, 1)");
+    assert_eq!(layer.output_shape(), "(None, 2, 2, 1)");
 }
 
 /// Strides default to pool_size when the caller passes None
@@ -337,7 +345,7 @@ fn avg_pool_2d_layer_type_and_output_shape() {
 fn avg_pool_2d_default_stride_equals_pool_size() {
     let mut layer = AveragePooling2D::new((2, 2));
     layer.build(&Shape::known(&[1, 6, 6, 1])).unwrap();
-    assert_eq!(layer.output_shape(), "(1, 3, 3, 1)");
+    assert_eq!(layer.output_shape(), "(None, 3, 3, 1)");
 }
 
 // AveragePooling3D, input [batch, depth, height, width, channels]
@@ -353,7 +361,8 @@ fn avg_pool_3d_forward_values_single_window() {
     let x: Tensor = Array::from_shape_vec((1, 2, 2, 2, 1), vals)
         .unwrap()
         .into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 1, 1, 1, 1]);
     // mean of 0..7 = 28/8
     assert_abs_diff_eq!(out[[0, 0, 0, 0, 0]], 3.5_f32, epsilon = 1e-5);
@@ -369,7 +378,8 @@ fn avg_pool_3d_forward_values_two_depth_windows() {
     let x: Tensor = Array::from_shape_vec((1, 4, 2, 2, 1), vals)
         .unwrap()
         .into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2, 1, 1, 1]);
     // Window at depth_start=0 covers values 0..7, mean 28/8
     assert_abs_diff_eq!(out[[0, 0, 0, 0, 0]], 3.5_f32, epsilon = 1e-5);
@@ -387,12 +397,12 @@ fn avg_pool_3d_predict_equals_forward() {
     let x: Tensor = Array::from_shape_vec((1, 2, 2, 2, 1), vals)
         .unwrap()
         .into_dyn();
-    let fwd = layer.forward(&x).unwrap();
+    let fwd = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     let mut layer_pred = AveragePooling3D::new((2, 2, 2))
         .with_strides((1, 1, 1))
         .unwrap();
     layer_pred.build(&Shape::known(&[1, 2, 2, 2, 1])).unwrap();
-    let pred = layer_pred.predict(&x).unwrap();
+    let pred = layer_pred.forward(&x, &mut Ctx::inference()).unwrap();
     assert_eq!(fwd.shape(), pred.shape());
     for (a, b) in fwd.iter().zip(pred.iter()) {
         assert_abs_diff_eq!(a, b, epsilon = 1e-6);
@@ -402,11 +412,11 @@ fn avg_pool_3d_predict_equals_forward() {
 /// backward() before forward() returns ForwardPassNotRun for AveragePooling3D
 #[test]
 fn avg_pool_3d_backward_before_forward_errors() {
-    let mut layer = AveragePooling3D::new((2, 2, 2))
+    let layer = AveragePooling3D::new((2, 2, 2))
         .with_strides((2, 2, 2))
         .unwrap();
     let grad: Tensor = Array::ones((1, 2, 2, 2, 1)).into_dyn();
-    let result = layer.backward(&grad);
+    let result = layer.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -424,11 +434,11 @@ fn avg_pool_3d_wrong_rank_input_errors() {
         .with_strides((2, 2, 2))
         .unwrap();
     let bad: Tensor = Array::ones((1, 4, 4, 1)).into_dyn();
-    assert!(layer.forward(&bad).is_err());
+    assert!(layer.forward_mut(&bad, &mut Ctx::training()).is_err());
     let layer_pred = AveragePooling3D::new((2, 2, 2))
         .with_strides((2, 2, 2))
         .unwrap();
-    assert!(layer_pred.predict(&bad).is_err());
+    assert!(layer_pred.forward(&bad, &mut Ctx::inference()).is_err());
 }
 
 /// The build rejects a shape that is not rank 5
@@ -470,7 +480,7 @@ fn avg_pool_3d_layer_type_and_output_shape() {
         .unwrap();
     layer.build(&Shape::known(&[1, 4, 4, 4, 1])).unwrap();
     assert_eq!(layer.layer_type(), "AveragePooling3D");
-    assert_eq!(layer.output_shape(), "(1, 2, 2, 2, 1)");
+    assert_eq!(layer.output_shape(), "(None, 2, 2, 2, 1)");
 }
 
 /// For 3D, strides default to pool_size when the caller passes None
@@ -478,7 +488,7 @@ fn avg_pool_3d_layer_type_and_output_shape() {
 fn avg_pool_3d_default_stride_equals_pool_size() {
     let mut layer = AveragePooling3D::new((2, 2, 2));
     layer.build(&Shape::known(&[1, 4, 4, 4, 1])).unwrap();
-    assert_eq!(layer.output_shape(), "(1, 2, 2, 2, 1)");
+    assert_eq!(layer.output_shape(), "(None, 2, 2, 2, 1)");
 }
 
 // GlobalAveragePooling1D, input [batch, length, channels] -> output [batch, channels]
@@ -497,7 +507,8 @@ fn global_avg_pool_1d_forward_distinct_channels() {
         5.0, 50.0, // length 4
     ];
     let x: Tensor = Array::from_shape_vec((1, 5, 2), vals).unwrap().into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2]);
     assert_abs_diff_eq!(out[[0, 0]], 3.0_f32, epsilon = 1e-5); // 15/5
     assert_abs_diff_eq!(out[[0, 1]], 30.0_f32, epsilon = 1e-5); // 150/5
@@ -508,7 +519,7 @@ fn global_avg_pool_1d_forward_distinct_channels() {
 fn global_avg_pool_1d_forward_all_ones() {
     let mut layer = GlobalAveragePooling1D::new();
     let x: Tensor = Array::ones((3, 7, 4)).into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[3, 4]);
     for b in 0..3 {
         for c in 0..4 {
@@ -526,7 +537,7 @@ fn global_avg_pool_1d_forward_multi_batch() {
         1.0, 3.0, 5.0, 7.0, // batch 1, channel 0
     ];
     let x: Tensor = Array::from_shape_vec((2, 4, 1), vals).unwrap().into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[2, 1]);
     assert_abs_diff_eq!(out[[0, 0]], 3.0_f32, epsilon = 1e-5); // 12/4
     assert_abs_diff_eq!(out[[1, 0]], 4.0_f32, epsilon = 1e-5); // 16/4
@@ -543,8 +554,8 @@ fn global_avg_pool_1d_predict_equals_forward() {
     )
     .unwrap()
     .into_dyn();
-    let fwd = layer_fwd.forward(&x).unwrap();
-    let pred = layer_pred.predict(&x).unwrap();
+    let fwd = layer_fwd.forward_mut(&x, &mut Ctx::training()).unwrap();
+    let pred = layer_pred.forward(&x, &mut Ctx::inference()).unwrap();
     assert_eq!(fwd.shape(), pred.shape());
     for (a, b) in fwd.iter().zip(pred.iter()) {
         assert_abs_diff_eq!(a, b, epsilon = 1e-6);
@@ -554,9 +565,9 @@ fn global_avg_pool_1d_predict_equals_forward() {
 /// backward() before forward() returns ForwardPassNotRun for GlobalAveragePooling1D
 #[test]
 fn global_avg_pool_1d_backward_before_forward_errors() {
-    let mut layer = GlobalAveragePooling1D::new();
+    let layer = GlobalAveragePooling1D::new();
     let grad: Tensor = Array::ones((1, 2)).into_dyn();
-    let result = layer.backward(&grad);
+    let result = layer.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -572,9 +583,9 @@ fn global_avg_pool_1d_backward_before_forward_errors() {
 fn global_avg_pool_1d_wrong_rank_input_errors() {
     let mut layer = GlobalAveragePooling1D::new();
     let bad: Tensor = Array::ones((3, 4)).into_dyn();
-    assert!(layer.forward(&bad).is_err());
+    assert!(layer.forward_mut(&bad, &mut Ctx::training()).is_err());
     let layer_pred = GlobalAveragePooling1D::new();
-    assert!(layer_pred.predict(&bad).is_err());
+    assert!(layer_pred.forward(&bad, &mut Ctx::inference()).is_err());
 }
 
 /// layer_type() returns correct string
@@ -593,8 +604,8 @@ fn global_avg_pool_1d_output_shape() {
     let mut layer = GlobalAveragePooling1D::new();
     // batch 2, length 5, channels 3
     let x: Tensor = Array::ones((2, 5, 3)).into_dyn();
-    layer.forward(&x).unwrap();
-    assert_eq!(layer.output_shape(), "(2, 3)");
+    layer.forward_mut(&x, &mut Ctx::training()).unwrap();
+    assert_eq!(layer.output_shape(), "(None, 3)");
 }
 
 // GlobalAveragePooling2D, input [batch, height, width, channels] -> output [batch, channels]
@@ -616,7 +627,8 @@ fn global_avg_pool_2d_forward_distinct_channels() {
     let x: Tensor = Array::from_shape_vec((1, 2, 3, 2), vals)
         .unwrap()
         .into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 2]);
     assert_abs_diff_eq!(out[[0, 0]], 3.5_f32, epsilon = 1e-5); // 21/6
     assert_abs_diff_eq!(out[[0, 1]], 35.0_f32, epsilon = 1e-5); // 210/6
@@ -627,7 +639,7 @@ fn global_avg_pool_2d_forward_distinct_channels() {
 fn global_avg_pool_2d_forward_all_ones() {
     let mut layer = GlobalAveragePooling2D::new();
     let x: Tensor = Array::ones((2, 5, 5, 3)).into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[2, 3]);
     for b in 0..2 {
         for c in 0..3 {
@@ -645,7 +657,7 @@ fn global_avg_pool_2d_forward_multi_batch() {
     let x: Tensor = Array::from_shape_vec((2, 3, 3, 1), vals)
         .unwrap()
         .into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[2, 1]);
     assert_abs_diff_eq!(out[[0, 0]], 2.0_f32, epsilon = 1e-5);
     assert_abs_diff_eq!(out[[1, 0]], 6.0_f32, epsilon = 1e-5);
@@ -660,7 +672,7 @@ fn global_avg_pool_2d_forward_single_spatial_pixel() {
     let x: Tensor = Array::from_shape_vec((2, 1, 1, 3), vals)
         .unwrap()
         .into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[2, 3]);
     for b in 0..2usize {
         for c in 0..3usize {
@@ -676,8 +688,8 @@ fn global_avg_pool_2d_predict_equals_forward() {
     let mut layer_fwd = GlobalAveragePooling2D::new();
     let layer_pred = GlobalAveragePooling2D::new();
     let x: Tensor = Array::ones((2, 4, 4, 3)).into_dyn();
-    let fwd = layer_fwd.forward(&x).unwrap();
-    let pred = layer_pred.predict(&x).unwrap();
+    let fwd = layer_fwd.forward_mut(&x, &mut Ctx::training()).unwrap();
+    let pred = layer_pred.forward(&x, &mut Ctx::inference()).unwrap();
     assert_eq!(fwd.shape(), pred.shape());
     for (a, b) in fwd.iter().zip(pred.iter()) {
         assert_abs_diff_eq!(a, b, epsilon = 1e-6);
@@ -687,9 +699,9 @@ fn global_avg_pool_2d_predict_equals_forward() {
 /// backward() before forward() returns ForwardPassNotRun for GlobalAveragePooling2D
 #[test]
 fn global_avg_pool_2d_backward_before_forward_errors() {
-    let mut layer = GlobalAveragePooling2D::new();
+    let layer = GlobalAveragePooling2D::new();
     let grad: Tensor = Array::ones((1, 2)).into_dyn();
-    let result = layer.backward(&grad);
+    let result = layer.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -705,9 +717,9 @@ fn global_avg_pool_2d_backward_before_forward_errors() {
 fn global_avg_pool_2d_wrong_rank_input_errors() {
     let mut layer = GlobalAveragePooling2D::new();
     let bad: Tensor = Array::ones((2, 3, 4)).into_dyn();
-    assert!(layer.forward(&bad).is_err());
+    assert!(layer.forward_mut(&bad, &mut Ctx::training()).is_err());
     let layer_pred = GlobalAveragePooling2D::new();
-    assert!(layer_pred.predict(&bad).is_err());
+    assert!(layer_pred.forward(&bad, &mut Ctx::inference()).is_err());
 }
 
 /// layer_type() returns correct string
@@ -726,8 +738,8 @@ fn global_avg_pool_2d_output_shape() {
     let mut layer = GlobalAveragePooling2D::new();
     // batch 3, 5x5 spatial, channels 4
     let x: Tensor = Array::ones((3, 5, 5, 4)).into_dyn();
-    layer.forward(&x).unwrap();
-    assert_eq!(layer.output_shape(), "(3, 4)");
+    layer.forward_mut(&x, &mut Ctx::training()).unwrap();
+    assert_eq!(layer.output_shape(), "(None, 4)");
 }
 
 // GlobalAveragePooling3D, input [batch, depth, height, width, channels] -> output [batch, channels]
@@ -741,7 +753,8 @@ fn global_avg_pool_3d_forward_single_batch_channel() {
     let x: Tensor = Array::from_shape_vec((1, 2, 2, 2, 1), vals)
         .unwrap()
         .into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[1, 1]);
     assert_abs_diff_eq!(out[[0, 0]], 3.5_f32, epsilon = 1e-5); // 28/8
 }
@@ -751,7 +764,7 @@ fn global_avg_pool_3d_forward_single_batch_channel() {
 fn global_avg_pool_3d_forward_all_ones() {
     let mut layer = GlobalAveragePooling3D::new();
     let x: Tensor = Array::ones((2, 3, 3, 3, 4)).into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[2, 4]);
     for b in 0..2 {
         for c in 0..4 {
@@ -773,7 +786,7 @@ fn global_avg_pool_3d_forward_multi_channel() {
     let x: Tensor = Array::from_shape_vec((1, 2, 2, 2, 2), vals)
         .unwrap()
         .into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[1, 2]);
     assert_abs_diff_eq!(out[[0, 0]], 5.0_f32, epsilon = 1e-5);
     assert_abs_diff_eq!(out[[0, 1]], 9.0_f32, epsilon = 1e-5);
@@ -788,7 +801,7 @@ fn global_avg_pool_3d_forward_multi_batch() {
     let x: Tensor = Array::from_shape_vec((2, 2, 2, 2, 1), vals)
         .unwrap()
         .into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[2, 1]);
     assert_abs_diff_eq!(out[[0, 0]], 3.0_f32, epsilon = 1e-5);
     assert_abs_diff_eq!(out[[1, 0]], 7.0_f32, epsilon = 1e-5);
@@ -803,8 +816,8 @@ fn global_avg_pool_3d_predict_equals_forward() {
     let x: Tensor = Array::from_shape_vec((1, 2, 2, 2, 1), vals)
         .unwrap()
         .into_dyn();
-    let fwd = layer_fwd.forward(&x).unwrap();
-    let pred = layer_pred.predict(&x).unwrap();
+    let fwd = layer_fwd.forward_mut(&x, &mut Ctx::training()).unwrap();
+    let pred = layer_pred.forward(&x, &mut Ctx::inference()).unwrap();
     assert_eq!(fwd.shape(), pred.shape());
     for (a, b) in fwd.iter().zip(pred.iter()) {
         assert_abs_diff_eq!(a, b, epsilon = 1e-6);
@@ -814,9 +827,9 @@ fn global_avg_pool_3d_predict_equals_forward() {
 /// backward() before forward() returns ForwardPassNotRun for GlobalAveragePooling3D
 #[test]
 fn global_avg_pool_3d_backward_before_forward_errors() {
-    let mut layer = GlobalAveragePooling3D::new();
+    let layer = GlobalAveragePooling3D::new();
     let grad: Tensor = Array::ones((1, 2)).into_dyn();
-    let result = layer.backward(&grad);
+    let result = layer.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -832,9 +845,9 @@ fn global_avg_pool_3d_backward_before_forward_errors() {
 fn global_avg_pool_3d_wrong_rank_input_errors() {
     let mut layer = GlobalAveragePooling3D::new();
     let bad: Tensor = Array::ones((1, 2, 3, 4)).into_dyn();
-    assert!(layer.forward(&bad).is_err());
+    assert!(layer.forward_mut(&bad, &mut Ctx::training()).is_err());
     let layer_pred = GlobalAveragePooling3D::new();
-    assert!(layer_pred.predict(&bad).is_err());
+    assert!(layer_pred.forward(&bad, &mut Ctx::inference()).is_err());
 }
 
 /// layer_type() returns correct string
@@ -853,8 +866,8 @@ fn global_avg_pool_3d_output_shape() {
     let mut layer = GlobalAveragePooling3D::new();
     // batch 2, 3x3x3 volume, channels 5
     let x: Tensor = Array::ones((2, 3, 3, 3, 5)).into_dyn();
-    layer.forward(&x).unwrap();
-    assert_eq!(layer.output_shape(), "(2, 5)");
+    layer.forward_mut(&x, &mut Ctx::training()).unwrap();
+    assert_eq!(layer.output_shape(), "(None, 5)");
 }
 
 /// Same padding excludes padded cells from the average divisor (Keras count_include_pad=False).
@@ -868,7 +881,7 @@ fn avg_pool_2d_same_padding_excludes_padding() {
     let x = Array::from_shape_vec((1, 3, 3, 1), (1..=9).map(|v| v as f32).collect())
         .unwrap()
         .into_dyn();
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[1, 2, 2, 1]);
     assert_abs_diff_eq!(out[[0, 0, 0, 0]], 3.0, epsilon = 1e-6); // (1+2+4+5)/4
     assert_abs_diff_eq!(out[[0, 0, 1, 0]], 4.5, epsilon = 1e-6); // (3+6)/2, padding excluded

@@ -19,6 +19,7 @@
 # Regeneration history, newest first. Each line holds the reason of 1 run that wrote
 # this file.
 #
+# reason the pure known_input_shapes reports the build shape with a free batch axis
 # reason the checkpoint is addressed by name, so the layer supplies every recorded parameter name and the parameter count records both halves
 #
 # Each value line holds the raw f32 bits from to_bits, in 8 lowercase hexadecimal
@@ -28,7 +29,7 @@
 
 format 6
 family sequence
-content_digest cfb50dabb094d8c2 cases 40 values 6716
+content_digest 3c3424a203858fde cases 40 values 6716
 
 case SimpleRNN units_3_tanh
 mode training
@@ -4519,7 +4520,7 @@ end
 
 case Embedding indices_whole
 mode training
-output_shape "(None, 4, 3)"
+output_shape "(None, None, 3)"
 param_count trainable 18 non_trainable 0
 param_name embeddings layer
 weight embeddings 6 3 checksum 034117b78625aa29
@@ -4634,7 +4635,7 @@ end
 
 case Embedding indices_truncated
 mode training
-output_shape "(None, 4, 3)"
+output_shape "(None, None, 3)"
 param_count trainable 18 non_trainable 0
 param_name embeddings layer
 weight embeddings 6 3 checksum 034117b78625aa29
@@ -4749,7 +4750,7 @@ end
 
 case LayerNormalization axis_default_rank_2
 mode training
-output_shape "(2, 8)"
+output_shape "(None, 8)"
 param_count trainable 16 non_trainable 0
 param_name gamma layer
 param_name beta layer
@@ -4865,7 +4866,7 @@ end
 
 case LayerNormalization axis_default_rank_3
 mode training
-output_shape "(2, 3, 4)"
+output_shape "(None, 3, 4)"
 param_count trainable 8 non_trainable 0
 param_name gamma layer
 param_name beta layer
@@ -4997,7 +4998,7 @@ end
 
 case LayerNormalization axis_custom_1
 mode training
-output_shape "(2, 3, 4)"
+output_shape "(None, 3, 4)"
 param_count trainable 6 non_trainable 0
 param_name gamma layer
 param_name beta layer
@@ -5125,7 +5126,7 @@ end
 
 case LayerNormalization axes_multiple_2_3
 mode training
-output_shape "(2, 2, 3, 2)"
+output_shape "(None, 2, 3, 2)"
 param_count trainable 12 non_trainable 0
 param_name gamma layer
 param_name beta layer
@@ -5265,7 +5266,7 @@ end
 
 case LayerNormalization axes_multiple_1_3
 mode training
-output_shape "(2, 2, 3, 2)"
+output_shape "(None, 2, 3, 2)"
 param_count trainable 8 non_trainable 0
 param_name gamma layer
 param_name beta layer
@@ -5397,7 +5398,7 @@ end
 
 case LayerNormalization inference_rank_2
 mode inference
-output_shape "(2, 8)"
+output_shape "(None, 8)"
 param_count trainable 16 non_trainable 0
 weight gamma 8 checksum 2c9df443f2bf7933
 weight beta 8 checksum e394d9a37233ac79
@@ -5475,7 +5476,7 @@ end
 
 case InstanceNormalization rank_3
 mode training
-output_shape "(2, 4, 3)"
+output_shape "(None, 4, 3)"
 param_count trainable 6 non_trainable 0
 param_name gamma layer
 param_name beta layer
@@ -5603,7 +5604,7 @@ end
 
 case InstanceNormalization rank_4
 mode training
-output_shape "(2, 2, 3, 4)"
+output_shape "(None, 2, 3, 4)"
 param_count trainable 8 non_trainable 0
 param_name gamma layer
 param_name beta layer
@@ -5831,7 +5832,7 @@ end
 
 case InstanceNormalization inference_rank_3
 mode inference
-output_shape "(2, 4, 3)"
+output_shape "(None, 4, 3)"
 param_count trainable 6 non_trainable 0
 weight gamma 3 checksum 31f54272e7718862
 weight beta 3 checksum d5a405aeffc5af9f
@@ -5941,7 +5942,7 @@ end
 
 case GroupNormalization groups_1
 mode training
-output_shape "(2, 4, 6)"
+output_shape "(None, 4, 6)"
 param_count trainable 12 non_trainable 0
 param_name gamma layer
 param_name beta layer
@@ -6177,7 +6178,7 @@ end
 
 case GroupNormalization groups_2
 mode training
-output_shape "(2, 4, 6)"
+output_shape "(None, 4, 6)"
 param_count trainable 12 non_trainable 0
 param_name gamma layer
 param_name beta layer
@@ -6413,7 +6414,7 @@ end
 
 case GroupNormalization groups_6
 mode training
-output_shape "(2, 4, 6)"
+output_shape "(None, 4, 6)"
 param_count trainable 12 non_trainable 0
 param_name gamma layer
 param_name beta layer
@@ -6649,7 +6650,7 @@ end
 
 case GroupNormalization rank_4_groups_2
 mode training
-output_shape "(2, 2, 3, 4)"
+output_shape "(None, 2, 3, 4)"
 param_count trainable 8 non_trainable 0
 param_name gamma layer
 param_name beta layer
@@ -6877,7 +6878,7 @@ end
 
 case GroupNormalization inference_groups_2
 mode inference
-output_shape "(2, 4, 6)"
+output_shape "(None, 4, 6)"
 param_count trainable 12 non_trainable 0
 weight gamma 6 checksum 29caed60fcd3895e
 weight beta 6 checksum 1f58d7cb9914783f

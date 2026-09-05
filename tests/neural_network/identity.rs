@@ -4,6 +4,7 @@
 //! carrying the layer trains exactly as one without it.
 
 use ndarray::{Array2, IxDyn};
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
@@ -13,7 +14,7 @@ use rustyml::neural_network::layers::identity::Identity;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::SequentialBuilder;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::{GlobalSeedGuard, assert_allclose};
@@ -38,10 +39,10 @@ fn identity_passes_every_rank_through_unchanged() {
         let x = ramp(&shape);
         let mut layer = Identity::new();
 
-        let out = layer.forward(&x).unwrap();
+        let out = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
         assert_eq!(out, x, "rank {} changed a value", shape.len());
 
-        let inferred = layer.predict(&x).unwrap();
+        let inferred = layer.forward(&x, &mut Ctx::inference()).unwrap();
         assert_eq!(
             inferred,
             x,
@@ -56,10 +57,11 @@ fn identity_passes_every_rank_through_unchanged() {
 fn identity_passes_its_gradient_through_unchanged() {
     let x = ramp(&[3, 4]);
     let mut layer = Identity::new();
-    layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    layer.forward_mut(&x, &mut ctx).unwrap();
 
     let upstream = ramp(&[3, 4]).mapv(|v| v * 2.0 + 1.0);
-    let grad = layer.backward(&upstream).unwrap();
+    let grad = layer.backward(&upstream, &mut ctx).unwrap();
     assert_eq!(grad, upstream);
 }
 
@@ -67,8 +69,10 @@ fn identity_passes_its_gradient_through_unchanged() {
 #[test]
 fn identity_default_matches_new() {
     let x = ramp(&[2, 3]);
-    let from_new = Identity::new().predict(&x).unwrap();
-    let from_default = Identity::default().predict(&x).unwrap();
+    let from_new = Identity::new().forward(&x, &mut Ctx::inference()).unwrap();
+    let from_default = Identity::default()
+        .forward(&x, &mut Ctx::inference())
+        .unwrap();
     assert_eq!(from_new, from_default);
 }
 
@@ -85,11 +89,12 @@ fn identity_output_is_in_c_order() {
     );
 
     let mut layer = Identity::new();
-    let out = layer.forward(&transposed).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&transposed, &mut ctx).unwrap();
     assert!(out.is_standard_layout(), "forward is not in C order");
     assert_eq!(out, transposed, "settling the layout changed a value");
 
-    let grad = layer.backward(&transposed).unwrap();
+    let grad = layer.backward(&transposed, &mut ctx).unwrap();
     assert!(grad.is_standard_layout(), "backward is not in C order");
     assert_eq!(grad, transposed);
 }
@@ -101,21 +106,29 @@ fn identity_holds_no_parameter() {
     assert_eq!(layer.layer_type(), "Identity");
     assert_eq!(layer.param_count(), ParamCounts::none());
     assert!(layer.weights().is_empty());
-    assert!(layer.parameters().is_empty());
+    assert!(layer.parameters_mut().is_empty());
 }
 
-/// The summary reads "Unknown" until a tensor has passed through the layer
+/// The summary reads "Unknown" until a tensor has passed through the layer, and afterward it
+/// reports the shape that the first forward pass built for
+///
+/// `known_input_shapes` reports the build shape, and the build reads the full shape of the
+/// tensor that triggered it, batch axis included. A second forward pass through the same
+/// instance still runs, at whatever rank it receives, because `Identity::forward` reads no
+/// build state. The summary does not move, because the layer already holds its build
 #[test]
 fn identity_output_shape_needs_a_forward_pass() {
     let mut layer = Identity::new();
     assert_eq!(layer.output_shape(), "Unknown");
 
-    layer.forward(&ramp(&[2, 3, 4])).unwrap();
+    layer
+        .forward_mut(&ramp(&[2, 3, 4]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(layer.output_shape(), "(None, 3, 4)");
 
-    // A rank-1 input has nothing after its batch axis
-    layer.forward(&ramp(&[4])).unwrap();
-    assert_eq!(layer.output_shape(), "(None,)");
+    // A rank-1 input still runs, and the summary keeps reporting the first build
+    layer.forward(&ramp(&[4]), &mut Ctx::training()).unwrap();
+    assert_eq!(layer.output_shape(), "(None, 3, 4)");
 }
 
 /// A model carrying the layer trains to the same weights as one without it
@@ -171,16 +184,18 @@ fn identity_does_not_change_what_a_model_learns() {
     );
 }
 
-/// `predict` writes no cache, so it cannot serve a later backward pass
+/// A forward pass with an inference context writes no cache, so it cannot serve a later
+/// backward pass
 #[test]
 fn identity_predict_caches_nothing() {
     let x = ramp(&[2, 3]);
-    let mut layer = Identity::new();
-    layer.predict(&x).unwrap();
+    let layer = Identity::new();
+    let mut ctx = Ctx::inference();
+    layer.forward(&x, &mut ctx).unwrap();
 
     assert!(
         matches!(
-            layer.backward(&x),
+            layer.backward(&x, &mut ctx),
             Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
         ),
         "predict must not leave a cache behind"
@@ -193,7 +208,7 @@ fn identity_rejects_a_rank_0_input() {
     let scalar = Tensor::from_shape_vec(IxDyn(&[]), vec![1.0]).unwrap();
     assert!(
         matches!(
-            Identity::new().predict(&scalar),
+            Identity::new().forward(&scalar, &mut Ctx::inference()),
             Err(Error::InvalidInput(_))
         ),
         "a rank-0 input has no batch axis"
@@ -205,7 +220,10 @@ fn identity_rejects_a_rank_0_input() {
 fn identity_rejects_empty_input() {
     let empty = Tensor::zeros(IxDyn(&[0, 3]));
     assert!(
-        matches!(Identity::new().forward(&empty), Err(Error::EmptyInput(_))),
+        matches!(
+            Identity::new().forward_mut(&empty, &mut Ctx::training()),
+            Err(Error::EmptyInput(_))
+        ),
         "Identity must reject an empty input"
     );
 }
@@ -213,10 +231,10 @@ fn identity_rejects_empty_input() {
 /// A backward pass before any forward pass has no cache to read
 #[test]
 fn identity_backward_needs_a_forward_pass() {
-    let mut layer = Identity::new();
+    let layer = Identity::new();
     assert!(
         matches!(
-            layer.backward(&ramp(&[2, 3])),
+            layer.backward(&ramp(&[2, 3]), &mut Ctx::training()),
             Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
         ),
         "backward must reject a missing cache"
@@ -227,9 +245,10 @@ fn identity_backward_needs_a_forward_pass() {
 #[test]
 fn identity_backward_rejects_a_wrong_shape() {
     let mut layer = Identity::new();
-    layer.forward(&ramp(&[2, 3])).unwrap();
+    let mut ctx = Ctx::training();
+    layer.forward_mut(&ramp(&[2, 3]), &mut ctx).unwrap();
 
-    let result = layer.backward(&ramp(&[2, 4]));
+    let result = layer.backward(&ramp(&[2, 4]), &mut ctx);
     assert!(
         matches!(
             result,

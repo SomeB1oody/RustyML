@@ -13,19 +13,17 @@ use super::col_fold_parallel_min_elems;
 use super::folds::{par_col_dot, par_col_sum, rows_per_block};
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::build_on_forward;
+use crate::neural_network::layers::built_layer_shape_functions;
 use crate::neural_network::layers::named_weight_layer_functions;
-use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
-use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
-use crate::neural_network::layers::regularization::normalization::normalization_layer_shape_functions;
+use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape_function;
 use crate::neural_network::layers::regularization::validation::{
     validate_epsilon, validate_momentum,
 };
 use crate::neural_network::layers::validation::{
     start_build, validate_built_input, validate_optional_weight, validate_weight_shape,
 };
-use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::traits::{LayerBase, ParamRef, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, StateSlot, Tensor};
 use ndarray::Axis;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
@@ -49,7 +47,8 @@ tunable_gate! {
 ///
 /// ```rust
 /// use rustyml::neural_network::layers::*;
-/// use rustyml::neural_network::traits::Layer;
+/// use rustyml::neural_network::traits::UnaryLayer;
+/// use rustyml::neural_network::Ctx;
 /// use ndarray::Array2;
 ///
 /// // Create a BatchNormalization layer
@@ -59,7 +58,8 @@ tunable_gate! {
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
 /// // During training, normalizes the input
-/// let output = bn.forward(&input).unwrap();
+/// let mut ctx = Ctx::training();
+/// let output = bn.forward_mut(&input, &mut ctx).unwrap();
 /// ```
 #[derive(Debug)]
 pub struct BatchNormalization {
@@ -73,32 +73,18 @@ pub struct BatchNormalization {
     ///
     /// The array stays allocated and holds every element at 1 when `scale` is false. A scale of
     /// 1 changes no value, so the forward pass reads it and gives the same result that dropping
-    /// the multiply gives. `weights` hides the array and `parameters` never yields it
+    /// the multiply gives. `weights` hides the array and `parameters_mut` never yields it
     gamma: Tensor,
     /// Shift parameter (trainable)
     ///
     /// The array stays allocated and holds every element at 0 when `center` is false. A shift
     /// of 0 changes every value except a negative zero, which it turns into a positive zero.
-    /// `weights` hides the array and `parameters` never yields it
+    /// `weights` hides the array and `parameters_mut` never yields it
     beta: Tensor,
     /// Running mean for inference
     moving_mean: Tensor,
     /// Running variance for inference
     moving_variance: Tensor,
-    /// Whether the layer is in training mode or inference mode
-    training: bool,
-    /// Mean computed during forward pass (used in backward pass)
-    batch_mean: Option<Tensor>,
-    /// Variance computed during forward pass (used in backward pass)
-    batch_var: Option<Tensor>,
-    /// Normalized input (used in backward pass)
-    x_normalized: Option<Tensor>,
-    /// Centered input (used in backward pass)
-    x_centered: Option<Tensor>,
-    /// Gradient for gamma parameter
-    grad_gamma: Option<Tensor>,
-    /// Gradient for beta parameter
-    grad_beta: Option<Tensor>,
     /// Whether the layer adds the shift `beta`
     center: bool,
     /// Whether the layer applies the scale `gamma`
@@ -133,24 +119,15 @@ impl BatchNormalization {
             beta: Tensor::zeros([0].as_slice()),
             moving_mean: Tensor::zeros([0].as_slice()),
             moving_variance: Tensor::ones([0].as_slice()),
-            training: true,
-            batch_mean: None,
-            batch_var: None,
-            x_normalized: None,
-            x_centered: None,
-            grad_gamma: None,
-            grad_beta: None,
             center: true,
             scale: true,
         })
     }
 
-    mode_dependent_layer_set_training!();
-
     /// Sets whether the layer adds the shift `beta` (defaults to `true`)
     ///
     /// With `center` set to false the layer holds no `beta`: `param_count` counts none for it,
-    /// `parameters` yields none for it, and a checkpoint of the layer holds no
+    /// `parameters_mut` yields none for it, and a checkpoint of the layer holds no
     /// `<position>.beta` path. The moving mean and the moving variance stay, because they are
     /// state that the layer keeps and not parameters that an optimizer updates
     ///
@@ -164,10 +141,9 @@ impl BatchNormalization {
     pub fn with_center(mut self, center: bool) -> Self {
         self.center = center;
         if !center {
-            // Put the array back at the identity shift and drop any gradient a previous
-            // backward pass left, so nothing the layer no longer holds can reach a result
+            // Put the array back at the identity shift, so nothing the layer no longer holds
+            // can reach a result
             self.beta = Tensor::zeros(self.beta.shape());
-            self.grad_beta = None;
         }
         self
     }
@@ -175,7 +151,7 @@ impl BatchNormalization {
     /// Sets whether the layer applies the scale `gamma` (defaults to `true`)
     ///
     /// With `scale` set to false the layer holds no `gamma`: `param_count` counts none for it,
-    /// `parameters` yields none for it, and a checkpoint of the layer holds no
+    /// `parameters_mut` yields none for it, and a checkpoint of the layer holds no
     /// `<position>.gamma` path. `beta` keeps its own name and its own optimizer state, because
     /// a checkpoint and an optimizer both address an array by name and never by position
     ///
@@ -189,10 +165,9 @@ impl BatchNormalization {
     pub fn with_scale(mut self, scale: bool) -> Self {
         self.scale = scale;
         if !scale {
-            // Put the array back at the identity scale and drop any gradient a previous
-            // backward pass left, so nothing the layer no longer holds can reach a result
+            // Put the array back at the identity scale, so nothing the layer no longer holds
+            // can reach a result
             self.gamma = Tensor::ones(self.gamma.shape());
-            self.grad_gamma = None;
         }
         self
     }
@@ -248,7 +223,83 @@ impl BatchNormalization {
     }
 }
 
-impl Layer for BatchNormalization {
+/// What the forward pass of [`BatchNormalization`] parks for its backward pass
+struct BatchNormalizationCache {
+    /// Per-channel variance of the mini-batch
+    batch_var: Tensor,
+    /// The input after the subtraction of the mean and the divide by the standard deviation
+    x_normalized: Tensor,
+    /// The input after the subtraction of the mean
+    x_centered: Tensor,
+}
+
+impl LayerBase for BatchNormalization {
+    fn layer_type(&self) -> &str {
+        "BatchNormalization"
+    }
+
+    fn param_count(&self) -> ParamCounts {
+        // The running statistics are parameters of the layer, and no optimizer updates them.
+        // They move only in the training forward pass, so they are non-trainable
+        // Read the arrays the layer holds rather than the configuration, so dropping
+        // `gamma` or `beta` corrects the count with no second formula to keep in step
+        let gamma = if self.scale { self.gamma.len() } else { 0 };
+        let beta = if self.center { self.beta.len() } else { 0 };
+        ParamCounts::new(
+            gamma + beta,
+            self.moving_mean.len() + self.moving_variance.len(),
+        )
+    }
+
+    fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
+        let Self {
+            gamma,
+            beta,
+            center,
+            scale,
+            ..
+        } = self;
+        let mut params = Vec::new();
+        // Each tensor is pushed on its own, so an array the layer drops holds back no other
+        if *scale {
+            params.push(ParamRef::no_decay(
+                "gamma",
+                gamma.as_slice_mut().expect("gamma must be contiguous"),
+            ));
+        }
+        if *center {
+            params.push(ParamRef::no_decay(
+                "beta",
+                beta.as_slice_mut().expect("beta must be contiguous"),
+            ));
+        }
+        params
+    }
+
+    built_layer_shape_functions!();
+
+    named_weight_layer_functions!(
+        trainable "gamma" => gamma if scale,
+        trainable "beta" => beta if center,
+        non_trainable "moving_mean" => moving_mean,
+        non_trainable "moving_variance" => moving_variance,
+    );
+
+    /// Takes back the running statistics that the training forward pass proposed
+    ///
+    /// The forward pass reads `&self`, so it writes the new running mean and the new running
+    /// variance into the state channel of the context. This moves them into the layer
+    fn apply_state(&mut self, state: &mut StateSlot<'_>) {
+        if let Some(moving_mean) = state.take::<Tensor>("moving_mean") {
+            self.moving_mean = moving_mean;
+        }
+        if let Some(moving_variance) = state.take::<Tensor>("moving_variance") {
+            self.moving_variance = moving_variance;
+        }
+    }
+}
+
+impl UnaryLayer for BatchNormalization {
     /// Allocates the per-channel arrays from the trailing axis of the input
     ///
     /// The channel axis is the last axis. An input of rank 1 has no channel axis, so the
@@ -276,8 +327,13 @@ impl Layer for BatchNormalization {
         Ok(())
     }
 
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        build_on_forward!(self, input);
+    /// Normalizes with the statistics of the mini-batch during training, and with the running
+    /// statistics during inference
+    ///
+    /// A training pass proposes a new running mean and a new running variance through the state
+    /// channel of the context, and the layer takes them back in
+    /// [`apply_state`](LayerBase::apply_state). An inference pass proposes nothing at all
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         validate_built_input(&self.built, "BatchNormalization", input.shape())?;
 
         // The parallel passes below need a contiguous slice. A standard-layout input is
@@ -292,7 +348,7 @@ impl Layer for BatchNormalization {
             &owned
         };
 
-        if self.training {
+        if ctx.is_training() {
             let total_elements = input.len();
             // Under the channels-last layout, the channel axis is innermost. A
             // `[batch, spatial..., channels]` buffer already *is* the `[M, C]` matrix the
@@ -416,20 +472,39 @@ impl Layer for BatchNormalization {
             };
 
             // Update running statistics
-            self.moving_mean =
-                &self.moving_mean * self.momentum + &batch_mean * (1.0 - self.momentum);
-            self.moving_variance =
-                &self.moving_variance * self.momentum + &batch_var * (1.0 - self.momentum);
+            //
+            // The pass reads `&self`, so the new values go into the state channel. A layer that
+            // runs twice in 1 pass reads back what its first call proposed, which is what the
+            // field held after the first call before the statistics moved to the context
+            let updated_mean = {
+                let current = ctx
+                    .state::<Tensor>("moving_mean")
+                    .unwrap_or(&self.moving_mean);
+                current * self.momentum + &batch_mean * (1.0 - self.momentum)
+            };
+            let updated_variance = {
+                let current = ctx
+                    .state::<Tensor>("moving_variance")
+                    .unwrap_or(&self.moving_variance);
+                current * self.momentum + &batch_var * (1.0 - self.momentum)
+            };
+            ctx.set_state("moving_mean", updated_mean);
+            ctx.set_state("moving_variance", updated_variance);
 
-            // Cache values for backward pass
-            self.batch_mean = Some(batch_mean);
-            self.batch_var = Some(batch_var);
-            self.x_normalized = Some(x_normalized);
-            self.x_centered = Some(x_centered);
+            // Park what the backward pass needs
+            ctx.push_cache(BatchNormalizationCache {
+                batch_var,
+                x_normalized,
+                x_centered,
+            });
 
             Ok(output)
         } else {
             // Inference mode: use running statistics
+            //
+            // The per-channel statistics are `[C]` and the channel axis is innermost. This lets
+            // ndarray's trailing-axis broadcast line them up against an input of any rank on its
+            // own
             let std_dev = (&self.moving_variance + self.epsilon).mapv(|x| x.sqrt());
             let x_normalized = (input - &self.moving_mean) / &std_dev;
             let output = &x_normalized * &self.gamma + &self.beta;
@@ -438,24 +513,18 @@ impl Layer for BatchNormalization {
         }
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_built_input(&self.built, "BatchNormalization", input.shape())?;
-
-        // The per-channel statistics are `[C]` and the channel axis is innermost. This lets
-        // ndarray's trailing-axis broadcast line them up against an input of any rank on its own
-        let std_dev = (&self.moving_variance + self.epsilon).mapv(|x| x.sqrt());
-        let x_normalized = (input - &self.moving_mean) / &std_dev;
-        let output = &x_normalized * &self.gamma + &self.beta;
-
-        Ok(output)
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        if !self.training {
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        if !ctx.is_training() {
             // During inference, pass gradient through unchanged
             return Ok(grad_output.clone());
         }
+
+        let cache: BatchNormalizationCache = ctx.pop_cache("BatchNormalization")?;
+        let BatchNormalizationCache {
+            batch_var,
+            x_normalized,
+            x_centered,
+        } = cache;
 
         // As in `forward`: only a non-contiguous view needs the copy
         let owned;
@@ -466,21 +535,6 @@ impl Layer for BatchNormalization {
             &owned
         };
         let total_elements = grad_output.len();
-
-        let x_normalized = self
-            .x_normalized
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("BatchNormalization"))?;
-
-        let x_centered = self
-            .x_centered
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("BatchNormalization"))?;
-
-        let batch_var = self
-            .batch_var
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("BatchNormalization"))?;
 
         let channels = self.gamma.len();
         // As in `forward`: any rank >= 2 gradient is already the `[M, C]` matrix the folds want.
@@ -513,15 +567,19 @@ impl Layer for BatchNormalization {
             )
         } else {
             (
-                (grad_output * x_normalized).sum_axis(Axis(0)),
+                (grad_output * &x_normalized).sum_axis(Axis(0)),
                 grad_output.sum_axis(Axis(0)),
             )
         };
 
-        // An array the layer does not hold keeps no gradient, so `parameters` yields
-        // none for it and no optimizer state is ever keyed on it
-        self.grad_gamma = self.scale.then_some(grad_gamma);
-        self.grad_beta = self.center.then_some(grad_beta);
+        // An array the layer does not hold gets no gradient, so the store holds none and no
+        // optimizer state is ever keyed on it
+        if self.scale {
+            ctx.add_grad("gamma", grad_gamma.into_dyn())?;
+        }
+        if self.center {
+            ctx.add_grad("beta", grad_beta.into_dyn())?;
+        }
 
         // Compute gradient with respect to normalized input
         let grad_x_normalized = if total_elements >= batch_norm_parallel_threshold() {
@@ -553,7 +611,7 @@ impl Layer for BatchNormalization {
         };
 
         // Compute gradient with respect to variance
-        let std_dev = (batch_var + self.epsilon).mapv(|x| x.sqrt());
+        let std_dev = (&batch_var + self.epsilon).mapv(|x| x.sqrt());
         let inv_std = std_dev.mapv(|x| 1.0 / x);
 
         // The -0.5 / -1.0 scales are applied per term inside the folds, matching the serial
@@ -567,7 +625,7 @@ impl Layer for BatchNormalization {
                 .expect("rank >= 2 batch-norm buffers are standard layout");
             par_col_dot(g, xc, channels, col_stats_parallel, -0.5)
         } else {
-            (&grad_x_normalized * x_centered * -0.5).sum_axis(Axis(0))
+            (&grad_x_normalized * &x_centered * -0.5).sum_axis(Axis(0))
         };
         let grad_var = grad_var_sum * &inv_std * &inv_std * &inv_std;
 
@@ -628,67 +686,14 @@ impl Layer for BatchNormalization {
         } else {
             // Sequential computation
             &grad_x_normalized * &inv_std
-                + &grad_var * (x_centered * 2.0 / batch_size)
+                + &grad_var * (&x_centered * 2.0 / batch_size)
                 + &grad_mean / batch_size
         };
 
         Ok(grad_input)
     }
 
-    fn layer_type(&self) -> &str {
-        "BatchNormalization"
-    }
-
-    normalization_layer_shape_functions!("BatchNormalization");
-
-    fn param_count(&self) -> ParamCounts {
-        // The running statistics are parameters of the layer, and no optimizer updates them.
-        // They move only in the training forward pass, so they are non-trainable
-        // Read the arrays the layer holds rather than the configuration, so dropping
-        // `gamma` or `beta` corrects the count with no second formula to keep in step
-        let gamma = if self.scale { self.gamma.len() } else { 0 };
-        let beta = if self.center { self.beta.len() } else { 0 };
-        ParamCounts::new(
-            gamma + beta,
-            self.moving_mean.len() + self.moving_variance.len(),
-        )
-    }
-
-    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
-        let Self {
-            gamma,
-            beta,
-            grad_gamma,
-            grad_beta,
-            ..
-        } = self;
-        let mut params = Vec::new();
-        // Each tensor is pushed on its own, so a tensor without a gradient holds back no other
-        if let Some(grad) = grad_gamma.as_ref() {
-            params.push(ParamGrad::no_decay(
-                "gamma",
-                gamma.as_slice_mut().expect("gamma must be contiguous"),
-                grad.as_slice().expect("grad_gamma must be contiguous"),
-            ));
-        }
-        if let Some(grad) = grad_beta.as_ref() {
-            params.push(ParamGrad::no_decay(
-                "beta",
-                beta.as_slice_mut().expect("beta must be contiguous"),
-                grad.as_slice().expect("grad_beta must be contiguous"),
-            ));
-        }
-        params
-    }
-
-    named_weight_layer_functions!(
-        trainable "gamma" => gamma if scale,
-        trainable "beta" => beta if center,
-        non_trainable "moving_mean" => moving_mean,
-        non_trainable "moving_variance" => moving_variance,
-    );
-
-    mode_dependent_layer_trait!();
+    normalization_layer_output_shape_function!("BatchNormalization");
 }
 
 /// Unit tests for the batch-normalization layer and its column-fold kernels
@@ -812,7 +817,8 @@ mod tests {
         )
         .unwrap();
 
-        let out = layer.forward(&x).unwrap();
+        let mut ctx = Ctx::training();
+        let out = layer.forward_mut(&x, &mut ctx).unwrap();
         assert_eq!(out.shape(), &[1, 2, 2, 2]);
 
         // Both channels share variance 1.25, so both use the same inverse standard deviation
@@ -847,11 +853,16 @@ mod tests {
 
         let mut spatial = BatchNormalization::new(0.9, 1e-5).unwrap();
         let x4 = Tensor::from_shape_vec(IxDyn(&[b, h, w, c]), flat.clone()).unwrap();
-        let out4 = spatial.forward(&x4).unwrap();
+        let mut spatial_ctx = Ctx::training();
+        let out4 = spatial.forward_mut(&x4, &mut spatial_ctx).unwrap();
+        // The running statistics live in the context until the layer takes them back
+        spatial.apply_state(&mut spatial_ctx.state_slot(0));
 
         let mut folded = BatchNormalization::new(0.9, 1e-5).unwrap();
         let x2 = Tensor::from_shape_vec(IxDyn(&[b * h * w, c]), flat).unwrap();
-        let out2 = folded.forward(&x2).unwrap();
+        let mut folded_ctx = Ctx::training();
+        let out2 = folded.forward_mut(&x2, &mut folded_ctx).unwrap();
+        folded.apply_state(&mut folded_ctx.state_slot(0));
 
         assert_eq!(
             out4.iter().copied().collect::<Vec<f32>>(),

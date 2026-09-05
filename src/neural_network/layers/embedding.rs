@@ -3,11 +3,9 @@
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::validation::{start_build, validate_weight_shape};
-use crate::neural_network::layers::{
-    build_config_function, build_on_forward, named_weight_layer_functions,
-};
-use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Fans, Initializer, Shape, Tensor};
+use crate::neural_network::layers::{built_layer_shape_functions, named_weight_layer_functions};
+use crate::neural_network::traits::{LayerBase, ParamRef, UnaryLayer};
+use crate::neural_network::{Ctx, Fans, Initializer, Shape, Tensor};
 use crate::parallel_gates::{cheap_map_parallel_threshold, split_cap};
 use ndarray::{Array2, IxDyn};
 use rayon::prelude::*;
@@ -73,7 +71,8 @@ tunable_gate! {
 /// use rustyml::neural_network::layers::{Activation, Dense, Embedding, Flatten};
 /// use rustyml::neural_network::optimizers::SGD;
 /// use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
-/// use rustyml::neural_network::traits::Layer;
+/// use rustyml::neural_network::traits::UnaryLayer;
+/// use rustyml::neural_network::Ctx;
 ///
 /// // A batch of 2 sequences of 3 word indices each, drawn from a vocabulary of 10
 /// let x = Array2::from_shape_vec((2, 3), vec![1.0, 4.0, 2.0, 7.0, 0.0, 4.0])
@@ -84,7 +83,7 @@ tunable_gate! {
 /// // The layer alone turns each of the 6 indices into a 5-element vector
 /// let mut lookup = Embedding::new(10, 5).unwrap();
 /// lookup.build(&Shape::known(x.shape())).unwrap();
-/// let vectors = lookup.predict(&x).unwrap();
+/// let vectors = lookup.forward(&x, &mut Ctx::inference()).unwrap();
 /// assert_eq!(vectors.shape(), &[2, 3, 5]);
 ///
 /// // A flatten step then feeds the vectors to a dense head
@@ -132,12 +131,6 @@ pub struct Embedding {
     built: Option<Shape>,
     /// Seed of the table draw, or `None` to take the global seed or entropy
     random_state: Option<u64>,
-    /// Row indices the forward pass read, in output order. The backward pass scatters into them
-    index_cache: Option<Vec<usize>>,
-    /// Shape of the most recent forward input, used to check and to shape the gradient
-    input_shape: Option<Vec<usize>>,
-    /// Stored table gradients, kept allocated across steps and refilled with 0 on each backward
-    grad_embeddings: Option<Array2<f32>>,
 }
 
 impl Embedding {
@@ -154,8 +147,8 @@ impl Embedding {
     ///
     /// # Notes
     ///
-    /// The constructor draws nothing. [`Layer::build`] draws the table, from the global seed
-    /// or from entropy by default. For a reproducible table, set a seed with
+    /// The constructor draws nothing. [`UnaryLayer::build`] draws the table, from the global
+    /// seed or from entropy by default. For a reproducible table, set a seed with
     /// [`Embedding::with_random_state`]
     ///
     /// # Errors
@@ -181,9 +174,6 @@ impl Embedding {
             embeddings: Array2::zeros((0, 0)),
             built: None,
             random_state: None,
-            index_cache: None,
-            input_shape: None,
-            grad_embeddings: None,
         })
     }
 
@@ -328,7 +318,42 @@ impl Embedding {
     }
 }
 
-impl Layer for Embedding {
+/// What the forward pass of [`Embedding`] parks for its backward pass
+struct EmbeddingCache {
+    /// Row indices the forward pass read, in output order. The backward pass scatters into them
+    indices: Vec<usize>,
+    /// Shape of the input the forward pass read, to check and to shape the gradient
+    input_shape: Vec<usize>,
+}
+
+impl LayerBase for Embedding {
+    fn layer_type(&self) -> &str {
+        "Embedding"
+    }
+
+    fn param_count(&self) -> ParamCounts {
+        // Read the arrays the layer holds rather than the configuration, so a change to
+        // the roster corrects the count with no second formula to keep in step
+        ParamCounts::trainable(self.embeddings.len())
+    }
+
+    fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
+        vec![ParamRef::weight(
+            "embeddings",
+            self.embeddings
+                .as_slice_mut()
+                .expect("the table is kept in C order"),
+        )]
+    }
+
+    built_layer_shape_functions!();
+
+    named_weight_layer_functions!(
+        trainable "embeddings" => embeddings,
+    );
+}
+
+impl UnaryLayer for Embedding {
     /// Draws the lookup table
     ///
     /// The table is `(input_dim, output_dim)`, and neither extent comes from the input. The
@@ -344,23 +369,22 @@ impl Layer for Embedding {
         Ok(())
     }
 
-    /// Training forward: caches the row indices and the input shape for the backward pass
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        build_on_forward!(self, input);
-        let indices = self.to_indices(input)?;
-        let output = self.gather(&indices, input.shape());
-        self.index_cache = Some(indices);
-        self.input_shape = Some(input.shape().to_vec());
-        Ok(output)
-    }
-
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if self.built.is_none() {
+    /// A training pass parks the row indices and the input shape for the backward pass
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        if !self.is_built() {
             return Err(Error::not_built("Embedding"));
         }
         let indices = self.to_indices(input)?;
-        Ok(self.gather(&indices, input.shape()))
+        let output = self.gather(&indices, input.shape());
+
+        if ctx.is_training() {
+            ctx.push_cache(EmbeddingCache {
+                indices,
+                input_shape: input.shape().to_vec(),
+            });
+        }
+
+        Ok(output)
     }
 
     /// Scatters the upstream gradient back into the table rows the forward pass read
@@ -371,30 +395,20 @@ impl Layer for Embedding {
     /// The returned tensor is 0 everywhere. An index carries no derivative, so no gradient flows
     /// back through the input. The shape still matches the input, so a layer before this one
     /// still receives a well-formed tensor
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        let Self {
-            input_dim,
-            output_dim,
-            index_cache,
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let EmbeddingCache {
+            indices,
             input_shape,
-            grad_embeddings,
-            ..
-        } = self;
-
-        let (Some(indices), Some(input_shape)) = (index_cache.as_ref(), input_shape.as_ref())
-        else {
-            return Err(Error::forward_pass_not_run("Embedding"));
-        };
+        } = ctx.pop_cache::<EmbeddingCache>("Embedding")?;
 
         let mut expected = input_shape.clone();
-        expected.push(*output_dim);
+        expected.push(self.output_dim);
         if grad_output.shape() != expected.as_slice() {
             return Err(Error::shape_mismatch(expected, grad_output.shape()));
         }
 
-        // The buffer survives between steps, so a large table allocates once instead of per batch
-        let grad = grad_embeddings.get_or_insert_with(|| Array2::zeros((*input_dim, *output_dim)));
-        grad.fill(0.0);
+        // The store owns the gradient, so the pass fills 1 fresh buffer and gives it away
+        let mut grad = Array2::zeros((self.input_dim, self.output_dim));
         let table = grad
             .as_slice_mut()
             .expect("the gradient buffer is kept in C order");
@@ -405,29 +419,17 @@ impl Layer for Embedding {
             .as_slice()
             .expect("as_standard_layout gives a C-order array");
 
-        let width = *output_dim;
-        for (row, &index) in source.chunks_exact(width).zip(indices) {
+        let width = self.output_dim;
+        for (row, &index) in source.chunks_exact(width).zip(&indices) {
             let slot = &mut table[index * width..(index + 1) * width];
             for (accumulator, &value) in slot.iter_mut().zip(row) {
                 *accumulator += value;
             }
         }
+        ctx.add_grad("embeddings", grad.into_dyn())?;
 
-        Ok(Tensor::zeros(IxDyn(input_shape)))
+        Ok(Tensor::zeros(IxDyn(&input_shape)))
     }
-
-    fn layer_type(&self) -> &str {
-        "Embedding"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        match &self.input_shape {
-            Some(shape) => Some(Shape::with_free_batch(shape)),
-            None => self.built.clone(),
-        }
-    }
-
-    build_config_function!();
 
     /// Every index becomes 1 row of the table, so the output gains a trailing width axis
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
@@ -436,34 +438,4 @@ impl Layer for Embedding {
         axes.push(Some(self.output_dim));
         Ok(Shape::new(axes))
     }
-
-    fn param_count(&self) -> ParamCounts {
-        // Read the arrays the layer holds rather than the configuration, so a change to
-        // the roster corrects the count with no second formula to keep in step
-        ParamCounts::trainable(self.embeddings.len())
-    }
-
-    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
-        let Self {
-            embeddings,
-            grad_embeddings,
-            ..
-        } = self;
-        let mut params = Vec::new();
-        if let Some(grad) = grad_embeddings.as_ref() {
-            params.push(ParamGrad::weight(
-                "embeddings",
-                embeddings
-                    .as_slice_mut()
-                    .expect("the table is kept in C order"),
-                grad.as_slice()
-                    .expect("the gradient buffer is kept in C order"),
-            ));
-        }
-        params
-    }
-
-    named_weight_layer_functions!(
-        trainable "embeddings" => embeddings,
-    );
 }

@@ -1,13 +1,15 @@
 //! Global max pooling layer for 1D inputs.
 
 use crate::error::Error;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::pooling::layer_functions_global_pooling;
 use crate::neural_network::layers::pooling::pooling_engine::{
     PoolKind, global_pool_backward, global_pool_forward,
 };
-use crate::neural_network::traits::Layer;
+use crate::neural_network::layers::pooling::{
+    layer_base_functions_pooling, layer_functions_global_pooling,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Global max pooling layer for 1D inputs
 ///
@@ -55,10 +57,8 @@ use crate::neural_network::traits::Layer;
 /// fixed shape.
 #[derive(Debug)]
 pub struct GlobalMaxPooling1D {
-    /// Shape of the input tensor cached during the forward pass
-    input_shape: Vec<usize>,
-    /// Cached flat per-channel arg-max indices used for the backward pass
-    argmax: Option<Vec<usize>>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
 }
 
 impl GlobalMaxPooling1D {
@@ -68,10 +68,7 @@ impl GlobalMaxPooling1D {
     ///
     /// - `GlobalMaxPooling1D` - New layer instance
     pub fn new() -> Self {
-        GlobalMaxPooling1D {
-            input_shape: Vec::new(),
-            argmax: None,
-        }
+        GlobalMaxPooling1D { built: None }
     }
 }
 
@@ -81,44 +78,49 @@ impl Default for GlobalMaxPooling1D {
     }
 }
 
-impl Layer for GlobalMaxPooling1D {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+/// What the forward pass of [`GlobalMaxPooling1D`] parks for its backward pass
+struct GlobalMaxPooling1DCache {
+    /// Shape of the input tensor
+    input_shape: Vec<usize>,
+    /// Flat per-channel arg-max offsets that the forward pass recorded, one per output element
+    argmax: Option<Vec<usize>>,
+}
+
+impl LayerBase for GlobalMaxPooling1D {
+    fn layer_type(&self) -> &str {
+        "GlobalMaxPooling1D"
+    }
+
+    layer_base_functions_pooling!();
+}
+
+impl UnaryLayer for GlobalMaxPooling1D {
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if input.ndim() != 3 {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }
 
-        // Cache the input shape and arg-max positions for the backward pass
-        self.input_shape = input.shape().to_vec();
-
         let (output, argmax) = global_pool_forward(input, PoolKind::Max);
-        self.argmax = argmax;
+
+        if ctx.is_training() {
+            ctx.push_cache(GlobalMaxPooling1DCache {
+                input_shape: input.shape().to_vec(),
+                argmax,
+            });
+        }
+
         Ok(output)
     }
 
-    /// Runs the forward pass for inference. Writes no cache. See [`Layer::predict`].
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.ndim() != 3 {
-            return Err(Error::invalid_input("input tensor is not 3D"));
-        }
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let cache: GlobalMaxPooling1DCache = ctx.pop_cache("GlobalMaxPooling1D")?;
 
-        Ok(global_pool_forward(input, PoolKind::Max).0)
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        if let Some(argmax) = &self.argmax {
-            Ok(global_pool_backward(
-                grad_output,
-                &self.input_shape,
-                PoolKind::Max,
-                Some(argmax),
-            ))
-        } else {
-            Err(Error::forward_pass_not_run("GlobalMaxPooling1D"))
-        }
-    }
-
-    fn layer_type(&self) -> &str {
-        "GlobalMaxPooling1D"
+        Ok(global_pool_backward(
+            grad_output,
+            &cache.input_shape,
+            PoolKind::Max,
+            cache.argmax.as_deref(),
+        ))
     }
 
     layer_functions_global_pooling!("GlobalMaxPooling1D", 3);

@@ -2,15 +2,13 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
-use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::validation::validate_stddev;
 use crate::neural_network::layers::validation::start_build;
 use crate::neural_network::layers::{
-    build_on_forward, built_layer_shape_functions, no_trainable_parameters_layer_functions,
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
 };
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, StateSlot, Tensor};
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand_distr::Normal;
@@ -23,16 +21,17 @@ use ndarray_rand::rand_distr::Normal;
 /// # Shape freedom
 ///
 /// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of
-/// any shape and of any rank. [`Layer::build`] records the shape it is given, and
-/// [`Layer::output_shape`] reports it, but no later input is checked against it. See the
-/// "Shape freedom" section of
+/// any shape and of any rank. [`UnaryLayer::build`] records the shape it is given, and
+/// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape)(crate::neural_network::traits::Layer::output_shape) reports it, but
+/// no later input is checked against it. See the "Shape freedom" section of
 /// [`Dropout`](crate::neural_network::layers::regularization::dropout::dropout::Dropout)
 ///
 /// # Examples
 ///
 /// ```rust
 /// use rustyml::neural_network::layers::*;
-/// use rustyml::neural_network::traits::Layer;
+/// use rustyml::neural_network::traits::UnaryLayer;
+/// use rustyml::neural_network::Ctx;
 /// use ndarray::Array2;
 ///
 /// // GaussianNoise layer with standard deviation 0.1
@@ -41,7 +40,8 @@ use ndarray_rand::rand_distr::Normal;
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
 /// // During training, the layer adds Gaussian noise with stddev=0.1
-/// let output = noise_layer.forward(&input).unwrap();
+/// let mut ctx = Ctx::training();
+/// let output = noise_layer.forward_mut(&input, &mut ctx).unwrap();
 /// ```
 #[derive(Debug)]
 pub struct GaussianNoise {
@@ -49,8 +49,6 @@ pub struct GaussianNoise {
     stddev: f32,
     /// Shape the layer was built for, batch axis first. `None` before the build
     built: Option<Shape>,
-    /// Whether the layer is in training mode or inference mode
-    training: bool,
     /// Random number generator used to sample the Gaussian noise
     rng: StdRng,
 }
@@ -82,7 +80,6 @@ impl GaussianNoise {
         Ok(GaussianNoise {
             stddev,
             built: None,
-            training: true,
             rng,
         })
     }
@@ -103,17 +100,37 @@ impl GaussianNoise {
         self.rng = crate::random::make_rng(Some(random_state));
         self
     }
-
-    mode_dependent_layer_set_training!();
 }
 
-impl Layer for GaussianNoise {
+impl LayerBase for GaussianNoise {
+    fn layer_type(&self) -> &str {
+        "GaussianNoise"
+    }
+
+    built_layer_shape_functions!();
+
+    no_trainable_parameters_layer_functions!();
+
+    /// Takes back the random stream that the forward pass advanced
+    ///
+    /// The forward pass draws from a copy that lives in the context, because it takes `&self`.
+    /// This method moves that copy into the layer, so the next pass starts where the last one
+    /// stopped
+    fn apply_state(&mut self, state: &mut StateSlot<'_>) {
+        if let Some(rng) = state.take::<StdRng>("rng") {
+            self.rng = rng;
+        }
+    }
+}
+
+impl UnaryLayer for GaussianNoise {
     /// Records the shape the layer serves. The layer holds no array, so nothing is
     /// allocated
     ///
-    /// The recorded shape is what [`Layer::output_shape`] reports, and no more. The layer owns
-    /// no array and reads no extent, so it checks no later input against it. See the
-    /// "Shape freedom" section of the type
+    /// The recorded shape is what
+    /// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape)(crate::neural_network::traits::Layer::output_shape) reports, and
+    /// no more. The layer owns no array and reads no extent, so it checks no later input
+    /// against it. See the "Shape freedom" section of the type
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "GaussianNoise", input)? else {
             return Ok(());
@@ -124,53 +141,41 @@ impl Layer for GaussianNoise {
     }
 
     /// Adds noise to a tensor of any shape. See the "Shape freedom" section of the type
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+    ///
+    /// An inference pass is the identity, and it draws nothing at all
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         // `stddev` was validated in `new()`, and the input needs no check
-        build_on_forward!(self, input);
+        if !self.is_built() {
+            return Err(Error::not_built("GaussianNoise"));
+        }
 
         // During inference or when stddev is 0, pass input through unchanged
-        if !self.training || self.stddev == 0.0 {
+        if !ctx.is_training() || self.stddev == 0.0 {
             return Ok(input.clone());
         }
+
+        // The stream lives in the context for the length of the pass, so the layer stays
+        // read-only and the draws of 2 calls follow each other
+        let mut rng = ctx
+            .take_state::<StdRng>("rng")
+            .unwrap_or_else(|| self.rng.clone());
 
         // Sample mean-0 Gaussian noise and add it to the input
         let noise = Tensor::random_using(
             input.raw_dim(),
             Normal::new(0.0, self.stddev).unwrap(),
-            &mut self.rng,
+            &mut rng,
         );
+        ctx.set_state("rng", rng);
+
         let output = input + &noise;
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    ///
-    /// The input needs no check, and the layer takes a tensor of any shape. `predict` cannot
-    /// build, so it still refuses a layer that holds no build
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `stddev` was validated in `new()`, and the input needs no check
-        if self.built.is_none() {
-            return Err(Error::not_built("GaussianNoise"));
-        }
-
-        // Inference is identity: pass input through without sampling noise
-        Ok(input.clone())
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
+    fn backward(&self, grad_output: &Tensor, _ctx: &mut Ctx) -> Result<Tensor, Error> {
         // The gradient passes through unchanged, since noise does not depend on x and
         // d/dx(x + noise) = 1
         Ok(grad_output.clone())
     }
-
-    fn layer_type(&self) -> &str {
-        "GaussianNoise"
-    }
-
-    built_layer_shape_functions!();
-
-    no_trainable_parameters_layer_functions!();
-
-    mode_dependent_layer_trait!();
 }

@@ -5,13 +5,14 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, Array3, Array4};
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::activation::relu::ReLU;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::flatten::Flatten;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, LayerBase, ParamId, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::{GateGuard, assert_allclose, named};
@@ -105,12 +106,12 @@ fn dense_param_count_3x5() {
 /// Identity weight with zero bias and Linear activation passes input through unchanged
 #[test]
 fn dense_forward_identity_weight_output_equals_input() {
-    let mut d = dense_2x2_with_weights(
+    let d = dense_2x2_with_weights(
         vec![1.0, 0.0, 0.0, 1.0], // identity
         vec![0.0, 0.0],
     );
     let x = t2(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
-    let out = d.forward(&x).unwrap();
+    let out = d.forward(&x, &mut Ctx::training()).unwrap();
     let expected = t2(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
     assert_allclose(&out, &expected, 1e-6_f32);
 }
@@ -120,12 +121,12 @@ fn dense_forward_identity_weight_output_equals_input() {
 /// Forward computes X*W + b with a diagonal weight and nonzero bias under Linear activation
 #[test]
 fn dense_forward_known_weights_and_bias() {
-    let mut d = dense_2x2_with_weights(
+    let d = dense_2x2_with_weights(
         vec![2.0, 0.0, 0.0, 3.0], // W = diag(2,3)
         vec![1.0, 2.0],           // b = [1, 2]
     );
     let x = t2(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
-    let out = d.forward(&x).unwrap();
+    let out = d.forward(&x, &mut Ctx::training()).unwrap();
     let expected = t2(2, 2, vec![3.0, 8.0, 7.0, 14.0]);
     assert_allclose(&out, &expected, 1e-5_f32);
 }
@@ -142,7 +143,7 @@ fn dense_forward_relu_zeroes_negative_preactivations() {
     d.set_weights(w, b).unwrap();
 
     let x = t2(2, 2, vec![2.0, 1.0, 1.0, 3.0]);
-    let out = d.forward(&x).unwrap();
+    let out = d.forward(&x, &mut Ctx::training()).unwrap();
     let expected = t2(2, 2, vec![3.0, 0.0, 4.0, 0.0]);
     assert_allclose(&out, &expected, 1e-6_f32);
 }
@@ -159,21 +160,21 @@ fn dense_forward_3_to_2_linear_single_row() {
     d.set_weights(w, b).unwrap();
 
     let x = t2(1, 3, vec![1.0, 2.0, 3.0]);
-    let out = d.forward(&x).unwrap();
+    let out = d.forward(&x, &mut Ctx::training()).unwrap();
     let expected = t2(1, 2, vec![22.0, 29.0]);
     assert_allclose(&out, &expected, 1e-5_f32);
 }
 
-// Dense: predict equal to forward in eval mode (no activation side effects)
+// Dense: an inference pass equals a training pass (no activation side effects)
 
-/// Dense has no mode-dependent behavior, so predict and forward produce identical outputs
+/// Dense has no mode-dependent behavior, so the 2 contexts produce identical outputs
 #[test]
 fn dense_predict_equals_forward() {
-    let mut d = dense_2x2_with_weights(vec![1.0, 2.0, 3.0, 4.0], vec![0.5, -0.5]);
+    let d = dense_2x2_with_weights(vec![1.0, 2.0, 3.0, 4.0], vec![0.5, -0.5]);
     let x = t2(2, 2, vec![1.0, -1.0, 0.5, 2.0]);
 
-    let fwd = d.forward(&x).unwrap();
-    let pred = d.predict(&x).unwrap();
+    let fwd = d.forward(&x, &mut Ctx::training()).unwrap();
+    let pred = d.forward(&x, &mut Ctx::inference()).unwrap();
     assert_allclose(&fwd, &pred, 1e-6_f32);
 }
 
@@ -196,10 +197,10 @@ fn dense_2_to_3_ramp() -> Dense {
 /// [2, 3] kernel and returns [2, 3, 3]. A per-timestep kernel would need 3 times the weights
 #[test]
 fn dense_forward_rank_3_shares_1_kernel_over_the_leading_axes() {
-    let mut d = dense_2_to_3_ramp();
+    let d = dense_2_to_3_ramp();
     let x = t3(2, 3, 2, (1..=12).map(|v| v as f32).collect());
 
-    let out = d.forward(&x).unwrap();
+    let out = d.forward(&x, &mut Ctx::training()).unwrap();
 
     // Row [a, b] gives [a + 4b + 0.5, 2a + 5b - 0.5, 3a + 6b + 1]
     let expected = t3(
@@ -224,8 +225,12 @@ fn dense_forward_rank_4_equals_the_folded_rank_2_result() {
     let x4 = t4(1, 2, 6, 2, data.clone());
     let x2 = t2(12, 2, data);
 
-    let out4 = dense_2_to_3_ramp().forward(&x4).unwrap();
-    let out2 = dense_2_to_3_ramp().forward(&x2).unwrap();
+    let out4 = dense_2_to_3_ramp()
+        .forward(&x4, &mut Ctx::training())
+        .unwrap();
+    let out2 = dense_2_to_3_ramp()
+        .forward(&x2, &mut Ctx::training())
+        .unwrap();
 
     assert_eq!(
         out4.shape(),
@@ -244,13 +249,14 @@ fn dense_forward_rank_4_equals_the_folded_rank_2_result() {
 /// input gradient goes back to the rank of the input
 #[test]
 fn dense_backward_rank_3_produces_the_3_gradients_of_the_fold() {
-    let mut d = dense_2_to_3_ramp();
+    let d = dense_2_to_3_ramp();
     let x = t3(2, 3, 2, (1..=12).map(|v| v as f32).collect());
-    d.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    d.forward(&x, &mut ctx).unwrap();
 
     // A gradient that differs in every position pins the orientation of both products
     let grad_output = t3(2, 3, 3, (1..=18).map(|v| v as f32).collect());
-    let grad_input = d.backward(&grad_output).unwrap();
+    let grad_input = d.backward(&grad_output, &mut ctx).unwrap();
 
     // grad_input[r] = G[r] * W^T, back at the rank of the input
     let expected_input = t3(
@@ -264,17 +270,18 @@ fn dense_backward_rank_3_produces_the_3_gradients_of_the_fold() {
     assert_eq!(grad_input.shape(), x.shape());
     assert_allclose(&grad_input, &expected_input, 1e-3_f32);
 
-    let params = d.parameters();
+    let grad_kernel = ctx.grads().get(ParamId::new(0, "kernel")).unwrap();
+    let grad_bias = ctx.grads().get(ParamId::new(0, "bias")).unwrap();
     // grad_weight = X2^T * G2, summed over all 6 folded rows
     let expected_weight = [411.0_f32, 447.0, 483.0, 462.0, 504.0, 546.0];
     // grad_bias sums the 6 folded rows, 1 sum for each unit
     let expected_bias = [51.0_f32, 57.0, 63.0];
-    assert_eq!(params[0].grad.len(), expected_weight.len());
-    assert_eq!(params[1].grad.len(), expected_bias.len());
-    for (got, want) in params[0].grad.iter().zip(expected_weight.iter()) {
+    assert_eq!(grad_kernel.len(), expected_weight.len());
+    assert_eq!(grad_bias.len(), expected_bias.len());
+    for (got, want) in grad_kernel.iter().zip(expected_weight.iter()) {
         assert_abs_diff_eq!(*got, *want, epsilon = 1e-2);
     }
-    for (got, want) in params[1].grad.iter().zip(expected_bias.iter()) {
+    for (got, want) in grad_bias.iter().zip(expected_bias.iter()) {
         assert_abs_diff_eq!(*got, *want, epsilon = 1e-3);
     }
 }
@@ -295,8 +302,12 @@ fn dense_forward_rank_3_accepts_an_input_that_is_not_in_c_order() {
     );
     let c_order: Tensor = permuted.as_standard_layout().into_owned();
 
-    let out = dense_2_to_3_ramp().forward(&permuted).unwrap();
-    let want = dense_2_to_3_ramp().forward(&c_order).unwrap();
+    let out = dense_2_to_3_ramp()
+        .forward(&permuted, &mut Ctx::training())
+        .unwrap();
+    let want = dense_2_to_3_ramp()
+        .forward(&c_order, &mut Ctx::training())
+        .unwrap();
 
     assert_eq!(out.shape(), &[3, 2, 3]);
     assert_allclose(&out, &want, 1e-4_f32);
@@ -326,7 +337,7 @@ fn dense_forward_rank_3_matches_a_per_slice_reference() {
         .map(|i| (i % 11) as f32 * 0.29 - 1.6)
         .collect();
     let x = t3(batch, steps, features, data.clone());
-    let out = d.forward(&x).unwrap();
+    let out = d.forward(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[batch, steps, units]);
 
     let mut reference = Dense::new(units, Linear::new()).unwrap();
@@ -340,7 +351,9 @@ fn dense_forward_rank_3_matches_a_per_slice_reference() {
 
     for row in 0..batch * steps {
         let slice = data[row * features..(row + 1) * features].to_vec();
-        let want = reference.predict(&t2(1, features, slice)).unwrap();
+        let want = reference
+            .forward(&t2(1, features, slice), &mut Ctx::inference())
+            .unwrap();
         for unit in 0..units {
             let got = out.as_slice().expect("C order")[row * units + unit];
             let expected = want.as_slice().expect("C order")[unit];
@@ -349,17 +362,19 @@ fn dense_forward_rank_3_matches_a_per_slice_reference() {
     }
 }
 
-/// `predict` gives the same rank-3 result as `forward`, and writes no cache
+/// An inference pass gives the same rank-3 result as a training pass, and writes no cache
 #[test]
 fn dense_predict_equals_forward_rank_3() {
-    let mut d = dense_2_to_3_ramp();
+    let d = dense_2_to_3_ramp();
     let x = t3(2, 3, 2, (1..=12).map(|v| v as f32).collect());
 
-    let predicted = d.predict(&x).unwrap();
-    let forwarded = d.forward(&x).unwrap();
+    let mut inference = Ctx::inference();
+    let predicted = d.forward(&x, &mut inference).unwrap();
+    let forwarded = d.forward(&x, &mut Ctx::training()).unwrap();
 
     assert_eq!(predicted.shape(), &[2, 3, 3]);
     assert_allclose(&predicted, &forwarded, 1e-6_f32);
+    assert_eq!(inference.pending_caches(), 0);
 }
 
 /// A rank-3 Softmax output normalizes over the units, 1 lane at a time
@@ -378,7 +393,9 @@ fn dense_rank_3_softmax_normalizes_each_last_axis_lane() {
     let b = Array2::from_shape_vec((1, 3), vec![0.5, -0.5, 1.0]).unwrap();
     d.set_weights(w.clone(), b.clone()).unwrap();
 
-    let out = d.forward(&t3(2, 3, 2, data.clone())).unwrap();
+    let out = d
+        .forward(&t3(2, 3, 2, data.clone()), &mut Ctx::training())
+        .unwrap();
     assert_eq!(out.shape(), &[2, 3, 3]);
     for lane in out.lanes(Axis(2)) {
         assert_abs_diff_eq!(lane.sum(), 1.0_f32, epsilon = 1e-6);
@@ -387,16 +404,17 @@ fn dense_rank_3_softmax_normalizes_each_last_axis_lane() {
     let mut flat = Dense::new(3, Softmax::new()).unwrap();
     flat.build(&Shape::known(&[1, 2])).unwrap();
     flat.set_weights(w, b).unwrap();
-    let want = flat.forward(&t2(6, 2, data)).unwrap();
+    let want = flat.forward(&t2(6, 2, data), &mut Ctx::training()).unwrap();
     let got_values: Vec<f32> = out.iter().cloned().collect();
     let want_values: Vec<f32> = want.iter().cloned().collect();
     assert_eq!(got_values, want_values, "the fold keeps every lane whole");
 }
 
-/// `output_shape` reports the rank of the last input it saw
+/// `output_shape` reports the shape of the build, and no forward pass moves it
 ///
-/// Dense(4) after an input of shape (batch, 5, 7) reports "(None, 5, 4)". Before the first
-/// forward pass only the unit count is known
+/// The kernel of Dense(4) depends on the last axis alone, so the build records
+/// `(None, input_dim)` whatever rank it received. The layer then accepts an input of any rank
+/// of 2 or more, and the display value stays the rank-2 answer
 #[test]
 fn dense_output_shape_reports_the_real_rank() {
     use ndarray::{ArrayD, IxDyn};
@@ -405,14 +423,17 @@ fn dense_output_shape_reports_the_real_rank() {
     d.build(&Shape::known(&[2, 7])).unwrap();
     assert_eq!(d.output_shape(), "(None, 4)");
 
-    d.forward(&ArrayD::zeros(IxDyn(&[2, 7]))).unwrap();
+    let mut ctx = Ctx::training();
+    d.forward(&ArrayD::zeros(IxDyn(&[2, 7])), &mut ctx).unwrap();
     assert_eq!(d.output_shape(), "(None, 4)");
 
-    d.forward(&ArrayD::zeros(IxDyn(&[2, 5, 7]))).unwrap();
-    assert_eq!(d.output_shape(), "(None, 5, 4)");
+    d.forward(&ArrayD::zeros(IxDyn(&[2, 5, 7])), &mut ctx)
+        .unwrap();
+    assert_eq!(d.output_shape(), "(None, 4)");
 
-    d.forward(&ArrayD::zeros(IxDyn(&[3, 2, 5, 7]))).unwrap();
-    assert_eq!(d.output_shape(), "(None, 2, 5, 4)");
+    d.forward(&ArrayD::zeros(IxDyn(&[3, 2, 5, 7])), &mut ctx)
+        .unwrap();
+    assert_eq!(d.output_shape(), "(None, 4)");
 }
 
 /// A rank-3 Dense gives the same values on both sides of every tuning gate
@@ -433,14 +454,16 @@ fn dense_rank_3_matches_across_the_tuning_gates() {
         let mut d = Dense::new(3, Softmax::new()).unwrap();
         d.build(&Shape::known(&[4, 3, 2])).unwrap();
         d.set_weights(w.clone(), b.clone()).unwrap();
-        let out = d.forward(&x).unwrap();
-        let grad = d.backward(&Tensor::ones(out.raw_dim())).unwrap();
-        let params = d.parameters();
+        let mut ctx = Ctx::training();
+        let out = d.forward(&x, &mut ctx).unwrap();
+        let grad = d.backward(&Tensor::ones(out.raw_dim()), &mut ctx).unwrap();
+        let grad_kernel = ctx.grads().get(ParamId::new(0, "kernel")).unwrap();
+        let grad_bias = ctx.grads().get(ParamId::new(0, "bias")).unwrap();
         (
             out.iter().cloned().collect::<Vec<f32>>(),
             grad.iter().cloned().collect::<Vec<f32>>(),
-            params[0].grad.to_vec(),
-            params[1].grad.to_vec(),
+            grad_kernel.iter().cloned().collect::<Vec<f32>>(),
+            grad_bias.iter().cloned().collect::<Vec<f32>>(),
         )
     };
 
@@ -455,7 +478,7 @@ fn dense_rank_3_matches_across_the_tuning_gates() {
 fn dense_forward_rejects_rank_1_input() {
     let mut d = Dense::new(2, Linear::new()).unwrap();
     let x = Array::from_vec(vec![1.0_f32, 2.0, 3.0]).into_dyn();
-    let result = d.forward(&x);
+    let result = d.forward_mut(&x, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for 1D input, got {:?}",
@@ -474,7 +497,7 @@ fn dense_rejects_a_last_axis_that_is_not_the_input_dim() {
     d.build(&Shape::known(&[2, 2])).unwrap();
 
     let rank_3 = t3(2, 4, 7, vec![0.5; 56]);
-    let result = d.forward(&rank_3);
+    let result = d.forward(&rank_3, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for a rank-3 last axis of 7, got {:?}",
@@ -482,17 +505,17 @@ fn dense_rejects_a_last_axis_that_is_not_the_input_dim() {
     );
 
     let rank_2 = t2(2, 7, vec![0.5; 14]);
-    let result = d.forward(&rank_2);
+    let result = d.forward(&rank_2, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for a rank-2 last axis of 7, got {:?}",
         result
     );
 
-    let result = d.predict(&rank_3);
+    let result = d.forward(&rank_3, &mut Ctx::inference());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
-        "expected InvalidInput from predict, got {:?}",
+        "expected InvalidInput from an inference pass, got {:?}",
         result
     );
 }
@@ -501,13 +524,14 @@ fn dense_rejects_a_last_axis_that_is_not_the_input_dim() {
 /// matrix
 #[test]
 fn dense_backward_rank_3_rejects_a_folded_gradient() {
-    let mut d = dense_2_to_3_ramp();
-    d.forward(&t3(2, 3, 2, (1..=12).map(|v| v as f32).collect()))
+    let d = dense_2_to_3_ramp();
+    let mut ctx = Ctx::training();
+    d.forward(&t3(2, 3, 2, (1..=12).map(|v| v as f32).collect()), &mut ctx)
         .unwrap();
 
     // [6, 3] holds the same 18 values as the cached [2, 3, 3] output, but it is not that shape
     let folded = t2(6, 3, (1..=18).map(|v| v as f32).collect());
-    let result = d.backward(&folded);
+    let result = d.backward(&folded, &mut ctx);
     assert!(
         matches!(result, Err(Error::ShapeMismatch { .. })),
         "expected ShapeMismatch, got {:?}",
@@ -517,10 +541,10 @@ fn dense_backward_rank_3_rejects_a_folded_gradient() {
 
 #[test]
 fn dense_backward_before_forward_returns_err() {
-    let mut d = Dense::new(2, Linear::new()).unwrap();
+    let d = Dense::new(2, Linear::new()).unwrap();
     // no forward called yet
     let grad = t2(1, 2, vec![1.0, 1.0]);
-    let result = d.backward(&grad);
+    let result = d.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -537,12 +561,13 @@ fn dense_backward_wrong_grad_shape_returns_err() {
     let mut d = Dense::new(2, Linear::new()).unwrap();
     // Valid forward establishes the cached 2D output of shape [1, 2]
     let x = t2(1, 3, vec![1.0, 2.0, 3.0]);
-    d.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    d.forward_mut(&x, &mut ctx).unwrap();
     // Feed a 3D gradient: backward must reject it, not panic
     let bad_grad = Array::from_shape_vec((1, 2, 1), vec![1.0_f32, 1.0])
         .unwrap()
         .into_dyn();
-    let result = d.backward(&bad_grad);
+    let result = d.backward(&bad_grad, &mut ctx);
     assert!(
         matches!(result, Err(Error::ShapeMismatch { .. })),
         "expected ShapeMismatch, got {:?}",
@@ -620,9 +645,10 @@ fn dense_weights_carry_the_declared_shapes() {
 fn dense_backward_output_shape_matches_input() {
     let mut d = Dense::new(3, Linear::new()).unwrap();
     let x = t2(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
-    let out = d.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = d.forward_mut(&x, &mut ctx).unwrap();
     let ones = Tensor::ones(out.raw_dim());
-    let grad = d.backward(&ones).unwrap();
+    let grad = d.backward(&ones, &mut ctx).unwrap();
     assert_eq!(
         grad.shape(),
         x.shape(),
@@ -678,7 +704,7 @@ fn flatten_forward_3d_correct_shape_and_values() {
     let x = t3(2, 3, 4, data.clone());
 
     let mut fl = Flatten::new();
-    let out = fl.forward(&x).unwrap();
+    let out = fl.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     assert_eq!(out.shape(), &[2, 12]);
 
@@ -698,7 +724,7 @@ fn flatten_forward_4d_correct_shape_and_values() {
     let x = t4(2, 2, 3, 4, data.clone());
 
     let mut fl = Flatten::new();
-    let out = fl.forward(&x).unwrap();
+    let out = fl.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     assert_eq!(out.shape(), &[2, 24]);
 
@@ -720,7 +746,7 @@ fn flatten_forward_5d_correct_shape_and_values() {
         .into_dyn();
 
     let mut fl = Flatten::new();
-    let out = fl.forward(&x).unwrap();
+    let out = fl.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     assert_eq!(out.shape(), &[2, 48]);
 
@@ -739,12 +765,13 @@ fn flatten_backward_restores_3d_shape_and_values() {
     let x = t3(2, 3, 4, data.clone());
 
     let mut fl = Flatten::new();
-    let _out = fl.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let _out = fl.forward_mut(&x, &mut ctx).unwrap();
 
     let grad_flat_data: Vec<f32> = (0..24).map(|v| (v as f32) * 2.0).collect();
     let grad_flat = t2(2, 12, grad_flat_data.clone());
 
-    let grad_input = fl.backward(&grad_flat).unwrap();
+    let grad_input = fl.backward(&grad_flat, &mut ctx).unwrap();
 
     assert_eq!(grad_input.shape(), &[2, 3, 4]);
 
@@ -761,12 +788,13 @@ fn flatten_backward_restores_4d_shape_and_values() {
     let x = t4(2, 2, 3, 4, data.clone());
 
     let mut fl = Flatten::new();
-    let _out = fl.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let _out = fl.forward_mut(&x, &mut ctx).unwrap();
 
     let grad_flat_data: Vec<f32> = (0..48).map(|v| -(v as f32)).collect();
     let grad_flat = t2(2, 24, grad_flat_data.clone());
 
-    let grad_input = fl.backward(&grad_flat).unwrap();
+    let grad_input = fl.backward(&grad_flat, &mut ctx).unwrap();
 
     assert_eq!(grad_input.shape(), &[2, 2, 3, 4]);
 
@@ -782,7 +810,7 @@ fn flatten_backward_restores_4d_shape_and_values() {
 fn flatten_forward_rejects_2d_input() {
     let mut fl = Flatten::new();
     let x = t2(2, 3, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
-    let result = fl.forward(&x);
+    let result = fl.forward_mut(&x, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for 2D input, got {:?}",
@@ -796,7 +824,7 @@ fn flatten_forward_rejects_6d_input() {
     let mut fl = Flatten::new();
     // build a 6D tensor manually
     let x: Tensor = ArrayD::zeros(vec![1, 2, 2, 2, 2, 2]);
-    let result = fl.forward(&x);
+    let result = fl.forward_mut(&x, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for 6D input, got {:?}",
@@ -806,10 +834,10 @@ fn flatten_forward_rejects_6d_input() {
 
 #[test]
 fn flatten_backward_before_forward_returns_err() {
-    let mut fl = Flatten::new();
-    // No forward call happened yet, so the layer's input_cache is None.
+    let fl = Flatten::new();
+    // No forward call happened yet, so the context holds no cache of this layer
     let grad = t2(2, 12, vec![0.0_f32; 24]);
-    let result = fl.backward(&grad);
+    let result = fl.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -820,7 +848,7 @@ fn flatten_backward_before_forward_returns_err() {
     );
 }
 
-// Flatten: predict equal to forward (no training-mode difference)
+// Flatten: an inference pass equals a training pass (no training-mode difference)
 
 #[test]
 fn flatten_predict_equals_forward() {
@@ -829,8 +857,8 @@ fn flatten_predict_equals_forward() {
 
     let mut fl = Flatten::new();
     fl.build(&Shape::known(&[2, 3, 4])).unwrap();
-    let fwd = fl.forward(&x).unwrap();
-    let pred = fl.predict(&x).unwrap();
+    let fwd = fl.forward(&x, &mut Ctx::training()).unwrap();
+    let pred = fl.forward(&x, &mut Ctx::inference()).unwrap();
     assert_allclose(&fwd, &pred, 1e-6_f32);
 }
 

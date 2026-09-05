@@ -1,11 +1,12 @@
 //! Stochastic Gradient Descent (SGD) optimizer
 
 use crate::error::Error;
+use crate::neural_network::ctx::Grads;
 use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
     validate_global_clipnorm, validate_learning_rate, validate_non_negative_finite,
 };
-use crate::neural_network::traits::{Layer, Optimizer, ParamId};
+use crate::neural_network::traits::{LayerBase, Optimizer, ParamId};
 use std::collections::HashMap;
 
 /// SGD (Stochastic Gradient Descent) optimizer
@@ -106,9 +107,16 @@ impl Optimizer for SGD {
         self.learning_rate = learning_rate;
     }
 
-    fn update(&mut self, scope: usize, layer: &mut dyn Layer, grad_scale: f32) {
-        for pg in layer.parameters() {
-            let grad = kernels::scaled_grad(pg.grad, grad_scale);
+    fn update(&mut self, scope: usize, layer: &mut dyn LayerBase, grads: &Grads, grad_scale: f32) {
+        for pg in layer.parameters_mut() {
+            let Some(grad) = grads.get(ParamId::new(scope, pg.name)) else {
+                continue;
+            };
+            let grad = grad
+                .as_slice()
+                .expect("a stored gradient is in the standard memory order");
+            debug_assert_eq!(grad.len(), pg.value.len());
+            let grad = kernels::scaled_grad(grad, grad_scale);
             // Decoupled weight decay shrinks the parameter before the gradient step (weights only,
             // biases and normalization gamma/beta excluded)
             if pg.decays {

@@ -4,10 +4,10 @@ use crate::error::{Context, Error};
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::validation::{start_build, validate_built_input};
 use crate::neural_network::layers::{
-    build_config_function, build_on_forward, no_trainable_parameters_layer_functions,
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
 };
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 use ndarray::IxDyn;
 
 /// Flattens a 3D, 4D, or 5D tensor into a 2D tensor
@@ -62,30 +62,33 @@ use ndarray::IxDyn;
 pub struct Flatten {
     /// Shape the layer was built for, batch axis first. `None` before the build
     built: Option<Shape>,
-    /// Shape of the most recent forward input. The backward pass restores it
-    ///
-    /// A flatten moves no data, so the backward pass needs the shape alone
-    input_shape: Option<Vec<usize>>,
 }
 
 impl Flatten {
     /// Creates a new Flatten layer
     ///
-    /// The layer takes no input shape. [`Layer::build`] gives it one, and a forward pass on a
-    /// layer that a caller drives by hand builds it from the tensor that arrives
+    /// The layer takes no input shape. [`UnaryLayer::build`] gives it one, and a forward pass on
+    /// a layer that a caller drives by hand builds it from the tensor that arrives
     ///
     /// # Returns
     ///
     /// - `Flatten` - A new `Flatten` layer
     pub fn new() -> Self {
-        Self {
-            built: None,
-            input_shape: None,
-        }
+        Self { built: None }
     }
 }
 
-impl Layer for Flatten {
+impl LayerBase for Flatten {
+    fn layer_type(&self) -> &str {
+        "Flatten"
+    }
+
+    built_layer_shape_functions!();
+
+    no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for Flatten {
     /// Records the shape the layer folds. The layer holds no array, so nothing is allocated
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "Flatten", input)? else {
@@ -102,68 +105,42 @@ impl Layer for Flatten {
         Ok(())
     }
 
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        build_on_forward!(self, input);
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         validate_built_input(&self.built, "Flatten", input.shape())?;
         let input_shape = input.shape();
 
-        self.input_shape = Some(input_shape.to_vec());
-
-        let batch_size = input_shape[0];
-        let flattened_features: usize = input_shape[1..].iter().product();
-
-        Ok(input
-            .to_shape(IxDyn(&[batch_size, flattened_features]))
-            .unwrap()
-            .to_owned())
-    }
-
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_built_input(&self.built, "Flatten", input.shape())?;
-        let input_shape = input.shape();
-
-        let batch_size = input_shape[0];
-        let flattened_features: usize = input_shape[1..].iter().product();
-
-        Ok(input
-            .to_shape(IxDyn(&[batch_size, flattened_features]))
-            .unwrap()
-            .to_owned())
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        if let Some(input_shape) = &self.input_shape {
-            let expected_grad_shape = [input_shape[0], input_shape[1..].iter().product()];
-            if grad_output.shape() != expected_grad_shape {
-                return Err(Error::shape_mismatch(
-                    expected_grad_shape,
-                    grad_output.shape(),
-                ));
-            }
-
-            // Reshape gradient back to input shape
-            let reshaped_grad = grad_output
-                .to_shape(IxDyn(input_shape))
-                .context("reshape gradient")?
-                .to_owned();
-
-            Ok(reshaped_grad)
-        } else {
-            Err(Error::forward_pass_not_run("Flatten"))
+        if ctx.is_training() {
+            ctx.push_cache(input_shape.to_vec());
         }
+
+        let batch_size = input_shape[0];
+        let flattened_features: usize = input_shape[1..].iter().product();
+
+        Ok(input
+            .to_shape(IxDyn(&[batch_size, flattened_features]))
+            .unwrap()
+            .to_owned())
     }
 
-    fn layer_type(&self) -> &str {
-        "Flatten"
-    }
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let input_shape: Vec<usize> = ctx.pop_cache("Flatten")?;
 
-    /// The batch axis is free, because the fold serves every batch size
-    fn known_input_shape(&self) -> Option<Shape> {
-        self.built.as_ref().map(Shape::free_batch)
-    }
+        let expected_grad_shape = [input_shape[0], input_shape[1..].iter().product()];
+        if grad_output.shape() != expected_grad_shape {
+            return Err(Error::shape_mismatch(
+                expected_grad_shape,
+                grad_output.shape(),
+            ));
+        }
 
-    build_config_function!();
+        // Reshape gradient back to input shape
+        let reshaped_grad = grad_output
+            .to_shape(IxDyn(input_shape.as_slice()))
+            .context("reshape gradient")?
+            .to_owned();
+
+        Ok(reshaped_grad)
+    }
 
     /// Every axis after the batch axis folds into 1 feature axis
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
@@ -171,6 +148,4 @@ impl Layer for Flatten {
         let (batch, tail) = input.split_batch("Flatten")?;
         Ok(Shape::from_batch(batch, &[tail.iter().product()]))
     }
-
-    no_trainable_parameters_layer_functions!();
 }

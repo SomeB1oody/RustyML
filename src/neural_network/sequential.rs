@@ -15,12 +15,13 @@
 //! methods of the built model alone. Training a model that was never built is therefore a
 //! compile error, and no run-time state says whether a model is ready
 
-use super::traits::{Layer, Loss, Optimizer};
+use super::traits::{Layer, Loss, Optimizer, ParamId};
 use crate::error::{Error, IoError};
 use crate::math::reduction::det_reduce;
 use crate::neural_network::NnError;
 use crate::neural_network::Shape;
 use crate::neural_network::Tensor;
+use crate::neural_network::ctx::{Ctx, Grads};
 use crate::neural_network::layers::checkpoint::{
     LoadReport, MODEL_FORMAT_VERSION, MODEL_MAGIC, ModelCheckpoint, apply, apply_partial, capture,
     weight_path,
@@ -124,7 +125,7 @@ pub struct Sequential {
 /// [`build`](SequentialBuilder::build) takes the shape of the input, gives every layer the
 /// shape that reaches it, and threads each output shape into the next layer
 ///
-/// A layer allocates its arrays in [`Layer::build`], so a model that was never built holds no
+/// A layer allocates its arrays in [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build), so a model that was never built holds no
 /// weight at all. Splitting the 2 types is what makes that impossible to use by mistake:
 /// `fit`, `train_batch`, `evaluate`, and `predict` are not methods of this type
 ///
@@ -229,7 +230,7 @@ impl SequentialBuilder {
     /// Builds every layer against `input_shape`, and gives back the model
     ///
     /// The walk runs from the input. Each layer is built for the shape that reaches it, and
-    /// [`Layer::compute_output_shape`] gives the shape that reaches the next one. A layer that
+    /// [`UnaryLayer::compute_output_shape`](crate::neural_network::traits::UnaryLayer::compute_output_shape) gives the shape that reaches the next one. A layer that
     /// refuses the shape stops the walk, and the message names the position of the layer and
     /// its type. Nothing is allocated past that position
     ///
@@ -277,11 +278,18 @@ impl SequentialBuilder {
         let mut shape = input_shape.clone();
         for (index, layer) in self.layers.iter_mut().enumerate() {
             let layer_type = layer.layer_type().to_string();
+            if !layer.arity().accepts(1) {
+                return Err(Error::invalid_input(format!(
+                    "layer {index} (`{layer_type}`) takes more than 1 input, and a sequential \
+                     model gives each layer exactly 1. Wire it in a graph instead"
+                )));
+            }
+            let inputs = [shape.clone()];
             layer
-                .build(&shape)
+                .build_many(&inputs)
                 .map_err(|source| build_refusal(index, &layer_type, &shape, source))?;
             let output = layer
-                .compute_output_shape(&shape)
+                .compute_output_shape_many(&inputs)
                 .map_err(|source| build_refusal(index, &layer_type, &shape, source))?;
             input_shapes.push(shape);
             shape = output;
@@ -318,15 +326,24 @@ fn build_refusal(index: usize, layer_type: &str, input: &Shape, source: Error) -
 /// norm is 0.0
 ///
 /// The walk is forward, from the input. That is the canonical order of the model, and the
-/// parameter-update walk in [`Sequential::train_batch`] uses the same one. The sum itself does
-/// not depend on the order, but the model has 1 order and both walks follow it
-fn global_grad_norm(layers: &mut [Box<dyn Layer>]) -> f32 {
+/// parameter-update walk in [`Sequential::train_batch`] uses the same one. A sum of `f32`
+/// squares is not associative, so the order is part of the answer
+fn global_grad_norm(layers: &mut [Box<dyn Layer>], grads: &Grads) -> f32 {
     let mut sum_sq = 0.0_f64;
-    for layer in layers.iter_mut() {
-        for pg in layer.parameters() {
+    // The walk is the layer order of the model, and the parameter order of each layer. The
+    // gradient store sorts by address instead, and a sum of `f32` squares is not associative,
+    // so reducing in store order would move the last bit of the norm
+    for (scope, layer) in layers.iter_mut().enumerate() {
+        for param in layer.parameters_mut() {
+            let Some(grad) = grads.get(ParamId::new(scope, param.name)) else {
+                continue;
+            };
+            let grad = grad
+                .as_slice()
+                .expect("a stored gradient is in the standard memory order");
             sum_sq += det_reduce(
-                pg.grad,
-                pg.grad.len() >= sq_sum_f32_parallel_min_elems(),
+                grad,
+                grad.len() >= sq_sum_f32_parallel_min_elems(),
                 |block| block.iter().map(|&g| (g as f64) * (g as f64)).sum::<f64>(),
                 |a, b| a + b,
                 0.0,
@@ -549,18 +566,23 @@ impl Sequential {
         // empty layer stack before anything is touched
         self.validate_training_inputs(x, y)?;
 
-        // Forward pass: first layer takes an input reference, later layers take owned tensors
-        let mut layers_iter = self.layers.iter_mut();
-        let first_layer = layers_iter
-            .next()
-            .ok_or_else(|| Error::NeuralNetwork(NnError::EmptyModel))?;
-        first_layer.set_training_if_mode_dependent(true);
-        let mut output = first_layer.forward(x)?;
+        let mut ctx = Ctx::training();
 
-        for layer in layers_iter {
-            layer.set_training_if_mode_dependent(true);
-            output = layer.forward(&output)?;
+        // Forward pass. The first layer reads the argument, and every later layer reads the
+        // output of the layer before it
+        let mut output: Option<Tensor> = None;
+        for (scope, layer) in self.layers.iter_mut().enumerate() {
+            ctx.set_owner(scope);
+            let input = output.as_ref().unwrap_or(x);
+            let next = layer.forward_many(&[input], &mut ctx)?;
+            // The running statistics of a normalization layer and the random stream of a
+            // dropout layer reach the layer here, because the forward pass took `&self`
+            if ctx.has_state(scope) {
+                layer.apply_state(&mut ctx.state_slot(scope));
+            }
+            output = Some(next);
         }
+        let output = output.ok_or(Error::NeuralNetwork(NnError::EmptyModel))?;
 
         // Calculate loss
         let loss_value = self.loss.as_ref().unwrap().compute_loss(y, &output)?;
@@ -573,9 +595,16 @@ impl Sequential {
             optimizer.step();
         }
 
-        // Run every layer's backward so each stashes its gradients
-        for layer in self.layers.iter_mut().rev() {
-            grad = layer.backward(&grad)?;
+        // Run every layer's backward, from the loss, so each adds its gradients to the store
+        for (scope, layer) in self.layers.iter_mut().enumerate().rev() {
+            ctx.set_owner(scope);
+            let mut inputs = layer.backward_many(&grad, &mut ctx)?;
+            grad = inputs.pop().ok_or_else(|| {
+                Error::computation(format!(
+                    "layer {scope} (`{}`) gave back no input gradient",
+                    layer.layer_type()
+                ))
+            })?;
         }
 
         // Clip-by-global-norm
@@ -585,7 +614,7 @@ impl Sequential {
             .and_then(|opt| opt.global_clipnorm());
         let grad_scale = match global_clipnorm {
             Some(max_norm) => {
-                let norm = global_grad_norm(&mut self.layers);
+                let norm = global_grad_norm(&mut self.layers, ctx.grads());
                 if norm.is_finite() && norm > max_norm {
                     max_norm / norm
                 } else {
@@ -601,7 +630,7 @@ impl Sequential {
         // the input and never from the output
         if let Some(ref mut optimizer) = self.optimizer {
             for (scope, layer) in self.layers.iter_mut().enumerate() {
-                optimizer.update(scope, &mut **layer, grad_scale);
+                optimizer.update(scope, &mut **layer, ctx.grads(), grad_scale);
             }
         }
 
@@ -875,17 +904,17 @@ impl Sequential {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Inference path: each layer's `predict` runs in eval mode and writes no caches
-        let mut layers_iter = self.layers.iter();
-        let first_layer = layers_iter
-            .next()
-            .ok_or_else(|| Error::NeuralNetwork(NnError::EmptyModel))?;
-        let mut output = first_layer.predict(x)?;
-
-        for layer in layers_iter {
-            output = layer.predict(&output)?;
+        // Inference path: every layer takes an inference context, so nothing writes a cache
+        // and every mode-dependent layer takes its inference behavior
+        let mut ctx = Ctx::inference();
+        let mut output: Option<Tensor> = None;
+        for (scope, layer) in self.layers.iter().enumerate() {
+            ctx.set_owner(scope);
+            let input = output.as_ref().unwrap_or(x);
+            let next = layer.forward_many(&[input], &mut ctx)?;
+            output = Some(next);
         }
-        Ok(output)
+        output.ok_or(Error::NeuralNetwork(NnError::EmptyModel))
     }
 
     /// Prints a summary of the model's structure
@@ -937,10 +966,11 @@ impl Sequential {
 
             // The shape table comes from the build, so a model that has only ever run
             // `predict` still prints a real shape for every position
-            let out_shape = match layer.compute_output_shape(&self.input_shapes[index]) {
-                Ok(shape) => shape.to_string(),
-                Err(_) => "Unknown".to_string(),
-            };
+            let out_shape =
+                match layer.compute_output_shape_many(&[self.input_shapes[index].clone()]) {
+                    Ok(shape) => shape.to_string(),
+                    Err(_) => "Unknown".to_string(),
+                };
 
             // Both counts are added, so a layer that holds non-trainable state (the running
             // statistics of batch normalization) reaches the total and the third column
@@ -1007,7 +1037,7 @@ impl Sequential {
     ///   already ruled that out, so this cannot happen on a model this crate built
     pub fn output_shape(&self) -> Result<Shape, Error> {
         let last = self.layers.len() - 1;
-        self.layers[last].compute_output_shape(&self.input_shapes[last])
+        self.layers[last].compute_output_shape_many(&[self.input_shapes[last].clone()])
     }
 
     /// Every checkpoint path of the model, in order
@@ -1223,4 +1253,24 @@ fn read_checkpoint(
     }
 
     Ok(postcard::from_bytes(&bytes)?)
+}
+
+/// Compile-time checks of what a built model can be shared as
+#[cfg(test)]
+mod tests {
+    use super::Sequential;
+
+    /// A forward pass takes `&self`, so a built model serves inference through a shared
+    /// reference. That holds only while every part of the model is `Send` and `Sync`, which
+    /// is why [`Layer`](crate::neural_network::traits::LayerBase),
+    /// [`Loss`](crate::neural_network::traits::Loss) and
+    /// [`Optimizer`](crate::neural_network::traits::Optimizer) all carry those bounds. This
+    /// test fails to compile if any of the 3 loses one
+    #[test]
+    fn a_built_model_is_send_and_sync() {
+        fn assert_send<T: Send>() {}
+        fn assert_sync<T: Sync>() {}
+        assert_send::<Sequential>();
+        assert_sync::<Sequential>();
+    }
 }

@@ -2,21 +2,21 @@
 //! length dimension.
 
 use crate::error::Error;
-use crate::neural_network::Shape;
-use crate::neural_network::Tensor;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::build_on_forward;
 use crate::neural_network::layers::convolution::PaddingType;
-use crate::neural_network::layers::pooling::layer_functions_1d_pooling;
 use crate::neural_network::layers::pooling::pooling_engine::{
     PoolKind, windowed_pool_backward, windowed_pool_forward,
 };
 use crate::neural_network::layers::pooling::validation::{
     validate_pool_size_1d, validate_stride_1d,
 };
+use crate::neural_network::layers::pooling::{
+    layer_base_functions_pooling, layer_functions_1d_pooling,
+};
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_1d_pooling;
 use crate::neural_network::layers::validation::validate_built_input;
-use crate::neural_network::traits::Layer;
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// 1D average pooling layer
 ///
@@ -94,8 +94,6 @@ pub struct AveragePooling1D {
     built: Option<Shape>,
     /// Padding mode applied around the input before pooling
     padding: PaddingType,
-    /// Shape of the most recent forward input, cached for the backward pass
-    forward_input_shape: Option<Vec<usize>>,
 }
 
 impl AveragePooling1D {
@@ -120,7 +118,6 @@ impl AveragePooling1D {
             stride: pool_size,
             built: None,
             padding: PaddingType::Valid,
-            forward_input_shape: None,
         }
     }
 
@@ -155,26 +152,16 @@ impl AveragePooling1D {
     }
 }
 
-impl Layer for AveragePooling1D {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        build_on_forward!(self, input);
-        validate_built_input(&self.built, "AveragePooling1D", input.shape())?;
-
-        // Cache the input shape for the backward pass
-        self.forward_input_shape = Some(input.shape().to_vec());
-
-        let (output, _) = windowed_pool_forward(
-            input,
-            &[self.pool_size],
-            &[self.stride],
-            PoolKind::Average,
-            self.padding,
-        );
-        Ok(output)
+impl LayerBase for AveragePooling1D {
+    fn layer_type(&self) -> &str {
+        "AveragePooling1D"
     }
 
-    /// Runs the forward pass for inference. Writes no cache. See [`Layer::predict`].
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
+    layer_base_functions_pooling!();
+}
+
+impl UnaryLayer for AveragePooling1D {
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         validate_built_input(&self.built, "AveragePooling1D", input.shape())?;
 
         let (output, _) = windowed_pool_forward(
@@ -184,28 +171,27 @@ impl Layer for AveragePooling1D {
             PoolKind::Average,
             self.padding,
         );
+
+        if ctx.is_training() {
+            // The only value the backward pass needs is the shape it must restore
+            ctx.push_cache(input.shape().to_vec());
+        }
+
         Ok(output)
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        let input_shape = self
-            .forward_input_shape
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("AveragePooling1D"))?;
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let input_shape: Vec<usize> = ctx.pop_cache("AveragePooling1D")?;
 
         Ok(windowed_pool_backward(
             grad_output,
-            input_shape,
+            &input_shape,
             &[self.pool_size],
             &[self.stride],
             PoolKind::Average,
             None,
             self.padding,
         ))
-    }
-
-    fn layer_type(&self) -> &str {
-        "AveragePooling1D"
     }
 
     layer_functions_1d_pooling!("AveragePooling1D");

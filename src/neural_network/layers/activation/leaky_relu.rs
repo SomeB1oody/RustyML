@@ -1,12 +1,15 @@
-//! Leaky ReLU activation layer that scales the negative side by `negative_slope` and caches the
+//! Leaky ReLU activation layer that scales the negative side by `negative_slope` and parks the
 //! output for backpropagation
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::{Activation, cached_shape};
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Leaky ReLU (Leaky Rectified Linear Unit) activation layer
 ///
@@ -52,8 +55,8 @@ use crate::neural_network::{Shape, Tensor};
 pub struct LeakyReLU {
     /// Slope applied below 0. Must be finite and greater than 0
     pub(super) negative_slope: f32,
-    /// Cached activated output from the forward pass, used during backpropagation
-    output_cache: Option<Tensor>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
 }
 
 impl LeakyReLU {
@@ -74,7 +77,7 @@ impl LeakyReLU {
         Activation::LeakyReLU { negative_slope }.validate()?;
         Ok(LeakyReLU {
             negative_slope,
-            output_cache: None,
+            built: None,
         })
     }
 }
@@ -92,13 +95,33 @@ impl Default for LeakyReLU {
     fn default() -> Self {
         LeakyReLU {
             negative_slope: 0.3,
-            output_cache: None,
+            built: None,
         }
     }
 }
 
-impl Layer for LeakyReLU {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+impl LayerBase for LeakyReLU {
+    fn layer_type(&self) -> &str {
+        "LeakyReLU"
+    }
+
+    built_layer_shape_functions!();
+
+    no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for LeakyReLU {
+    /// Records the shape the layer serves. The layer holds no array, so nothing is allocated
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "LeakyReLU", input)? else {
+            return Ok(());
+        };
+        self.compute_output_shape(&built)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
@@ -109,47 +132,25 @@ impl Layer for LeakyReLU {
         .forward(input)?;
 
         // Cache activated output for backpropagation
-        self.output_cache = Some(output.clone());
+        if ctx.is_training() {
+            ctx.push_cache(output.clone());
+        }
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.is_empty() {
-            return Err(Error::empty_input("input tensor"));
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let output: Tensor = ctx.pop_cache("LeakyReLU")?;
+
+        // Leaky ReLU preserves shape, so gradient must match the cached output
+        if grad_output.shape() != output.shape() {
+            return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
         }
 
+        // Leaky ReLU derivative is 1 for x >= 0, and `negative_slope` below 0
         Activation::LeakyReLU {
             negative_slope: self.negative_slope,
         }
-        .forward(input)
+        .backward(&output, grad_output)
     }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        if let Some(output) = &self.output_cache {
-            // Leaky ReLU preserves shape, so gradient must match the cached output
-            if grad_output.shape() != output.shape() {
-                return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
-            }
-
-            // Leaky ReLU derivative is 1 for x >= 0, and `negative_slope` below 0
-            Activation::LeakyReLU {
-                negative_slope: self.negative_slope,
-            }
-            .backward(output, grad_output)
-        } else {
-            Err(Error::forward_pass_not_run("LeakyReLU"))
-        }
-    }
-
-    fn layer_type(&self) -> &str {
-        "LeakyReLU"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        cached_shape(&self.output_cache)
-    }
-
-    no_trainable_parameters_layer_functions!();
 }

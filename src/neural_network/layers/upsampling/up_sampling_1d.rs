@@ -2,13 +2,16 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::layers::upsampling::Interpolation;
 use crate::neural_network::layers::upsampling::resize_engine::{
     upsample_backward, upsample_forward, upsample_output_shape, validate_factors,
 };
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Repeats each step of the step axis of a rank-3 tensor
 ///
@@ -61,8 +64,8 @@ use crate::neural_network::{Shape, Tensor};
 pub struct UpSampling1D {
     /// Times the layer repeats each step
     size: usize,
-    /// Shape of the most recent forward input. The backward pass needs it to size the gradient
-    input_shape: Option<Vec<usize>>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
 }
 
 impl UpSampling1D {
@@ -81,15 +84,33 @@ impl UpSampling1D {
     /// - `Error::InvalidParameter` - If `size` is 0
     pub fn new(size: usize) -> Result<Self, Error> {
         validate_factors(&[size])?;
-        Ok(UpSampling1D {
-            size,
-            input_shape: None,
-        })
+        Ok(UpSampling1D { size, built: None })
     }
 }
 
-impl Layer for UpSampling1D {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+impl LayerBase for UpSampling1D {
+    fn layer_type(&self) -> &str {
+        "UpSampling1D"
+    }
+
+    built_layer_shape_functions!();
+
+    no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for UpSampling1D {
+    /// Records the shape the layer enlarges. The layer holds no array, so nothing is allocated.
+    /// The shape algebra checks the rank
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "UpSampling1D", input)? else {
+            return Ok(());
+        };
+        self.compute_output_shape(&built)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let output = upsample_forward(
             input,
             &[self.size],
@@ -97,42 +118,27 @@ impl Layer for UpSampling1D {
             3,
             "UpSampling1D",
         )?;
-        self.input_shape = Some(input.shape().to_vec());
+
+        if ctx.is_training() {
+            ctx.push_cache(input.shape().to_vec());
+        }
+
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        upsample_forward(
-            input,
-            &[self.size],
-            Interpolation::Nearest,
-            3,
-            "UpSampling1D",
-        )
-    }
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let input_shape: Vec<usize> = ctx.pop_cache("UpSampling1D")?;
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         upsample_backward(
             grad_output,
-            self.input_shape.as_deref(),
+            Some(input_shape.as_slice()),
             &[self.size],
             Interpolation::Nearest,
             "UpSampling1D",
         )
-    }
-
-    fn layer_type(&self) -> &str {
-        "UpSampling1D"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        self.input_shape.as_deref().map(Shape::with_free_batch)
     }
 
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         upsample_output_shape(input, &[self.size], "UpSampling1D")
     }
-
-    no_trainable_parameters_layer_functions!();
 }

@@ -1,7 +1,7 @@
 //! The shape of a tensor as a layer describes it, with a free axis for an extent that no
 //! configuration fixes
 //!
-//! [`Shape`] is what [`Layer::compute_output_shape`](crate::neural_network::traits::Layer::compute_output_shape)
+//! [`Shape`] is what [`UnaryLayer::compute_output_shape`](crate::neural_network::traits::UnaryLayer::compute_output_shape)
 //! takes and returns. A layer maps an input shape to an output shape with the layer
 //! configuration alone, so a caller gets the answer before any tensor exists
 

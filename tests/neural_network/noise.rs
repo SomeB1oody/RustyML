@@ -8,11 +8,12 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::regularization::noise_injection::gaussian_dropout::GaussianDropout;
 use rustyml::neural_network::layers::regularization::noise_injection::gaussian_noise::GaussianNoise;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 // helpers
@@ -70,13 +71,12 @@ fn gaussian_noise_eval_mode_is_identity() {
         .into_dyn();
 
     let mut layer = GaussianNoise::new(1.0).unwrap();
-    layer.set_training_if_mode_dependent(false);
 
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut Ctx::inference()).unwrap();
     crate::common::assert_allclose(&output, &input, 1e-6f32);
 }
 
-/// predict() is always identity regardless of the training flag
+/// An inference pass is always the identity, whatever a training pass would draw
 #[test]
 fn gaussian_noise_predict_is_always_identity() {
     let input_data = vec![1.0f32, -2.0, 3.5, 0.0, -0.5, 7.0];
@@ -84,15 +84,14 @@ fn gaussian_noise_predict_is_always_identity() {
         .unwrap()
         .into_dyn();
 
-    // With the training flag set, predict must still be identity
+    // An inference context gives the identity, at a stddev that a training pass would use
     let mut layer = GaussianNoise::new(1.0).unwrap();
     layer.build(&Shape::known(&[2, 3])).unwrap();
-    layer.set_training_if_mode_dependent(true);
-    let output = layer.predict(&input).unwrap();
+    let output = layer.forward(&input, &mut Ctx::inference()).unwrap();
     crate::common::assert_allclose(&output, &input, 1e-6f32);
 }
 
-/// predict() in eval mode equals forward() in eval mode (both identity)
+/// 2 inference passes agree, and both are the identity
 #[test]
 fn gaussian_noise_predict_equals_forward_in_eval_mode() {
     let input_data: Vec<f32> = (0..12).map(|i| i as f32 * 0.3 - 1.0).collect();
@@ -102,10 +101,9 @@ fn gaussian_noise_predict_equals_forward_in_eval_mode() {
 
     let mut layer = GaussianNoise::new(0.5).unwrap();
     layer.build(&Shape::known(&[3, 4])).unwrap();
-    layer.set_training_if_mode_dependent(false);
 
-    let forward_out = layer.forward(&input).unwrap();
-    let predict_out = layer.predict(&input).unwrap();
+    let forward_out = layer.forward(&input, &mut Ctx::inference()).unwrap();
+    let predict_out = layer.forward(&input, &mut Ctx::inference()).unwrap();
     crate::common::assert_allclose(&predict_out, &forward_out, 1e-6f32);
 }
 
@@ -117,9 +115,8 @@ fn gaussian_noise_zero_stddev_training_is_identity() {
         .into_dyn();
 
     let mut layer = GaussianNoise::new(0.0).unwrap();
-    layer.set_training_if_mode_dependent(true);
 
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut Ctx::training()).unwrap();
     crate::common::assert_allclose(&output, &input, 1e-6f32);
 }
 
@@ -137,9 +134,8 @@ fn gaussian_noise_training_preserves_mean() {
         .into_dyn();
 
     let mut layer = GaussianNoise::new(stddev).unwrap();
-    layer.set_training_if_mode_dependent(true);
 
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut Ctx::training()).unwrap();
     let mean = tensor_mean(&output);
 
     assert!(
@@ -161,9 +157,8 @@ fn gaussian_noise_training_noise_std_matches_stddev() {
             .into_dyn();
 
         let mut layer = GaussianNoise::new(stddev).unwrap();
-        layer.set_training_if_mode_dependent(true);
 
-        let output = layer.forward(&input).unwrap();
+        let output = layer.forward_mut(&input, &mut Ctx::training()).unwrap();
         // Noise = output - input element-wise
         let noise: Tensor = &output - &input;
         let std_val = tensor_std(&noise);
@@ -187,9 +182,8 @@ fn gaussian_noise_training_can_produce_negative_values() {
         .into_dyn();
 
     let mut layer = GaussianNoise::new(5.0).unwrap();
-    layer.set_training_if_mode_dependent(true);
 
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut Ctx::training()).unwrap();
     let neg_count = output.iter().filter(|&&v| v < 0.0).count();
 
     assert!(
@@ -199,7 +193,11 @@ fn gaussian_noise_training_can_produce_negative_values() {
     );
 }
 
-/// 2 consecutive training-mode forward() calls do not produce identical outputs
+/// 2 consecutive training passes do not produce identical outputs
+///
+/// The forward pass draws from a copy of the random stream that lives in the context, and
+/// `apply_state` moves that copy into the layer. The model does that after every pass, and the
+/// next pass therefore starts where the last one stopped
 #[test]
 fn gaussian_noise_training_consecutive_calls_differ() {
     const N: usize = 10_000;
@@ -208,10 +206,13 @@ fn gaussian_noise_training_consecutive_calls_differ() {
         .into_dyn();
 
     let mut layer = GaussianNoise::new(0.5).unwrap();
-    layer.set_training_if_mode_dependent(true);
 
-    let out1 = layer.forward(&input).unwrap();
-    let out2 = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let out1 = layer.forward_mut(&input, &mut ctx).unwrap();
+    layer.apply_state(&mut ctx.state_slot(0));
+
+    let mut ctx = Ctx::training();
+    let out2 = layer.forward(&input, &mut ctx).unwrap();
 
     let all_equal = out1.iter().zip(out2.iter()).all(|(a, b)| a == b);
     assert!(
@@ -236,12 +237,13 @@ fn gaussian_noise_forward_accepts_a_shape_the_build_did_not_name() {
         .into_dyn();
 
     let output = layer
-        .forward(&other_input)
+        .forward(&other_input, &mut Ctx::training())
         .unwrap_or_else(|e| panic!("forward refused another shape: {e:?}"));
     assert_eq!(output.shape(), &[3, 3]);
 }
 
-/// predict() takes the same freedom as forward(), and it refuses an unbuilt layer alone
+/// An inference pass takes the same freedom as a training pass, and it refuses an unbuilt
+/// layer alone
 #[test]
 fn gaussian_noise_predict_accepts_a_shape_the_build_did_not_name() {
     let mut layer = GaussianNoise::new(0.1).unwrap();
@@ -250,16 +252,16 @@ fn gaussian_noise_predict_accepts_a_shape_the_build_did_not_name() {
         .into_dyn();
     assert!(
         matches!(
-            layer.predict(&other_input),
+            layer.forward(&other_input, &mut Ctx::inference()),
             Err(Error::NeuralNetwork(NnError::NotBuilt("GaussianNoise")))
         ),
-        "predict must refuse a layer that holds no build"
+        "an inference pass must refuse a layer that holds no build"
     );
 
     layer.build(&Shape::known(&[4, 4])).unwrap();
     let output = layer
-        .predict(&other_input)
-        .unwrap_or_else(|e| panic!("predict refused another shape: {e:?}"));
+        .forward(&other_input, &mut Ctx::inference())
+        .unwrap_or_else(|e| panic!("an inference pass refused another shape: {e:?}"));
     assert_eq!(output.shape(), &[3, 3]);
 }
 
@@ -280,10 +282,10 @@ fn gaussian_noise_accepts_any_rank() {
     let b: Tensor = Array::from_shape_vec((2, 3, 4), vec![1.0f32; 24])
         .unwrap()
         .into_dyn();
-    assert!(layer.forward(&a).is_ok());
-    assert!(layer.forward(&b).is_ok());
-    assert!(layer.predict(&a).is_ok());
-    assert!(layer.predict(&b).is_ok());
+    assert!(layer.forward(&a, &mut Ctx::training()).is_ok());
+    assert!(layer.forward(&b, &mut Ctx::training()).is_ok());
+    assert!(layer.forward(&a, &mut Ctx::inference()).is_ok());
+    assert!(layer.forward(&b, &mut Ctx::inference()).is_ok());
 }
 
 // GaussianNoise: metadata
@@ -293,7 +295,7 @@ fn gaussian_noise_layer_type_and_output_shape() {
     let mut layer = GaussianNoise::new(0.3).unwrap();
     layer.build(&Shape::known(&[32, 128])).unwrap();
     assert_eq!(layer.layer_type(), "GaussianNoise");
-    assert_eq!(layer.output_shape(), "(32, 128)");
+    assert_eq!(layer.output_shape(), "(None, 128)");
 }
 
 #[test]
@@ -343,13 +345,12 @@ fn gaussian_dropout_eval_mode_is_identity() {
         .into_dyn();
 
     let mut layer = GaussianDropout::new(0.5).unwrap();
-    layer.set_training_if_mode_dependent(false);
 
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut Ctx::inference()).unwrap();
     crate::common::assert_allclose(&output, &input, 1e-6f32);
 }
 
-/// predict() is always identity regardless of the training flag
+/// An inference pass is always the identity, whatever a training pass would draw
 #[test]
 fn gaussian_dropout_predict_is_always_identity() {
     let input_data = vec![2.0f32, -1.5, 0.3, 4.0, -3.0, 1.1];
@@ -359,12 +360,11 @@ fn gaussian_dropout_predict_is_always_identity() {
 
     let mut layer = GaussianDropout::new(0.3).unwrap();
     layer.build(&Shape::known(&[2, 3])).unwrap();
-    layer.set_training_if_mode_dependent(true);
-    let output = layer.predict(&input).unwrap();
+    let output = layer.forward(&input, &mut Ctx::inference()).unwrap();
     crate::common::assert_allclose(&output, &input, 1e-6f32);
 }
 
-/// predict() in eval mode equals forward() in eval mode (both identity)
+/// 2 inference passes agree, and both are the identity
 #[test]
 fn gaussian_dropout_predict_equals_forward_in_eval_mode() {
     let input_data: Vec<f32> = (0..12).map(|i| i as f32 * 0.3 - 1.0).collect();
@@ -374,10 +374,9 @@ fn gaussian_dropout_predict_equals_forward_in_eval_mode() {
 
     let mut layer = GaussianDropout::new(0.4).unwrap();
     layer.build(&Shape::known(&[3, 4])).unwrap();
-    layer.set_training_if_mode_dependent(false);
 
-    let forward_out = layer.forward(&input).unwrap();
-    let predict_out = layer.predict(&input).unwrap();
+    let forward_out = layer.forward(&input, &mut Ctx::inference()).unwrap();
+    let predict_out = layer.forward(&input, &mut Ctx::inference()).unwrap();
     crate::common::assert_allclose(&predict_out, &forward_out, 1e-6f32);
 }
 
@@ -389,9 +388,8 @@ fn gaussian_dropout_rate_zero_training_is_identity() {
         .into_dyn();
 
     let mut layer = GaussianDropout::new(0.0).unwrap();
-    layer.set_training_if_mode_dependent(true);
 
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut Ctx::training()).unwrap();
     crate::common::assert_allclose(&output, &input, 1e-6f32);
 }
 
@@ -410,9 +408,8 @@ fn gaussian_dropout_training_preserves_mean() {
         .into_dyn();
 
     let mut layer = GaussianDropout::new(rate).unwrap();
-    layer.set_training_if_mode_dependent(true);
 
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut Ctx::training()).unwrap();
     let mean = tensor_mean(&output);
 
     assert!(
@@ -441,9 +438,8 @@ fn gaussian_dropout_training_noise_std_matches_formula() {
             .into_dyn();
 
         let mut layer = GaussianDropout::new(rate).unwrap();
-        layer.set_training_if_mode_dependent(true);
 
-        let output = layer.forward(&input).unwrap();
+        let output = layer.forward_mut(&input, &mut Ctx::training()).unwrap();
         // With input=1, output = noise, so std(output) = std(noise)
         let std_val = tensor_std(&output);
 
@@ -457,7 +453,11 @@ fn gaussian_dropout_training_noise_std_matches_formula() {
     }
 }
 
-/// 2 consecutive training-mode forward() calls do not produce identical outputs
+/// 2 consecutive training passes do not produce identical outputs
+///
+/// The forward pass draws from a copy of the random stream that lives in the context, and
+/// `apply_state` moves that copy into the layer. The model does that after every pass, and the
+/// next pass therefore starts where the last one stopped
 #[test]
 fn gaussian_dropout_training_consecutive_calls_differ() {
     const N: usize = 10_000;
@@ -466,10 +466,13 @@ fn gaussian_dropout_training_consecutive_calls_differ() {
         .into_dyn();
 
     let mut layer = GaussianDropout::new(0.5).unwrap();
-    layer.set_training_if_mode_dependent(true);
 
-    let out1 = layer.forward(&input).unwrap();
-    let out2 = layer.forward(&input).unwrap();
+    let mut ctx = Ctx::training();
+    let out1 = layer.forward_mut(&input, &mut ctx).unwrap();
+    layer.apply_state(&mut ctx.state_slot(0));
+
+    let mut ctx = Ctx::training();
+    let out2 = layer.forward(&input, &mut ctx).unwrap();
 
     let all_equal = out1.iter().zip(out2.iter()).all(|(a, b)| a == b);
     assert!(
@@ -494,12 +497,13 @@ fn gaussian_dropout_forward_accepts_a_shape_the_build_did_not_name() {
         .into_dyn();
 
     let output = layer
-        .forward(&other_input)
+        .forward(&other_input, &mut Ctx::training())
         .unwrap_or_else(|e| panic!("forward refused another shape: {e:?}"));
     assert_eq!(output.shape(), &[3, 3]);
 }
 
-/// predict() takes the same freedom as forward(), and it refuses an unbuilt layer alone
+/// An inference pass takes the same freedom as a training pass, and it refuses an unbuilt
+/// layer alone
 #[test]
 fn gaussian_dropout_predict_accepts_a_shape_the_build_did_not_name() {
     let mut layer = GaussianDropout::new(0.3).unwrap();
@@ -508,16 +512,16 @@ fn gaussian_dropout_predict_accepts_a_shape_the_build_did_not_name() {
         .into_dyn();
     assert!(
         matches!(
-            layer.predict(&other_input),
+            layer.forward(&other_input, &mut Ctx::inference()),
             Err(Error::NeuralNetwork(NnError::NotBuilt("GaussianDropout")))
         ),
-        "predict must refuse a layer that holds no build"
+        "an inference pass must refuse a layer that holds no build"
     );
 
     layer.build(&Shape::known(&[4, 4])).unwrap();
     let output = layer
-        .predict(&other_input)
-        .unwrap_or_else(|e| panic!("predict refused another shape: {e:?}"));
+        .forward(&other_input, &mut Ctx::inference())
+        .unwrap_or_else(|e| panic!("an inference pass refused another shape: {e:?}"));
     assert_eq!(output.shape(), &[3, 3]);
 }
 
@@ -537,22 +541,23 @@ fn gaussian_dropout_accepts_any_rank() {
     let b: Tensor = Array::from_shape_vec((2, 3, 4), vec![1.0f32; 24])
         .unwrap()
         .into_dyn();
-    assert!(layer.forward(&a).is_ok());
-    assert!(layer.forward(&b).is_ok());
-    assert!(layer.predict(&a).is_ok());
-    assert!(layer.predict(&b).is_ok());
+    assert!(layer.forward(&a, &mut Ctx::training()).is_ok());
+    assert!(layer.forward(&b, &mut Ctx::training()).is_ok());
+    assert!(layer.forward(&a, &mut Ctx::inference()).is_ok());
+    assert!(layer.forward(&b, &mut Ctx::inference()).is_ok());
 }
 
-/// In training mode, backward multiplies by the cached forward noise. Without a prior forward()
-/// call, there is no noise to reuse, so it errors, matching Dense's and Dropout's contract.
+/// In training mode, backward multiplies by the noise that the forward pass parked. Without a
+/// prior forward pass, the context holds no noise, so it errors, matching Dense's and Dropout's
+/// contract.
 #[test]
 fn gaussian_dropout_backward_without_forward_errors() {
     let grad: Tensor = Array::from_shape_vec((2, 3), vec![1.0f32; 6])
         .unwrap()
         .into_dyn();
-    let mut layer = GaussianDropout::new(0.3).unwrap();
+    let layer = GaussianDropout::new(0.3).unwrap();
 
-    let result = layer.backward(&grad);
+    let result = layer.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -571,14 +576,15 @@ fn gaussian_dropout_backward_multiplies_by_forward_noise() {
         .unwrap()
         .into_dyn();
     let mut layer = GaussianDropout::new(0.3).unwrap().with_random_state(42);
+    let mut ctx = Ctx::training();
 
     // With input = ones, output = ones * noise = noise
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
 
     let grad: Tensor = Array::from_shape_vec((2, 3), vec![0.5, 1.0, 1.5, 2.0, 2.5, 3.0])
         .unwrap()
         .into_dyn();
-    let grad_input = layer.backward(&grad).unwrap();
+    let grad_input = layer.backward(&grad, &mut ctx).unwrap();
 
     // grad_input should be grad * noise == grad * output
     let expected = &grad * &output;
@@ -587,21 +593,28 @@ fn gaussian_dropout_backward_multiplies_by_forward_noise() {
     }
 }
 
-/// backward borrows, not consumes, the cached noise, so calling it twice after a single forward
-/// call gives the same gradient both times.
+/// 2 passes over the same input give the same gradient
+///
+/// The context owns the noise, and the backward pass takes it, so a second gradient needs a
+/// second pass. The 2 passes agree to the bit, because a pass whose state no model applies
+/// leaves the random stream of the layer where it was
 #[test]
 fn gaussian_dropout_backward_is_idempotent() {
     let input: Tensor = Array::from_shape_vec((2, 3), vec![1.0f32; 6])
         .unwrap()
         .into_dyn();
     let mut layer = GaussianDropout::new(0.3).unwrap().with_random_state(42);
-    layer.forward(&input).unwrap();
 
     let grad: Tensor = Array::from_shape_vec((2, 3), vec![0.5, 1.0, 1.5, 2.0, 2.5, 3.0])
         .unwrap()
         .into_dyn();
-    let first = layer.backward(&grad).unwrap();
-    let second = layer.backward(&grad).unwrap();
+    let mut ctx = Ctx::training();
+    let _ = layer.forward_mut(&input, &mut ctx).unwrap();
+    let first = layer.backward(&grad, &mut ctx).unwrap();
+
+    let mut ctx = Ctx::training();
+    let _ = layer.forward(&input, &mut ctx).unwrap();
+    let second = layer.backward(&grad, &mut ctx).unwrap();
     for (a, b) in first.iter().zip(second.iter()) {
         assert_abs_diff_eq!(a, b, epsilon = 0.0);
     }
@@ -614,10 +627,9 @@ fn gaussian_dropout_backward_inference_is_passthrough() {
     let grad: Tensor = Array::from_shape_vec((2, 3), vec![0.5, 1.0, 1.5, 2.0, 2.5, 3.0])
         .unwrap()
         .into_dyn();
-    let mut layer = GaussianDropout::new(0.3).unwrap();
-    layer.set_training(false);
+    let layer = GaussianDropout::new(0.3).unwrap();
 
-    let grad_input = layer.backward(&grad).unwrap();
+    let grad_input = layer.backward(&grad, &mut Ctx::inference()).unwrap();
     for (got, exp) in grad_input.iter().zip(grad.iter()) {
         assert_abs_diff_eq!(got, exp, epsilon = 1e-6);
     }
@@ -630,7 +642,7 @@ fn gaussian_dropout_layer_type_and_output_shape() {
     let mut layer = GaussianDropout::new(0.3).unwrap();
     layer.build(&Shape::known(&[32, 128])).unwrap();
     assert_eq!(layer.layer_type(), "GaussianDropout");
-    assert_eq!(layer.output_shape(), "(32, 128)");
+    assert_eq!(layer.output_shape(), "(None, 128)");
 }
 
 #[test]
@@ -641,7 +653,7 @@ fn gaussian_dropout_empty_input_shape_output_shape_unknown() {
 
 // Mode-switching symmetry
 
-/// set_training_if_mode_dependent(true) re-enables noise and (false) disables it
+/// A training context enables the noise, and an inference context disables it
 #[test]
 fn gaussian_noise_mode_switching_routes_correctly() {
     const N: usize = 1_000;
@@ -652,19 +664,16 @@ fn gaussian_noise_mode_switching_routes_correctly() {
     let mut layer = GaussianNoise::new(2.0).unwrap();
 
     // Eval mode is the identity
-    layer.set_training_if_mode_dependent(false);
-    let eval_out = layer.forward(&input).unwrap();
+    let eval_out = layer.forward_mut(&input, &mut Ctx::inference()).unwrap();
     crate::common::assert_allclose(&eval_out, &input, 1e-6f32);
 
     // Training mode now differs from the input
-    layer.set_training_if_mode_dependent(true);
-    let train_out = layer.forward(&input).unwrap();
+    let train_out = layer.forward(&input, &mut Ctx::training()).unwrap();
     let any_different = train_out.iter().zip(input.iter()).any(|(a, b)| a != b);
     assert!(any_different, "training mode must add noise");
 
     // Back to eval mode: the identity again
-    layer.set_training_if_mode_dependent(false);
-    let eval_out2 = layer.forward(&input).unwrap();
+    let eval_out2 = layer.forward(&input, &mut Ctx::inference()).unwrap();
     crate::common::assert_allclose(&eval_out2, &input, 1e-6f32);
 }
 
@@ -679,19 +688,16 @@ fn gaussian_dropout_mode_switching_routes_correctly() {
     let mut layer = GaussianDropout::new(0.5).unwrap();
 
     // Eval mode is the identity
-    layer.set_training_if_mode_dependent(false);
-    let eval_out = layer.forward(&input).unwrap();
+    let eval_out = layer.forward_mut(&input, &mut Ctx::inference()).unwrap();
     crate::common::assert_allclose(&eval_out, &input, 1e-6f32);
 
     // Training mode now differs from the input
-    layer.set_training_if_mode_dependent(true);
-    let train_out = layer.forward(&input).unwrap();
+    let train_out = layer.forward(&input, &mut Ctx::training()).unwrap();
     let any_different = train_out.iter().zip(input.iter()).any(|(a, b)| a != b);
     assert!(any_different, "training mode must multiply by noise");
 
     // Back to eval mode: the identity again
-    layer.set_training_if_mode_dependent(false);
-    let eval_out2 = layer.forward(&input).unwrap();
+    let eval_out2 = layer.forward(&input, &mut Ctx::inference()).unwrap();
     crate::common::assert_allclose(&eval_out2, &input, 1e-6f32);
 }
 
@@ -701,14 +707,14 @@ fn gaussian_dropout_mode_switching_routes_correctly() {
 fn gaussian_noise_backward_passes_gradient_through_unchanged() {
     let mut layer = GaussianNoise::new(1.0).unwrap();
     // Realistic call order: a training-mode forward first, then backward
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
     let x: Tensor = Array::from_elem((2, 3), 1.0f32).into_dyn();
-    let _ = layer.forward(&x).unwrap();
+    let _ = layer.forward_mut(&x, &mut ctx).unwrap();
 
     let grad: Tensor = Array::from_shape_vec((2, 3), vec![1.0f32, -2.0, 3.0, -4.0, 5.0, -6.0])
         .unwrap()
         .into_dyn();
-    let grad_in = layer.backward(&grad).unwrap();
+    let grad_in = layer.backward(&grad, &mut ctx).unwrap();
 
     // Pure pass-through => byte-identical gradient (zero epsilon)
     crate::common::assert_allclose(&grad_in, &grad, 0.0f32);

@@ -2,7 +2,7 @@
 //!
 //! Focus areas:
 //! - Forward values (not just shapes): inverted-dropout scaling, rate=0 identity, rate=1 zeros
-//! - Eval mode: output == input (identity), predict() == forward() in eval mode
+//! - Eval mode: output == input (identity), whatever the rate
 //! - SpatialDropout channel-consistency: whole channel 0 or fully kept and scaled
 //! - Constructor rejects invalid rates
 //! - backward before forward -> Err(ForwardPassNotRun)
@@ -12,13 +12,14 @@
 //!   the entry validation. The recorded semantics come from Keras 3.15.1 on the jax backend
 
 use ndarray::Array;
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::regularization::dropout::dropout::Dropout;
 use rustyml::neural_network::layers::regularization::dropout::spatial_dropout_1d::SpatialDropout1D;
 use rustyml::neural_network::layers::regularization::dropout::spatial_dropout_2d::SpatialDropout2D;
 use rustyml::neural_network::layers::regularization::dropout::spatial_dropout_3d::SpatialDropout3D;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::UnaryLayer;
 use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
@@ -43,7 +44,7 @@ fn filled(shape: &[usize], value: f32) -> Tensor {
 fn dropout_rate_zero_is_identity_in_training_mode() {
     // rate=0 takes the dedicated early-return path, so no units drop
     let mut layer = Dropout::new(0.0).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = Array::from_shape_vec(
         (3, 4),
@@ -54,7 +55,7 @@ fn dropout_rate_zero_is_identity_in_training_mode() {
     .unwrap()
     .into_dyn();
 
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     assert_allclose(&output, &input, 1e-6_f32);
 }
 
@@ -62,10 +63,10 @@ fn dropout_rate_zero_is_identity_in_training_mode() {
 fn dropout_rate_one_yields_zeros_in_training_mode() {
     // rate=1 takes the dedicated early-return path, giving all zeros
     let mut layer = Dropout::new(1.0).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = filled(&[2, 5], 3.0);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     let expected = filled(&[2, 5], 0.0);
     assert_allclose(&output, &expected, 1e-6_f32);
 }
@@ -74,41 +75,44 @@ fn dropout_rate_one_yields_zeros_in_training_mode() {
 fn dropout_eval_mode_is_exact_identity() {
     // Inverted dropout: inference passes the input through unchanged
     let mut layer = Dropout::new(0.5).unwrap();
-    layer.set_training_if_mode_dependent(false);
+    let mut ctx = Ctx::inference();
 
     let input = Array::from_shape_vec((2, 3), vec![1.0, -1.0, 2.0, 0.5, -0.5, 3.0])
         .unwrap()
         .into_dyn();
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     assert_allclose(&output, &input, 1e-6_f32);
 }
 
+/// 2 inference passes agree, and each of them is the identity
+///
+/// The mode is the context, so the inference entry point is a forward pass that takes
+/// `Ctx::inference()`. The pass keeps no state between the 2 calls, and it gives the input back
 #[test]
 fn dropout_predict_equals_forward_in_eval_mode() {
     let mut layer = Dropout::new(0.3).unwrap();
     layer.build(&Shape::known(&[2, 4])).unwrap();
-    layer.set_training_if_mode_dependent(false);
 
     let input = Array::from_shape_vec((2, 4), (0..8).map(|v| v as f32 * 0.5).collect())
         .unwrap()
         .into_dyn();
 
-    let out_forward = layer.forward(&input).unwrap();
-    let out_predict = layer.predict(&input).unwrap();
+    let out_forward = layer.forward(&input, &mut Ctx::inference()).unwrap();
+    let out_predict = layer.forward(&input, &mut Ctx::inference()).unwrap();
     assert_allclose(&out_forward, &out_predict, 1e-6_f32);
     assert_allclose(&out_forward, &input, 1e-6_f32);
 }
 
+/// An inference pass is the identity at a high rate as well
 #[test]
 fn dropout_predict_is_identity_in_training_mode() {
     let mut layer = Dropout::new(0.9).unwrap();
     layer.build(&Shape::known(&[3])).unwrap();
-    layer.set_training_if_mode_dependent(true);
 
     let input = Array::from_shape_vec((3,), vec![1.0, -2.0, 3.0])
         .unwrap()
         .into_dyn();
-    let out = layer.predict(&input).unwrap();
+    let out = layer.forward(&input, &mut Ctx::inference()).unwrap();
     assert_allclose(&out, &input, 1e-6_f32);
 }
 
@@ -116,10 +120,10 @@ fn dropout_predict_is_identity_in_training_mode() {
 fn dropout_training_inverted_scaling_on_kept_units() {
     // Inverted dropout scales kept units by 1/(1-rate). With rate=0.5, scale = 2.0.
     let mut layer = Dropout::new(0.5).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = ones(&[200]);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
 
     let mut zero_count = 0usize;
     for &v in output.iter() {
@@ -143,13 +147,13 @@ fn dropout_training_inverted_scaling_on_kept_units() {
 fn dropout_rate_one_backward_returns_zeros() {
     // rate=1 zeroes the forward output. Backward returns zeros too, from its own early-return path
     let mut layer = Dropout::new(1.0).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = filled(&[2, 3], 1.0);
-    let _ = layer.forward(&input).unwrap();
+    let _ = layer.forward_mut(&input, &mut ctx).unwrap();
 
     let grad = filled(&[2, 3], 1.0);
-    let grad_in = layer.backward(&grad).unwrap();
+    let grad_in = layer.backward(&grad, &mut ctx).unwrap();
     let expected = filled(&[2, 3], 0.0);
     assert_allclose(&grad_in, &expected, 1e-6_f32);
 }
@@ -158,15 +162,15 @@ fn dropout_rate_one_backward_returns_zeros() {
 fn dropout_rate_zero_backward_passes_gradient_through() {
     // rate=0 -> forward identity, backward passes gradient through unchanged
     let mut layer = Dropout::new(0.0).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = filled(&[2, 3], 1.0);
-    let _ = layer.forward(&input).unwrap();
+    let _ = layer.forward_mut(&input, &mut ctx).unwrap();
 
     let grad = Array::from_shape_vec((2, 3), vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
         .unwrap()
         .into_dyn();
-    let grad_in = layer.backward(&grad).unwrap();
+    let grad_in = layer.backward(&grad, &mut ctx).unwrap();
     assert_allclose(&grad_in, &grad, 1e-6_f32);
 }
 
@@ -174,15 +178,15 @@ fn dropout_rate_zero_backward_passes_gradient_through() {
 fn dropout_eval_backward_passes_gradient_through() {
     // Inference mode: backward() passes gradient through unchanged
     let mut layer = Dropout::new(0.5).unwrap();
-    layer.set_training_if_mode_dependent(false);
+    let mut ctx = Ctx::inference();
 
     let input = filled(&[2, 3], 1.0);
-    let _ = layer.forward(&input).unwrap();
+    let _ = layer.forward_mut(&input, &mut ctx).unwrap();
 
     let grad = Array::from_shape_vec((2, 3), vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
         .unwrap()
         .into_dyn();
-    let grad_in = layer.backward(&grad).unwrap();
+    let grad_in = layer.backward(&grad, &mut ctx).unwrap();
     assert_allclose(&grad_in, &grad, 1e-6_f32);
 }
 
@@ -191,12 +195,12 @@ fn dropout_backward_kept_units_scaled_correctly() {
     // Backward multiplies grad_output by 1/(1-rate). With rate=0.5 and all-ones input,
     // kept output and kept gradient both equal 2.0, and dropped units give 0.0
     let mut layer = Dropout::new(0.5).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = ones(&[50]);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     let grad_upstream = ones(&[50]);
-    let grad_in = layer.backward(&grad_upstream).unwrap();
+    let grad_in = layer.backward(&grad_upstream, &mut ctx).unwrap();
 
     for (i, (&out_v, &grad_v)) in output.iter().zip(grad_in.iter()).enumerate() {
         if out_v == 0.0 {
@@ -234,12 +238,11 @@ fn dropout_constructor_accepts_boundary_rates_zero_and_one() {
 
 #[test]
 fn dropout_backward_before_forward_returns_forward_pass_not_run() {
-    // mask is None -> backward before forward -> ForwardPassNotRun error
-    let mut layer = Dropout::new(0.5).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    // The context holds no mask -> backward before forward -> ForwardPassNotRun error
+    let layer = Dropout::new(0.5).unwrap();
 
     let grad = filled(&[4], 1.0);
-    let err = layer.backward(&grad).unwrap_err();
+    let err = layer.backward(&grad, &mut Ctx::training()).unwrap_err();
     assert!(
         matches!(err, Error::NeuralNetwork(NnError::ForwardPassNotRun(_))),
         "expected ForwardPassNotRun, got {:?}",
@@ -252,9 +255,10 @@ fn spatial_dropout_backward_before_forward_reports_concrete_layer_name() {
     // Regression: shared dropout_backward must name the concrete SpatialDropout layer
     // in ForwardPassNotRun, not a hardcoded "Dropout"
     // Channels-last: (batch=2, length=8, channels=4)
-    let mut d1 = SpatialDropout1D::new(0.5).unwrap();
-    d1.set_training_if_mode_dependent(true);
-    let err1 = d1.backward(&filled(&[2, 8, 4], 1.0)).unwrap_err();
+    let d1 = SpatialDropout1D::new(0.5).unwrap();
+    let err1 = d1
+        .backward(&filled(&[2, 8, 4], 1.0), &mut Ctx::training())
+        .unwrap_err();
     assert!(
         matches!(
             err1,
@@ -265,9 +269,10 @@ fn spatial_dropout_backward_before_forward_reports_concrete_layer_name() {
     );
 
     // Channels-last: (batch=2, height=4, width=4, channels=3)
-    let mut d2 = SpatialDropout2D::new(0.5).unwrap();
-    d2.set_training_if_mode_dependent(true);
-    let err2 = d2.backward(&filled(&[2, 4, 4, 3], 1.0)).unwrap_err();
+    let d2 = SpatialDropout2D::new(0.5).unwrap();
+    let err2 = d2
+        .backward(&filled(&[2, 4, 4, 3], 1.0), &mut Ctx::training())
+        .unwrap_err();
     assert!(
         matches!(
             err2,
@@ -278,9 +283,10 @@ fn spatial_dropout_backward_before_forward_reports_concrete_layer_name() {
     );
 
     // Channels-last: (batch=1, depth=3, height=3, width=3, channels=2)
-    let mut d3 = SpatialDropout3D::new(0.5).unwrap();
-    d3.set_training_if_mode_dependent(true);
-    let err3 = d3.backward(&filled(&[1, 3, 3, 3, 2], 1.0)).unwrap_err();
+    let d3 = SpatialDropout3D::new(0.5).unwrap();
+    let err3 = d3
+        .backward(&filled(&[1, 3, 3, 3, 2], 1.0), &mut Ctx::training())
+        .unwrap_err();
     assert!(
         matches!(
             err3,
@@ -302,7 +308,7 @@ fn dropout_forward_accepts_a_shape_the_build_did_not_name() {
     // The feature count differs from the 1 the build named
     let input = Array::ones((2, 5)).into_dyn();
     let out = layer
-        .forward(&input)
+        .forward(&input, &mut Ctx::training())
         .unwrap_or_else(|e| panic!("forward refused a wider input: {e:?}"));
     assert_eq!(out.shape(), &[2, 5]);
 }
@@ -315,33 +321,34 @@ fn dropout_accepts_any_batch_size() {
     for batch in [1usize, 3, 8, 16] {
         let input = Array::ones((batch, 4)).into_dyn();
         let out = layer
-            .forward(&input)
+            .forward_mut(&input, &mut Ctx::training())
             .unwrap_or_else(|e| panic!("forward rejected batch {batch}: {e:?}"));
         assert_eq!(out.shape(), &[batch, 4]);
         let out = layer
-            .predict(&input)
-            .unwrap_or_else(|e| panic!("predict rejected batch {batch}: {e:?}"));
+            .forward(&input, &mut Ctx::inference())
+            .unwrap_or_else(|e| panic!("an inference pass rejected batch {batch}: {e:?}"));
         assert_eq!(out.shape(), &[batch, 4]);
     }
 }
 
-/// `predict` takes the same freedom as `forward`, and it refuses an unbuilt layer alone
+/// An inference pass takes the same freedom as a training pass, and it refuses an unbuilt
+/// layer alone
 #[test]
 fn dropout_predict_accepts_a_shape_the_build_did_not_name() {
     let mut layer = Dropout::new(0.5).unwrap();
     assert!(
         matches!(
-            layer.predict(&Array::ones((2, 4)).into_dyn()),
+            layer.forward(&Array::ones((2, 4)).into_dyn(), &mut Ctx::inference()),
             Err(Error::NeuralNetwork(NnError::NotBuilt("Dropout")))
         ),
-        "predict must refuse a layer that holds no build"
+        "an inference pass must refuse a layer that holds no build"
     );
 
     layer.build(&Shape::known(&[2, 4])).unwrap();
     let input = Array::ones((2, 5)).into_dyn();
     let out = layer
-        .predict(&input)
-        .unwrap_or_else(|e| panic!("predict refused a wider input: {e:?}"));
+        .forward(&input, &mut Ctx::inference())
+        .unwrap_or_else(|e| panic!("an inference pass refused a wider input: {e:?}"));
     assert_eq!(out.shape(), &[2, 5]);
 }
 
@@ -356,10 +363,10 @@ fn dropout_accepts_any_rank() {
     let mut layer = Dropout::new(0.0).unwrap();
     let a = Array::ones((2, 3)).into_dyn();
     let b = Array::ones((5, 7, 2)).into_dyn();
-    assert!(layer.forward(&a).is_ok());
-    assert!(layer.forward(&b).is_ok());
-    assert!(layer.predict(&a).is_ok());
-    assert!(layer.predict(&b).is_ok());
+    assert!(layer.forward_mut(&a, &mut Ctx::training()).is_ok());
+    assert!(layer.forward_mut(&b, &mut Ctx::training()).is_ok());
+    assert!(layer.forward(&a, &mut Ctx::inference()).is_ok());
+    assert!(layer.forward(&b, &mut Ctx::inference()).is_ok());
 }
 
 // SpatialDropout1D - channel-consistency and values
@@ -369,10 +376,10 @@ fn spatial_dropout_1d_rate_zero_is_identity() {
     // rate=0 -> identity in training mode
     // Channels-last: (batch=2, length=8, channels=4)
     let mut layer = SpatialDropout1D::new(0.0).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = filled(&[2, 8, 4], 1.5_f32);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     assert_allclose(&output, &input, 1e-6_f32);
 }
 
@@ -381,10 +388,10 @@ fn spatial_dropout_1d_rate_one_yields_zeros() {
     // rate=1 -> all zeros
     // Channels-last: (batch=1, length=5, channels=3)
     let mut layer = SpatialDropout1D::new(1.0).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = filled(&[1, 5, 3], 2.0);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     let expected = filled(&[1, 5, 3], 0.0);
     assert_allclose(&output, &expected, 1e-6_f32);
 }
@@ -393,10 +400,10 @@ fn spatial_dropout_1d_rate_one_yields_zeros() {
 fn spatial_dropout_1d_eval_is_identity() {
     // Channels-last: (batch=2, length=6, channels=4)
     let mut layer = SpatialDropout1D::new(0.5).unwrap();
-    layer.set_training_if_mode_dependent(false);
+    let mut ctx = Ctx::inference();
 
     let input = filled(&[2, 6, 4], 3.0);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     assert_allclose(&output, &input, 1e-6_f32);
 }
 
@@ -406,7 +413,7 @@ fn spatial_dropout_1d_predict_is_identity() {
     let mut layer = SpatialDropout1D::new(0.8).unwrap();
     layer.build(&Shape::known(&[1, 6, 4])).unwrap();
     let input = filled(&[1, 6, 4], 2.0);
-    let out = layer.predict(&input).unwrap();
+    let out = layer.forward(&input, &mut Ctx::inference()).unwrap();
     assert_allclose(&out, &input, 1e-6_f32);
 }
 
@@ -419,10 +426,10 @@ fn spatial_dropout_1d_channel_consistency() {
     let scale = 1.0 / (1.0 - rate); // = 2.0
 
     let mut layer = SpatialDropout1D::new(rate).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = ones(&[1, 10, 8]);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
 
     let batch_size = 1;
     let length = 10;
@@ -455,13 +462,13 @@ fn spatial_dropout_1d_kept_channel_exact_scale() {
 
     // Channels-last layout: (batch=1, length=4, channels=10)
     let mut layer = SpatialDropout1D::new(rate).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     // Give each spatial position a distinct value
     let data: Vec<f32> = (0..40).map(|i| i as f32 + 1.0).collect();
     let input = Tensor::from_shape_vec(ndarray::IxDyn(&[1, 4, 10]), data).unwrap();
 
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
 
     let mut found_kept = false;
     for c in 0..10 {
@@ -493,12 +500,12 @@ fn spatial_dropout_1d_backward_channel_consistency() {
     // Channels-last layout: (batch=1, length=4, channels=6)
     let rate = 0.5_f32;
     let mut layer = SpatialDropout1D::new(rate).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = ones(&[1, 4, 6]);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     let grad_up = ones(&[1, 4, 6]);
-    let grad_in = layer.backward(&grad_up).unwrap();
+    let grad_in = layer.backward(&grad_up, &mut ctx).unwrap();
 
     let scale = 1.0 / (1.0 - rate);
     for c in 0..6 {
@@ -544,27 +551,26 @@ fn spatial_dropout_1d_rejects_wrong_ndim_forward() {
     // Channels-last: (batch=2, length=8, channels=4)
     let mut layer = SpatialDropout1D::new(0.5).unwrap();
     let input_2d = Array::ones((2, 8)).into_dyn();
-    assert!(layer.forward(&input_2d).is_err());
+    assert!(layer.forward_mut(&input_2d, &mut Ctx::training()).is_err());
 
     let input_4d = Array::ones((2, 8, 4, 3)).into_dyn();
-    assert!(layer.forward(&input_4d).is_err());
+    assert!(layer.forward_mut(&input_4d, &mut Ctx::training()).is_err());
 }
 
 #[test]
 fn spatial_dropout_1d_rejects_wrong_ndim_predict() {
-    // predict() also enforces ndim
+    // An inference pass refuses the same input
     let layer = SpatialDropout1D::new(0.5).unwrap();
     let input_2d = Array::ones((2, 8)).into_dyn();
-    assert!(layer.predict(&input_2d).is_err());
+    assert!(layer.forward(&input_2d, &mut Ctx::inference()).is_err());
 }
 
 #[test]
 fn spatial_dropout_1d_backward_before_forward_returns_error() {
-    let mut layer = SpatialDropout1D::new(0.5).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let layer = SpatialDropout1D::new(0.5).unwrap();
 
     let grad = filled(&[1, 8, 4], 1.0);
-    let err = layer.backward(&grad).unwrap_err();
+    let err = layer.backward(&grad, &mut Ctx::training()).unwrap_err();
     assert!(
         matches!(err, Error::NeuralNetwork(NnError::ForwardPassNotRun(_))),
         "expected ForwardPassNotRun, got {:?}",
@@ -578,10 +584,10 @@ fn spatial_dropout_1d_backward_before_forward_returns_error() {
 fn spatial_dropout_2d_rate_zero_is_identity() {
     // Channels-last: (batch=2, height=4, width=4, channels=3)
     let mut layer = SpatialDropout2D::new(0.0).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = filled(&[2, 4, 4, 3], 1.0);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     assert_allclose(&output, &input, 1e-6_f32);
 }
 
@@ -589,10 +595,10 @@ fn spatial_dropout_2d_rate_zero_is_identity() {
 fn spatial_dropout_2d_rate_one_yields_zeros() {
     // Channels-last: (batch=1, height=3, width=3, channels=2)
     let mut layer = SpatialDropout2D::new(1.0).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = filled(&[1, 3, 3, 2], 5.0);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     assert_allclose(&output, &filled(&[1, 3, 3, 2], 0.0), 1e-6_f32);
 }
 
@@ -600,10 +606,10 @@ fn spatial_dropout_2d_rate_one_yields_zeros() {
 fn spatial_dropout_2d_eval_is_identity() {
     // Channels-last: (batch=1, height=4, width=4, channels=2)
     let mut layer = SpatialDropout2D::new(0.5).unwrap();
-    layer.set_training_if_mode_dependent(false);
+    let mut ctx = Ctx::inference();
 
     let input = filled(&[1, 4, 4, 2], 2.0);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     assert_allclose(&output, &input, 1e-6_f32);
 }
 
@@ -613,7 +619,7 @@ fn spatial_dropout_2d_predict_is_identity() {
     let mut layer = SpatialDropout2D::new(0.7).unwrap();
     layer.build(&Shape::known(&[1, 3, 3, 2])).unwrap();
     let input = filled(&[1, 3, 3, 2], 2.5);
-    let out = layer.predict(&input).unwrap();
+    let out = layer.forward(&input, &mut Ctx::inference()).unwrap();
     assert_allclose(&out, &input, 1e-6_f32);
 }
 
@@ -625,10 +631,10 @@ fn spatial_dropout_2d_channel_consistency() {
     let scale = 1.0 / (1.0 - rate);
 
     let mut layer = SpatialDropout2D::new(rate).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = ones(&[1, 4, 4, 8]);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
 
     for c in 0..8 {
         let first = output[[0, 0, 0, c]];
@@ -653,14 +659,14 @@ fn spatial_dropout_2d_rejects_wrong_ndim() {
     // Channels-last: (batch=1, height=4, width=4, channels=2)
     let mut layer = SpatialDropout2D::new(0.5).unwrap();
     let input_3d = Array::ones((1, 4, 4)).into_dyn();
-    assert!(layer.forward(&input_3d).is_err());
+    assert!(layer.forward_mut(&input_3d, &mut Ctx::training()).is_err());
 }
 
 #[test]
 fn spatial_dropout_2d_predict_rejects_wrong_ndim() {
     let layer = SpatialDropout2D::new(0.5).unwrap();
     let input_3d = Array::ones((1, 4, 4)).into_dyn();
-    assert!(layer.predict(&input_3d).is_err());
+    assert!(layer.forward(&input_3d, &mut Ctx::inference()).is_err());
 }
 
 #[test]
@@ -671,11 +677,10 @@ fn spatial_dropout_2d_rejects_invalid_rate() {
 
 #[test]
 fn spatial_dropout_2d_backward_before_forward_returns_error() {
-    let mut layer = SpatialDropout2D::new(0.5).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let layer = SpatialDropout2D::new(0.5).unwrap();
 
     let grad = filled(&[1, 4, 4, 2], 1.0);
-    let err = layer.backward(&grad).unwrap_err();
+    let err = layer.backward(&grad, &mut Ctx::training()).unwrap_err();
     assert!(
         matches!(err, Error::NeuralNetwork(NnError::ForwardPassNotRun(_))),
         "expected ForwardPassNotRun, got {:?}",
@@ -692,12 +697,12 @@ fn spatial_dropout_2d_backward_channel_consistency() {
     let scale = 1.0 / (1.0 - rate);
 
     let mut layer = SpatialDropout2D::new(rate).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = ones(&[1, 3, 3, 6]);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     let grad_up = ones(&[1, 3, 3, 6]);
-    let grad_in = layer.backward(&grad_up).unwrap();
+    let grad_in = layer.backward(&grad_up, &mut ctx).unwrap();
 
     for c in 0..6 {
         let out_first = output[[0, 0, 0, c]];
@@ -720,10 +725,10 @@ fn spatial_dropout_2d_backward_channel_consistency() {
 fn spatial_dropout_3d_rate_zero_is_identity() {
     // Channels-last: (batch=1, depth=2, height=3, width=3, channels=3)
     let mut layer = SpatialDropout3D::new(0.0).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = filled(&[1, 2, 3, 3, 3], 1.0);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     assert_allclose(&output, &input, 1e-6_f32);
 }
 
@@ -731,10 +736,10 @@ fn spatial_dropout_3d_rate_zero_is_identity() {
 fn spatial_dropout_3d_rate_one_yields_zeros() {
     // Channels-last: (batch=1, depth=2, height=2, width=2, channels=2)
     let mut layer = SpatialDropout3D::new(1.0).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = filled(&[1, 2, 2, 2, 2], 3.0);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     assert_allclose(&output, &filled(&[1, 2, 2, 2, 2], 0.0), 1e-6_f32);
 }
 
@@ -742,10 +747,10 @@ fn spatial_dropout_3d_rate_one_yields_zeros() {
 fn spatial_dropout_3d_eval_is_identity() {
     // Channels-last: (batch=1, depth=2, height=3, width=3, channels=2)
     let mut layer = SpatialDropout3D::new(0.5).unwrap();
-    layer.set_training_if_mode_dependent(false);
+    let mut ctx = Ctx::inference();
 
     let input = filled(&[1, 2, 3, 3, 2], 4.0);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     assert_allclose(&output, &input, 1e-6_f32);
 }
 
@@ -755,7 +760,7 @@ fn spatial_dropout_3d_predict_is_identity() {
     let mut layer = SpatialDropout3D::new(0.6).unwrap();
     layer.build(&Shape::known(&[1, 2, 3, 3, 2])).unwrap();
     let input = filled(&[1, 2, 3, 3, 2], 1.5);
-    let out = layer.predict(&input).unwrap();
+    let out = layer.forward(&input, &mut Ctx::inference()).unwrap();
     assert_allclose(&out, &input, 1e-6_f32);
 }
 
@@ -767,10 +772,10 @@ fn spatial_dropout_3d_channel_consistency() {
     let scale = 1.0 / (1.0 - rate);
 
     let mut layer = SpatialDropout3D::new(rate).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = ones(&[1, 2, 3, 3, 8]);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
 
     for c in 0..8 {
         let first = output[[0, 0, 0, 0, c]];
@@ -797,14 +802,14 @@ fn spatial_dropout_3d_rejects_wrong_ndim() {
     // Channels-last: (batch=1, depth=2, height=3, width=3, channels=2)
     let mut layer = SpatialDropout3D::new(0.5).unwrap();
     let input_4d = Array::ones((1, 2, 3, 3)).into_dyn();
-    assert!(layer.forward(&input_4d).is_err());
+    assert!(layer.forward_mut(&input_4d, &mut Ctx::training()).is_err());
 }
 
 #[test]
 fn spatial_dropout_3d_predict_rejects_wrong_ndim() {
     let layer = SpatialDropout3D::new(0.5).unwrap();
     let input_4d = Array::ones((1, 2, 3, 3)).into_dyn();
-    assert!(layer.predict(&input_4d).is_err());
+    assert!(layer.forward(&input_4d, &mut Ctx::inference()).is_err());
 }
 
 #[test]
@@ -815,11 +820,10 @@ fn spatial_dropout_3d_rejects_invalid_rate() {
 
 #[test]
 fn spatial_dropout_3d_backward_before_forward_returns_error() {
-    let mut layer = SpatialDropout3D::new(0.5).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let layer = SpatialDropout3D::new(0.5).unwrap();
 
     let grad = filled(&[1, 2, 3, 3, 2], 1.0);
-    let err = layer.backward(&grad).unwrap_err();
+    let err = layer.backward(&grad, &mut Ctx::training()).unwrap_err();
     assert!(
         matches!(err, Error::NeuralNetwork(NnError::ForwardPassNotRun(_))),
         "expected ForwardPassNotRun, got {:?}",
@@ -835,12 +839,12 @@ fn spatial_dropout_3d_backward_channel_consistency() {
     let scale = 1.0 / (1.0 - rate);
 
     let mut layer = SpatialDropout3D::new(rate).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = ones(&[1, 2, 2, 2, 4]);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     let grad_up = ones(&[1, 2, 2, 2, 4]);
-    let grad_in = layer.backward(&grad_up).unwrap();
+    let grad_in = layer.backward(&grad_up, &mut ctx).unwrap();
 
     for c in 0..4 {
         let out_first = output[[0, 0, 0, 0, c]];
@@ -859,25 +863,25 @@ fn spatial_dropout_3d_backward_channel_consistency() {
     }
 }
 
-// Cross-type: predict() never caches a mask. Backward after predict uses the mask
-// from the previous forward() call, not the predict call.
+// Cross-type: an inference pass caches no mask. A backward pass after it still reads the
+// mask of the training pass, because that mask lives in the training context.
 
 #[test]
 fn dropout_predict_does_not_overwrite_mask_from_forward() {
-    // Sequence forward() -> predict() -> backward(): predict() must not touch the stored
-    // mask, so backward() still uses the forward() mask
+    // Sequence training forward -> inference forward -> backward: the inference pass must not
+    // touch the cache of the training pass, so backward still uses the training mask
     let mut layer = Dropout::new(0.5).unwrap();
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = ones(&[10]);
-    let fwd_output = layer.forward(&input).unwrap();
+    let fwd_output = layer.forward_mut(&input, &mut ctx).unwrap();
 
-    // Calling predict (in training mode) does not cache a mask
-    let _ = layer.predict(&input).unwrap();
+    // An inference pass caches no mask, and it holds its own context
+    let _ = layer.forward(&input, &mut Ctx::inference()).unwrap();
 
-    // backward() still succeeds using the mask from forward()
+    // backward() still succeeds using the mask of the training pass
     let grad = ones(&[10]);
-    let grad_in = layer.backward(&grad).unwrap();
+    let grad_in = layer.backward(&grad, &mut ctx).unwrap();
 
     // Zero where output was zero, 2.0 where output was 2.0
     for (o, g) in fwd_output.iter().zip(grad_in.iter()) {
@@ -938,8 +942,11 @@ fn masked_ones(shape: &[usize], noise_shape: Option<Vec<Option<usize>>>, seed: u
         layer = layer.with_noise_shape(noise_shape).unwrap();
     }
     let mut layer = layer.with_random_state(seed);
-    layer.set_training_if_mode_dependent(true);
-    keep_mask(&layer.forward(&ones(shape)).unwrap())
+    keep_mask(
+        &layer
+            .forward_mut(&ones(shape), &mut Ctx::training())
+            .unwrap(),
+    )
 }
 
 /// An all-None noise_shape reproduces the default per-element draw exactly
@@ -1174,13 +1181,13 @@ fn dropout_noise_shape_at_rate_one_gives_zeros() {
         .with_noise_shape(vec![Some(2), Some(1), Some(4)])
         .unwrap()
         .with_random_state(41);
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
     let input = ones(&[2, 3, 4]);
-    let output = layer.forward(&input).unwrap();
+    let output = layer.forward_mut(&input, &mut ctx).unwrap();
     assert!(output.iter().all(|&v| v == 0.0), "rate 1 kept a unit");
 
-    let grad = layer.backward(&ones(&[2, 3, 4])).unwrap();
+    let grad = layer.backward(&ones(&[2, 3, 4]), &mut ctx).unwrap();
     assert!(grad.iter().all(|&v| v == 0.0), "rate 1 kept a gradient");
 
     // A rate of 0 stays the identity with a noise_shape as well
@@ -1188,8 +1195,12 @@ fn dropout_noise_shape_at_rate_one_gives_zeros() {
         .unwrap()
         .with_noise_shape(vec![Some(2), Some(1), Some(4)])
         .unwrap();
-    layer.set_training_if_mode_dependent(true);
-    assert_allclose(&layer.forward(&input).unwrap(), &input, 1e-6_f32);
+    let mut ctx = Ctx::training();
+    assert_allclose(
+        &layer.forward_mut(&input, &mut ctx).unwrap(),
+        &input,
+        1e-6_f32,
+    );
 }
 
 /// The backward pass reuses the small mask and broadcasts it the same way
@@ -1203,10 +1214,10 @@ fn dropout_noise_shape_backward_broadcasts_the_small_mask() {
         .with_noise_shape(vec![Some(2), Some(1), Some(4)])
         .unwrap()
         .with_random_state(51);
-    layer.set_training_if_mode_dependent(true);
+    let mut ctx = Ctx::training();
 
-    let output = layer.forward(&ones(&[2, 3, 4])).unwrap();
-    let grad_in = layer.backward(&ones(&[2, 3, 4])).unwrap();
+    let output = layer.forward_mut(&ones(&[2, 3, 4]), &mut ctx).unwrap();
+    let grad_in = layer.backward(&ones(&[2, 3, 4]), &mut ctx).unwrap();
 
     for (o, g) in output.iter().zip(grad_in.iter()) {
         assert_eq!(o.to_bits(), g.to_bits(), "the gradient lost the mask");
@@ -1223,9 +1234,13 @@ fn dropout_noise_shape_backward_broadcasts_the_small_mask() {
         }
     }
 
-    // A scaled upstream carries through with the same mask
+    // A scaled upstream carries through with the same mask. The backward pass takes the cache
+    // of its context, so the second gradient needs a second pass. That pass draws the same mask,
+    // because the stream of the layer only moves when a model applies the state of a pass
+    let mut ctx = Ctx::training();
+    let _ = layer.forward(&ones(&[2, 3, 4]), &mut ctx).unwrap();
     let upstream = filled(&[2, 3, 4], 3.0);
-    let scaled = layer.backward(&upstream).unwrap();
+    let scaled = layer.backward(&upstream, &mut ctx).unwrap();
     for (g, s) in grad_in.iter().zip(scaled.iter()) {
         assert_eq!(
             s.to_bits(),
@@ -1243,11 +1258,18 @@ fn dropout_noise_shape_passes_through_in_inference_mode() {
         .with_noise_shape(vec![Some(2), Some(1), Some(4)])
         .unwrap()
         .with_random_state(61);
-    layer.set_training_if_mode_dependent(false);
 
     let input = filled(&[2, 3, 4], 1.5);
-    assert_allclose(&layer.forward(&input).unwrap(), &input, 1e-6_f32);
-    assert_allclose(&layer.predict(&input).unwrap(), &input, 1e-6_f32);
+    assert_allclose(
+        &layer.forward_mut(&input, &mut Ctx::inference()).unwrap(),
+        &input,
+        1e-6_f32,
+    );
+    assert_allclose(
+        &layer.forward(&input, &mut Ctx::inference()).unwrap(),
+        &input,
+        1e-6_f32,
+    );
 }
 
 /// The same seed gives the same mask, in this process and in any other
@@ -1279,9 +1301,10 @@ fn dropout_noise_shape_rejects_an_entry_that_is_not_the_input_extent() {
         .unwrap()
         .with_noise_shape(vec![Some(2), Some(2), Some(4)])
         .unwrap();
-    layer.set_training_if_mode_dependent(true);
 
-    let err = layer.forward(&ones(&[2, 3, 4])).unwrap_err();
+    let err = layer
+        .forward_mut(&ones(&[2, 3, 4]), &mut Ctx::training())
+        .unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -1293,9 +1316,10 @@ fn dropout_noise_shape_rejects_an_entry_that_is_not_the_input_extent() {
         .unwrap()
         .with_noise_shape(vec![Some(1), Some(3)])
         .unwrap();
-    layer.set_training_if_mode_dependent(true);
     assert!(matches!(
-        layer.forward(&ones(&[2, 3, 4])).unwrap_err(),
+        layer
+            .forward_mut(&ones(&[2, 3, 4]), &mut Ctx::training())
+            .unwrap_err(),
         Error::InvalidParameter { .. }
     ));
 }
@@ -1307,10 +1331,11 @@ fn dropout_noise_shape_rejects_a_higher_rank_than_the_input() {
         .unwrap()
         .with_noise_shape(vec![Some(1), Some(2), Some(3), Some(4)])
         .unwrap();
-    layer.set_training_if_mode_dependent(true);
 
     assert!(matches!(
-        layer.forward(&ones(&[2, 3, 4])).unwrap_err(),
+        layer
+            .forward_mut(&ones(&[2, 3, 4]), &mut Ctx::training())
+            .unwrap_err(),
         Error::InvalidParameter { .. }
     ));
 }
@@ -1375,9 +1400,12 @@ fn dropout_noise_shape_keeps_the_mask_at_its_own_shape() {
         .with_noise_shape(vec![Some(1), Some(1), Some(4)])
         .unwrap()
         .with_random_state(81);
-    layer.set_training_if_mode_dependent(true);
 
-    let mask = keep_mask(&layer.forward(&ones(&[8, 64, 4])).unwrap());
+    let mask = keep_mask(
+        &layer
+            .forward_mut(&ones(&[8, 64, 4]), &mut Ctx::training())
+            .unwrap(),
+    );
     for (flat, &m) in mask.iter().enumerate() {
         assert_eq!(m, mask[flat % 4], "the 4 draws did not tile the tensor");
     }

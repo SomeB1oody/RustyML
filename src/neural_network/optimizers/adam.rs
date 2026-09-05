@@ -1,8 +1,9 @@
 //! Adam (Adaptive Moment Estimation) optimizer with classic coupled L2 weight decay
 
 use crate::error::Error;
+use crate::neural_network::ctx::Grads;
 use crate::neural_network::optimizers::adam_core::AdamCore;
-use crate::neural_network::traits::{Layer, Optimizer};
+use crate::neural_network::traits::{LayerBase, Optimizer};
 
 /// Adam (Adaptive Moment Estimation) optimizer
 ///
@@ -98,7 +99,7 @@ impl Optimizer for Adam {
         self.core.step();
     }
 
-    fn update(&mut self, scope: usize, layer: &mut dyn Layer, grad_scale: f32) {
-        self.core.update(scope, layer, grad_scale);
+    fn update(&mut self, scope: usize, layer: &mut dyn LayerBase, grads: &Grads, grad_scale: f32) {
+        self.core.update(scope, layer, grads, grad_scale);
     }
 }

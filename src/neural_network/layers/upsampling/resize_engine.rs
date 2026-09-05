@@ -356,12 +356,25 @@ fn run_bands(source: &Tensor, bands: &[Option<Band>]) -> Tensor {
 }
 
 /// Shape an upsampled output takes, given the shape that enters the layer
-fn upsampled_shape(input_shape: &[usize], factors: &[usize]) -> Vec<usize> {
+///
+/// A factor is bounded below only at construction, so a large factor can push an extent past
+/// what an index can hold. The caller reports that rather than letting the multiply wrap
+fn upsampled_shape(
+    input_shape: &[usize],
+    factors: &[usize],
+    layer: &str,
+) -> Result<Vec<usize>, Error> {
     let mut shape = input_shape.to_vec();
     for (spatial, &factor) in factors.iter().enumerate() {
-        shape[spatial + 1] *= factor;
+        shape[spatial + 1] = shape[spatial + 1].checked_mul(factor).ok_or_else(|| {
+            Error::invalid_input(format!(
+                "{layer} layer grows axis {} of a {input_shape:?} input by {factor}, and the \
+                 output does not fit in memory",
+                spatial + 1
+            ))
+        })?;
     }
-    shape
+    Ok(shape)
 }
 
 /// Runs the forward pass of an upsampling layer
@@ -459,7 +472,7 @@ pub(super) fn upsample_backward(
         return Err(Error::forward_pass_not_run(layer));
     };
 
-    let expected = upsampled_shape(input_shape, factors);
+    let expected = upsampled_shape(input_shape, factors, layer)?;
     if grad_output.shape() != expected.as_slice() {
         return Err(Error::shape_mismatch(expected, grad_output.shape()));
     }
@@ -500,7 +513,7 @@ pub(super) fn upsample_output_shape(
     dims.extend(tail);
     Ok(Shape::from_batch(
         batch,
-        &upsampled_shape(&dims, factors)[1..],
+        &upsampled_shape(&dims, factors, layer)?[1..],
     ))
 }
 

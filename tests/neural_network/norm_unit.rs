@@ -5,6 +5,7 @@
 //! differences. This file pins the gradient against reference values instead.
 
 use ndarray::{Array2, Array3, Array4, IxDyn};
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
@@ -14,7 +15,7 @@ use rustyml::neural_network::layers::regularization::normalization::unit_normali
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::SequentialBuilder;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
@@ -65,7 +66,7 @@ fn ramp(shape: &[usize], offset: f32) -> Tensor {
 #[test]
 fn unit_normalization_forward_hand_derived() {
     let x = t2(2, 3, vec![3.0, 4.0, 0.0, 0.0, 5.0, 12.0]);
-    let out = last_axis().predict(&x).unwrap();
+    let out = last_axis().forward(&x, &mut Ctx::inference()).unwrap();
 
     let want = t2(2, 3, vec![0.6, 0.8, 0.0, 0.0, 5.0 / 13.0, 12.0 / 13.0]);
     assert_allclose(&out, &want, 1e-6);
@@ -75,7 +76,7 @@ fn unit_normalization_forward_hand_derived() {
 #[test]
 fn unit_normalization_gives_every_group_a_length_of_1() {
     let x = ramp(&[4, 5], 7.0);
-    let out = last_axis().predict(&x).unwrap();
+    let out = last_axis().forward(&x, &mut Ctx::inference()).unwrap();
 
     for row in 0..4 {
         let length: f32 = (0..5).map(|c| out[[row, c]] * out[[row, c]]).sum();
@@ -94,12 +95,13 @@ fn unit_normalization_gives_every_group_a_length_of_1() {
 fn unit_normalization_matches_reference_on_the_last_axis() {
     let x = t2(2, 3, vec![1.0, 2.0, 3.0, -4.0, 0.0, 3.0]);
     let mut layer = last_axis();
+    let mut ctx = Ctx::training();
 
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     let want = t2(2, 3, vec![0.2672612, 0.5345225, 0.8017837, -0.8, 0.0, 0.6]);
     assert_allclose(&out, &want, 1e-6);
 
-    let grad = layer.backward(&upstream(&out)).unwrap();
+    let grad = layer.backward(&upstream(&out), &mut ctx).unwrap();
     let want_grad = t2(
         2,
         3,
@@ -113,8 +115,9 @@ fn unit_normalization_matches_reference_on_the_last_axis() {
 fn unit_normalization_matches_reference_on_a_middle_axis() {
     let x = ramp(&[2, 3, 4], 11.0);
     let mut layer = UnitNormalization::new(UnitNormalizationAxis::Custom(1)).unwrap();
+    let mut ctx = Ctx::training();
 
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     let want = t3(
         2,
         3,
@@ -148,7 +151,7 @@ fn unit_normalization_matches_reference_on_a_middle_axis() {
     );
     assert_allclose(&out, &want, 1e-6);
 
-    let grad = layer.backward(&upstream(&out)).unwrap();
+    let grad = layer.backward(&upstream(&out), &mut ctx).unwrap();
     let want_grad = t3(
         2,
         3,
@@ -188,8 +191,9 @@ fn unit_normalization_matches_reference_on_a_middle_axis() {
 fn unit_normalization_matches_reference_on_2_separated_axes() {
     let x = ramp(&[2, 3, 4], 11.0);
     let mut layer = UnitNormalization::new(UnitNormalizationAxis::Multiple(vec![0, 2])).unwrap();
+    let mut ctx = Ctx::training();
 
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     let want = t3(
         2,
         3,
@@ -223,7 +227,7 @@ fn unit_normalization_matches_reference_on_2_separated_axes() {
     );
     assert_allclose(&out, &want, 1e-6);
 
-    let grad = layer.backward(&upstream(&out)).unwrap();
+    let grad = layer.backward(&upstream(&out), &mut ctx).unwrap();
     let want_grad = t3(
         2,
         3,
@@ -265,14 +269,14 @@ fn unit_normalization_matches_reference_on_2_separated_axes() {
 fn unit_normalization_axis_spellings_agree_on_the_last_axis() {
     let x = ramp(&[2, 3, 4], 5.0);
 
-    let by_default = last_axis().predict(&x).unwrap();
+    let by_default = last_axis().forward(&x, &mut Ctx::inference()).unwrap();
     let by_custom = UnitNormalization::new(UnitNormalizationAxis::Custom(2))
         .unwrap()
-        .predict(&x)
+        .forward(&x, &mut Ctx::inference())
         .unwrap();
     let by_list = UnitNormalization::new(UnitNormalizationAxis::Multiple(vec![2]))
         .unwrap()
-        .predict(&x)
+        .forward(&x, &mut Ctx::inference())
         .unwrap();
 
     assert_eq!(by_default, by_custom);
@@ -286,11 +290,11 @@ fn unit_normalization_axis_list_order_does_not_matter() {
 
     let ascending = UnitNormalization::new(UnitNormalizationAxis::Multiple(vec![0, 2]))
         .unwrap()
-        .predict(&x)
+        .forward(&x, &mut Ctx::inference())
         .unwrap();
     let descending = UnitNormalization::new(UnitNormalizationAxis::Multiple(vec![2, 0]))
         .unwrap()
-        .predict(&x)
+        .forward(&x, &mut Ctx::inference())
         .unwrap();
 
     assert_eq!(ascending, descending);
@@ -302,7 +306,7 @@ fn unit_normalization_over_every_axis_makes_1_group() {
     let x = t2(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
     let out = UnitNormalization::new(UnitNormalizationAxis::Multiple(vec![0, 1]))
         .unwrap()
-        .predict(&x)
+        .forward(&x, &mut Ctx::inference())
         .unwrap();
 
     // sqrt(1 + 4 + 9 + 16) = sqrt(30)
@@ -320,7 +324,7 @@ fn unit_normalization_on_the_batch_axis_normalizes_columns() {
     let x = t2(2, 2, vec![3.0, 5.0, 4.0, 12.0]);
     let out = UnitNormalization::new(UnitNormalizationAxis::Custom(0))
         .unwrap()
-        .predict(&x)
+        .forward(&x, &mut Ctx::inference())
         .unwrap();
 
     // Column 0 is the 3-4-5 triangle, and column 1 is the 5-12-13 triangle
@@ -338,7 +342,7 @@ fn unit_normalization_serves_every_rank_from_2_up() {
         vec![2, 2, 2, 2, 2],
     ] {
         let x = ramp(&shape, 3.0);
-        let out = last_axis().predict(&x).unwrap();
+        let out = last_axis().forward(&x, &mut Ctx::inference()).unwrap();
         assert_eq!(out.shape(), shape.as_slice());
 
         let group_len = *shape.last().unwrap();
@@ -361,8 +365,8 @@ fn unit_normalization_ignores_the_length_of_its_input() {
     let x = ramp(&[3, 6], 8.0);
     let scaled = x.mapv(|v| v * 137.0);
 
-    let plain = last_axis().predict(&x).unwrap();
-    let stretched = last_axis().predict(&scaled).unwrap();
+    let plain = last_axis().forward(&x, &mut Ctx::inference()).unwrap();
+    let stretched = last_axis().forward(&scaled, &mut Ctx::inference()).unwrap();
     assert_allclose(&plain, &stretched, 1e-5);
 }
 
@@ -370,8 +374,8 @@ fn unit_normalization_ignores_the_length_of_its_input() {
 #[test]
 fn unit_normalization_is_idempotent() {
     let x = ramp(&[3, 6], 8.0);
-    let once = last_axis().predict(&x).unwrap();
-    let twice = last_axis().predict(&once).unwrap();
+    let once = last_axis().forward(&x, &mut Ctx::inference()).unwrap();
+    let twice = last_axis().forward(&once, &mut Ctx::inference()).unwrap();
     assert_allclose(&once, &twice, 1e-6);
 }
 
@@ -383,8 +387,9 @@ fn unit_normalization_is_idempotent() {
 fn unit_normalization_gradient_is_orthogonal_to_its_output() {
     let x = ramp(&[4, 5], 9.0);
     let mut layer = last_axis();
-    let out = layer.forward(&x).unwrap();
-    let grad = layer.backward(&upstream(&out)).unwrap();
+    let mut ctx = Ctx::training();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
+    let grad = layer.backward(&upstream(&out), &mut ctx).unwrap();
 
     for row in 0..4 {
         let projection: f32 = (0..5).map(|c| grad[[row, c]] * out[[row, c]]).sum();
@@ -402,14 +407,15 @@ fn unit_normalization_gradient_is_orthogonal_to_its_output() {
 fn unit_normalization_leaves_an_all_zero_group_at_zero() {
     let x = t2(2, 3, vec![0.0, 0.0, 0.0, 3.0, 4.0, 0.0]);
     let mut layer = last_axis();
+    let mut ctx = Ctx::training();
 
-    let out = layer.forward(&x).unwrap();
+    let out = layer.forward_mut(&x, &mut ctx).unwrap();
     let want = t2(2, 3, vec![0.0, 0.0, 0.0, 0.6, 0.8, 0.0]);
     assert_allclose(&out, &want, 1e-6);
 
     // The cap scaled the first group, so its gradient is the cap itself. Without the cap, the
     // derivative of the reciprocal square root would overflow to NaN here
-    let grad = layer.backward(&upstream(&out)).unwrap();
+    let grad = layer.backward(&upstream(&out), &mut ctx).unwrap();
     for c in 0..3 {
         let want = 1e12 * (1.0 + 0.1 * (c as f32 - 3.0));
         assert!(
@@ -431,7 +437,7 @@ fn unit_normalization_leaves_an_all_zero_group_at_zero() {
 fn unit_normalization_cap_takes_over_below_a_norm_of_1e_minus_12() {
     // Group 0 has a norm of 1e-13, below the boundary. Group 1 has 1e-11, above it
     let x = t2(2, 1, vec![1e-13, 1e-11]);
-    let out = last_axis().predict(&x).unwrap();
+    let out = last_axis().forward(&x, &mut Ctx::inference()).unwrap();
 
     // Below the boundary the cap of 1e12 applies, so the length stays below 1
     assert!((out[[0, 0]] - 0.1).abs() < 1e-6, "got {}", out[[0, 0]]);
@@ -456,14 +462,17 @@ fn unit_normalization_capped_group_gradient_drops_the_projection_term() {
 
     for (axis, x) in cases {
         let mut layer = UnitNormalization::new(axis.clone()).unwrap();
-        let out = layer.forward(&x).unwrap();
+        let mut ctx = Ctx::training();
+        let out = layer.forward_mut(&x, &mut ctx).unwrap();
         // The cap scaled the group, so its length stays at 0.1 rather than reaching 1
         assert!(
             (out.iter().map(|v| v * v).sum::<f32>() - 0.01).abs() < 1e-6,
             "{axis:?} did not take the cap"
         );
 
-        let grad = layer.backward(&Tensor::ones(x.raw_dim())).unwrap();
+        let grad = layer
+            .backward(&Tensor::ones(x.raw_dim()), &mut ctx)
+            .unwrap();
         for (k, g) in grad.iter().enumerate() {
             assert!(
                 (g / 1e12 - 1.0).abs() < 1e-6,
@@ -477,7 +486,7 @@ fn unit_normalization_capped_group_gradient_drops_the_projection_term() {
 #[test]
 fn unit_normalization_spreads_a_nan_across_its_group() {
     let x = t2(2, 3, vec![f32::NAN, 1.0, 2.0, 3.0, 4.0, 0.0]);
-    let out = last_axis().predict(&x).unwrap();
+    let out = last_axis().forward(&x, &mut Ctx::inference()).unwrap();
 
     for c in 0..3 {
         assert!(
@@ -494,7 +503,7 @@ fn unit_normalization_spreads_a_nan_across_its_group() {
 #[test]
 fn unit_normalization_returns_zero_when_the_sum_of_squares_overflows() {
     let x = t2(1, 3, vec![1e20, 2e20, 3e20]);
-    let out = last_axis().predict(&x).unwrap();
+    let out = last_axis().forward(&x, &mut Ctx::inference()).unwrap();
 
     for c in 0..3 {
         assert_eq!(out[[0, c]], 0.0, "column {c} is {}", out[[0, c]]);
@@ -513,13 +522,14 @@ fn unit_normalization_output_is_in_c_order() {
     ] {
         let x = ramp(&[2, 3, 4], 7.0);
         let mut layer = UnitNormalization::new(axis.clone()).unwrap();
-        let out = layer.forward(&x).unwrap();
+        let mut ctx = Ctx::training();
+        let out = layer.forward_mut(&x, &mut ctx).unwrap();
         assert!(
             out.is_standard_layout(),
             "{axis:?} forward is not in C order"
         );
 
-        let grad = layer.backward(&upstream(&out)).unwrap();
+        let grad = layer.backward(&upstream(&out), &mut ctx).unwrap();
         assert!(
             grad.is_standard_layout(),
             "{axis:?} backward is not in C order"
@@ -543,8 +553,12 @@ fn unit_normalization_accepts_input_that_is_not_in_c_order() {
     )
     .unwrap();
 
-    let from_strided = last_axis().predict(&transposed).unwrap();
-    let from_c_order = last_axis().predict(&settled).unwrap();
+    let from_strided = last_axis()
+        .forward(&transposed, &mut Ctx::inference())
+        .unwrap();
+    let from_c_order = last_axis()
+        .forward(&settled, &mut Ctx::inference())
+        .unwrap();
     assert_eq!(from_strided, from_c_order);
 }
 
@@ -582,9 +596,10 @@ fn unit_normalization_parallel_path_matches_the_serial_path() {
     let run = |chunk: &[f32], grad_chunk: &[f32], count: usize| -> (Vec<f32>, Vec<f32>) {
         let x = t2(count, features, chunk.to_vec());
         let mut layer = last_axis();
-        let out = layer.forward(&x).unwrap();
+        let mut ctx = Ctx::training();
+        let out = layer.forward_mut(&x, &mut ctx).unwrap();
         let grad = layer
-            .backward(&t2(count, features, grad_chunk.to_vec()))
+            .backward(&t2(count, features, grad_chunk.to_vec()), &mut ctx)
             .unwrap();
         (
             out.as_slice().unwrap().to_vec(),
@@ -605,22 +620,24 @@ fn unit_normalization_parallel_path_matches_the_serial_path() {
 
 // contract
 
-/// `predict` writes no cache, so it cannot serve a later backward pass
+/// An inference pass writes no cache, so it cannot serve a later backward pass
 #[test]
 fn unit_normalization_predict_matches_forward_and_caches_nothing() {
     let x = ramp(&[2, 4], 3.0);
     let mut layer = last_axis();
 
-    let inferred = layer.predict(&x).unwrap();
+    let mut inference = Ctx::inference();
+    let inferred = layer.forward_mut(&x, &mut inference).unwrap();
     assert!(
         matches!(
-            layer.backward(&inferred),
+            layer.backward(&inferred, &mut inference),
             Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
         ),
-        "predict must not leave a cache behind"
+        "an inference pass must not leave a cache behind"
     );
 
-    let trained = layer.forward(&x).unwrap();
+    let mut training = Ctx::training();
+    let trained = layer.forward(&x, &mut training).unwrap();
     assert_eq!(inferred, trained);
 }
 
@@ -631,16 +648,21 @@ fn unit_normalization_holds_no_parameter() {
     assert_eq!(layer.layer_type(), "UnitNormalization");
     assert_eq!(layer.param_count(), ParamCounts::none());
     assert!(layer.weights().is_empty());
-    assert!(layer.parameters().is_empty());
+    assert!(layer.parameters_mut().is_empty());
 }
 
-/// The summary reads "Unknown" until a tensor has passed through the layer
+/// The summary reads "Unknown" until the layer holds a build
+///
+/// `forward_mut` builds the layer from the whole shape of the tensor it receives, batch extent
+/// included, so the display reports that extent and not a free batch axis
 #[test]
 fn unit_normalization_output_shape_needs_a_forward_pass() {
     let mut layer = last_axis();
     assert_eq!(layer.output_shape(), "Unknown");
 
-    layer.forward(&ramp(&[2, 3, 4], 5.0)).unwrap();
+    layer
+        .forward_mut(&ramp(&[2, 3, 4], 5.0), &mut Ctx::training())
+        .unwrap();
     assert_eq!(layer.output_shape(), "(None, 3, 4)");
 }
 
@@ -649,7 +671,7 @@ fn unit_normalization_output_shape_needs_a_forward_pass() {
 fn unit_normalization_runs_inside_a_sequential_model() {
     let x =
         Array4::from_shape_fn((2, 3, 3, 4), |(b, h, w, c)| (b + h + w + c) as f32 - 4.0).into_dyn();
-    let y = last_axis().predict(&x).unwrap();
+    let y = last_axis().forward(&x, &mut Ctx::inference()).unwrap();
 
     let mut model = SequentialBuilder::new()
         .add(last_axis())
@@ -694,7 +716,10 @@ fn unit_normalization_rejects_a_repeated_axis() {
 fn unit_normalization_rejects_rank_below_2() {
     let rank_1 = Tensor::from_shape_vec(IxDyn(&[4]), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
     assert!(
-        matches!(last_axis().predict(&rank_1), Err(Error::InvalidInput(_))),
+        matches!(
+            last_axis().forward(&rank_1, &mut Ctx::inference()),
+            Err(Error::InvalidInput(_))
+        ),
         "a rank-1 input has no axis to normalize besides the batch axis"
     );
 }
@@ -705,7 +730,7 @@ fn unit_normalization_rejects_an_axis_out_of_bounds() {
     let layer = UnitNormalization::new(UnitNormalizationAxis::Custom(3)).unwrap();
     assert!(
         matches!(
-            layer.predict(&ramp(&[2, 3], 0.0)),
+            layer.forward(&ramp(&[2, 3], 0.0), &mut Ctx::inference()),
             Err(Error::InvalidInput(_))
         ),
         "axis 3 does not exist in a rank-2 input"
@@ -714,7 +739,7 @@ fn unit_normalization_rejects_an_axis_out_of_bounds() {
     let listed = UnitNormalization::new(UnitNormalizationAxis::Multiple(vec![0, 4])).unwrap();
     assert!(
         matches!(
-            listed.predict(&ramp(&[2, 3, 4], 0.0)),
+            listed.forward(&ramp(&[2, 3, 4], 0.0), &mut Ctx::inference()),
             Err(Error::InvalidInput(_))
         ),
         "axis 4 does not exist in a rank-3 input"
@@ -726,7 +751,10 @@ fn unit_normalization_rejects_an_axis_out_of_bounds() {
 fn unit_normalization_rejects_empty_input() {
     let empty = Tensor::zeros(IxDyn(&[0, 3]));
     assert!(
-        matches!(last_axis().forward(&empty), Err(Error::EmptyInput(_))),
+        matches!(
+            last_axis().forward_mut(&empty, &mut Ctx::training()),
+            Err(Error::EmptyInput(_))
+        ),
         "forward must reject an input with no element"
     );
 }
@@ -734,10 +762,10 @@ fn unit_normalization_rejects_empty_input() {
 /// A backward pass before any forward pass has no cache to read
 #[test]
 fn unit_normalization_backward_needs_a_forward_pass() {
-    let mut layer = last_axis();
+    let layer = last_axis();
     assert!(
         matches!(
-            layer.backward(&ramp(&[2, 3], 0.0)),
+            layer.backward(&ramp(&[2, 3], 0.0), &mut Ctx::training()),
             Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
         ),
         "backward must reject a missing cache"
@@ -748,9 +776,10 @@ fn unit_normalization_backward_needs_a_forward_pass() {
 #[test]
 fn unit_normalization_backward_rejects_a_wrong_shape() {
     let mut layer = last_axis();
-    layer.forward(&ramp(&[2, 3], 0.0)).unwrap();
+    let mut ctx = Ctx::training();
+    layer.forward_mut(&ramp(&[2, 3], 0.0), &mut ctx).unwrap();
 
-    let result = layer.backward(&ramp(&[2, 4], 0.0));
+    let result = layer.backward(&ramp(&[2, 4], 0.0), &mut ctx);
     assert!(
         matches!(
             result,

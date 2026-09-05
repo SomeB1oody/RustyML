@@ -6,11 +6,9 @@ use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::validation::{
     start_build, validate_optional_weight, validate_weight_shape,
 };
-use crate::neural_network::layers::{
-    build_config_function, build_on_forward, named_weight_layer_functions,
-};
-use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Fans, Initializer, Shape, Tensor};
+use crate::neural_network::layers::{build_config_function, named_weight_layer_functions};
+use crate::neural_network::traits::{LayerBase, ParamRef, UnaryLayer};
+use crate::neural_network::{Ctx, Fans, Initializer, Shape, Tensor};
 use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Activation as FusedActivation, Bias, Parallelism};
 use ndarray::{Array, Array2, ArrayView2, Axis, CowArray, Ix2};
@@ -30,7 +28,8 @@ use ndarray::{Array, Array2, ArrayView2, Axis, CowArray, Ix2};
 /// sequence data, where the layer transforms each timestep with the same weights
 ///
 /// Weights start from Xavier/Glorot initialization, and biases start at 0. During training,
-/// the layer caches intermediate values for the backward pass
+/// the forward pass parks the values that the backward pass needs in the
+/// [`Ctx`]
 ///
 /// # Examples
 ///
@@ -69,19 +68,21 @@ use ndarray::{Array, Array2, ArrayView2, Axis, CowArray, Ix2};
 ///
 /// ```rust
 /// use ndarray::Array;
+/// use rustyml::neural_network::Ctx;
 /// use rustyml::neural_network::layers::{Activation, Dense};
-/// use rustyml::neural_network::traits::Layer;
+/// use rustyml::neural_network::traits::UnaryLayer;
 ///
 /// // 2 sequences of 5 timesteps, and 7 features for each timestep
 /// let x = Array::ones((2, 5, 7)).into_dyn();
 /// let mut layer = Dense::new(4, Activation::ReLU).unwrap();
 ///
-/// let output = layer.forward(&x).unwrap();
+/// let mut ctx = Ctx::training();
+/// let output = layer.forward_mut(&x, &mut ctx).unwrap();
 /// assert_eq!(output.shape(), &[2, 5, 4]);
 /// ```
 #[derive(Debug)]
 pub struct Dense {
-    /// Feature count of the last axis, which [`Layer::build`] reads from the input shape
+    /// Feature count of the last axis, which [`UnaryLayer::build`] reads from the input shape
     input_dim: usize,
     /// Shape the kernel depends on, which is `(None, input_dim)`. `None` before the build
     built: Option<Shape>,
@@ -97,19 +98,6 @@ pub struct Dense {
     /// The forward pass drops the bias epilogue, `weights` hides the array, and `parameters`
     /// never yields it, so a bias-free layer holds it and no more
     bias: Array2<f32>,
-    /// Cache of the folded input `[rows, input_dim]` from the forward pass
-    input_cache: Option<Array2<f32>>,
-    /// Shape of the last input that the forward pass received
-    ///
-    /// The backward pass restores the rank of the input gradient from it, and
-    /// [`Layer::output_shape`] reports the real output rank from it
-    input_shape: Option<Vec<usize>>,
-    /// Cache of the activated output, used to backprop through the activation
-    output_cache: Option<Tensor>,
-    /// Stored weight gradients
-    grad_weights: Option<Array2<f32>>,
-    /// Stored bias gradients
-    grad_bias: Option<Array2<f32>>,
     /// Activation function applied to the linear output
     activation: Activation,
     /// Whether the layer adds a bias to the linear output
@@ -131,7 +119,7 @@ impl Dense {
     ///
     /// # Notes
     ///
-    /// The constructor draws nothing. [`Layer::build`] reads the feature count from the input
+    /// The constructor draws nothing. [`UnaryLayer::build`] reads the feature count from the input
     /// shape and draws the kernel then. The draw takes the global seed or entropy by default.
     /// For reproducible initialization, set a seed with [`Dense::with_random_state`]
     ///
@@ -155,11 +143,6 @@ impl Dense {
             output_dim: units,
             weights: Array::zeros((0, 0)),
             bias: Array::zeros((0, 0)),
-            input_cache: None,
-            input_shape: None,
-            output_cache: None,
-            grad_weights: None,
-            grad_bias: None,
             activation,
             use_bias: true,
         })
@@ -179,7 +162,7 @@ impl Dense {
         self.bias = Array::zeros((1, self.output_dim));
     }
 
-    /// Sets the seed that the weight draw of [`Layer::build`] uses
+    /// Sets the seed that the weight draw of [`UnaryLayer::build`] uses
     ///
     /// By default the draw takes the global seed or entropy (see [`crate::random`]). An unbuilt
     /// layer holds no kernel, so this records the seed and draws nothing. A layer that is
@@ -218,11 +201,6 @@ impl Dense {
     /// - `Self` - The updated layer
     pub fn with_use_bias(mut self, use_bias: bool) -> Self {
         self.use_bias = use_bias;
-        if !use_bias {
-            // Drop any gradient a previous backward pass left, so the bias cannot reach
-            // `parameters` after the layer stops holding it
-            self.grad_bias = None;
-        }
         self
     }
 
@@ -315,7 +293,7 @@ impl Dense {
     }
 
     /// The layer's full forward transform, `activation(input * weights + bias)`. Shared by
-    /// [`Layer::forward`] and [`Layer::predict`]
+    /// [`UnaryLayer::forward`] and [`Layer::predict`]
     ///
     /// The bias add rides the GEMM epilogue, so the pre-activation is written exactly once,
     /// with no separate broadcast add of the bias. The bias is the per-column addend, so it
@@ -397,7 +375,61 @@ impl Dense {
     }
 }
 
-impl Layer for Dense {
+/// What the forward pass of [`Dense`] parks for its backward pass
+struct DenseCache {
+    /// The input folded to `[rows, input_dim]`
+    input: Array2<f32>,
+    /// Shape of the tensor the forward pass received, to restore the rank of the gradient
+    input_shape: Vec<usize>,
+    /// The activated output, to backpropagate through the activation
+    output: Tensor,
+}
+
+impl LayerBase for Dense {
+    fn layer_type(&self) -> &str {
+        "Dense"
+    }
+
+    fn param_count(&self) -> ParamCounts {
+        // Read the arrays the layer holds rather than the configuration, so dropping the bias
+        // corrects the count with no second formula to keep in step
+        let bias = if self.use_bias { self.bias.len() } else { 0 };
+        ParamCounts::trainable(self.weights.len() + bias)
+    }
+
+    fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
+        let Self {
+            weights,
+            bias,
+            use_bias,
+            ..
+        } = self;
+        let mut params = vec![ParamRef::weight(
+            "kernel",
+            weights.as_slice_mut().expect("weights must be contiguous"),
+        )];
+        if *use_bias {
+            params.push(ParamRef::no_decay(
+                "bias",
+                bias.as_slice_mut().expect("bias must be contiguous"),
+            ));
+        }
+        params
+    }
+
+    fn known_input_shapes(&self) -> Option<Vec<Shape>> {
+        self.built.as_ref().map(|shape| vec![shape.free_batch()])
+    }
+
+    build_config_function!();
+
+    named_weight_layer_functions!(
+        trainable "kernel" => weights,
+        trainable "bias" => bias if use_bias,
+    );
+}
+
+impl UnaryLayer for Dense {
     /// Reads the feature count from the last axis, and draws the kernel and the bias
     ///
     /// The kernel is `(input_dim, units)` for every input rank, and every leading position
@@ -426,103 +458,64 @@ impl Layer for Dense {
         Ok(())
     }
 
-    /// Training forward: caches the input and the activated output for the backward pass
-    ///
     /// Fuses the linear product, bias add, and (for `ReLU`) the activation into one gemmkit
     /// call. See `Dense::project` for the `NaN` handling of the fused `ReLU`
     ///
     /// The input has rank 2 or more. The leading axes fold into 1 row axis, so a rank-3 input
     /// costs the same 1 matrix product as a rank-2 input with the same number of rows
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        build_on_forward!(self, input);
-        let input_2d = Self::fold(input, self.input_dim, "input")?;
-
-        // Fused linear + bias + activation, then cache the activated output for backpropagation
-        let output = self.project(&input_2d.view(), input.shape())?;
-        self.output_cache = Some(output.clone());
-
-        // Cache the folded input [rows, input_dim] and the input shape for the backward pass
-        self.input_shape = Some(input.shape().to_vec());
-        self.input_cache = Some(input_2d.into_owned());
-
-        Ok(output)
-    }
-
-    /// Inference forward (eval mode, writes no caches). Same fused projection as
-    /// [`forward`](Layer::forward). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if self.built.is_none() {
             return Err(Error::not_built("Dense"));
         }
         let input_2d = Self::fold(input, self.input_dim, "input")?;
+        let output = self.project(&input_2d.view(), input.shape())?;
 
-        self.project(&input_2d.view(), input.shape())
+        if ctx.is_training() {
+            ctx.push_cache(DenseCache {
+                input: input_2d.into_owned(),
+                input_shape: input.shape().to_vec(),
+                output: output.clone(),
+            });
+        }
+
+        Ok(output)
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // Backprop through the activation using the cached activated output
-        let activated = self
-            .output_cache
-            .take()
-            .ok_or_else(|| Error::forward_pass_not_run("Dense"))?;
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let cache: DenseCache = ctx.pop_cache("Dense")?;
+
         // Upstream gradient must match the cached output shape
-        if grad_output.shape() != activated.shape() {
+        if grad_output.shape() != cache.output.shape() {
             return Err(Error::shape_mismatch(
-                activated.shape(),
+                cache.output.shape(),
                 grad_output.shape(),
             ));
         }
-        let grad_upstream = self.activation.backward(&activated, grad_output)?;
+        let grad_upstream = self.activation.backward(&cache.output, grad_output)?;
 
         // Fold the upstream gradient to [rows, output_dim]. Both operands of the weight
         // gradient are then 2D, and the bias gradient sums over 1 row axis that already
         // holds every leading position
         let grad_upstream_2d = Self::fold(&grad_upstream, self.output_dim, "gradient")?;
 
-        let input = self
-            .input_cache
-            .take()
-            .ok_or_else(|| Error::forward_pass_not_run("Dense"))?;
-        let input_shape = self
-            .input_shape
-            .clone()
-            .ok_or_else(|| Error::forward_pass_not_run("Dense"))?;
+        let grad_w = dot(&cache.input.t(), &grad_upstream_2d);
+        ctx.add_grad("kernel", grad_w.as_standard_layout().to_owned().into_dyn())?;
 
-        // Weight gradients
-        let grad_w = dot(&input.t(), &grad_upstream_2d);
-
-        // Store gradients in a contiguous layout for `parameters()`
-        self.grad_weights = Some(grad_w.as_standard_layout().to_owned());
-        // Bias gradients: sum over every axis except the last one. A bias-free layer computes
-        // none, so `parameters` yields none and no optimizer state is ever keyed on one
-        self.grad_bias = self.use_bias.then(|| {
+        // A bias-free layer computes no bias gradient, so the store holds none and no
+        // optimizer state is ever keyed on one
+        if self.use_bias {
             let grad_b = grad_upstream_2d.sum_axis(Axis(0)).insert_axis(Axis(0));
-            grad_b.as_standard_layout().to_owned()
-        });
+            ctx.add_grad("bias", grad_b.as_standard_layout().to_owned().into_dyn())?;
+        }
 
         // Gradient with respect to the input, back at the rank of the cached input
         let grad_input = dot(&grad_upstream_2d, &self.weights.t());
 
         grad_input
             .into_dyn()
-            .into_shape_with_order(input_shape)
+            .into_shape_with_order(cache.input_shape)
             .context("Failed to restore the rank of the Dense input gradient")
     }
-
-    fn layer_type(&self) -> &str {
-        "Dense"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        match &self.input_shape {
-            Some(shape) => Some(Shape::with_free_batch(shape)),
-            // Before the first forward pass the layer knows the feature count it folds to, and
-            // nothing about the axes between the batch axis and the last axis
-            None => self.built.clone(),
-        }
-    }
-
-    build_config_function!();
 
     /// The last axis becomes the unit count, and every axis before it passes through
     ///
@@ -554,43 +547,4 @@ impl Layer for Dense {
         axes[last] = Some(self.output_dim);
         Ok(Shape::new(axes))
     }
-
-    fn param_count(&self) -> ParamCounts {
-        // Read the arrays the layer holds rather than the configuration, so dropping the bias
-        // corrects the count with no second formula to keep in step
-        let bias = if self.use_bias { self.bias.len() } else { 0 };
-        ParamCounts::trainable(self.weights.len() + bias)
-    }
-
-    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
-        let Self {
-            weights,
-            bias,
-            grad_weights,
-            grad_bias,
-            ..
-        } = self;
-        let mut params = Vec::new();
-        // Each tensor is pushed on its own, so a tensor without a gradient holds back no other
-        if let Some(grad) = grad_weights.as_ref() {
-            params.push(ParamGrad::weight(
-                "kernel",
-                weights.as_slice_mut().expect("weights must be contiguous"),
-                grad.as_slice().expect("grad_weights must be contiguous"),
-            ));
-        }
-        if let Some(grad) = grad_bias.as_ref() {
-            params.push(ParamGrad::no_decay(
-                "bias",
-                bias.as_slice_mut().expect("bias must be contiguous"),
-                grad.as_slice().expect("grad_bias must be contiguous"),
-            ));
-        }
-        params
-    }
-
-    named_weight_layer_functions!(
-        trainable "kernel" => weights,
-        trainable "bias" => bias if use_bias,
-    );
 }

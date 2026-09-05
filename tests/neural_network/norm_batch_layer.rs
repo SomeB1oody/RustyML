@@ -3,12 +3,13 @@
 //! definition. Gradient correctness lives in tests/neural_network/gradient_check.rs.
 
 use ndarray::{ArrayD, Dimension};
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization;
 use rustyml::neural_network::layers::regularization::normalization::layer_normalization::{
     LayerNormalization, LayerNormalizationAxis,
 };
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{LayerBase, ParamId, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 use crate::common::assert_allclose;
@@ -79,7 +80,7 @@ fn bn_forward_rejects_wrong_input_shape() {
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
     bn.build(&Shape::known(&[4, 3])).unwrap();
     let wrong = tensor2(vec![1.0f32; 8], 4, 2);
-    let result = bn.forward(&wrong);
+    let result = bn.forward(&wrong, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput, got {:?}",
@@ -95,7 +96,7 @@ fn bn_forward_accepts_different_batch_size() {
     bn.build(&Shape::known(&[4, 3])).unwrap();
     let smaller = tensor2(vec![1.0f32; 6], 2, 3);
     let out = bn
-        .forward(&smaller)
+        .forward(&smaller, &mut Ctx::training())
         .expect("a smaller batch must be accepted");
     assert_eq!(out.shape(), &[2, 3]);
 }
@@ -116,8 +117,8 @@ fn bn_train_output_has_batch_mean_zero_and_var_one() {
     let input = tensor2(data, 4, 3);
 
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
-    // Default: training=true, gamma=1, beta=0
-    let output = bn.forward(&input).unwrap();
+    // A training context, and the default gamma=1, beta=0
+    let output = bn.forward_mut(&input, &mut Ctx::training()).unwrap();
     assert_eq!(output.shape(), &[4, 3]);
 
     // Check batch-mean ~= 0 and batch-variance ~= 1 for each feature column
@@ -146,7 +147,7 @@ fn bn_train_forward_concrete_values_4x1() {
     let input = tensor2(vec![2.0f32, 4.0, 6.0, 8.0], 4, 1);
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
 
-    let output = bn.forward(&input).unwrap();
+    let output = bn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     // Expected values computed analytically
     let std = (5.0f32 + 1e-5f32).sqrt();
@@ -157,20 +158,23 @@ fn bn_train_forward_concrete_values_4x1() {
 // Running statistics update after training forward
 
 /// 1 training-mode forward updates running_mean to 0.5 and running_var to 1.4
-/// (momentum 0.9), verified through a subsequent eval-mode forward
+/// (momentum 0.9), verified through a subsequent inference pass
 #[test]
 fn bn_running_stats_update_after_one_forward() {
     let input_train = tensor2(vec![2.0f32, 4.0, 6.0, 8.0], 4, 1);
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
+    let mut ctx = Ctx::training();
 
     // Training forward updates running stats
-    bn.forward(&input_train).unwrap();
+    bn.forward_mut(&input_train, &mut ctx).unwrap();
+    // The forward pass proposed the new statistics in the context, and `apply_state` moves
+    // them into the layer, exactly as `Sequential` does after each forward pass
+    bn.apply_state(&mut ctx.state_slot(0));
 
-    // Switch to eval and feed the declared shape [4,1]
-    bn.set_training_if_mode_dependent(false);
-    // All rows = 5.0, so each produces the same eval output
+    // Feed the declared shape [4,1] to an inference pass
+    // All rows = 5.0, so each produces the same inference output
     let input_eval = tensor2(vec![5.0f32, 5.0, 5.0, 5.0], 4, 1);
-    let output = bn.forward(&input_eval).unwrap();
+    let output = bn.forward(&input_eval, &mut Ctx::inference()).unwrap();
 
     // running_mean = 0.5, running_var = 1.4
     let expected_val = 4.5_f32 / (1.4f32 + 1e-5f32).sqrt();
@@ -178,9 +182,9 @@ fn bn_running_stats_update_after_one_forward() {
     assert_allclose(&output, &expected, 1e-4);
 }
 
-// Eval mode: uses running stats from set_weights
+// An inference pass uses the running stats from set_weights
 
-/// In eval mode, BN normalizes with running_mean and running_var injected via set_weights
+/// In an inference pass, BN normalizes with running_mean and running_var injected via set_weights
 #[test]
 fn bn_eval_uses_running_stats_from_set_weights() {
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
@@ -194,10 +198,8 @@ fn bn_eval_uses_running_stats_from_set_weights() {
     bn.set_weights(gamma, beta, running_mean, running_var)
         .unwrap();
 
-    bn.set_training_if_mode_dependent(false);
-
     let input = tensor2(vec![1.0f32, 2.0, 3.0, 5.0, 8.0, 4.0], 2, 3);
-    let output = bn.forward(&input).unwrap();
+    let output = bn.forward(&input, &mut Ctx::inference()).unwrap();
 
     let eps = 1e-5f32;
     let e00 = 0.0f32;
@@ -210,9 +212,9 @@ fn bn_eval_uses_running_stats_from_set_weights() {
     assert_allclose(&output, &expected, 1e-4);
 }
 
-// predict() == forward() in eval mode
+// 2 inference passes agree, and neither writes a cache or a state change
 
-/// In eval mode, BN predict() matches forward() bit-exactly without mutating state
+/// 2 BN inference passes agree bit-exactly, and neither changes the layer
 #[test]
 fn bn_predict_equals_forward_in_eval_mode() {
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
@@ -224,14 +226,19 @@ fn bn_predict_equals_forward_in_eval_mode() {
     let running_var = tensor1(vec![4.0f32, 9.0, 1.0]);
     bn.set_weights(gamma, beta, running_mean, running_var)
         .unwrap();
-    bn.set_training_if_mode_dependent(false);
 
     let input = tensor2(vec![1.0f32, 2.0, 3.0, 5.0, 8.0, 4.0], 2, 3);
 
-    let out_forward = bn.forward(&input).unwrap();
-    let out_predict = bn.predict(&input).unwrap();
+    let mut first = Ctx::inference();
+    let out_forward = bn.forward(&input, &mut first).unwrap();
+    let mut second = Ctx::inference();
+    let out_again = bn.forward(&input, &mut second).unwrap();
 
-    assert_allclose(&out_forward, &out_predict, 0.0f32);
+    // An inference pass writes no cache and proposes no state change, so it moves nothing
+    assert_eq!(first.pending_caches(), 0);
+    assert!(!first.has_state(0));
+
+    assert_allclose(&out_forward, &out_again, 0.0f32);
 }
 
 // set_weights rejects wrong shapes
@@ -261,7 +268,7 @@ fn bn_set_weights_rejects_wrong_gamma_shape() {
 
 // Custom gamma and beta scale/shift output
 
-/// BN eval mode applies custom gamma and beta to the normalized value
+/// A BN inference pass applies custom gamma and beta to the normalized value
 #[test]
 fn bn_eval_applies_custom_gamma_and_beta() {
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
@@ -273,10 +280,9 @@ fn bn_eval_applies_custom_gamma_and_beta() {
     let running_var = tensor1(vec![1.0f32]);
     bn.set_weights(gamma, beta, running_mean, running_var)
         .unwrap();
-    bn.set_training_if_mode_dependent(false);
 
     let input = tensor2(vec![3.0f32], 1, 1);
-    let output = bn.forward(&input).unwrap();
+    let output = bn.forward(&input, &mut Ctx::inference()).unwrap();
 
     let eps = 1e-5f32;
     let x_norm = 3.0_f32 / (1.0f32 + eps).sqrt();
@@ -288,20 +294,25 @@ fn bn_eval_applies_custom_gamma_and_beta() {
 // Multiple training forwards accumulate running stats
 
 /// 2 training forwards accumulate running_mean to 0.75 and running_var to 1.0
-/// (momentum 0.5), verified through an eval-mode forward
+/// (momentum 0.5), verified through an inference pass
 #[test]
 fn bn_running_stats_accumulate_over_multiple_forwards() {
     let mut bn = BatchNormalization::new(0.5, 1e-5).unwrap();
 
     let x = tensor2(vec![0.0f32, 2.0], 2, 1);
-    bn.forward(&x).unwrap();
-    bn.forward(&x).unwrap();
-
-    bn.set_training_if_mode_dependent(false);
+    // Each pass proposes its own statistics in the context, and `apply_state` moves them
+    // into the layer. The second pass therefore reads what the first pass wrote, which is what
+    // `Sequential` gives a model
+    let mut first = Ctx::training();
+    let mut second = Ctx::training();
+    bn.forward_mut(&x, &mut first).unwrap();
+    bn.apply_state(&mut first.state_slot(0));
+    bn.forward(&x, &mut second).unwrap();
+    bn.apply_state(&mut second.state_slot(0));
 
     // running_mean ~= 0.75, running_var ~= 1.0. Feed shape [2,1] to match input_shape.
     let x_eval = tensor2(vec![1.0f32, 5.0], 2, 1);
-    let output = bn.forward(&x_eval).unwrap();
+    let output = bn.forward(&x_eval, &mut Ctx::inference()).unwrap();
 
     let denom = (1.0f32 + 1e-5f32).sqrt();
     let e0 = (1.0 - 0.75) / denom;
@@ -324,26 +335,25 @@ fn bn_uniform_batch_output_is_zero() {
     let input = tensor2(data, 4, 3);
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
 
-    let output = bn.forward(&input).unwrap();
+    let output = bn.forward_mut(&input, &mut Ctx::training()).unwrap();
     let zeros = tensor2(vec![0.0f32; 12], 4, 3);
     assert_allclose(&output, &zeros, 1e-6);
 }
 
-// Training mode vs eval mode produce different outputs
+// A training pass and an inference pass produce different outputs
 
-/// For a non-trivial input, BN training mode (batch stats) and eval mode (running stats)
+/// For a non-trivial input, a BN training pass (batch stats) and an inference pass (running stats)
 /// produce different outputs
 #[test]
 fn bn_training_and_eval_modes_produce_different_outputs() {
     let input = tensor2(vec![1.0f32, 1.0, 3.0, 3.0], 2, 2);
 
     let mut bn_train = BatchNormalization::new(0.9, 1e-5).unwrap();
-    // Training mode (default), running stats untouched (mean=0, var=1)
-    let out_train = bn_train.forward(&input).unwrap();
+    // A training pass, with the running stats untouched (mean=0, var=1)
+    let out_train = bn_train.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     let mut bn_eval = BatchNormalization::new(0.9, 1e-5).unwrap();
-    bn_eval.set_training_if_mode_dependent(false);
-    let out_eval = bn_eval.forward(&input).unwrap();
+    let out_eval = bn_eval.forward_mut(&input, &mut Ctx::inference()).unwrap();
 
     // The 2 outputs must differ in at least 1 element
     let differs = out_train
@@ -430,7 +440,7 @@ fn ln_default_each_sample_has_mean_zero_and_var_one() {
     let input = tensor2(data, 2, 4);
     let mut ln = LayerNormalization::new(1e-5).unwrap();
 
-    let output = ln.forward(&input).unwrap();
+    let output = ln.forward_mut(&input, &mut Ctx::training()).unwrap();
     assert_eq!(output.shape(), &[2, 4]);
 
     for row in 0..2 {
@@ -457,7 +467,7 @@ fn ln_default_forward_concrete_values() {
     let input = tensor2(data, 2, 4);
     let mut ln = LayerNormalization::new(1e-5).unwrap();
 
-    let output = ln.forward(&input).unwrap();
+    let output = ln.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     let std_val = (5.0f32 + 1e-5f32).sqrt();
     let expected = tensor2(
@@ -490,7 +500,7 @@ fn ln_custom_axis0_concrete_values() {
         .with_normalized_axis(LayerNormalizationAxis::Custom(0))
         .unwrap();
 
-    let output = ln.forward(&input).unwrap();
+    let output = ln.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     let std_val = (8.0f32 / 3.0 + 1e-5f32).sqrt();
     // Col 0: centered = [-2, 0, 2], col 1: centered = [0, -2, 2]
@@ -521,7 +531,7 @@ fn ln_custom_axis0_each_column_has_mean_zero_and_var_one() {
         .with_normalized_axis(LayerNormalizationAxis::Custom(0))
         .unwrap();
 
-    let output = ln.forward(&input).unwrap();
+    let output = ln.forward_mut(&input, &mut Ctx::training()).unwrap();
     assert_eq!(output.shape(), &[5, 3]);
 
     for col in 0..3 {
@@ -549,7 +559,7 @@ fn ln_multiple_axes_output_has_mean_zero_and_var_one() {
         .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![0, 1]))
         .unwrap();
 
-    let output = ln.forward(&input).unwrap();
+    let output = ln.forward_mut(&input, &mut Ctx::training()).unwrap();
     assert_eq!(output.shape(), &[3, 4]);
 
     // With Multiple([0,1]) on a 2D tensor, the entire output is normalized jointly
@@ -575,7 +585,7 @@ fn ln_multiple_single_axis_on_3d_input() {
         .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![1]))
         .unwrap();
 
-    let output = ln.forward(&input).unwrap();
+    let output = ln.forward_mut(&input, &mut Ctx::training()).unwrap();
     assert_eq!(output.shape(), &[2, 3, 4]);
 
     // Axis=1 has 3 elements. For each (batch, spatial) pair, those 3 values are normalized.
@@ -605,7 +615,7 @@ fn ln_default_constant_row_is_finite_and_zero() {
     let input = tensor2(data, 2, 4);
     let mut ln = LayerNormalization::new(1e-5).unwrap();
 
-    let output = ln.forward(&input).unwrap();
+    let output = ln.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     // Row 0 (constant): all outputs should be exactly 0
     for c in 0..4 {
@@ -631,19 +641,19 @@ fn ln_default_constant_row_is_finite_and_zero() {
     }
 }
 
-// predict() == forward() for LN
+// An inference pass == a training pass, for LN
 
-/// LN predict() matches forward() since LN always computes stats from the current input
+/// An inference pass matches a training pass, since LN always computes stats from the current input
 #[test]
 fn ln_predict_equals_forward() {
     let data = vec![1.0f32, 3.0, 5.0, 7.0, 2.0, -2.0, 0.0, 4.0];
     let input = tensor2(data, 2, 4);
     let mut ln = LayerNormalization::new(1e-5).unwrap();
 
-    // Run forward first (writes caches)
-    let out_forward = ln.forward(&input).unwrap();
-    // predict() computes the same values without touching the cache
-    let out_predict = ln.predict(&input).unwrap();
+    // A training pass runs first, and it writes a cache
+    let out_forward = ln.forward_mut(&input, &mut Ctx::training()).unwrap();
+    // An inference pass computes the same values and writes no cache
+    let out_predict = ln.forward(&input, &mut Ctx::inference()).unwrap();
 
     assert_allclose(&out_forward, &out_predict, 1e-6);
 }
@@ -661,7 +671,7 @@ fn ln_set_weights_custom_gamma_beta() {
     let beta = tensor1(vec![10.0f32, 10.0]);
     ln.set_weights(gamma, beta).unwrap();
 
-    let output = ln.forward(&input).unwrap();
+    let output = ln.forward(&input, &mut Ctx::training()).unwrap();
 
     let eps = 1e-5f32;
     let std = (4.0f32 + eps).sqrt();
@@ -699,7 +709,7 @@ fn ln_forward_rejects_wrong_input_shape() {
     let mut ln = LayerNormalization::new(1e-5).unwrap();
     ln.build(&Shape::known(&[2, 4])).unwrap();
     let wrong = tensor2(vec![1.0f32; 10], 2, 5);
-    let result = ln.forward(&wrong);
+    let result = ln.forward(&wrong, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput, got {:?}",
@@ -707,37 +717,35 @@ fn ln_forward_rejects_wrong_input_shape() {
     );
 }
 
-// LN eval mode: set_training_if_mode_dependent
+// LN inference mode: the context carries it
 
-/// Toggling training mode does not change LN forward output (mode only affects backward)
+/// The context does not change LN forward output (the mode only affects backward)
 #[test]
 fn ln_mode_switch_does_not_change_forward_output() {
     let data = vec![1.0f32, 3.0, 5.0, 7.0, 2.0, -2.0, 0.0, 4.0];
     let input = tensor2(data, 2, 4);
     let mut ln = LayerNormalization::new(1e-5).unwrap();
 
-    // Training mode output
-    let out_train = ln.forward(&input).unwrap();
+    // The output of a training pass
+    let out_train = ln.forward_mut(&input, &mut Ctx::training()).unwrap();
 
-    // Switch to eval mode
-    ln.set_training_if_mode_dependent(false);
-    let out_eval = ln.forward(&input).unwrap();
+    // The output of an inference pass
+    let out_eval = ln.forward(&input, &mut Ctx::inference()).unwrap();
 
     assert_allclose(&out_train, &out_eval, 1e-6);
 }
 
-// LN predict() in eval mode equals forward() in eval mode
+// 2 LN inference passes give the same values
 
-/// In eval mode, LN predict() and forward() agree exactly
+/// 2 LN inference passes agree exactly
 #[test]
 fn ln_predict_equals_forward_in_eval_mode() {
     let data = vec![1.0f32, 3.0, 5.0, 7.0, 2.0, -2.0, 0.0, 4.0];
     let input = tensor2(data, 2, 4);
     let mut ln = LayerNormalization::new(1e-5).unwrap();
-    ln.set_training_if_mode_dependent(false);
 
-    let out_forward = ln.forward(&input).unwrap();
-    let out_predict = ln.predict(&input).unwrap();
+    let out_forward = ln.forward_mut(&input, &mut Ctx::inference()).unwrap();
+    let out_predict = ln.forward(&input, &mut Ctx::inference()).unwrap();
 
     assert_allclose(&out_forward, &out_predict, 0.0f32);
 }
@@ -753,7 +761,7 @@ fn ln_multiple_valid_axes_forward_succeeds() {
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![0, 1]))
         .unwrap();
-    let result = ln.forward(&input);
+    let result = ln.forward_mut(&input, &mut Ctx::training());
     assert!(
         result.is_ok(),
         "forward with valid Multiple axes failed: {:?}",
@@ -766,9 +774,9 @@ fn ln_multiple_valid_axes_forward_succeeds() {
 /// BatchNormalization::backward called before any forward returns ForwardPassNotRun
 #[test]
 fn bn_backward_before_forward_errors() {
-    let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
+    let bn = BatchNormalization::new(0.9, 1e-5).unwrap();
     let grad = tensor2(vec![1.0f32; 6], 2, 3);
-    let err = bn.backward(&grad).unwrap_err();
+    let err = bn.backward(&grad, &mut Ctx::training()).unwrap_err();
     assert!(
         matches!(
             err,
@@ -782,9 +790,9 @@ fn bn_backward_before_forward_errors() {
 /// LayerNormalization::backward called before any forward returns ForwardPassNotRun
 #[test]
 fn ln_backward_before_forward_errors() {
-    let mut ln = LayerNormalization::new(1e-5).unwrap();
+    let ln = LayerNormalization::new(1e-5).unwrap();
     let grad = tensor2(vec![1.0f32; 8], 2, 4);
-    let err = ln.backward(&grad).unwrap_err();
+    let err = ln.backward(&grad, &mut Ctx::training()).unwrap_err();
     assert!(
         matches!(
             err,
@@ -805,7 +813,7 @@ fn ln_custom_axis_out_of_bounds_forward_errors() {
         .with_normalized_axis(LayerNormalizationAxis::Custom(5))
         .unwrap();
     let input = tensor1(vec![1.0f32, 2.0, 3.0, 4.0]); // ndim = 1, axis 5 is out of bounds
-    let result = ln.forward(&input);
+    let result = ln.forward_mut(&input, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -813,7 +821,7 @@ fn ln_custom_axis_out_of_bounds_forward_errors() {
     );
 }
 
-/// LN Custom(axis) out-of-bounds is also rejected by predict() with InvalidParameter
+/// LN Custom(axis) out-of-bounds is also rejected by an inference pass with InvalidParameter
 #[test]
 fn ln_custom_axis_out_of_bounds_predict_errors() {
     let mut ln = LayerNormalization::new(1e-5)
@@ -822,7 +830,7 @@ fn ln_custom_axis_out_of_bounds_predict_errors() {
         .unwrap();
     ln.build(&Shape::known(&[4])).unwrap();
     let input = tensor1(vec![1.0f32, 2.0, 3.0, 4.0]); // ndim = 1, axis 5 is out of bounds
-    let result = ln.predict(&input);
+    let result = ln.forward(&input, &mut Ctx::inference());
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -835,7 +843,7 @@ fn ln_custom_axis_out_of_bounds_predict_errors() {
 fn ln_default_scalar_input_forward_errors() {
     let mut ln = LayerNormalization::new(1e-5).unwrap();
     let scalar = ArrayD::from_shape_vec(vec![], vec![3.0f32]).unwrap(); // 0-dim tensor
-    let result = ln.forward(&scalar);
+    let result = ln.forward_mut(&scalar, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput, got {:?}",
@@ -843,13 +851,13 @@ fn ln_default_scalar_input_forward_errors() {
     );
 }
 
-/// LN Default on a 0-dim (scalar) tensor is also rejected by predict() with InvalidInput
+/// LN Default on a 0-dim (scalar) tensor is also rejected by an inference pass with InvalidInput
 #[test]
 fn ln_default_scalar_input_predict_errors() {
     let mut ln = LayerNormalization::new(1e-5).unwrap();
     ln.build(&Shape::known(&[4])).unwrap();
     let scalar = ArrayD::from_shape_vec(vec![], vec![3.0f32]).unwrap(); // 0-dim tensor
-    let result = ln.predict(&scalar);
+    let result = ln.forward(&scalar, &mut Ctx::inference());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput, got {:?}",
@@ -857,37 +865,37 @@ fn ln_default_scalar_input_predict_errors() {
     );
 }
 
-// Eval-mode backward: gradient passes through unchanged
+// The backward pass of an inference context: the gradient passes through unchanged
 
-/// BatchNormalization::backward in eval mode returns grad_output unchanged (bit-exact)
+/// BatchNormalization::backward in an inference pass returns grad_output unchanged (bit-exact)
 #[test]
 fn bn_backward_eval_mode_passes_gradient_through() {
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
-    bn.set_training_if_mode_dependent(false);
+    let mut ctx = Ctx::inference();
 
-    // A forward in eval mode (uses running stats) does not affect the passthrough
+    // An inference forward (which uses the running stats) does not affect the passthrough
     let input = tensor2(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3);
-    bn.forward(&input).unwrap();
+    bn.forward_mut(&input, &mut ctx).unwrap();
 
     // Distinct gradient values so an accidental transform would change them
     let grad = tensor2(vec![0.5f32, -1.5, 2.0, -3.0, 4.5, -6.0], 2, 3);
-    let grad_input = bn.backward(&grad).unwrap();
+    let grad_input = bn.backward(&grad, &mut ctx).unwrap();
 
-    // Eval-mode backward returns grad_output.clone()
+    // The backward pass of an inference context returns grad_output.clone()
     assert_allclose(&grad_input, &grad, 0.0f32);
 }
 
-/// LayerNormalization::backward in eval mode returns grad_output unchanged (bit-exact)
+/// LayerNormalization::backward in an inference pass returns grad_output unchanged (bit-exact)
 #[test]
 fn ln_backward_eval_mode_passes_gradient_through() {
     let mut ln = LayerNormalization::new(1e-5).unwrap();
-    ln.set_training_if_mode_dependent(false);
+    let mut ctx = Ctx::inference();
 
     let input = tensor2(vec![1.0f32, 3.0, 5.0, 7.0, 2.0, -2.0, 0.0, 4.0], 2, 4);
-    ln.forward(&input).unwrap();
+    ln.forward_mut(&input, &mut ctx).unwrap();
 
     let grad = tensor2(vec![0.5f32, -1.5, 2.0, -3.0, 4.5, -6.0, 7.0, -8.5], 2, 4);
-    let grad_input = ln.backward(&grad).unwrap();
+    let grad_input = ln.backward(&grad, &mut ctx).unwrap();
 
     assert_allclose(&grad_input, &grad, 0.0f32);
 }
@@ -901,7 +909,7 @@ fn bn_new_scalar_param_branch_forward_1d() {
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
 
     let input = tensor1(vec![1.0f32, 2.0, 3.0, 4.0]);
-    let output = bn.forward(&input).unwrap();
+    let output = bn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     // Shape is preserved through the scalar-param broadcast
     assert_eq!(output.shape(), &[4]);
@@ -930,7 +938,7 @@ fn bn_spatial_4d_normalizes_per_channel() {
     // channel 1 = {5,6,7,8}
     let x: Tensor =
         ArrayD::from_shape_vec(vec![1, 2, 2, 2], vec![1., 5., 2., 6., 3., 7., 4., 8.]).unwrap();
-    let out = bn.forward(&x).unwrap();
+    let out = bn.forward(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[1, 2, 2, 2]);
 
     // Channel 0: mean 2.5, population variance ((-1.5)^2+(-0.5)^2+0.5^2+1.5^2)/4 = 1.25.
@@ -962,11 +970,12 @@ fn bn_spatial_4d_backward_shape() {
     use rustyml::neural_network::Tensor;
     // [N=2, H=3, W=2, C=2]: the trailing axis is the channel axis
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
+    let mut ctx = Ctx::training();
     let x: Tensor =
         ArrayD::from_shape_fn(vec![2, 3, 2, 2], |idx| (idx[1] + idx[2] + idx[3]) as f32);
-    bn.forward(&x).unwrap();
+    bn.forward_mut(&x, &mut ctx).unwrap();
     let grad: Tensor = ArrayD::ones(vec![2, 3, 2, 2]);
-    let grad_in = bn.backward(&grad).unwrap();
+    let grad_in = bn.backward(&grad, &mut ctx).unwrap();
     assert_eq!(grad_in.shape(), &[2, 3, 2, 2]);
     assert!(grad_in.iter().all(|v| v.is_finite()));
 }
@@ -1004,14 +1013,18 @@ fn bn_run(shape: &[usize], gate: usize) -> (ArrayD<f32>, ArrayD<f32>, Vec<f32>) 
     });
 
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
-    let out = bn.forward(&x).unwrap();
-    let grad_in = bn.backward(&grad).unwrap();
-    // `parameters` hands out gamma and beta with the gradients the backward pass just wrote
-    let grads: Vec<f32> = bn
-        .parameters()
-        .iter()
-        .flat_map(|p| p.grad.iter().copied())
-        .collect();
+    let mut ctx = Ctx::training();
+    let out = bn.forward_mut(&x, &mut ctx).unwrap();
+    let grad_in = bn.backward(&grad, &mut ctx).unwrap();
+    // The backward pass put the gamma and the beta gradient in the store of the context
+    let mut grads: Vec<f32> = Vec::new();
+    for name in ["gamma", "beta"] {
+        let grad = ctx
+            .grads()
+            .get(ParamId::new(0, name))
+            .expect("the backward pass must write the gradient of gamma and of beta");
+        grads.extend(grad.iter().copied());
+    }
     assert!(!grads.is_empty(), "the backward pass must write gradients");
     (out, grad_in, grads)
 }

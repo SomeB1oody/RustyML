@@ -9,21 +9,11 @@
 //! math and its own weights instead of delegating to the enum
 
 use crate::error::{Context, Error};
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::Tensor;
 use crate::parallel_gates::{cheap_map_parallel_threshold, exp_map_parallel_threshold};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array2, ArrayView1, ArrayViewMut1, Axis, Zip};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-
-/// The shape a cached activation output holds, or `None` when no forward pass has run
-///
-/// Every activation layer keeps the extents of its input, so the shape of the cached output is
-/// also the shape of the input that produced it
-fn cached_shape(cached_tensor: &Option<Tensor>) -> Option<Shape> {
-    cached_tensor
-        .as_ref()
-        .map(|tensor| Shape::known(tensor.shape()))
-}
 
 /// ELU (Exponential Linear Unit) activation layer
 pub mod elu;

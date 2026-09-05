@@ -2,9 +2,12 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Linear (identity) activation layer
 ///
@@ -39,9 +42,8 @@ use crate::neural_network::{Shape, Tensor};
 /// ```
 #[derive(Debug)]
 pub struct Linear {
-    /// Shape of the input from the forward pass. The backward pass uses it to validate the
-    /// gradient (Linear's derivative is 1, so the input values themselves are not needed)
-    input_shape: Option<Vec<usize>>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
 }
 
 impl Linear {
@@ -51,7 +53,7 @@ impl Linear {
     ///
     /// - `Self` - A new `Linear` layer
     pub fn new() -> Self {
-        Linear { input_shape: None }
+        Linear { built: None }
     }
 }
 
@@ -61,54 +63,49 @@ impl Default for Linear {
     }
 }
 
-impl Layer for Linear {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+impl LayerBase for Linear {
+    fn layer_type(&self) -> &str {
+        "Linear"
+    }
+
+    built_layer_shape_functions!();
+
+    no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for Linear {
+    /// Records the shape the layer serves. The layer holds no array, so nothing is allocated
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "Linear", input)? else {
+            return Ok(());
+        };
+        self.compute_output_shape(&built)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
 
         // Save the input shape for backward-pass validation only
-        self.input_shape = Some(input.shape().to_vec());
-
-        // Identity: f(x) = x
-        Ok(input.clone())
-    }
-
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.is_empty() {
-            return Err(Error::empty_input("input tensor"));
+        if ctx.is_training() {
+            ctx.push_cache(input.shape().to_vec());
         }
 
         // Identity: f(x) = x
         Ok(input.clone())
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        if let Some(input_shape) = &self.input_shape {
-            if grad_output.shape() != input_shape.as_slice() {
-                return Err(Error::shape_mismatch(
-                    input_shape.clone(),
-                    grad_output.shape(),
-                ));
-            }
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let input_shape: Vec<usize> = ctx.pop_cache("Linear")?;
 
-            // Derivative is 1, so the gradient passes through unchanged
-            Ok(grad_output.clone())
-        } else {
-            Err(Error::forward_pass_not_run("Linear"))
+        if grad_output.shape() != input_shape.as_slice() {
+            return Err(Error::shape_mismatch(input_shape, grad_output.shape()));
         }
-    }
 
-    fn layer_type(&self) -> &str {
-        "Linear"
+        // Derivative is 1, so the gradient passes through unchanged
+        Ok(grad_output.clone())
     }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        self.input_shape
-            .as_ref()
-            .map(|shape| Shape::known(shape.as_slice()))
-    }
-
-    no_trainable_parameters_layer_functions!();
 }

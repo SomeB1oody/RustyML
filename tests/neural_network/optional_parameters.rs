@@ -20,8 +20,6 @@
 use crate::common::assert_allclose;
 use ndarray::{Array, Array1, Array2, Array3, Array4, Array5, IxDyn};
 use rustyml::error::{Error, IoError};
-use rustyml::neural_network::Shape;
-use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::Activation;
 use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
 use rustyml::neural_network::layers::convolution::conv_1d_transpose::Conv1DTranspose;
@@ -42,7 +40,10 @@ use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
 use rustyml::neural_network::sequential::SequentialBuilder;
-use rustyml::neural_network::traits::{Layer, Optimizer, WeightKind};
+use rustyml::neural_network::traits::{
+    Layer, LayerBase, Optimizer, ParamId, UnaryLayer, WeightKind,
+};
+use rustyml::neural_network::{Ctx, Shape, Tensor};
 
 // ---------------------------------------------------------------------------------------
 // Helpers
@@ -90,14 +91,25 @@ fn weight_names(layer: &dyn Layer) -> Vec<&'static str> {
 
 /// Every parameter name that a layer yields, in order
 fn parameter_names(layer: &mut dyn Layer) -> Vec<&'static str> {
-    layer.parameters().iter().map(|pg| pg.name).collect()
+    layer.parameters_mut().iter().map(|pg| pg.name).collect()
 }
 
-/// Runs 1 forward pass and 1 backward pass, and gives the parameter names back
-fn train_once(layer: &mut dyn Layer, input: &Tensor, upstream: &Tensor) -> Vec<&'static str> {
-    layer.forward(input).unwrap();
-    layer.backward(upstream).unwrap();
-    parameter_names(layer)
+/// Runs 1 forward pass and 1 backward pass, and gives the context of the pass back
+///
+/// The layer takes no owner, so every gradient of the pass sits at layer position 0 in the
+/// store that [`Ctx::grads`] gives
+fn train_once(layer: &mut dyn Layer, input: &Tensor, upstream: &Tensor) -> Ctx {
+    let mut ctx = Ctx::training();
+    layer.forward_many_mut(&[input], &mut ctx).unwrap();
+    layer.backward_many(upstream, &mut ctx).unwrap();
+    ctx
+}
+
+/// The gradient of 1 named parameter of a layer that `train_once` drove
+fn grad_of<'a>(ctx: &'a Ctx, name: &'static str) -> &'a Tensor {
+    ctx.grads()
+        .get(ParamId::new(0, name))
+        .unwrap_or_else(|| panic!("the pass gave `{name}` no gradient"))
 }
 
 /// Every element of 1 named array of a layer
@@ -343,19 +355,19 @@ fn every_bias_free_layer_yields_its_kernels() {
             arrays,
             "{name} exposes the wrong arrays without a bias"
         );
-        let output = layer.forward(&input).unwrap();
+        let mut ctx = Ctx::training();
+        let output = layer.forward_many_mut(&[&input], &mut ctx).unwrap();
         let upstream = Tensor::ones(output.raw_dim());
-        layer.backward(&upstream).unwrap();
+        layer.backward_many(&upstream, &mut ctx).unwrap();
         assert_eq!(
             parameter_names(&mut *layer),
             arrays,
             "{name} yields the wrong parameters without a bias"
         );
-        for pg in layer.parameters() {
+        for &array in &arrays {
             assert!(
-                pg.grad.iter().any(|g| g.abs() > 0.0),
-                "{name} yielded an all-zero gradient for `{}`",
-                pg.name
+                grad_of(&ctx, array).iter().any(|g| g.abs() > 0.0),
+                "{name} yielded an all-zero gradient for `{array}`"
             );
         }
     }
@@ -390,17 +402,18 @@ fn dropping_gamma_does_not_give_beta_the_optimizer_state_of_gamma() {
 
     // Step 1 fills the momentum buffer of `gamma`, and leaves the buffer of `beta` at 0
     let mut full = LayerNormalization::new(1e-5).unwrap();
-    assert_eq!(train_once(&mut full, &x, &upstream), vec!["gamma", "beta"]);
-    for pg in full.parameters() {
-        let all_zero = pg.grad.iter().all(|g| *g == 0.0);
-        match pg.name {
+    let full_ctx = train_once(&mut full, &x, &upstream);
+    assert_eq!(parameter_names(&mut full), vec!["gamma", "beta"]);
+    for name in parameter_names(&mut full) {
+        let all_zero = grad_of(&full_ctx, name).iter().all(|g| *g == 0.0);
+        match name {
             "gamma" => assert!(!all_zero, "the gamma gradient must not be all zero"),
             "beta" => assert!(all_zero, "the beta gradient must be exactly zero"),
             other => panic!("unexpected parameter `{other}`"),
         }
     }
     optimizer.step();
-    optimizer.update(0, &mut full, 1.0);
+    optimizer.update(0, &mut full, full_ctx.grads(), 1.0);
     assert!(
         array_of(&full, "gamma").iter().any(|v| *v != 1.0),
         "gamma must have moved, or the buffer of gamma holds nothing"
@@ -414,9 +427,10 @@ fn dropping_gamma_does_not_give_beta_the_optimizer_state_of_gamma() {
     // scope. `beta` is the only parameter, and it sits at index 0
     let mut scale_free = LayerNormalization::new(1e-5).unwrap().with_scale(false);
     assert_eq!(weight_names(&scale_free), vec!["beta"]);
-    assert_eq!(train_once(&mut scale_free, &x, &upstream), vec!["beta"]);
+    let scale_free_ctx = train_once(&mut scale_free, &x, &upstream);
+    assert_eq!(parameter_names(&mut scale_free), vec!["beta"]);
     optimizer.step();
-    optimizer.update(0, &mut scale_free, 1.0);
+    optimizer.update(0, &mut scale_free, scale_free_ctx.grads(), 1.0);
 
     assert_eq!(
         array_of(&scale_free, "beta"),
@@ -706,8 +720,9 @@ fn a_bias_free_dense_matches_keras() {
 
     let x = tensor(&[2, 3], 0);
     let upstream = tensor(&[2, 4], 200);
-    let output = layer.forward(&x).unwrap();
-    let grad_input = layer.backward(&upstream).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward(&x, &mut ctx).unwrap();
+    let grad_input = layer.backward(&upstream, &mut ctx).unwrap();
 
     let wanted_output: Tensor = Array::from_shape_vec(
         IxDyn(&[2, 4]),
@@ -753,10 +768,13 @@ fn a_bias_free_dense_matches_keras() {
         -0.10050001,
         0.19549999,
     ];
-    let params = layer.parameters();
+    let params = layer.parameters_mut();
     assert_eq!(params.len(), 1);
     assert_eq!(params[0].name, "kernel");
-    for (got, wanted) in params[0].grad.iter().zip(wanted_grad_kernel.iter()) {
+    for (got, wanted) in grad_of(&ctx, "kernel")
+        .iter()
+        .zip(wanted_grad_kernel.iter())
+    {
         assert!(
             (got - wanted).abs() < 1e-6,
             "kernel gradient {got} differs from the Keras value {wanted}"
@@ -772,8 +790,9 @@ fn a_scale_free_layer_normalization_matches_keras() {
 
     let x = tensor(&[2, 4], 20);
     let upstream = tensor(&[2, 4], 700);
-    let output = layer.forward(&x).unwrap();
-    layer.backward(&upstream).unwrap();
+    let mut ctx = Ctx::training();
+    let output = layer.forward_mut(&x, &mut ctx).unwrap();
+    layer.backward(&upstream, &mut ctx).unwrap();
 
     let wanted_output: Tensor = Array::from_shape_vec(
         IxDyn(&[2, 4]),
@@ -792,10 +811,10 @@ fn a_scale_free_layer_normalization_matches_keras() {
     assert_allclose(&output, &wanted_output, 1e-5_f32);
 
     let wanted_grad_beta = [-0.44, 0.3, 0.030000001, -0.24000001];
-    let params = layer.parameters();
+    let params = layer.parameters_mut();
     assert_eq!(params.len(), 1);
     assert_eq!(params[0].name, "beta");
-    for (got, wanted) in params[0].grad.iter().zip(wanted_grad_beta.iter()) {
+    for (got, wanted) in grad_of(&ctx, "beta").iter().zip(wanted_grad_beta.iter()) {
         assert!(
             (got - wanted).abs() < 1e-6,
             "beta gradient {got} differs from the Keras value {wanted}"
@@ -1188,16 +1207,17 @@ fn every_normalization_layer_yields_exactly_the_parameters_it_owns() {
                 "{name} with center {center} and scale {scale} exposes the wrong trainable arrays"
             );
 
+            let ctx = train_once(&mut *layer, &input, &upstream);
             assert_eq!(
-                train_once(&mut *layer, &input, &upstream),
+                parameter_names(&mut *layer),
                 owned,
                 "{name} with center {center} and scale {scale} yields the wrong parameters"
             );
 
-            for entry in layer.parameters() {
+            for entry in layer.parameters_mut() {
                 assert_eq!(
                     entry.value.len(),
-                    entry.grad.len(),
+                    grad_of(&ctx, entry.name).len(),
                     "{name} yielded `{}` against a gradient of another length",
                     entry.name
                 );
@@ -1228,8 +1248,9 @@ fn the_use_bias_layers_yield_exactly_the_parameters_they_own() {
             owned,
             "Dense with use_bias {use_bias} exposes the wrong arrays"
         );
+        train_once(&mut dense, &tensor(&[4, 3], 0), &tensor(&[4, 2], 47));
         assert_eq!(
-            train_once(&mut dense, &tensor(&[4, 3], 0), &tensor(&[4, 2], 47)),
+            parameter_names(&mut dense),
             owned,
             "Dense with use_bias {use_bias} yields the wrong parameters"
         );
@@ -1242,12 +1263,13 @@ fn the_use_bias_layers_yield_exactly_the_parameters_they_own() {
             owned,
             "Conv2D with use_bias {use_bias} exposes the wrong arrays"
         );
+        train_once(
+            &mut conv,
+            &tensor(&[1, 4, 4, 2], 0),
+            &tensor(&[1, 3, 3, 2], 47),
+        );
         assert_eq!(
-            train_once(
-                &mut conv,
-                &tensor(&[1, 4, 4, 2], 0),
-                &tensor(&[1, 3, 3, 2], 47)
-            ),
+            parameter_names(&mut conv),
             owned,
             "Conv2D with use_bias {use_bias} yields the wrong parameters"
         );

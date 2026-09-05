@@ -9,13 +9,13 @@
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
 use rustyml::error::Error;
-use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::softmax::Softmax;
 use rustyml::neural_network::losses::{
     BinaryCrossEntropy, CategoricalCrossEntropy, MeanAbsoluteError, MeanSquaredError,
     SparseCategoricalCrossEntropy,
 };
-use rustyml::neural_network::traits::{Layer, Loss};
+use rustyml::neural_network::traits::{Loss, UnaryLayer};
+use rustyml::neural_network::{Ctx, Tensor};
 
 use crate::common::assert_allclose;
 
@@ -1037,18 +1037,23 @@ fn cce_row_constant_term_vanishes_through_softmax_backward() {
         .unwrap()
         .into_dyn();
 
+    // 1 context per pass: each softmax runs its own forward pass and its own backward pass
     let mut current = Softmax::new();
-    let probs = current.forward(&logits).unwrap();
+    let mut current_ctx = Ctx::training();
+    let probs = current.forward_mut(&logits, &mut current_ctx).unwrap();
     let mut legacy = Softmax::new();
-    legacy.forward(&logits).unwrap();
+    let mut legacy_ctx = Ctx::training();
+    legacy.forward_mut(&logits, &mut legacy_ctx).unwrap();
 
     let grad = cce.compute_grad(&y_true, &probs).unwrap();
     // Softmax rows sum to 1 and the targets are one-hot, so the added term is exactly 1 / batch
     let grad_without_term = &grad - 1.0 / 2.0;
 
     assert_allclose(
-        &current.backward(&grad).unwrap(),
-        &legacy.backward(&grad_without_term).unwrap(),
+        &current.backward(&grad, &mut current_ctx).unwrap(),
+        &legacy
+            .backward(&grad_without_term, &mut legacy_ctx)
+            .unwrap(),
         1e-5_f32,
     );
 }

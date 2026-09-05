@@ -4,9 +4,12 @@
 use super::folds::{rows_per_block, segment_dot};
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
+use crate::neural_network::layers::built_layer_shape_functions;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape_function;
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 use crate::parallel_gates::cheap_map_parallel_threshold;
 use ndarray::{Axis, IxDyn, Zip};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
@@ -104,22 +107,14 @@ pub enum UnitNormalizationAxis {
 /// transpose in and a transpose back out. It holds 1 more tensor of the input size while it
 /// folds the squares
 ///
-/// `forward` also keeps a copy of its output, which the backward pass reads. `predict` keeps
-/// nothing
+/// A training pass also keeps a copy of its output, which the backward pass reads. An inference
+/// pass keeps nothing
 #[derive(Debug)]
 pub struct UnitNormalization {
     /// Axes the L2 norm reduces over
     axis: UnitNormalizationAxis,
-    /// Shape of the most recent forward input. The backward pass needs it to check the gradient
-    input_shape: Option<Vec<usize>>,
-    /// Scale the most recent forward pass applied, 1 element per group, in the input shape with
-    /// a 1 at every normalized axis
-    scale: Option<Tensor>,
-    /// 1.0 for a group whose scale came from its norm, and 0.0 for a group the cap took over.
-    /// Same shape as `scale`
-    from_norm: Option<Tensor>,
-    /// Output of the most recent forward pass, which the backward pass reads
-    output: Option<Tensor>,
+    /// Shape the layer was built for, batch axis first. `None` before the build
+    built: Option<Shape>,
 }
 
 impl UnitNormalization {
@@ -161,13 +156,7 @@ impl UnitNormalization {
             }
         }
 
-        Ok(UnitNormalization {
-            axis,
-            input_shape: None,
-            scale: None,
-            from_norm: None,
-            output: None,
-        })
+        Ok(UnitNormalization { axis, built: None })
     }
 
     /// Resolves the axis configuration against a concrete input rank
@@ -464,34 +453,67 @@ fn strided_backward(
     grad_input
 }
 
-impl Layer for UnitNormalization {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+/// What the forward pass of [`UnitNormalization`] parks for its backward pass
+struct UnitNormalizationCache {
+    /// Shape of the tensor the forward pass received. The backward pass checks the gradient
+    /// against it
+    input_shape: Vec<usize>,
+    /// Scale the forward pass applied, 1 element per group, in the input shape with a 1 at
+    /// every normalized axis
+    scale: Tensor,
+    /// 1.0 for a group whose scale came from its norm, and 0.0 for a group the cap took over.
+    /// Same shape as `scale`
+    from_norm: Tensor,
+    /// Output of the forward pass, which the backward pass reads
+    output: Tensor,
+}
+
+impl LayerBase for UnitNormalization {
+    fn layer_type(&self) -> &str {
+        "UnitNormalization"
+    }
+
+    built_layer_shape_functions!();
+
+    no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for UnitNormalization {
+    /// Records the shape the norm reduces over. The layer holds no array, so nothing is
+    /// allocated. The shape algebra checks the rank
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "UnitNormalization", input)? else {
+            return Ok(());
+        };
+        UnaryLayer::compute_output_shape(self, &built)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let axes = self.validate(input)?;
         let (output, scale, from_norm) = Self::normalize(input, &axes);
 
-        self.input_shape = Some(input.shape().to_vec());
-        self.scale = Some(scale);
-        self.from_norm = Some(from_norm);
-        self.output = Some(output.clone());
+        if ctx.is_training() {
+            ctx.push_cache(UnitNormalizationCache {
+                input_shape: input.shape().to_vec(),
+                scale,
+                from_norm,
+                output: output.clone(),
+            });
+        }
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        let axes = self.validate(input)?;
-        Ok(Self::normalize(input, &axes).0)
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        let (Some(input_shape), Some(scale), Some(from_norm), Some(output)) = (
-            &self.input_shape,
-            &self.scale,
-            &self.from_norm,
-            &self.output,
-        ) else {
-            return Err(Error::forward_pass_not_run("UnitNormalization"));
-        };
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let cache: UnitNormalizationCache = ctx.pop_cache("UnitNormalization")?;
+        let UnitNormalizationCache {
+            input_shape,
+            scale,
+            from_norm,
+            output,
+        } = &cache;
 
         if grad_output.shape() != input_shape.as_slice() {
             return Err(Error::shape_mismatch(
@@ -526,13 +548,5 @@ impl Layer for UnitNormalization {
         Ok(grad_input)
     }
 
-    fn layer_type(&self) -> &str {
-        "UnitNormalization"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        self.input_shape.as_deref().map(Shape::with_free_batch)
-    }
-
-    no_trainable_parameters_layer_functions!();
+    normalization_layer_output_shape_function!("UnitNormalization");
 }

@@ -2,10 +2,13 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::{Activation, cached_shape};
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::{
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
+};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Tanh (hyperbolic tangent) activation layer
 ///
@@ -44,8 +47,8 @@ use crate::neural_network::{Shape, Tensor};
 /// ```
 #[derive(Debug)]
 pub struct Tanh {
-    /// Cached activated output from the forward pass, used during backpropagation
-    output_cache: Option<Tensor>,
+    /// Shape the layer was built for. `None` before the build
+    built: Option<Shape>,
 }
 
 impl Tanh {
@@ -55,7 +58,7 @@ impl Tanh {
     ///
     /// - `Self` - A new `Tanh` layer
     pub fn new() -> Self {
-        Tanh { output_cache: None }
+        Tanh { built: None }
     }
 }
 
@@ -65,8 +68,29 @@ impl Default for Tanh {
     }
 }
 
-impl Layer for Tanh {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+impl LayerBase for Tanh {
+    fn layer_type(&self) -> &str {
+        "Tanh"
+    }
+
+    built_layer_shape_functions!();
+
+    no_trainable_parameters_layer_functions!();
+}
+
+impl UnaryLayer for Tanh {
+    /// Records the shape the layer serves. The layer holds no array, so nothing is
+    /// allocated
+    fn build(&mut self, input: &Shape) -> Result<(), Error> {
+        let Some(built) = start_build(&self.built, "Tanh", input)? else {
+            return Ok(());
+        };
+        self.compute_output_shape(&built)?;
+        self.built = Some(built);
+        Ok(())
+    }
+
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
@@ -75,42 +99,22 @@ impl Layer for Tanh {
         let output = Activation::Tanh.forward(input)?;
 
         // Cache the activated output for backpropagation
-        self.output_cache = Some(output.clone());
+        if ctx.is_training() {
+            ctx.push_cache(output.clone());
+        }
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.is_empty() {
-            return Err(Error::empty_input("input tensor"));
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        let output: Tensor = ctx.pop_cache("Tanh")?;
+
+        // tanh preserves shape, so the gradient must match the cached output
+        if grad_output.shape() != output.shape() {
+            return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
         }
 
-        // Apply tanh. Large-magnitude inputs saturate toward -1/+1 by construction
-        Activation::Tanh.forward(input)
+        // Derivative: d/dx tanh(x) = 1 - tanh^2(x)
+        Activation::Tanh.backward(&output, grad_output)
     }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        if let Some(output) = &self.output_cache {
-            // tanh preserves shape, so the gradient must match the cached output
-            if grad_output.shape() != output.shape() {
-                return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
-            }
-
-            // Derivative: d/dx tanh(x) = 1 - tanh^2(x)
-            Activation::Tanh.backward(output, grad_output)
-        } else {
-            Err(Error::forward_pass_not_run("Tanh"))
-        }
-    }
-
-    fn layer_type(&self) -> &str {
-        "Tanh"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        cached_shape(&self.output_cache)
-    }
-
-    no_trainable_parameters_layer_functions!();
 }

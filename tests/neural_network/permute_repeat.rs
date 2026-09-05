@@ -4,6 +4,7 @@
 //! `gradient_check.rs` covers gradient values. This file does not duplicate them.
 
 use ndarray::{Array2, Array3, Array4, Array5, IxDyn};
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
@@ -16,7 +17,7 @@ use rustyml::neural_network::layers::repeat_vector::RepeatVector;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::SequentialBuilder;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
 use rustyml::prelude::Activation;
 use rustyml::{error::Error, neural_network::NnError};
 
@@ -122,7 +123,7 @@ fn permute_new_rejects_axis_above_range() {
 fn permute_forward_swaps_two_axes_by_value() {
     let mut p = Permute::new(vec![2, 1]).unwrap();
     let x = t3(1, 2, 3, ramp(6));
-    let out = p.forward(&x).unwrap();
+    let out = p.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     // Row-major [[1, 2, 3], [4, 5, 6]] transposes to [[1, 4], [2, 5], [3, 6]]
     let want = t3(1, 3, 2, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
@@ -134,7 +135,7 @@ fn permute_forward_swaps_two_axes_by_value() {
 fn permute_forward_rotates_three_axes_by_value() {
     let mut p = Permute::new(vec![3, 1, 2]).unwrap();
     let x = t4(1, 2, 2, 2, ramp(8));
-    let out = p.forward(&x).unwrap();
+    let out = p.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     assert_eq!(out.shape(), &[1, 2, 2, 2]);
     // out[0, a, b, c] reads x[0, b, c, a]
@@ -147,7 +148,7 @@ fn permute_forward_rotates_three_axes_by_value() {
 fn permute_forward_identity_copies_input() {
     let mut p = Permute::new(vec![1, 2, 3]).unwrap();
     let x = ramp_of(&[2, 3, 4, 2]);
-    let out = p.forward(&x).unwrap();
+    let out = p.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_allclose(&out, &x, 1e-6_f32);
 }
 
@@ -156,7 +157,7 @@ fn permute_forward_identity_copies_input() {
 fn permute_forward_serves_rank_5() {
     let mut p = Permute::new(vec![4, 3, 2, 1]).unwrap();
     let x: Tensor = Array5::ones((2, 3, 4, 5, 6)).into_dyn();
-    let out = p.forward(&x).unwrap();
+    let out = p.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[2, 6, 5, 4, 3]);
 }
 
@@ -165,8 +166,9 @@ fn permute_forward_serves_rank_5() {
 fn permute_output_is_in_c_order() {
     let mut p = Permute::new(vec![2, 1]).unwrap();
     let x = ramp_of(&[2, 3, 4]);
+    let mut ctx = Ctx::training();
 
-    let out = p.forward(&x).unwrap();
+    let out = p.forward_mut(&x, &mut ctx).unwrap();
     assert!(
         out.is_standard_layout(),
         "the forward output must be in C order"
@@ -177,7 +179,7 @@ fn permute_output_is_in_c_order() {
     );
 
     let grad = ramp_of(&[2, 4, 3]);
-    let grad_input = p.backward(&grad).unwrap();
+    let grad_input = p.backward(&grad, &mut ctx).unwrap();
     assert!(
         grad_input.is_standard_layout(),
         "the backward output must be in C order"
@@ -211,16 +213,18 @@ fn permute_feeds_softmax() {
     }
 }
 
-/// predict gives the same output as forward, and writes no cache
+/// A forward pass with an inference context matches one with a training context. A layer now
+/// builds itself from the first tensor it receives no matter which context that pass runs in,
+/// so `output_shape` is known right after the first pass
 #[test]
 fn permute_predict_matches_forward() {
     let x = ramp_of(&[2, 3, 4]);
     let mut p = Permute::new(vec![2, 1]).unwrap();
 
-    let from_predict = p.predict(&x).unwrap();
-    assert_eq!(p.output_shape(), "Unknown");
+    let from_predict = p.forward_mut(&x, &mut Ctx::inference()).unwrap();
+    assert_eq!(p.output_shape(), "(None, 4, 3)");
 
-    let from_forward = p.forward(&x).unwrap();
+    let from_forward = p.forward(&x, &mut Ctx::training()).unwrap();
     assert_allclose(&from_predict, &from_forward, 1e-6_f32);
 }
 
@@ -231,10 +235,11 @@ fn permute_predict_matches_forward() {
 fn permute_backward_applies_the_inverse_order() {
     let mut p = Permute::new(vec![2, 1]).unwrap();
     let x = t3(1, 2, 3, ramp(6));
-    p.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    p.forward_mut(&x, &mut ctx).unwrap();
 
     let grad = t3(1, 3, 2, ramp(6));
-    let grad_input = p.backward(&grad).unwrap();
+    let grad_input = p.backward(&grad, &mut ctx).unwrap();
 
     // [[1, 2], [3, 4], [5, 6]] transposes back to [[1, 3, 5], [2, 4, 6]]
     let want = t3(1, 2, 3, vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
@@ -247,11 +252,11 @@ fn permute_rotation_round_trips_through_its_inverse() {
     let x = ramp_of(&[2, 3, 4, 5]);
 
     let mut forward = Permute::new(vec![3, 1, 2]).unwrap();
-    let rotated = forward.forward(&x).unwrap();
+    let rotated = forward.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(rotated.shape(), &[2, 5, 3, 4]);
 
     let mut back = Permute::new(vec![2, 3, 1]).unwrap();
-    let restored = back.forward(&rotated).unwrap();
+    let restored = back.forward_mut(&rotated, &mut Ctx::training()).unwrap();
     assert_allclose(&restored, &x, 1e-6_f32);
 }
 
@@ -262,7 +267,7 @@ fn permute_rotation_round_trips_through_its_inverse() {
 fn permute_forward_rejects_wrong_rank() {
     let mut p = Permute::new(vec![2, 1]).unwrap();
     for shape in [vec![2usize, 3], vec![2, 3, 4, 5]] {
-        let result = p.forward(&ramp_of(&shape));
+        let result = p.forward_mut(&ramp_of(&shape), &mut Ctx::training());
         assert!(
             matches!(result, Err(Error::InvalidInput(_))),
             "expected InvalidInput for shape {shape:?}, got {result:?}"
@@ -276,7 +281,10 @@ fn permute_forward_rejects_empty_input() {
     let mut p = Permute::new(vec![2, 1]).unwrap();
     let empty: Tensor = Tensor::zeros(IxDyn(&[0, 3, 4]));
     assert!(
-        matches!(p.forward(&empty), Err(Error::EmptyInput(_))),
+        matches!(
+            p.forward_mut(&empty, &mut Ctx::training()),
+            Err(Error::EmptyInput(_))
+        ),
         "Permute must reject an empty input"
     );
 }
@@ -284,8 +292,8 @@ fn permute_forward_rejects_empty_input() {
 /// backward before any forward pass reports ForwardPassNotRun
 #[test]
 fn permute_backward_before_forward_returns_err() {
-    let mut p = Permute::new(vec![2, 1]).unwrap();
-    let result = p.backward(&ramp_of(&[2, 4, 3]));
+    let p = Permute::new(vec![2, 1]).unwrap();
+    let result = p.backward(&ramp_of(&[2, 4, 3]), &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -299,9 +307,10 @@ fn permute_backward_before_forward_returns_err() {
 #[test]
 fn permute_backward_wrong_grad_shape_returns_err() {
     let mut p = Permute::new(vec![2, 1]).unwrap();
-    p.forward(&ramp_of(&[2, 3, 4])).unwrap();
+    let mut ctx = Ctx::training();
+    p.forward_mut(&ramp_of(&[2, 3, 4]), &mut ctx).unwrap();
 
-    let result = p.backward(&ramp_of(&[2, 3, 4]));
+    let result = p.backward(&ramp_of(&[2, 3, 4]), &mut ctx);
     assert!(
         matches!(
             &result,
@@ -323,13 +332,15 @@ fn permute_metadata() {
     assert!(p.weights().is_empty(), "Permute must expose no weight");
 }
 
-/// output_shape is unknown before the first forward pass and resolved after it
+/// output_shape is unknown before the first forward pass and resolved after it. The resolved
+/// shape is the shape the layer built for, so the batch axis prints its real extent
 #[test]
 fn permute_output_shape_before_and_after_forward() {
     let mut p = Permute::new(vec![2, 1]).unwrap();
     assert_eq!(p.output_shape(), "Unknown");
 
-    p.forward(&ramp_of(&[2, 3, 4])).unwrap();
+    p.forward_mut(&ramp_of(&[2, 3, 4]), &mut Ctx::training())
+        .unwrap();
     assert_eq!(p.output_shape(), "(None, 4, 3)");
 }
 
@@ -338,7 +349,9 @@ fn permute_output_shape_before_and_after_forward() {
 fn permute_one_instance_serves_every_batch_size() {
     let mut p = Permute::new(vec![2, 1]).unwrap();
     for batch in [1_usize, 4, 7] {
-        let out = p.forward(&ramp_of(&[batch, 3, 5])).unwrap();
+        let out = p
+            .forward_mut(&ramp_of(&[batch, 3, 5]), &mut Ctx::training())
+            .unwrap();
         assert_eq!(
             out.shape(),
             &[batch, 5, 3],
@@ -366,7 +379,7 @@ fn repeat_vector_new_rejects_zero() {
 fn repeat_vector_forward_repeats_each_row() {
     let mut r = RepeatVector::new(2).unwrap();
     let x = t2(2, 3, ramp(6));
-    let out = r.forward(&x).unwrap();
+    let out = r.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     let want = t3(
         2,
@@ -382,23 +395,25 @@ fn repeat_vector_forward_repeats_each_row() {
 fn repeat_vector_forward_with_one_step_adds_an_axis() {
     let mut r = RepeatVector::new(1).unwrap();
     let x = t2(2, 3, ramp(6));
-    let out = r.forward(&x).unwrap();
+    let out = r.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     assert_eq!(out.shape(), &[2, 1, 3]);
     let want = t3(2, 1, 3, ramp(6));
     assert_allclose(&out, &want, 1e-6_f32);
 }
 
-/// predict gives the same output as forward, and writes no cache
+/// A forward pass with an inference context matches one with a training context. A layer now
+/// builds itself from the first tensor it receives no matter which context that pass runs in,
+/// so `output_shape` is known right after the first pass
 #[test]
 fn repeat_vector_predict_matches_forward() {
     let x = t2(3, 4, ramp(12));
     let mut r = RepeatVector::new(5).unwrap();
 
-    let from_predict = r.predict(&x).unwrap();
-    assert_eq!(r.output_shape(), "Unknown");
+    let from_predict = r.forward_mut(&x, &mut Ctx::inference()).unwrap();
+    assert_eq!(r.output_shape(), "(None, 5, 4)");
 
-    let from_forward = r.forward(&x).unwrap();
+    let from_forward = r.forward(&x, &mut Ctx::training()).unwrap();
     assert_allclose(&from_predict, &from_forward, 1e-6_f32);
 }
 
@@ -409,10 +424,11 @@ fn repeat_vector_predict_matches_forward() {
 fn repeat_vector_backward_sums_over_the_step_axis() {
     let mut r = RepeatVector::new(2).unwrap();
     let x = t2(2, 3, ramp(6));
-    r.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    r.forward_mut(&x, &mut ctx).unwrap();
 
     let grad = t3(2, 2, 3, ramp(12));
-    let grad_input = r.backward(&grad).unwrap();
+    let grad_input = r.backward(&grad, &mut ctx).unwrap();
 
     // Sample 0 sums [1, 2, 3] with [4, 5, 6]. Sample 1 sums [7, 8, 9] with [10, 11, 12]
     let want = t2(2, 3, vec![5.0, 7.0, 9.0, 17.0, 19.0, 21.0]);
@@ -426,7 +442,7 @@ fn repeat_vector_backward_sums_over_the_step_axis() {
 fn repeat_vector_forward_rejects_wrong_rank() {
     let mut r = RepeatVector::new(3).unwrap();
     for shape in [vec![5usize], vec![2, 3, 4]] {
-        let result = r.forward(&ramp_of(&shape));
+        let result = r.forward_mut(&ramp_of(&shape), &mut Ctx::training());
         assert!(
             matches!(result, Err(Error::InvalidInput(_))),
             "expected InvalidInput for shape {shape:?}, got {result:?}"
@@ -440,7 +456,10 @@ fn repeat_vector_forward_rejects_empty_input() {
     let mut r = RepeatVector::new(3).unwrap();
     let empty: Tensor = Tensor::zeros(IxDyn(&[0, 4]));
     assert!(
-        matches!(r.forward(&empty), Err(Error::EmptyInput(_))),
+        matches!(
+            r.forward_mut(&empty, &mut Ctx::training()),
+            Err(Error::EmptyInput(_))
+        ),
         "RepeatVector must reject an empty input"
     );
 }
@@ -448,8 +467,8 @@ fn repeat_vector_forward_rejects_empty_input() {
 /// backward before any forward pass reports ForwardPassNotRun
 #[test]
 fn repeat_vector_backward_before_forward_returns_err() {
-    let mut r = RepeatVector::new(3).unwrap();
-    let result = r.backward(&ramp_of(&[2, 3, 4]));
+    let r = RepeatVector::new(3).unwrap();
+    let result = r.backward(&ramp_of(&[2, 3, 4]), &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -463,9 +482,10 @@ fn repeat_vector_backward_before_forward_returns_err() {
 #[test]
 fn repeat_vector_backward_wrong_grad_shape_returns_err() {
     let mut r = RepeatVector::new(3).unwrap();
-    r.forward(&t2(2, 4, ramp(8))).unwrap();
+    let mut ctx = Ctx::training();
+    r.forward_mut(&t2(2, 4, ramp(8)), &mut ctx).unwrap();
 
-    let result = r.backward(&ramp_of(&[2, 2, 4]));
+    let result = r.backward(&ramp_of(&[2, 2, 4]), &mut ctx);
     assert!(
         matches!(
             &result,
@@ -487,13 +507,15 @@ fn repeat_vector_metadata() {
     assert!(r.weights().is_empty(), "RepeatVector must expose no weight");
 }
 
-/// output_shape is unknown before the first forward pass and resolved after it
+/// output_shape is unknown before the first forward pass and resolved after it. The resolved
+/// shape is the shape the layer built for, so the batch axis prints its real extent
 #[test]
 fn repeat_vector_output_shape_before_and_after_forward() {
     let mut r = RepeatVector::new(3).unwrap();
     assert_eq!(r.output_shape(), "Unknown");
 
-    r.forward(&t2(2, 5, ramp(10))).unwrap();
+    r.forward_mut(&t2(2, 5, ramp(10)), &mut Ctx::training())
+        .unwrap();
     assert_eq!(r.output_shape(), "(None, 3, 5)");
 }
 
@@ -502,7 +524,9 @@ fn repeat_vector_output_shape_before_and_after_forward() {
 fn repeat_vector_one_instance_serves_every_batch_size() {
     let mut r = RepeatVector::new(4).unwrap();
     for batch in [1_usize, 4, 7] {
-        let out = r.forward(&t2(batch, 3, ramp(batch * 3))).unwrap();
+        let out = r
+            .forward_mut(&t2(batch, 3, ramp(batch * 3)), &mut Ctx::training())
+            .unwrap();
         assert_eq!(
             out.shape(),
             &[batch, 4, 3],

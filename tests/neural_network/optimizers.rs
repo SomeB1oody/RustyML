@@ -15,8 +15,6 @@ use crate::common::named;
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, ArrayD};
 use rustyml::error::Error;
-use rustyml::neural_network::Shape;
-use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::dense::Dense;
@@ -29,7 +27,10 @@ use rustyml::neural_network::optimizers::RMSprop;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
 use rustyml::neural_network::sequential::SequentialBuilder;
-use rustyml::neural_network::traits::{Layer, Optimizer, ParamGrad, WeightMut, WeightRef};
+use rustyml::neural_network::traits::{
+    LayerBase, Optimizer, ParamRef, UnaryLayer, WeightMut, WeightRef,
+};
+use rustyml::neural_network::{Ctx, Shape, Tensor};
 
 // Helper: simple regression problem
 
@@ -790,15 +791,16 @@ fn dense_after_one_sgd_step(
     let x = Array::from_shape_vec((1, 2), vec![1.0_f32, 2.0])
         .unwrap()
         .into_dyn();
-    let _ = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let _ = layer.forward(&x, &mut ctx).unwrap();
     let grad_out = Array::from_shape_vec((1, 2), vec![0.7_f32, -1.3])
         .unwrap()
         .into_dyn();
-    layer.backward(&grad_out).unwrap();
+    layer.backward(&grad_out, &mut ctx).unwrap();
 
     let mut opt = SGD::new(lr, 0.0, false, weight_decay).unwrap();
     opt.step();
-    opt.update(0, &mut layer, 1.0);
+    opt.update(0, &mut layer, ctx.grads(), 1.0);
     (
         named(&layer, "kernel").to_owned(),
         named(&layer, "bias").to_owned(),
@@ -842,19 +844,19 @@ fn weight_decay_decays_dense_weights_but_skips_bias() {
 /// Returns the resulting (gamma, beta).
 fn batchnorm_gamma_beta_after_one_sgd_step(weight_decay: f32) -> (ArrayD<f32>, ArrayD<f32>) {
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
-    bn.set_training_if_mode_dependent(true);
     let x = Array::from_shape_vec((2, 3), vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0])
         .unwrap()
         .into_dyn();
-    let _ = bn.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let _ = bn.forward_mut(&x, &mut ctx).unwrap();
     let grad_out = Array::from_shape_vec((2, 3), vec![0.5_f32, -0.5, 1.0, -1.0, 0.25, -0.25])
         .unwrap()
         .into_dyn();
-    bn.backward(&grad_out).unwrap();
+    bn.backward(&grad_out, &mut ctx).unwrap();
 
     let mut opt = SGD::new(0.1, 0.0, false, weight_decay).unwrap();
     opt.step();
-    opt.update(0, &mut bn, 1.0);
+    opt.update(0, &mut bn, ctx.grads(), 1.0);
     (
         named(&bn, "gamma").to_owned(),
         named(&bn, "beta").to_owned(),
@@ -899,14 +901,15 @@ fn dense_weights_after_one_step<O: Optimizer>(
     let x = Array::from_shape_vec((1, 2), vec![1.0_f32, 2.0])
         .unwrap()
         .into_dyn();
-    let _ = layer.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let _ = layer.forward(&x, &mut ctx).unwrap();
     let grad_out = Array::from_shape_vec((1, 2), vec![0.7_f32, -1.3])
         .unwrap()
         .into_dyn();
-    layer.backward(&grad_out).unwrap();
+    layer.backward(&grad_out, &mut ctx).unwrap();
 
     opt.step();
-    opt.update(0, &mut layer, 1.0);
+    opt.update(0, &mut layer, ctx.grads(), 1.0);
     (
         named(&layer, "kernel").to_owned(),
         named(&layer, "bias").to_owned(),
@@ -1077,17 +1080,23 @@ fn pass_through_dense() -> Dense {
     layer
 }
 
-/// Runs 1 forward and 1 backward pass over a fixed input and a fixed upstream gradient, so the
-/// layer holds the gradients that `parameters` exposes
-fn one_pass(layer: &mut Dense) {
+/// Runs 1 forward and 1 backward pass over a fixed input and a fixed upstream gradient, and
+/// gives the context back, so the caller reads the gradients of the pass out of its store
+///
+/// `scope` is the position the caller gives the layer. The context addresses every gradient by
+/// that position, so the matching `update` call finds them
+fn one_pass(layer: &mut Dense, scope: usize) -> Ctx {
+    let mut ctx = Ctx::training();
+    ctx.set_owner(scope);
     let x = Array::from_shape_vec((1, 2), vec![1.0_f32, 2.0])
         .unwrap()
         .into_dyn();
-    let _ = layer.forward(&x).unwrap();
+    let _ = layer.forward(&x, &mut ctx).unwrap();
     let grad_out = Array::from_shape_vec((1, 2), vec![0.7_f32, -1.3])
         .unwrap()
         .into_dyn();
-    layer.backward(&grad_out).unwrap();
+    layer.backward(&grad_out, &mut ctx).unwrap();
+    ctx
 }
 
 /// The live kernel of a Dense layer
@@ -1103,12 +1112,13 @@ fn assert_same_kernel(got: &ArrayD<f32>, want: &ArrayD<f32>, message: &str) {
     }
 }
 
-/// A layer that yields no parameter on 1 step and 2 parameters on the next must not move any
-/// other layer's per-parameter optimizer state
+/// A layer whose gradient store holds nothing on 1 step and 2 gradients on the next must not
+/// move any other layer's per-parameter optimizer state
 ///
-/// `quiet` never ran a backward pass before step 1, so it yields 0 parameters there. `tracked`
-/// yields 2 on both steps. The momentum buffer of every `tracked` tensor must therefore be the
-/// same buffer on both steps, and `quiet` must start from a zero buffer of its own
+/// `quiet` runs no pass before step 1, so its store holds nothing there. `tracked` runs a pass
+/// on both steps, so its store holds 2 gradients each time. The momentum buffer of every
+/// `tracked` tensor must therefore be the same buffer on both steps, and `quiet` must start
+/// from a zero buffer of its own
 #[test]
 fn a_changing_parameter_count_must_not_move_another_layer_state() {
     let mut quiet = pass_through_dense();
@@ -1116,40 +1126,40 @@ fn a_changing_parameter_count_must_not_move_another_layer_state() {
     let mut opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
 
     // Step 1: only `tracked` holds gradients
-    one_pass(&mut tracked);
-    assert_eq!(
-        quiet.parameters().len(),
-        0,
-        "a layer with no gradient must yield nothing"
+    let quiet_ctx = Ctx::training();
+    let tracked_ctx = one_pass(&mut tracked, 1);
+    assert!(
+        quiet_ctx.grads().is_empty(),
+        "a layer that ran no backward pass must hold no gradient"
     );
-    assert_eq!(tracked.parameters().len(), 2);
+    assert_eq!(tracked_ctx.grads().len(), 2);
     opt.step();
-    opt.update(0, &mut quiet, 1.0);
-    opt.update(1, &mut tracked, 1.0);
+    opt.update(0, &mut quiet, quiet_ctx.grads(), 1.0);
+    opt.update(1, &mut tracked, tracked_ctx.grads(), 1.0);
 
     // Step 2: both hold gradients
-    one_pass(&mut quiet);
-    one_pass(&mut tracked);
-    assert_eq!(quiet.parameters().len(), 2);
+    let quiet_ctx = one_pass(&mut quiet, 0);
+    let tracked_ctx = one_pass(&mut tracked, 1);
+    assert_eq!(quiet_ctx.grads().len(), 2);
     opt.step();
-    opt.update(0, &mut quiet, 1.0);
-    opt.update(1, &mut tracked, 1.0);
+    opt.update(0, &mut quiet, quiet_ctx.grads(), 1.0);
+    opt.update(1, &mut tracked, tracked_ctx.grads(), 1.0);
 
     // Control 1: `tracked` alone, on the same 2-step schedule and its own optimizer
     let mut tracked_control = pass_through_dense();
     let mut tracked_control_opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
     for _ in 0..2 {
-        one_pass(&mut tracked_control);
+        let ctx = one_pass(&mut tracked_control, 1);
         tracked_control_opt.step();
-        tracked_control_opt.update(1, &mut tracked_control, 1.0);
+        tracked_control_opt.update(1, &mut tracked_control, ctx.grads(), 1.0);
     }
 
     // Control 2: `quiet` alone, on the 1 step it takes part in, and its own optimizer
     let mut quiet_control = pass_through_dense();
     let mut quiet_control_opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
-    one_pass(&mut quiet_control);
+    let quiet_control_ctx = one_pass(&mut quiet_control, 0);
     quiet_control_opt.step();
-    quiet_control_opt.update(0, &mut quiet_control, 1.0);
+    quiet_control_opt.update(0, &mut quiet_control, quiet_control_ctx.grads(), 1.0);
 
     assert_same_kernel(
         &dense_kernel(&tracked),
@@ -1286,19 +1296,16 @@ fn a_second_layer_moves_no_state_of_the_first() {
     );
 }
 
-/// A stand-in for a layer whose parameter roster changes between steps
+/// A stand-in for a layer whose gradient roster changes between steps
 ///
-/// It holds 2 tensors of equal length and can withhold the gradient of the first. No layer of
-/// the crate can be built that way yet, because none supports `use_bias` or `scale`. The
-/// optimizer contract must hold for such a layer all the same, and this is the shape that
-/// contract is about to meet
+/// It holds 2 tensors of equal length, and the store of a pass can carry the gradient of the
+/// second one alone. No layer of the crate produced that shape when this test was written, and
+/// the optimizer contract must hold for it all the same
 struct RosterLayer {
-    /// The tensor that the layer can withhold
+    /// The tensor whose gradient the store can leave out
     gamma: Vec<f32>,
-    /// The tensor that the layer always yields
+    /// The tensor whose gradient the store always holds
     beta: Vec<f32>,
-    /// Whether `gamma` currently has a gradient
-    gamma_has_grad: bool,
 }
 
 impl RosterLayer {
@@ -1307,7 +1314,6 @@ impl RosterLayer {
         Self {
             gamma: vec![0.0; 4],
             beta: vec![0.0; 4],
-            gamma_has_grad: false,
         }
     }
 }
@@ -1315,30 +1321,16 @@ impl RosterLayer {
 /// The fixed gradient of every tensor of a `RosterLayer`, on every step
 const ROSTER_GRAD: [f32; 4] = [0.5, -0.25, 1.0, -2.0];
 
-impl Layer for RosterLayer {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        Ok(input.clone())
-    }
-
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        Ok(input.clone())
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        Ok(grad_output.clone())
-    }
-
+impl LayerBase for RosterLayer {
     fn param_count(&self) -> ParamCounts {
         ParamCounts::trainable(self.gamma.len() + self.beta.len())
     }
 
-    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
-        let mut params = Vec::new();
-        if self.gamma_has_grad {
-            params.push(ParamGrad::no_decay("gamma", &mut self.gamma, &ROSTER_GRAD));
-        }
-        params.push(ParamGrad::no_decay("beta", &mut self.beta, &ROSTER_GRAD));
-        params
+    fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
+        vec![
+            ParamRef::no_decay("gamma", &mut self.gamma),
+            ParamRef::no_decay("beta", &mut self.beta),
+        ]
     }
 
     fn weights(&self) -> Vec<WeightRef<'_>> {
@@ -1350,37 +1342,50 @@ impl Layer for RosterLayer {
     }
 }
 
+/// The gradient store of 1 step of a `RosterLayer`, at layer position 0
+///
+/// `beta` always holds a gradient. `gamma` holds one only when `with_gamma` is set, which is
+/// how the test makes a tensor join the roster on a later step
+fn roster_grads(with_gamma: bool) -> Ctx {
+    let mut ctx = Ctx::training();
+    if with_gamma {
+        ctx.add_grad("gamma", Array::from_vec(ROSTER_GRAD.to_vec()).into_dyn())
+            .unwrap();
+    }
+    ctx.add_grad("beta", Array::from_vec(ROSTER_GRAD.to_vec()).into_dyn())
+        .unwrap();
+    ctx
+}
+
 /// A tensor that joins the parameter roster on a later step must not take the optimizer state
 /// of a tensor that was there first
 ///
-/// `gamma` is the first entry of the roster and it is absent on step 1. A positional key gives
-/// its slot to `beta` on step 1, and hands that slot back to `gamma` on step 2. The 2 tensors
-/// have equal length, so a length check reports nothing
+/// `gamma` is the first entry of the roster and it holds no gradient on step 1. A positional
+/// key gives its slot to `beta` on step 1, and hands that slot back to `gamma` on step 2. The 2
+/// tensors have equal length, so a length check reports nothing
 #[test]
 fn a_tensor_joining_the_roster_must_not_take_another_tensor_state() {
     // Run under test: gamma joins on step 2
     let mut layer = RosterLayer::new();
     let mut opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
     opt.step();
-    opt.update(0, &mut layer, 1.0);
-    layer.gamma_has_grad = true;
+    opt.update(0, &mut layer, roster_grads(false).grads(), 1.0);
     opt.step();
-    opt.update(0, &mut layer, 1.0);
+    opt.update(0, &mut layer, roster_grads(true).grads(), 1.0);
 
     // Control for beta: the same 2 steps, and gamma never joins
     let mut beta_control = RosterLayer::new();
     let mut beta_control_opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
     for _ in 0..2 {
         beta_control_opt.step();
-        beta_control_opt.update(0, &mut beta_control, 1.0);
+        beta_control_opt.update(0, &mut beta_control, roster_grads(false).grads(), 1.0);
     }
 
     // Control for gamma: 1 step from a zero momentum buffer of its own
     let mut gamma_control = RosterLayer::new();
-    gamma_control.gamma_has_grad = true;
     let mut gamma_control_opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
     gamma_control_opt.step();
-    gamma_control_opt.update(0, &mut gamma_control, 1.0);
+    gamma_control_opt.update(0, &mut gamma_control, roster_grads(true).grads(), 1.0);
 
     for i in 0..4 {
         assert!(
@@ -1411,19 +1416,24 @@ const FIRST_LAYER_GRAD: [f32; 2] = [0.7, -1.3];
 /// and the test can see it
 const SECOND_LAYER_GRAD: [f32; 2] = [-0.4, 2.1];
 
-/// Runs 1 forward and 1 backward pass over a fixed input and the given upstream gradient
+/// Runs 1 forward and 1 backward pass over a fixed input and the given upstream gradient, and
+/// gives the context back
 ///
 /// The activation is Linear and the input is fixed, so the parameter gradients are the same on
-/// every call. The schedules below are therefore deterministic
-fn one_pass_with(layer: &mut Dense, grad_out: [f32; 2]) {
+/// every call. The schedules below are therefore deterministic. `scope` is the position the
+/// caller gives the layer, so every gradient reaches the address that `update` reads
+fn one_pass_with(layer: &mut Dense, scope: usize, grad_out: [f32; 2]) -> Ctx {
+    let mut ctx = Ctx::training();
+    ctx.set_owner(scope);
     let x = Array::from_shape_vec((1, 2), vec![1.0_f32, 2.0])
         .unwrap()
         .into_dyn();
-    let _ = layer.forward(&x).unwrap();
+    let _ = layer.forward(&x, &mut ctx).unwrap();
     let grad = Array::from_shape_vec((1, 2), grad_out.to_vec())
         .unwrap()
         .into_dyn();
-    layer.backward(&grad).unwrap();
+    layer.backward(&grad, &mut ctx).unwrap();
+    ctx
 }
 
 /// Asserts that an optimizer keys its per-parameter state on the layer index as well as on the
@@ -1443,11 +1453,11 @@ fn scope_must_separate_2_same_shape_layers<O: Optimizer>(make: impl Fn() -> O, o
     let mut second = pass_through_dense();
     let mut opt = make();
     for _ in 0..STEPS {
-        one_pass_with(&mut first, FIRST_LAYER_GRAD);
-        one_pass_with(&mut second, SECOND_LAYER_GRAD);
+        let first_ctx = one_pass_with(&mut first, 0, FIRST_LAYER_GRAD);
+        let second_ctx = one_pass_with(&mut second, 1, SECOND_LAYER_GRAD);
         opt.step();
-        opt.update(0, &mut first, 1.0);
-        opt.update(1, &mut second, 1.0);
+        opt.update(0, &mut first, first_ctx.grads(), 1.0);
+        opt.update(1, &mut second, second_ctx.grads(), 1.0);
     }
 
     // Control: the same schedule, with 1 optimizer per layer, so no state can cross
@@ -1456,12 +1466,12 @@ fn scope_must_separate_2_same_shape_layers<O: Optimizer>(make: impl Fn() -> O, o
     let mut first_opt = make();
     let mut second_opt = make();
     for _ in 0..STEPS {
-        one_pass_with(&mut first_control, FIRST_LAYER_GRAD);
-        one_pass_with(&mut second_control, SECOND_LAYER_GRAD);
+        let first_ctx = one_pass_with(&mut first_control, 0, FIRST_LAYER_GRAD);
+        let second_ctx = one_pass_with(&mut second_control, 1, SECOND_LAYER_GRAD);
         first_opt.step();
         second_opt.step();
-        first_opt.update(0, &mut first_control, 1.0);
-        second_opt.update(1, &mut second_control, 1.0);
+        first_opt.update(0, &mut first_control, first_ctx.grads(), 1.0);
+        second_opt.update(1, &mut second_control, second_ctx.grads(), 1.0);
     }
 
     let first_kernel = dense_kernel(&first);
@@ -1564,9 +1574,9 @@ fn sgd_momentum_velocity_must_survive_between_steps() {
     // 1 plain SGD step gives the displacement `lr * g` of every element
     let mut plain = pass_through_dense();
     let mut plain_opt = SGD::new(0.1, 0.0, false, 0.0).unwrap();
-    one_pass(&mut plain);
+    let plain_ctx = one_pass(&mut plain, 0);
     plain_opt.step();
-    plain_opt.update(0, &mut plain, 1.0);
+    plain_opt.update(0, &mut plain, plain_ctx.grads(), 1.0);
     let start = dense_kernel(&pass_through_dense());
     let unit = &start - &dense_kernel(&plain);
     assert!(
@@ -1578,9 +1588,9 @@ fn sgd_momentum_velocity_must_survive_between_steps() {
         let mut layer = pass_through_dense();
         let mut opt = SGD::new(0.1, 0.9, nesterov, 0.0).unwrap();
         for _ in 0..3 {
-            one_pass(&mut layer);
+            let ctx = one_pass(&mut layer, 0);
             opt.step();
-            opt.update(0, &mut layer, 1.0);
+            opt.update(0, &mut layer, ctx.grads(), 1.0);
         }
         let got = dense_kernel(&layer);
         for ((g, s), u) in got.iter().zip(start.iter()).zip(unit.iter()) {

@@ -46,7 +46,7 @@ pub use max_pooling_2d::MaxPooling2D;
 pub use max_pooling_3d::MaxPooling3D;
 
 // The `pub(in ...) use` lines below export the macros by path, so callers import them explicitly
-/// Generates the standard `Layer` function implementations for global pooling layers
+/// Generates the `UnaryLayer` function implementations for global pooling layers
 ///
 /// Global pooling reduces the spatial dimensions of the input to a single value per channel. It
 /// applies a pooling operation (max or average) across all spatial dimensions. The output shape
@@ -54,24 +54,36 @@ pub use max_pooling_3d::MaxPooling3D;
 ///
 /// # Generated Functions
 ///
-/// - `known_input_shape()` - the shape of the last input the forward pass saw, or `None` before
-///   the first pass
+/// - `build()` - records the shape the layer serves, and refuses a rank it cannot pool
 /// - `compute_output_shape()` - drops every spatial axis and keeps the batch axis and the
 ///   channel axis
-/// - all functions from the `no_trainable_parameters_layer_functions!()` macro
 ///
 /// # Requirements
 ///
 /// The implementing struct must have the field:
-/// - `input_shape: Vec<usize>` - shape of the last input the forward pass saw
+/// - `built: Option<Shape>` - the shape the layer was built for
 ///
 /// The macro takes the layer name and the rank the layer accepts, both of which reach the
 /// error messages
 macro_rules! layer_functions_global_pooling {
     ($layer:literal, $rank:literal) => {
-        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
-            (!self.input_shape.is_empty())
-                .then(|| $crate::neural_network::Shape::known(&self.input_shape))
+        /// Records the shape the layer serves. The layer holds no array, so nothing is
+        /// allocated. The shape algebra checks the rank
+        fn build(
+            &mut self,
+            input: &$crate::neural_network::Shape,
+        ) -> Result<(), $crate::error::Error> {
+            let Some(built) = $crate::neural_network::layers::validation::start_build(
+                &self.built,
+                $layer,
+                input,
+            )?
+            else {
+                return Ok(());
+            };
+            $crate::neural_network::traits::UnaryLayer::compute_output_shape(self, &built)?;
+            self.built = Some(built);
+            Ok(())
         }
 
         fn compute_output_shape(
@@ -87,12 +99,32 @@ macro_rules! layer_functions_global_pooling {
                 &[tail[tail.len() - 1]],
             ))
         }
+    };
+}
+
+/// Generates the `LayerBase` function implementations that every pooling layer shares
+///
+/// # Generated Functions
+///
+/// - `known_input_shapes()` - the shape the layer was built for
+/// - `is_built()` - whether the layer holds a build
+/// - `build_config()` - the same shape with the batch axis freed, for a checkpoint
+/// - all functions from the `no_trainable_parameters_layer_functions!()` macro
+///
+/// # Requirements
+///
+/// The implementing struct must have the field:
+/// - `built: Option<Shape>` - the shape the layer was built for
+macro_rules! layer_base_functions_pooling {
+    () => {
+        $crate::neural_network::layers::built_layer_shape_functions!();
 
         $crate::neural_network::layers::no_trainable_parameters_layer_functions!();
     };
 }
+pub(in crate::neural_network::layers::pooling) use layer_base_functions_pooling;
 
-/// Generates the standard `Layer` function implementations for 1D pooling layers
+/// Generates the `UnaryLayer` function implementations for 1D pooling layers
 ///
 /// Applies to pooling layers that operate on 3D tensors with shape
 /// `[batch_size, length, channels]` and produce outputs with shape
@@ -102,11 +134,8 @@ macro_rules! layer_functions_global_pooling {
 ///
 /// - `build()` - records the shape the layer serves, and refuses a shape the window
 ///   does not fit
-/// - `known_input_shape()` - the shape the layer was built for
-/// - `build_config()` - the same shape with the batch axis freed, for a checkpoint
 /// - `compute_output_shape()` - applies the pooling window to every spatial axis, and keeps the
 ///   batch axis and the channel axis
-/// - all functions from the `no_trainable_parameters_layer_functions!()` macro
 ///
 /// # Requirements
 ///
@@ -132,16 +161,10 @@ macro_rules! layer_functions_1d_pooling {
             else {
                 return Ok(());
             };
-            self.compute_output_shape(&built)?;
+            $crate::neural_network::traits::UnaryLayer::compute_output_shape(self, &built)?;
             self.built = Some(built);
             Ok(())
         }
-
-        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
-            self.built.clone()
-        }
-
-        $crate::neural_network::layers::build_config_function!();
 
         fn compute_output_shape(
             &self,
@@ -160,12 +183,10 @@ macro_rules! layer_functions_1d_pooling {
                 &output_shape[1..],
             ))
         }
-
-        $crate::neural_network::layers::no_trainable_parameters_layer_functions!();
     };
 }
 
-/// Generates the standard `Layer` function implementations for 2D pooling layers
+/// Generates the `UnaryLayer` function implementations for 2D pooling layers
 ///
 /// Applies to pooling layers that operate on 4D tensors with shape
 /// `[batch_size, height, width, channels]` and produce outputs with shape
@@ -175,11 +196,8 @@ macro_rules! layer_functions_1d_pooling {
 ///
 /// - `build()` - records the shape the layer serves, and refuses a shape the window
 ///   does not fit
-/// - `known_input_shape()` - the shape the layer was built for
-/// - `build_config()` - the same shape with the batch axis freed, for a checkpoint
 /// - `compute_output_shape()` - applies the pooling window to every spatial axis, and keeps the
 ///   batch axis and the channel axis
-/// - all functions from the `no_trainable_parameters_layer_functions!()` macro
 ///
 /// # Requirements
 ///
@@ -205,16 +223,10 @@ macro_rules! layer_functions_2d_pooling {
             else {
                 return Ok(());
             };
-            self.compute_output_shape(&built)?;
+            $crate::neural_network::traits::UnaryLayer::compute_output_shape(self, &built)?;
             self.built = Some(built);
             Ok(())
         }
-
-        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
-            self.built.clone()
-        }
-
-        $crate::neural_network::layers::build_config_function!();
 
         fn compute_output_shape(
             &self,
@@ -237,12 +249,10 @@ macro_rules! layer_functions_2d_pooling {
                 &output_shape[1..],
             ))
         }
-
-        $crate::neural_network::layers::no_trainable_parameters_layer_functions!();
     };
 }
 
-/// Generates the standard `Layer` function implementations for 3D pooling layers
+/// Generates the `UnaryLayer` function implementations for 3D pooling layers
 ///
 /// Applies to pooling layers that operate on 5D tensors with shape
 /// `[batch_size, depth, height, width, channels]`. These layers produce outputs with shape
@@ -252,11 +262,8 @@ macro_rules! layer_functions_2d_pooling {
 ///
 /// - `build()` - records the shape the layer serves, and refuses a shape the window
 ///   does not fit
-/// - `known_input_shape()` - the shape the layer was built for
-/// - `build_config()` - the same shape with the batch axis freed, for a checkpoint
 /// - `compute_output_shape()` - applies the pooling window to every spatial axis, and keeps the
 ///   batch axis and the channel axis
-/// - all functions from the `no_trainable_parameters_layer_functions!()` macro
 ///
 /// # Requirements
 ///
@@ -283,16 +290,10 @@ macro_rules! layer_functions_3d_pooling {
             else {
                 return Ok(());
             };
-            self.compute_output_shape(&built)?;
+            $crate::neural_network::traits::UnaryLayer::compute_output_shape(self, &built)?;
             self.built = Some(built);
             Ok(())
         }
-
-        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
-            self.built.clone()
-        }
-
-        $crate::neural_network::layers::build_config_function!();
 
         fn compute_output_shape(
             &self,
@@ -315,8 +316,6 @@ macro_rules! layer_functions_3d_pooling {
                 &output_shape[1..],
             ))
         }
-
-        $crate::neural_network::layers::no_trainable_parameters_layer_functions!();
     };
 }
 pub(in crate::neural_network::layers::pooling) use layer_functions_1d_pooling;

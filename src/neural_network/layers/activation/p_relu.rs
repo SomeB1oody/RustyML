@@ -4,11 +4,9 @@
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::validation::{start_build, validate_weight_shape};
-use crate::neural_network::layers::{
-    build_config_function, build_on_forward, named_weight_layer_functions,
-};
-use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::layers::{built_layer_shape_functions, named_weight_layer_functions};
+use crate::neural_network::traits::{LayerBase, ParamRef, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, Tensor};
 use crate::parallel_gates::cheap_map_parallel_threshold;
 use ndarray::{ArrayD, Axis, Zip};
 
@@ -52,9 +50,10 @@ use ndarray::{ArrayD, Axis, Zip};
 /// use rustyml::neural_network::layers::{Activation, Dense, PReLU};
 /// use rustyml::neural_network::losses::MeanSquaredError;
 /// use rustyml::neural_network::optimizers::SGD;
+/// use rustyml::neural_network::Ctx;
 /// use rustyml::neural_network::Shape;
 /// use rustyml::neural_network::sequential::SequentialBuilder;
-/// use rustyml::neural_network::traits::Layer;
+/// use rustyml::neural_network::traits::UnaryLayer;
 ///
 /// // 2 samples of 3 features, with negative values that exercise the learned branch
 /// let x = Array2::from_shape_vec((2, 3), vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0])
@@ -65,7 +64,8 @@ use ndarray::{ArrayD, Axis, Zip};
 /// // The layer alone starts from a slope of 0.25 on each of the 3 features
 /// let mut slopes = PReLU::new(0.25).unwrap();
 /// slopes.build(&Shape::known(x.shape())).unwrap();
-/// let out = slopes.predict(&x).unwrap();
+/// let mut ctx = Ctx::inference();
+/// let out = slopes.forward(&x, &mut ctx).unwrap();
 /// assert_eq!(out[[0, 0]], -0.25);
 /// assert_eq!(out[[0, 1]], 2.0);
 ///
@@ -105,10 +105,6 @@ pub struct PReLU {
     alpha: ArrayD<f32>,
     /// Shape the layer was built for, batch axis first. `None` before the build
     built: Option<Shape>,
-    /// Cached input from the forward pass, used during backpropagation
-    input_cache: Option<Tensor>,
-    /// Stored slope gradients, kept allocated across steps and overwritten on each backward
-    grad_alpha: Option<ArrayD<f32>>,
 }
 
 impl PReLU {
@@ -146,8 +142,6 @@ impl PReLU {
             alpha_init: alpha,
             alpha: ArrayD::from_elem(Vec::new(), alpha),
             built: None,
-            input_cache: None,
-            grad_alpha: None,
         })
     }
 
@@ -161,7 +155,6 @@ impl PReLU {
             param_shape[axis - 1] = 1;
         }
         self.alpha = ArrayD::from_elem(param_shape, self.alpha_init);
-        self.grad_alpha = None;
     }
 
     /// Makes the named axes share 1 slope, and resizes the slope array to match
@@ -191,8 +184,8 @@ impl PReLU {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If an axis is 0, which is the batch axis and is always
-    ///   shared, or appears more than 1 time. [`Layer::build`] reports an axis that the rank of
-    ///   the real input does not hold
+    ///   shared, or appears more than 1 time. [`UnaryLayer::build`] reports an axis that the
+    ///   rank of the real input does not hold
     pub fn with_shared_axes(mut self, shared_axes: Vec<usize>) -> Result<Self, Error> {
         let mut sorted = shared_axes;
         sorted.sort_unstable();
@@ -281,7 +274,7 @@ impl PReLU {
         Ok(())
     }
 
-    /// Applies the transform, which both `forward` and `predict` share
+    /// Applies the transform. `forward` calls this on every pass, training and inference alike
     fn activate(&self, input: &Tensor) -> Result<Tensor, Error> {
         self.validate_input(input)?;
 
@@ -308,7 +301,33 @@ impl PReLU {
     }
 }
 
-impl Layer for PReLU {
+impl LayerBase for PReLU {
+    fn layer_type(&self) -> &str {
+        "PReLU"
+    }
+
+    fn param_count(&self) -> ParamCounts {
+        ParamCounts::trainable(self.alpha.len())
+    }
+
+    fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
+        let Self { alpha, .. } = self;
+        vec![ParamRef::no_decay(
+            "alpha",
+            alpha
+                .as_slice_mut()
+                .expect("the slopes are kept in C order"),
+        )]
+    }
+
+    built_layer_shape_functions!();
+
+    named_weight_layer_functions!(
+        trainable "alpha" => alpha,
+    );
+}
+
+impl UnaryLayer for PReLU {
     /// Allocates 1 slope per position of the input shape, with the batch axis removed
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "PReLU", input)? else {
@@ -347,16 +366,15 @@ impl Layer for PReLU {
     ///
     /// The output alone cannot serve. A slope of 0 maps the whole negative side onto 0, so the
     /// output no longer says which elements were negative
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        build_on_forward!(self, input);
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        if self.built.is_none() {
+            return Err(Error::not_built("PReLU"));
+        }
         let output = self.activate(input)?;
-        self.input_cache = Some(input.clone());
+        if ctx.is_training() {
+            ctx.push_cache(input.clone());
+        }
         Ok(output)
-    }
-
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        self.activate(input)
     }
 
     /// Splits the upstream gradient between the input and the slopes
@@ -365,18 +383,12 @@ impl Layer for PReLU {
     /// the slope where the input was below 0, and it is 0 at exactly 0. The slope gradient sums
     /// `g * x` over every negative element that the slope covers, which is the batch axis and
     /// every shared axis
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let Self {
-            shared_axes,
-            alpha,
-            input_cache,
-            grad_alpha,
-            ..
+            shared_axes, alpha, ..
         } = self;
 
-        let Some(input) = input_cache.as_ref() else {
-            return Err(Error::forward_pass_not_run("PReLU"));
-        };
+        let input: Tensor = ctx.pop_cache("PReLU")?;
         if grad_output.shape() != input.shape() {
             return Err(Error::shape_mismatch(input.shape(), grad_output.shape()));
         }
@@ -399,14 +411,14 @@ impl Layer for PReLU {
         if input.len() >= cheap_map_parallel_threshold() {
             Zip::from(&mut grad_input)
                 .and(&mut contribution)
-                .and(input)
+                .and(&input)
                 .and(grad_output)
                 .and(&slopes)
                 .par_for_each(split);
         } else {
             Zip::from(&mut grad_input)
                 .and(&mut contribution)
-                .and(input)
+                .and(&input)
                 .and(grad_output)
                 .and(&slopes)
                 .for_each(split);
@@ -421,26 +433,10 @@ impl Layer for PReLU {
             reduced = reduced.sum_axis(target).insert_axis(target);
         }
 
-        let grad = grad_alpha.get_or_insert_with(|| ArrayD::zeros(alpha.raw_dim()));
-        grad.assign(&reduced);
+        ctx.add_grad("alpha", reduced.as_standard_layout().to_owned().into_dyn())?;
 
         Ok(grad_input)
     }
-
-    fn layer_type(&self) -> &str {
-        "PReLU"
-    }
-
-    fn known_input_shape(&self) -> Option<Shape> {
-        // A shared axis accepts any extent, so the observed shape can differ from the
-        // configured one
-        match &self.input_cache {
-            Some(input) => Some(Shape::known(input.shape())),
-            None => self.built.clone(),
-        }
-    }
-
-    build_config_function!();
 
     /// The layer keeps every extent, and it refuses a shape its slope array cannot cover
     ///
@@ -484,30 +480,4 @@ impl Layer for PReLU {
         }
         Ok(input.clone())
     }
-
-    fn param_count(&self) -> ParamCounts {
-        ParamCounts::trainable(self.alpha.len())
-    }
-
-    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
-        let Self {
-            alpha, grad_alpha, ..
-        } = self;
-        let mut params = Vec::new();
-        if let Some(grad) = grad_alpha.as_ref() {
-            params.push(ParamGrad::no_decay(
-                "alpha",
-                alpha
-                    .as_slice_mut()
-                    .expect("the slopes are kept in C order"),
-                grad.as_slice()
-                    .expect("the gradient buffer is kept in C order"),
-            ));
-        }
-        params
-    }
-
-    named_weight_layer_functions!(
-        trainable "alpha" => alpha,
-    );
 }

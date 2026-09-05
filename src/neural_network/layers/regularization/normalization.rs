@@ -443,29 +443,16 @@ pub use unit_normalization::{UnitNormalization, UnitNormalizationAxis};
 // Macros are defined after the `mod` declarations and path-exported via a `pub(in ...) use`
 // re-export. Callers therefore import them explicitly instead of relying on textual macro
 // ordering
-/// Common implementation of the 2 shape methods of a normalization layer
+/// Common implementation of the pure output-shape method of a normalization layer
 ///
 /// A normalization layer changes values and not extents, so its output shape repeats its input
 /// shape. The macro takes the layer name, which reaches the error messages
 ///
 /// # Generated Functions
 ///
-/// - `known_input_shape()` - the shape the layer was built for, or `None` before the build
-/// - `build_config()` - the same shape with the batch axis freed, for a checkpoint
 /// - `compute_output_shape()` - the input shape, unchanged
-///
-/// # Requirements
-///
-/// The implementing struct must have the field:
-/// - `built: Option<Shape>` - the shape the layer was built for
-macro_rules! normalization_layer_shape_functions {
+macro_rules! normalization_layer_output_shape_function {
     ($layer:literal) => {
-        fn known_input_shape(&self) -> Option<$crate::neural_network::Shape> {
-            self.built.clone()
-        }
-
-        $crate::neural_network::layers::build_config_function!();
-
         fn compute_output_shape(
             &self,
             input: &$crate::neural_network::Shape,
@@ -476,7 +463,7 @@ macro_rules! normalization_layer_shape_functions {
     };
 }
 
-pub(in crate::neural_network::layers::regularization::normalization) use normalization_layer_shape_functions;
+pub(in crate::neural_network::layers::regularization::normalization) use normalization_layer_output_shape_function;
 
 /// Unit tests for the group-normalization core and its deterministic fold kernels
 #[cfg(test)]

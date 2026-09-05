@@ -5,17 +5,15 @@ use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::regularization::dropout::{
     spatial_dropout_backward, spatial_dropout_scale,
 };
-use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
-use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::validation::{
     validate_input_ndim, validate_rate,
 };
 use crate::neural_network::layers::validation::{start_build, validate_built_input};
 use crate::neural_network::layers::{
-    build_on_forward, built_layer_shape_functions, no_trainable_parameters_layer_functions,
+    built_layer_shape_functions, no_trainable_parameters_layer_functions,
 };
-use crate::neural_network::traits::Layer;
-use crate::neural_network::{Shape, Tensor};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
+use crate::neural_network::{Ctx, Shape, StateSlot, Tensor};
 use crate::parallel_gates::spatial_dropout_scale_parallel_min_elems;
 use ndarray::IxDyn;
 use ndarray_rand::rand::rngs::StdRng;
@@ -31,7 +29,8 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 ///
 /// ```rust
 /// use rustyml::neural_network::layers::*;
-/// use rustyml::neural_network::traits::Layer;
+/// use rustyml::neural_network::traits::UnaryLayer;
+/// use rustyml::neural_network::Ctx;
 /// use ndarray::Array5;
 ///
 /// // Create a SpatialDropout3D layer with 20% dropout rate
@@ -41,7 +40,8 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// let input = Array5::ones((32, 16, 28, 28, 64)).into_dyn();
 ///
 /// // During training, ~20% of channels will be set to 0
-/// let output = spatial_dropout.forward(&input).unwrap();
+/// let mut ctx = Ctx::training();
+/// let output = spatial_dropout.forward_mut(&input, &mut ctx).unwrap();
 /// ```
 #[derive(Debug)]
 pub struct SpatialDropout3D {
@@ -49,10 +49,6 @@ pub struct SpatialDropout3D {
     rate: f32,
     /// Shape the layer was built for, batch axis first. `None` before the build
     built: Option<Shape>,
-    /// Binary mask used during training to determine which channels to drop
-    mask: Option<Tensor>,
-    /// Whether the layer is in training mode or inference mode
-    training: bool,
     /// Random number generator backing mask sampling
     rng: StdRng,
 }
@@ -82,8 +78,6 @@ impl SpatialDropout3D {
         Ok(SpatialDropout3D {
             rate,
             built: None,
-            mask: None,
-            training: true,
             rng: crate::random::make_rng(None),
         })
     }
@@ -104,11 +98,30 @@ impl SpatialDropout3D {
         self.rng = crate::random::make_rng(Some(random_state));
         self
     }
-
-    mode_dependent_layer_set_training!();
 }
 
-impl Layer for SpatialDropout3D {
+impl LayerBase for SpatialDropout3D {
+    fn layer_type(&self) -> &str {
+        "SpatialDropout3D"
+    }
+
+    built_layer_shape_functions!();
+
+    no_trainable_parameters_layer_functions!();
+
+    /// Takes back the random stream that the forward pass advanced
+    ///
+    /// The stream is the only state of the layer that a forward pass changes. A training pass
+    /// leaves the advanced stream in the context, and this moves it into the layer, so the next
+    /// pass draws the values that follow
+    fn apply_state(&mut self, state: &mut StateSlot<'_>) {
+        if let Some(rng) = state.take::<StdRng>("rng") {
+            self.rng = rng;
+        }
+    }
+}
+
+impl UnaryLayer for SpatialDropout3D {
     /// Records the shape the layer serves. The layer holds no array, so nothing is
     /// allocated
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
@@ -120,9 +133,12 @@ impl Layer for SpatialDropout3D {
         Ok(())
     }
 
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+    /// Drops whole channels of a `(batch_size, depth, height, width, channels)` tensor
+    ///
+    /// An inference pass draws nothing and passes the input through unchanged, which is what
+    /// inverted dropout needs
+    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         // `rate` was validated in `new()`
-        build_on_forward!(self, input);
         validate_built_input(&self.built, "SpatialDropout3D", input.shape())?;
         validate_input_ndim(
             input.ndim(),
@@ -130,7 +146,7 @@ impl Layer for SpatialDropout3D {
             "SpatialDropout3D (batch_size, depth, height, width, channels)",
         )?;
 
-        if !self.training {
+        if !ctx.is_training() {
             // Inference passes input through unchanged
             return Ok(input.clone());
         }
@@ -148,12 +164,19 @@ impl Layer for SpatialDropout3D {
         let batch_size = shape[0];
         let channels = shape[shape.len() - 1];
 
+        // The stream of the pass, which starts from the stream of the layer. The draw below
+        // advances the copy in the context, and `apply_state` moves it back into the layer
+        let mut rng = ctx
+            .take_state::<StdRng>("rng")
+            .unwrap_or_else(|| self.rng.clone());
+
         // Per-channel mask of shape (batch_size, channels): 1 keep/drop value per channel
         let mut mask_2d = Tensor::random_using(
             IxDyn(&[batch_size, channels]),
             Uniform::new(0.0, 1.0).unwrap(),
-            &mut self.rng,
+            &mut rng,
         );
+        ctx.set_state("rng", rng);
 
         // Threshold the samples into a binary keep/drop mask. The mask holds 1 value per
         // (batch, channel), so it stays far too small for rayon to pay
@@ -168,50 +191,30 @@ impl Layer for SpatialDropout3D {
             spatial_dropout_scale_parallel_min_elems(),
         );
 
-        // Store the small per-channel mask for backpropagation
-        self.mask = Some(mask_2d);
+        // Park the small per-channel mask for backpropagation
+        ctx.push_cache(mask_2d);
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` was validated in `new()`. Only the runtime input needs a check.
-        validate_built_input(&self.built, "SpatialDropout3D", input.shape())?;
-        validate_input_ndim(
-            input.ndim(),
-            5,
-            "SpatialDropout3D (batch_size, depth, height, width, channels)",
-        )?;
-
-        // Inference passes input through unchanged
-        Ok(input.clone())
-    }
-
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
+    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+        // A pass that drew no mask parked none, and the helper reads the mode and the rate
+        // before it reads the mask. It reports the missing mask with the same error that
+        // `pop_cache` gives, so a backward pass with no forward pass behind it still refuses
+        let mask = ctx.pop_cache::<Tensor>("SpatialDropout3D").ok();
         spatial_dropout_backward(
             grad_output,
-            &self.mask,
-            self.training,
+            &mask,
+            ctx.is_training(),
             self.rate,
             "SpatialDropout3D",
             spatial_dropout_scale_parallel_min_elems(),
         )
     }
 
-    fn layer_type(&self) -> &str {
-        "SpatialDropout3D"
-    }
-
-    built_layer_shape_functions!();
-
     /// The layer changes values and not extents
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         input.check_rank("SpatialDropout3D", 5)?;
         Ok(input.clone())
     }
-
-    no_trainable_parameters_layer_functions!();
-
-    mode_dependent_layer_trait!();
 }

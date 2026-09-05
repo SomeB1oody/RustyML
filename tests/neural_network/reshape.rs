@@ -5,6 +5,7 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, Array3, Array4, IxDyn};
+use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
@@ -15,7 +16,7 @@ use rustyml::neural_network::layers::reshape::Reshape;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::SequentialBuilder;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
@@ -60,7 +61,7 @@ fn ramp(count: usize) -> Vec<f32> {
 fn reshape_forward_splits_rank_2_into_rank_3() {
     let mut r = Reshape::new(vec![2, 2]).unwrap();
     let x = t2(5, 4, ramp(20));
-    let out = r.forward(&x).unwrap();
+    let out = r.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[5, 2, 2]);
 }
 
@@ -69,7 +70,7 @@ fn reshape_forward_splits_rank_2_into_rank_3() {
 fn reshape_forward_merges_rank_3_into_rank_2() {
     let mut r = Reshape::new(vec![4]).unwrap();
     let x = t3(5, 2, 2, ramp(20));
-    let out = r.forward(&x).unwrap();
+    let out = r.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[5, 4]);
 }
 
@@ -78,7 +79,7 @@ fn reshape_forward_merges_rank_3_into_rank_2() {
 fn reshape_forward_infers_leading_axis() {
     let mut r = Reshape::new(vec![-1, 2]).unwrap();
     let x = t2(5, 4, ramp(20));
-    let out = r.forward(&x).unwrap();
+    let out = r.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[5, 2, 2]);
 }
 
@@ -87,7 +88,7 @@ fn reshape_forward_infers_leading_axis() {
 fn reshape_forward_infers_trailing_axis() {
     let mut r = Reshape::new(vec![2, -1]).unwrap();
     let x = t2(5, 4, ramp(20));
-    let out = r.forward(&x).unwrap();
+    let out = r.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[5, 2, 2]);
 }
 
@@ -96,7 +97,7 @@ fn reshape_forward_infers_trailing_axis() {
 fn reshape_forward_single_inferred_axis_folds_all_axes() {
     let mut r = Reshape::new(vec![-1]).unwrap();
     let x = t3(5, 2, 3, ramp(30));
-    let out = r.forward(&x).unwrap();
+    let out = r.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[5, 6]);
 }
 
@@ -105,7 +106,7 @@ fn reshape_forward_single_inferred_axis_folds_all_axes() {
 fn reshape_forward_adds_unit_axes() {
     let mut r = Reshape::new(vec![1, 1, 4]).unwrap();
     let x = t2(5, 4, ramp(20));
-    let out = r.forward(&x).unwrap();
+    let out = r.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[5, 1, 1, 4]);
 }
 
@@ -114,7 +115,7 @@ fn reshape_forward_adds_unit_axes() {
 fn reshape_forward_empty_target_gives_rank_1_output() {
     let mut r = Reshape::new(vec![]).unwrap();
     let x = t2(5, 1, ramp(5));
-    let out = r.forward(&x).unwrap();
+    let out = r.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[5]);
 }
 
@@ -123,7 +124,7 @@ fn reshape_forward_empty_target_gives_rank_1_output() {
 fn reshape_forward_rank_1_input_gains_trailing_axis() {
     let mut r = Reshape::new(vec![1]).unwrap();
     let x = t1(ramp(5));
-    let out = r.forward(&x).unwrap();
+    let out = r.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[5, 1]);
 }
 
@@ -134,7 +135,7 @@ fn reshape_forward_rank_1_input_gains_trailing_axis() {
 fn reshape_split_keeps_c_order_values() {
     let mut r = Reshape::new(vec![2, 3]).unwrap();
     let x = t2(2, 6, ramp(12));
-    let out = r.forward(&x).unwrap();
+    let out = r.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     assert_eq!(out.shape(), &[2, 2, 3]);
     let out_slice = out.as_slice().expect("output not contiguous");
@@ -148,7 +149,7 @@ fn reshape_split_keeps_c_order_values() {
 fn reshape_merge_keeps_c_order_values() {
     let mut r = Reshape::new(vec![12]).unwrap();
     let x = t3(2, 3, 4, ramp(24));
-    let out = r.forward(&x).unwrap();
+    let out = r.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     assert_eq!(out.shape(), &[2, 12]);
     let out_slice = out.as_slice().expect("output not contiguous");
@@ -159,23 +160,25 @@ fn reshape_merge_keeps_c_order_values() {
 
 // Reshape: predict
 
-/// The layer has no mode-dependent behavior, so predict and forward give identical outputs
+/// A forward pass with an inference context gives the same output as one with a training
+/// context
 #[test]
 fn reshape_predict_equals_forward() {
     let mut r = Reshape::new(vec![-1, 2]).unwrap();
     let x = t2(3, 4, ramp(12));
 
-    let fwd = r.forward(&x).unwrap();
-    let pred = r.predict(&x).unwrap();
+    let fwd = r.forward_mut(&x, &mut Ctx::training()).unwrap();
+    let pred = r.forward(&x, &mut Ctx::inference()).unwrap();
     assert_allclose(&fwd, &pred, 1e-6_f32);
 }
 
-/// predict needs no cache, so it works on a layer that never ran a forward pass
+/// A forward pass with an inference context needs no build and no cache, so it works on a
+/// layer that never ran a forward pass before
 #[test]
 fn reshape_predict_works_without_forward() {
     let r = Reshape::new(vec![2, 2]).unwrap();
     let x = t2(5, 4, ramp(20));
-    let out = r.predict(&x).unwrap();
+    let out = r.forward(&x, &mut Ctx::inference()).unwrap();
 
     assert_eq!(out.shape(), &[5, 2, 2]);
     let out_slice = out.as_slice().expect("output not contiguous");
@@ -191,11 +194,12 @@ fn reshape_predict_works_without_forward() {
 fn reshape_backward_restores_input_shape_and_values() {
     let mut r = Reshape::new(vec![2, 3]).unwrap();
     let x = t2(2, 6, ramp(12));
-    let out = r.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    let out = r.forward_mut(&x, &mut ctx).unwrap();
     assert_eq!(out.shape(), &[2, 2, 3]);
 
     let grad_output = t3(2, 2, 3, ramp(12).into_iter().map(|v| v * 2.0).collect());
-    let grad_input = r.backward(&grad_output).unwrap();
+    let grad_input = r.backward(&grad_output, &mut ctx).unwrap();
 
     assert_eq!(grad_input.shape(), x.shape());
     let gs = grad_input.as_slice().expect("grad not contiguous");
@@ -244,7 +248,7 @@ fn reshape_new_rejects_extent_below_minus_1() {
 fn reshape_forward_element_count_mismatch_returns_shape_mismatch() {
     let mut r = Reshape::new(vec![2, 3]).unwrap();
     let x = t2(5, 4, ramp(20));
-    let result = r.forward(&x);
+    let result = r.forward_mut(&x, &mut Ctx::training());
     assert!(
         matches!(
             &result,
@@ -261,7 +265,7 @@ fn reshape_forward_element_count_mismatch_returns_shape_mismatch() {
 fn reshape_forward_rejects_rank_0_input() {
     let mut r = Reshape::new(vec![1]).unwrap();
     let x: Tensor = Tensor::zeros(IxDyn(&[]));
-    let result = r.forward(&x);
+    let result = r.forward_mut(&x, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for a rank-0 input, got {:?}",
@@ -274,7 +278,7 @@ fn reshape_forward_rejects_rank_0_input() {
 fn reshape_forward_rejects_empty_input() {
     let mut r = Reshape::new(vec![2, 2]).unwrap();
     let x: Tensor = Tensor::zeros(IxDyn(&[0, 4]));
-    let result = r.forward(&x);
+    let result = r.forward_mut(&x, &mut Ctx::training());
     assert!(
         matches!(result, Err(Error::EmptyInput(_))),
         "expected EmptyInput for an empty input, got {:?}",
@@ -285,10 +289,10 @@ fn reshape_forward_rejects_empty_input() {
 /// backward before any forward pass reports ForwardPassNotRun
 #[test]
 fn reshape_backward_before_forward_returns_err() {
-    let mut r = Reshape::new(vec![2, 2]).unwrap();
-    // No forward call happened yet, so the layer holds no input shape.
+    let r = Reshape::new(vec![2, 2]).unwrap();
+    // No forward call happened yet, so the context holds no cache of this layer.
     let grad = t3(5, 2, 2, ramp(20));
-    let result = r.backward(&grad);
+    let result = r.backward(&grad, &mut Ctx::training());
     assert!(
         matches!(
             result,
@@ -304,11 +308,12 @@ fn reshape_backward_before_forward_returns_err() {
 fn reshape_backward_wrong_grad_shape_returns_err() {
     let mut r = Reshape::new(vec![2, 2]).unwrap();
     let x = t2(5, 4, ramp(20));
-    r.forward(&x).unwrap();
+    let mut ctx = Ctx::training();
+    r.forward_mut(&x, &mut ctx).unwrap();
 
     // The forward output shape is [5, 2, 2]. This gradient keeps the input shape instead.
     let bad_grad = t2(5, 4, ramp(20));
-    let result = r.backward(&bad_grad);
+    let result = r.backward(&bad_grad, &mut ctx);
     assert!(
         matches!(
             &result,
@@ -328,7 +333,7 @@ fn reshape_one_instance_serves_every_batch_size() {
     let mut r = Reshape::new(vec![2, 3]).unwrap();
     for batch in [1_usize, 4, 7] {
         let x = t2(batch, 6, ramp(batch * 6));
-        let out = r.forward(&x).unwrap();
+        let out = r.forward_mut(&x, &mut Ctx::training()).unwrap();
         assert_eq!(
             out.shape(),
             &[batch, 2, 3],
@@ -348,8 +353,8 @@ fn reshape_single_inferred_axis_equals_flatten() {
     let mut r = Reshape::new(vec![-1]).unwrap();
     let mut fl = Flatten::new();
 
-    let reshaped = r.forward(&x).unwrap();
-    let flattened = fl.forward(&x).unwrap();
+    let reshaped = r.forward_mut(&x, &mut Ctx::training()).unwrap();
+    let flattened = fl.forward_mut(&x, &mut Ctx::training()).unwrap();
 
     assert_eq!(reshaped.shape(), &[2, 24]);
     assert_allclose(&reshaped, &flattened, 1e-6_f32);
@@ -398,12 +403,16 @@ fn reshape_output_shape_before_forward_with_inferred_axis() {
     assert_eq!(r.output_shape(), "Unknown");
 }
 
-/// After a forward pass, output_shape reports the resolved shape
+/// After a forward pass, output_shape reports the shape the build recorded
+///
+/// `known_input_shapes` reports the build shape with the batch axis freed, because 1 layer
+/// serves every batch size. `output_shape` therefore names a free batch axis, whatever batch
+/// the tensor that triggered the build carried
 #[test]
 fn reshape_output_shape_after_forward() {
     let mut r = Reshape::new(vec![-1, 2]).unwrap();
     let x = t2(5, 4, ramp(20));
-    r.forward(&x).unwrap();
+    r.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(r.output_shape(), "(None, 2, 2)");
 }
 

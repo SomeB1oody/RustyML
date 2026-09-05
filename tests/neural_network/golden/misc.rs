@@ -31,7 +31,7 @@ use rustyml::neural_network::layers::permute::Permute;
 use rustyml::neural_network::layers::repeat_vector::RepeatVector;
 use rustyml::neural_network::layers::rescaling::Rescaling;
 use rustyml::neural_network::layers::reshape::Reshape;
-use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::traits::{Layer, UnaryLayer};
 
 /// Every layer type of the misc family, in the order the data file records them.
 fn fixtures() -> Vec<LayerFixture> {
@@ -321,8 +321,8 @@ fn p_relu_cases() -> Vec<GoldenCase> {
 /// `rank_4_scale_0p25` pins that the map stays elementwise at a higher rank, and that the
 /// output keeps the input shape.
 ///
-/// The layer reads no training mode and keeps no cache, so `predict` returns exactly the
-/// `forward` output. Every case keeps the assertion of the harness that pins this.
+/// The layer reads no training mode and keeps no cache, so an inference pass returns exactly
+/// the forward output. Every case keeps the assertion of the harness that pins this.
 fn rescaling_cases() -> Vec<GoldenCase> {
     vec![
         GoldenCase::new("scale_0p5", &ACTIVATION_SHAPE, || {

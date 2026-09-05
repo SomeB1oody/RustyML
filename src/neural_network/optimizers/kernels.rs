@@ -3,7 +3,7 @@
 //! Each optimizer's per-parameter math lives here as a single function. Every function operates
 //! on a mutable `f32` parameter slice, a gradient slice, and any needed optimizer state slices.
 //! Every layer exposes its parameters as flat slices through
-//! [`Layer::parameters`](crate::neural_network::traits::Layer::parameters). These kernels work for
+//! [`LayerBase::parameters_mut`](crate::neural_network::traits::LayerBase::parameters_mut). These kernels work for
 //! any parameter shape
 
 use crate::parallel_gates::fused_slice_parallel_threshold;
