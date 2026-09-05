@@ -596,20 +596,21 @@ fn gaussian_dropout_backward_multiplies_by_forward_noise() {
 /// 2 passes over the same input give the same gradient
 ///
 /// The context owns the noise, and the backward pass takes it, so a second gradient needs a
-/// second pass. The 2 passes agree to the bit, because a pass whose state no model applies
-/// leaves the random stream of the layer where it was
+/// second pass. The 2 passes agree to the bit, because `forward` takes `&self` and leaves the
+/// random stream of the layer where it was
 #[test]
 fn gaussian_dropout_backward_is_idempotent() {
     let input: Tensor = Array::from_shape_vec((2, 3), vec![1.0f32; 6])
         .unwrap()
         .into_dyn();
     let mut layer = GaussianDropout::new(0.3).unwrap().with_random_state(42);
+    layer.build(&Shape::known(&[2, 3])).unwrap();
 
     let grad: Tensor = Array::from_shape_vec((2, 3), vec![0.5, 1.0, 1.5, 2.0, 2.5, 3.0])
         .unwrap()
         .into_dyn();
     let mut ctx = Ctx::training();
-    let _ = layer.forward_mut(&input, &mut ctx).unwrap();
+    let _ = layer.forward(&input, &mut ctx).unwrap();
     let first = layer.backward(&grad, &mut ctx).unwrap();
 
     let mut ctx = Ctx::training();

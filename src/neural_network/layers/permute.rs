@@ -207,7 +207,7 @@ impl UnaryLayer for Permute {
         self.validate(input)?;
 
         if ctx.is_training() {
-            ctx.push_cache(input.shape().to_vec());
+            ctx.push_cache("Permute", input.shape().to_vec());
         }
 
         Ok(permute_into(input, &self.forward_axes))

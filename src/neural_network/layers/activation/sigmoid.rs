@@ -99,7 +99,7 @@ impl UnaryLayer for Sigmoid {
         let output = Activation::Sigmoid.forward(input)?;
 
         if ctx.is_training() {
-            ctx.push_cache(output.clone());
+            ctx.push_cache("Sigmoid", output.clone());
         }
 
         Ok(output)

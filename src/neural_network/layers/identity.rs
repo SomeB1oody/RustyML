@@ -124,7 +124,7 @@ impl UnaryLayer for Identity {
         Self::validate(input)?;
 
         if ctx.is_training() {
-            ctx.push_cache(input.shape().to_vec());
+            ctx.push_cache("Identity", input.shape().to_vec());
         }
 
         Ok(copy_in_c_order(input))

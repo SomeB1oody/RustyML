@@ -181,10 +181,13 @@ impl UnaryLayer for MaxPooling1D {
         );
 
         if ctx.is_training() {
-            ctx.push_cache(MaxPooling1DCache {
-                input_shape: input.shape().to_vec(),
-                argmax: argmax.expect("PoolKind::Max always tracks the arg-max"),
-            });
+            ctx.push_cache(
+                "MaxPooling1D",
+                MaxPooling1DCache {
+                    input_shape: input.shape().to_vec(),
+                    argmax: argmax.expect("PoolKind::Max always tracks the arg-max"),
+                },
+            );
         }
 
         Ok(output)

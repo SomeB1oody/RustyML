@@ -1214,9 +1214,12 @@ fn dropout_noise_shape_backward_broadcasts_the_small_mask() {
         .with_noise_shape(vec![Some(2), Some(1), Some(4)])
         .unwrap()
         .with_random_state(51);
+    // The layer is built here, so both passes below take the pure `forward`. A pure pass never
+    // advances the random stream of the layer, so the 2 passes draw the same mask
+    layer.build(&Shape::known(&[2, 3, 4])).unwrap();
     let mut ctx = Ctx::training();
 
-    let output = layer.forward_mut(&ones(&[2, 3, 4]), &mut ctx).unwrap();
+    let output = layer.forward(&ones(&[2, 3, 4]), &mut ctx).unwrap();
     let grad_in = layer.backward(&ones(&[2, 3, 4]), &mut ctx).unwrap();
 
     for (o, g) in output.iter().zip(grad_in.iter()) {
@@ -1235,8 +1238,8 @@ fn dropout_noise_shape_backward_broadcasts_the_small_mask() {
     }
 
     // A scaled upstream carries through with the same mask. The backward pass takes the cache
-    // of its context, so the second gradient needs a second pass. That pass draws the same mask,
-    // because the stream of the layer only moves when a model applies the state of a pass
+    // of its context, so the second gradient needs a second pass. That pass draws the same
+    // mask, because `forward` takes `&self` and leaves the stream of the layer where it was
     let mut ctx = Ctx::training();
     let _ = layer.forward(&ones(&[2, 3, 4]), &mut ctx).unwrap();
     let upstream = filled(&[2, 3, 4], 3.0);

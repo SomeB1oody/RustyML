@@ -95,7 +95,7 @@ impl UnaryLayer for GlobalAveragePooling1D {
         let (output, _) = global_pool_forward(input, PoolKind::Average);
 
         if ctx.is_training() {
-            ctx.push_cache(input.shape().to_vec());
+            ctx.push_cache("GlobalAveragePooling1D", input.shape().to_vec());
         }
 
         Ok(output)

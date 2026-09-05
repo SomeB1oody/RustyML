@@ -271,10 +271,13 @@ impl UnaryLayer for InstanceNormalization {
             group_norm_forward_core(input, num_channels, &self.gamma, &self.beta, self.epsilon);
 
         if ctx.is_training() {
-            ctx.push_cache(InstanceNormalizationCache {
-                x_normalized,
-                inv_std,
-            });
+            ctx.push_cache(
+                "InstanceNormalization",
+                InstanceNormalizationCache {
+                    x_normalized,
+                    inv_std,
+                },
+            );
         }
 
         Ok(output)

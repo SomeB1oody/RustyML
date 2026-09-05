@@ -471,11 +471,14 @@ impl UnaryLayer for Dense {
         let output = self.project(&input_2d.view(), input.shape())?;
 
         if ctx.is_training() {
-            ctx.push_cache(DenseCache {
-                input: input_2d.into_owned(),
-                input_shape: input.shape().to_vec(),
-                output: output.clone(),
-            });
+            ctx.push_cache(
+                "Dense",
+                DenseCache {
+                    input: input_2d.into_owned(),
+                    input_shape: input.shape().to_vec(),
+                    output: output.clone(),
+                },
+            );
         }
 
         Ok(output)

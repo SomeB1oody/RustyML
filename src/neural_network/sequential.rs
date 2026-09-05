@@ -579,6 +579,10 @@ impl Sequential {
             // dropout layer reach the layer here, because the forward pass took `&self`
             if ctx.has_state(scope) {
                 layer.apply_state(&mut ctx.state_slot(scope));
+                debug_assert!(
+                    !ctx.has_state(scope),
+                    "layer {scope} proposed a state change and did not take it back"
+                );
             }
             output = Some(next);
         }

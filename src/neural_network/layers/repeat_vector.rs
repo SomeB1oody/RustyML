@@ -140,7 +140,7 @@ impl UnaryLayer for RepeatVector {
         self.validate(input)?;
 
         if ctx.is_training() {
-            ctx.push_cache(input.shape().to_vec());
+            ctx.push_cache("RepeatVector", input.shape().to_vec());
         }
 
         Ok(self.repeat(input))

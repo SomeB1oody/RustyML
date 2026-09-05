@@ -571,11 +571,14 @@ impl UnaryLayer for SeparableConv1D {
         // Park only after a successful pass, so a rejected input leaves no partial state. The
         // depthwise output reaches the backward pass alone
         if ctx.is_training() {
-            ctx.push_cache(SeparableConv1DCache {
-                input: input.clone(),
-                depthwise_output,
-                output: activated.clone(),
-            });
+            ctx.push_cache(
+                "SeparableConv1D",
+                SeparableConv1DCache {
+                    input: input.clone(),
+                    depthwise_output,
+                    output: activated.clone(),
+                },
+            );
         }
         Ok(activated)
     }

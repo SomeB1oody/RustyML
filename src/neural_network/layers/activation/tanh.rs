@@ -100,7 +100,7 @@ impl UnaryLayer for Tanh {
 
         // Cache the activated output for backpropagation
         if ctx.is_training() {
-            ctx.push_cache(output.clone());
+            ctx.push_cache("Tanh", output.clone());
         }
 
         Ok(output)

@@ -102,7 +102,7 @@ impl UnaryLayer for Exponential {
 
         // Cache activated output for backpropagation
         if ctx.is_training() {
-            ctx.push_cache(output.clone());
+            ctx.push_cache("Exponential", output.clone());
         }
 
         Ok(output)

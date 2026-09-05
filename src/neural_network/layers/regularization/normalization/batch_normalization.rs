@@ -492,11 +492,14 @@ impl UnaryLayer for BatchNormalization {
             ctx.set_state("moving_variance", updated_variance);
 
             // Park what the backward pass needs
-            ctx.push_cache(BatchNormalizationCache {
-                batch_var,
-                x_normalized,
-                x_centered,
-            });
+            ctx.push_cache(
+                "BatchNormalization",
+                BatchNormalizationCache {
+                    batch_var,
+                    x_normalized,
+                    x_centered,
+                },
+            );
 
             Ok(output)
         } else {

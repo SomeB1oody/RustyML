@@ -104,7 +104,7 @@ impl UnaryLayer for HardSigmoid {
 
         // Cache activated output for backpropagation
         if ctx.is_training() {
-            ctx.push_cache(output.clone());
+            ctx.push_cache("HardSigmoid", output.clone());
         }
 
         Ok(output)

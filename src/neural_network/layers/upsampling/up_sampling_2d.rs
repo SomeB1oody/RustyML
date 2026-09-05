@@ -133,7 +133,7 @@ impl UnaryLayer for UpSampling2D {
         let output = upsample_forward(input, &self.size.0, self.interpolation, 4, "UpSampling2D")?;
 
         if ctx.is_training() {
-            ctx.push_cache(input.shape().to_vec());
+            ctx.push_cache("UpSampling2D", input.shape().to_vec());
         }
 
         Ok(output)

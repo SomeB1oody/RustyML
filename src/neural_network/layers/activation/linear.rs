@@ -91,7 +91,7 @@ impl UnaryLayer for Linear {
 
         // Save the input shape for backward-pass validation only
         if ctx.is_training() {
-            ctx.push_cache(input.shape().to_vec());
+            ctx.push_cache("Linear", input.shape().to_vec());
         }
 
         // Identity: f(x) = x

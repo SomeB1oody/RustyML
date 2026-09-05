@@ -228,7 +228,7 @@ impl UnaryLayer for Reshape {
         let output_shape = self.resolve(input.shape())?;
 
         if ctx.is_training() {
-            ctx.push_cache(input.shape().to_vec());
+            ctx.push_cache("Reshape", input.shape().to_vec());
         }
 
         Ok(input

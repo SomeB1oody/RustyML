@@ -378,10 +378,13 @@ impl UnaryLayer for Embedding {
         let output = self.gather(&indices, input.shape());
 
         if ctx.is_training() {
-            ctx.push_cache(EmbeddingCache {
-                indices,
-                input_shape: input.shape().to_vec(),
-            });
+            ctx.push_cache(
+                "Embedding",
+                EmbeddingCache {
+                    indices,
+                    input_shape: input.shape().to_vec(),
+                },
+            );
         }
 
         Ok(output)

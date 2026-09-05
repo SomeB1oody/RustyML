@@ -168,7 +168,7 @@ impl UnaryLayer for AveragePooling3D {
 
         if ctx.is_training() {
             // The only value the backward pass needs is the shape it must restore
-            ctx.push_cache(input.shape().to_vec());
+            ctx.push_cache("AveragePooling3D", input.shape().to_vec());
         }
 
         Ok(output)

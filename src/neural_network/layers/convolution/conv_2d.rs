@@ -430,10 +430,13 @@ impl UnaryLayer for Conv2D {
         let activated = self.activation.forward(&output)?;
 
         if ctx.is_training() {
-            ctx.push_cache(Conv2DCache {
-                input: input.clone(),
-                output: activated.clone(),
-            });
+            ctx.push_cache(
+                "Conv2D",
+                Conv2DCache {
+                    input: input.clone(),
+                    output: activated.clone(),
+                },
+            );
         }
 
         Ok(activated)

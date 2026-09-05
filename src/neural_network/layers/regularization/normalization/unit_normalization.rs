@@ -495,12 +495,15 @@ impl UnaryLayer for UnitNormalization {
         let (output, scale, from_norm) = Self::normalize(input, &axes);
 
         if ctx.is_training() {
-            ctx.push_cache(UnitNormalizationCache {
-                input_shape: input.shape().to_vec(),
-                scale,
-                from_norm,
-                output: output.clone(),
-            });
+            ctx.push_cache(
+                "UnitNormalization",
+                UnitNormalizationCache {
+                    input_shape: input.shape().to_vec(),
+                    scale,
+                    from_norm,
+                    output: output.clone(),
+                },
+            );
         }
 
         Ok(output)

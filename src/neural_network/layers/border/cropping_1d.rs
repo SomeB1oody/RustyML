@@ -108,7 +108,7 @@ impl UnaryLayer for Cropping1D {
         let output = crop_forward(input, &self.cropping.0, 3, "Cropping1D")?;
 
         if ctx.is_training() {
-            ctx.push_cache(input.shape().to_vec());
+            ctx.push_cache("Cropping1D", input.shape().to_vec());
         }
 
         Ok(output)

@@ -621,6 +621,11 @@ pub trait UnaryLayer: LayerBase {
     /// [`SequentialBuilder::build`](crate::neural_network::sequential::SequentialBuilder::build)
     /// has already built every layer it holds
     ///
+    /// The method also moves the non-trainable state that the pass proposed into the layer,
+    /// with [`LayerBase::apply_state`]. A model does that step itself, and a caller that drives
+    /// 1 layer by hand has no other place for it. Without the step the random stream of a
+    /// dropout layer never advances, and 2 calls draw the same mask
+    ///
     /// # Parameters
     ///
     /// - `input` - The input tensor to the layer
@@ -638,7 +643,15 @@ pub trait UnaryLayer: LayerBase {
         if !self.is_built() {
             self.build(&Shape::known(input.shape()))?;
         }
-        self.forward(input, ctx)
+        let output = self.forward(input, ctx)?;
+        // A forward pass takes `&self`, so a layer that changes non-trainable state can only
+        // propose the new value. A model applies it after the call. A caller that drives 1
+        // layer by hand has nowhere else to do that, so this entry point completes the pass
+        let owner = ctx.owner();
+        if ctx.has_state(owner) {
+            self.apply_state(&mut ctx.state_slot(owner));
+        }
+        Ok(output)
     }
 }
 
@@ -748,7 +761,14 @@ pub trait Layer: LayerBase {
             let shapes: Vec<Shape> = inputs.iter().map(|t| Shape::known(t.shape())).collect();
             self.build_many(&shapes)?;
         }
-        self.forward_many(inputs, ctx)
+        let output = self.forward_many(inputs, ctx)?;
+        // See [`UnaryLayer::forward_mut`]: this entry point completes the pass of a layer that
+        // a caller drives by hand, by moving the proposed state into the layer
+        let owner = ctx.owner();
+        if ctx.has_state(owner) {
+            self.apply_state(&mut ctx.state_slot(owner));
+        }
+        Ok(output)
     }
 
     /// Returns a description of the output shape of the layer

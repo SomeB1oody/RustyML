@@ -173,7 +173,7 @@ impl UnaryLayer for GaussianDropout {
         let output = input * &noise;
 
         // Park the exact draw so backward can apply the same multiplier
-        ctx.push_cache(noise);
+        ctx.push_cache("GaussianDropout", noise);
 
         Ok(output)
     }

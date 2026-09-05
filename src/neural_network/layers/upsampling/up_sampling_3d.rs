@@ -121,7 +121,7 @@ impl UnaryLayer for UpSampling3D {
         )?;
 
         if ctx.is_training() {
-            ctx.push_cache(input.shape().to_vec());
+            ctx.push_cache("UpSampling3D", input.shape().to_vec());
         }
 
         Ok(output)

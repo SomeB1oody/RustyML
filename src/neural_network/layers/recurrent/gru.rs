@@ -558,7 +558,7 @@ impl UnaryLayer for GRU {
             rh: Vec::with_capacity(timesteps),
         };
         let output = self.run(&x3, Some(&mut caches))?;
-        ctx.push_cache(caches);
+        ctx.push_cache("GRU", caches);
         Ok(output)
     }
 

@@ -192,7 +192,7 @@ impl UnaryLayer for SpatialDropout1D {
         );
 
         // Park the small per-channel mask for backpropagation
-        ctx.push_cache(mask_2d);
+        ctx.push_cache("SpatialDropout1D", mask_2d);
 
         Ok(output)
     }

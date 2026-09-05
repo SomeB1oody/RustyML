@@ -567,7 +567,7 @@ impl UnaryLayer for LSTM {
             o: Vec::with_capacity(timesteps),
         };
         let output = self.run(&x3, Some(&mut caches))?;
-        ctx.push_cache(caches);
+        ctx.push_cache("LSTM", caches);
         Ok(output)
     }
 

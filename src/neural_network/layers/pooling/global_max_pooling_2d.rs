@@ -104,10 +104,13 @@ impl UnaryLayer for GlobalMaxPooling2D {
         let (output, argmax) = global_pool_forward(input, PoolKind::Max);
 
         if ctx.is_training() {
-            ctx.push_cache(GlobalMaxPooling2DCache {
-                input_shape: input.shape().to_vec(),
-                argmax,
-            });
+            ctx.push_cache(
+                "GlobalMaxPooling2D",
+                GlobalMaxPooling2DCache {
+                    input_shape: input.shape().to_vec(),
+                    argmax,
+                },
+            );
         }
 
         Ok(output)

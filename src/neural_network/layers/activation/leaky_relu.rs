@@ -133,7 +133,7 @@ impl UnaryLayer for LeakyReLU {
 
         // Cache activated output for backpropagation
         if ctx.is_training() {
-            ctx.push_cache(output.clone());
+            ctx.push_cache("LeakyReLU", output.clone());
         }
 
         Ok(output)

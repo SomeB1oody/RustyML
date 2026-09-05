@@ -420,10 +420,13 @@ impl UnaryLayer for Conv1DTranspose {
         let activated = self.activation.forward(&output)?;
 
         if ctx.is_training() {
-            ctx.push_cache(Conv1DTransposeCache {
-                input: input.clone(),
-                output: activated.clone(),
-            });
+            ctx.push_cache(
+                "Conv1DTranspose",
+                Conv1DTransposeCache {
+                    input: input.clone(),
+                    output: activated.clone(),
+                },
+            );
         }
 
         Ok(activated)

@@ -282,10 +282,13 @@ impl UnaryLayer for GroupNormalization {
 
         // Park the intermediates for the backward pass
         if ctx.is_training() {
-            ctx.push_cache(GroupNormalizationCache {
-                x_normalized,
-                inv_std,
-            });
+            ctx.push_cache(
+                "GroupNormalization",
+                GroupNormalizationCache {
+                    x_normalized,
+                    inv_std,
+                },
+            );
         }
 
         Ok(output)

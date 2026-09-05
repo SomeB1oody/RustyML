@@ -143,7 +143,7 @@ impl UnaryLayer for Softmax {
 
         // Cache output for backpropagation
         if ctx.is_training() {
-            ctx.push_cache(output.clone());
+            ctx.push_cache("Softmax", output.clone());
         }
 
         Ok(output)

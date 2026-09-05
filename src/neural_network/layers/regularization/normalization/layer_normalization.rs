@@ -684,11 +684,14 @@ impl LayerNormalization {
         );
 
         // Park the values the backward pass needs (std as [R], 1 scalar per row)
-        ctx.push_cache(LayerNormalizationCache {
-            x_normalized,
-            x_centered,
-            std_dev: std_dev.into_dyn(),
-        });
+        ctx.push_cache(
+            "LayerNormalization",
+            LayerNormalizationCache {
+                x_normalized,
+                x_centered,
+                std_dev: std_dev.into_dyn(),
+            },
+        );
 
         Ok(output)
     }
@@ -941,11 +944,14 @@ impl LayerNormalization {
         let output = &x_normalized * &gamma_broadcast + &beta_broadcast;
 
         // Park the values the backward pass needs (broadcast-ready shapes with the axis kept)
-        ctx.push_cache(LayerNormalizationCache {
-            x_normalized,
-            x_centered,
-            std_dev,
-        });
+        ctx.push_cache(
+            "LayerNormalization",
+            LayerNormalizationCache {
+                x_normalized,
+                x_centered,
+                std_dev,
+            },
+        );
 
         Ok(output)
     }

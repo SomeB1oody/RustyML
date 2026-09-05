@@ -109,7 +109,7 @@ impl UnaryLayer for ZeroPadding1D {
         let output = pad_forward(input, &self.padding.0, 3, "ZeroPadding1D")?;
 
         if ctx.is_training() {
-            ctx.push_cache(input.shape().to_vec());
+            ctx.push_cache("ZeroPadding1D", input.shape().to_vec());
         }
 
         Ok(output)

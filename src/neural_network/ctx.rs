@@ -44,6 +44,18 @@ pub type CallId = usize;
 /// A value that a layer parks in the context between 2 calls
 type Slot = Box<dyn Any + Send + Sync>;
 
+/// 1 parked cache, together with the type name of the layer that parked it
+///
+/// The name is what makes a mis-addressed take an error. A cache is `dyn Any`, and most layers
+/// park a plain tensor or a plain shape, so a take that reaches the stack of another layer
+/// would find a value of the right type and give back the wrong numbers
+struct CacheSlot {
+    /// The type name of the layer that parked the value
+    layer: &'static str,
+    /// The parked value
+    value: Slot,
+}
+
 /// Every parameter gradient of 1 pass, addressed by [`ParamId`]
 ///
 /// A backward pass adds gradients here, and the optimizer reads them. The store owns the
@@ -236,7 +248,7 @@ pub struct Ctx {
     /// The key is the call and not the layer. A branch of a model that never reaches the loss
     /// leaves its cache behind, and a stack shared with another call of the same layer would
     /// then hand that stale cache to the wrong backward pass
-    caches: HashMap<CallId, Vec<Slot>>,
+    caches: HashMap<CallId, Vec<CacheSlot>>,
     /// The non-trainable values that the forward pass proposed to change
     states: HashMap<(LayerId, &'static str), Slot>,
     /// Every parameter gradient of the pass
@@ -346,27 +358,28 @@ impl Ctx {
     ///
     /// # Parameters
     ///
+    /// - `layer` - The type name of the layer that parks the value
     /// - `cache` - The value to park
     ///
     /// # Type Parameters
     ///
     /// - `T` - The type the layer parks and takes back
-    pub fn push_cache<T: Any + Send + Sync>(&mut self, cache: T) {
+    pub fn push_cache<T: Any + Send + Sync>(&mut self, layer: &'static str, cache: T) {
         debug_assert!(
             self.training,
             "a layer must write no cache in an inference pass"
         );
-        self.caches
-            .entry(self.call)
-            .or_default()
-            .push(Box::new(cache));
+        self.caches.entry(self.call).or_default().push(CacheSlot {
+            layer,
+            value: Box::new(cache),
+        });
     }
 
     /// Takes back the newest value that this call parked
     ///
     /// # Parameters
     ///
-    /// - `layer` - The type name of the layer, for the error message
+    /// - `layer` - The type name of the layer, which must match the name of the push
     ///
     /// # Type Parameters
     ///
@@ -378,8 +391,10 @@ impl Ctx {
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork(NnError::ForwardPassNotRun)` - If the layer parked nothing, or
-    ///   if it parked a value of another type
+    /// - `Error::NeuralNetwork(NnError::ForwardPassNotRun)` - If the call parked nothing
+    /// - `Error::Computation` - If the newest value of this call came from another layer, or
+    ///   if it holds another type. Both mean that 2 layers share 1 call, or that a layer
+    ///   parked 1 type and took back another
     pub fn pop_cache<T: Any + Send + Sync>(&mut self, layer: &'static str) -> Result<T, Error> {
         let stack = self
             .caches
@@ -388,11 +403,22 @@ impl Ctx {
         let slot = stack
             .pop()
             .ok_or_else(|| Error::forward_pass_not_run(layer))?;
-        match slot.downcast::<T>() {
+        if slot.layer != layer {
+            let found = slot.layer;
+            stack.push(slot);
+            return Err(Error::computation(format!(
+                "the cache of call {} came from layer `{found}`, and layer `{layer}` asked for \
+                 it. Give each layer its own position with `Ctx::set_position`",
+                self.call
+            )));
+        }
+        match slot.value.downcast::<T>() {
             Ok(cache) => Ok(*cache),
-            Err(slot) => {
-                stack.push(slot);
-                Err(Error::forward_pass_not_run(layer))
+            Err(value) => {
+                stack.push(CacheSlot { layer, value });
+                Err(Error::computation(format!(
+                    "layer `{layer}` parked a cache of another type than the one it asked for"
+                )))
             }
         }
     }
@@ -474,6 +500,19 @@ impl Ctx {
         self.states.insert((self.owner, name), Box::new(value));
     }
 
+    /// How many proposed state changes no layer has taken back
+    ///
+    /// The count is 0 after a full pass, because a model applies the state of every layer it
+    /// calls. A value left here is a defect: the layer that wrote it did not take it back, so
+    /// its running statistics or its random stream never moved
+    ///
+    /// # Returns
+    ///
+    /// - `usize` - The total over every layer
+    pub fn pending_states(&self) -> usize {
+        self.states.len()
+    }
+
     /// Whether the pass proposed any state change for the layer
     ///
     /// # Parameters
@@ -532,6 +571,19 @@ impl Ctx {
     pub fn grads(&self) -> &Grads {
         &self.grads
     }
+
+    /// Empties the gradient store, and gives back what it held
+    ///
+    /// The store SUMS, so a caller that drives several training steps against 1 context must
+    /// empty it between the steps. Otherwise step 2 updates every parameter by the total of
+    /// step 1 and step 2. A model builds a new context for every step and never needs this
+    ///
+    /// # Returns
+    ///
+    /// - `Grads` - Every gradient the store held
+    pub fn take_grads(&mut self) -> Grads {
+        std::mem::take(&mut self.grads)
+    }
 }
 
 impl std::fmt::Debug for Ctx {
@@ -546,5 +598,111 @@ impl std::fmt::Debug for Ctx {
             .field("states", &self.states.len())
             .field("grads", &self.grads.len())
             .finish()
+    }
+}
+
+/// Unit tests for the 4 channels of the context
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::neural_network::layers::regularization::dropout::dropout::Dropout;
+    use crate::neural_network::traits::UnaryLayer;
+    use crate::neural_network::{Shape, Tensor};
+
+    /// A cache is addressed by the call, and 2 layers that share 1 call would otherwise cross
+    /// their caches. Most layers park a plain tensor or a plain shape, so the type alone
+    /// separates almost nothing. The name of the layer is what makes the take an error
+    #[test]
+    fn a_cache_of_another_layer_is_refused() {
+        let mut ctx = Ctx::training();
+        ctx.push_cache("Dense", vec![2_usize, 3]);
+
+        let taken = ctx.pop_cache::<Vec<usize>>("Flatten");
+        let message = match taken {
+            Ok(_) => panic!("the cache of another layer must not come back"),
+            Err(error) => error.to_string(),
+        };
+        assert!(message.contains("Dense"), "{message}");
+        assert!(message.contains("Flatten"), "{message}");
+
+        // The refusal leaves the stack as it was, so the owner still finds its cache
+        assert_eq!(ctx.pop_cache::<Vec<usize>>("Dense").unwrap(), vec![2, 3]);
+    }
+
+    /// A layer that parks 1 type and takes back another is a defect of that layer, and the
+    /// message says so instead of reporting a missing forward pass
+    #[test]
+    fn a_cache_of_another_type_is_refused() {
+        let mut ctx = Ctx::training();
+        ctx.push_cache("Dense", vec![2_usize, 3]);
+
+        let message = match ctx.pop_cache::<Tensor>("Dense") {
+            Ok(_) => panic!("a cache of another type must not come back"),
+            Err(error) => error.to_string(),
+        };
+        assert!(message.contains("another type"), "{message}");
+    }
+
+    /// A backward pass with no forward pass behind it reports exactly that
+    #[test]
+    fn an_empty_stack_reports_a_missing_forward_pass() {
+        let mut ctx = Ctx::training();
+        let message = match ctx.pop_cache::<Tensor>("Dense") {
+            Ok(_) => panic!("an empty context holds no cache"),
+            Err(error) => error.to_string(),
+        };
+        assert!(
+            message.contains("forward pass has not been run"),
+            "{message}"
+        );
+    }
+
+    /// `forward_mut` completes the pass of a hand-driven layer, so its random stream advances
+    ///
+    /// Without that step the stream never moves, and every call of a dropout layer draws the
+    /// same mask. `forward` takes `&self` and cannot move the stream, which is what makes 2
+    /// pure passes agree
+    #[test]
+    fn a_hand_driven_pass_advances_the_random_stream() {
+        let input = Tensor::ones([4, 8].as_slice());
+
+        let mut advancing = Dropout::new(0.5).unwrap().with_random_state(7);
+        let mut ctx = Ctx::training();
+        let first = advancing.forward_mut(&input, &mut ctx).unwrap();
+        assert_eq!(ctx.pending_states(), 0, "the state must reach the layer");
+        let mut ctx = Ctx::training();
+        let second = advancing.forward_mut(&input, &mut ctx).unwrap();
+        assert_ne!(first, second, "the random stream did not advance");
+
+        let mut pure = Dropout::new(0.5).unwrap().with_random_state(7);
+        pure.build(&Shape::known(&[4, 8])).unwrap();
+        let mut ctx = Ctx::training();
+        let one = pure.forward(&input, &mut ctx).unwrap();
+        let mut ctx = Ctx::training();
+        let two = pure.forward(&input, &mut ctx).unwrap();
+        assert_eq!(one, two, "a pure pass must not move the stream");
+        assert_eq!(
+            one, first,
+            "the first draw of the 2 layers is the same draw"
+        );
+    }
+
+    /// The store sums, so a caller that reuses 1 context across steps must empty it
+    #[test]
+    fn take_grads_empties_the_store() {
+        let mut ctx = Ctx::training();
+        ctx.add_grad("kernel", Tensor::ones([2].as_slice()))
+            .unwrap();
+        ctx.add_grad("kernel", Tensor::ones([2].as_slice()))
+            .unwrap();
+
+        let taken = ctx.take_grads();
+        assert_eq!(taken.len(), 1);
+        assert_eq!(
+            taken.get(ParamId::new(0, "kernel")).unwrap(),
+            &Tensor::from_elem([2].as_slice(), 2.0),
+            "the store sums a gradient that arrives twice"
+        );
+        assert!(ctx.grads().is_empty(), "the store is empty after the take");
     }
 }

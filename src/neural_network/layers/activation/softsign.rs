@@ -103,7 +103,7 @@ impl UnaryLayer for Softsign {
 
         // Cache activated output for backpropagation
         if ctx.is_training() {
-            ctx.push_cache(output.clone());
+            ctx.push_cache("Softsign", output.clone());
         }
 
         Ok(output)

@@ -309,7 +309,7 @@ impl UnaryLayer for Dropout {
         let output = broadcast_dropout_scale(input, &mask, self.rate)?;
 
         // Park the mask, at its own shape, for backpropagation
-        ctx.push_cache(mask);
+        ctx.push_cache("Dropout", mask);
 
         Ok(output)
     }

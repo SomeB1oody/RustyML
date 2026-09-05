@@ -110,7 +110,7 @@ impl UnaryLayer for Flatten {
         let input_shape = input.shape();
 
         if ctx.is_training() {
-            ctx.push_cache(input_shape.to_vec());
+            ctx.push_cache("Flatten", input_shape.to_vec());
         }
 
         let batch_size = input_shape[0];

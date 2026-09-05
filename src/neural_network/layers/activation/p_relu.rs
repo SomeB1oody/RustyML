@@ -372,7 +372,7 @@ impl UnaryLayer for PReLU {
         }
         let output = self.activate(input)?;
         if ctx.is_training() {
-            ctx.push_cache(input.clone());
+            ctx.push_cache("PReLU", input.clone());
         }
         Ok(output)
     }

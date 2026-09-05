@@ -491,10 +491,13 @@ impl UnaryLayer for DepthwiseConv1D {
         let activated = self.convolve(input)?;
         // Park only after a successful convolution, so a rejected input leaves no partial state
         if ctx.is_training() {
-            ctx.push_cache(DepthwiseConv1DCache {
-                input: input.clone(),
-                output: activated.clone(),
-            });
+            ctx.push_cache(
+                "DepthwiseConv1D",
+                DepthwiseConv1DCache {
+                    input: input.clone(),
+                    output: activated.clone(),
+                },
+            );
         }
         Ok(activated)
     }

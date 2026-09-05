@@ -452,10 +452,13 @@ impl UnaryLayer for SimpleRNN {
 
         let mut hs = Vec::with_capacity(x3.shape()[1] + 1);
         let output = self.run(&x3, Some(&mut hs))?;
-        ctx.push_cache(SimpleRnnCache {
-            input: x3.to_owned(),
-            hidden_states: hs,
-        });
+        ctx.push_cache(
+            "SimpleRNN",
+            SimpleRnnCache {
+                input: x3.to_owned(),
+                hidden_states: hs,
+            },
+        );
         Ok(output)
     }
 
