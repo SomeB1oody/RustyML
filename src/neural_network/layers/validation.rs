@@ -120,6 +120,65 @@ pub(super) fn start_build(
     Ok(None)
 }
 
+/// Opens the build of a layer with several inputs, and refuses a second build for other shapes
+///
+/// This is [`start_build`] for a merge layer. Such a layer records 1 shape per input, so the
+/// answer carries the whole list. A layer that a graph reaches from several nodes builds once,
+/// on its first node, and every later node checks its shapes against that build
+///
+/// The comparison frees the batch axis of every shape, because 1 layer serves every batch size
+///
+/// # Parameters
+///
+/// - `built` - The shapes the layer already built for, or `None` before its first build
+/// - `layer` - Layer name, which the message names
+/// - `inputs` - 1 shape per input of the layer, batch axis first
+///
+/// # Returns
+///
+/// - `Result<Option<Vec<Shape>>, Error>` - `Some(shapes)` to allocate and then record, and
+///   `None` when the layer already holds every array for these inputs
+///
+/// # Errors
+///
+/// - `Error::InvalidInput` - If the layer is already built for another input count, for another
+///   rank, or for another shape. Each message names the 2 sides
+pub(super) fn start_build_many(
+    built: &Option<Vec<Shape>>,
+    layer: &str,
+    inputs: &[Shape],
+) -> Result<Option<Vec<Shape>>, Error> {
+    let Some(held) = built else {
+        return Ok(Some(inputs.to_vec()));
+    };
+    if held.len() != inputs.len() {
+        return Err(Error::invalid_input(format!(
+            "{layer} is already built for {} inputs, and cannot build again for {} inputs. \
+             Build a new layer for the second input count",
+            held.len(),
+            inputs.len()
+        )));
+    }
+    for (position, (held, input)) in held.iter().zip(inputs).enumerate() {
+        if held.rank() != input.rank() {
+            return Err(Error::invalid_input(format!(
+                "{layer} is already built for the shape {held} of rank {} on input {position}, \
+                 and cannot build again for {input} of rank {}. Build a new layer for the \
+                 second shape",
+                held.rank(),
+                input.rank()
+            )));
+        }
+        if held.free_batch() != input.free_batch() {
+            return Err(Error::invalid_input(format!(
+                "{layer} is already built for the shape {held} on input {position}, and cannot \
+                 build again for {input}. Build a new layer for the second shape"
+            )));
+        }
+    }
+    Ok(None)
+}
+
 /// Checks a live input tensor against the shape the layer was built for
 ///
 /// The rank must match, and every axis after the batch axis that the build shape fixes must

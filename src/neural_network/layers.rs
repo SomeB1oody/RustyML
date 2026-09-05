@@ -18,6 +18,7 @@
 //!   - [`embedding`](crate::neural_network::layers::embedding)
 //!   - [`flatten`](crate::neural_network::layers::flatten)
 //!   - [`identity`](crate::neural_network::layers::identity)
+//!   - [`merge`](crate::neural_network::layers::merge)
 //!   - [`permute`](crate::neural_network::layers::permute)
 //!   - [`pooling`](crate::neural_network::layers::pooling)
 //!   - [`recurrent`](crate::neural_network::layers::recurrent)
@@ -128,6 +129,8 @@ pub mod embedding;
 pub mod flatten;
 /// A layer that passes its input through unchanged
 pub mod identity;
+/// Layers that take several inputs and reduce or join them into 1 output
+pub mod merge;
 /// A layer that reorders the axes after the batch axis
 pub mod permute;
 /// Pooling layer for neural networks
@@ -156,6 +159,7 @@ pub use dense::*;
 pub use embedding::*;
 pub use flatten::*;
 pub use identity::*;
+pub use merge::*;
 pub use permute::*;
 pub use pooling::*;
 pub use recurrent::*;

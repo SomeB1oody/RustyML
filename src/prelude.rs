@@ -51,3 +51,12 @@ pub use self::metrics::*;
 pub use self::neural_network::*;
 #[cfg(feature = "utils")]
 pub use self::utils::*;
+
+// `Average` is the 1 name that 2 categories of the crate give to an item. The metrics category
+// gives the averaging mode of the classification scores, and the neural network category gives
+// the merge layer that averages its inputs. A glob of the 2 categories cannot give the name 1
+// meaning, so this explicit re-export settles it and the root keeps the averaging mode. The
+// merge layer stays reachable as `prelude::neural_network::Average`, and as
+// `neural_network::layers::Average`
+#[cfg(feature = "metrics")]
+pub use crate::metrics::Average;

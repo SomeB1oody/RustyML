@@ -32,6 +32,8 @@ mod dropout;
 mod embedding;
 /// Bit-exact golden fixtures that pin the behavior of every layer before the layer rewrite.
 mod golden;
+/// Tests for `Graph`: the topology it refuses, the fan-in gradient, and weight sharing.
+mod graph;
 /// Tests for the Identity layer: pass-through, layout, and error paths.
 mod identity;
 /// Tests for the loss functions: forward values, gradients, and error paths.

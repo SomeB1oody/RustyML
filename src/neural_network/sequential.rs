@@ -384,6 +384,19 @@ pub struct History {
 }
 
 impl History {
+    /// Builds the record from 1 loss per epoch, in epoch order
+    ///
+    /// # Parameters
+    ///
+    /// - `loss` - 1 loss value per epoch that ran
+    ///
+    /// # Returns
+    ///
+    /// - `History` - The record
+    pub(crate) fn new(loss: Vec<f32>) -> Self {
+        Self { loss }
+    }
+
     /// The per-epoch loss, in epoch order
     ///
     /// # Returns
@@ -1231,7 +1244,7 @@ impl Sequential {
 /// - `Error::Io(IoError::UnsupportedModelFormat)` - The file is too short for a header, does
 ///   not carry the magic tag, or carries another format version
 /// - `Error::Io(IoError::Serialization)` - Deserialization failed
-fn read_checkpoint(
+pub(crate) fn read_checkpoint(
     path: impl AsRef<std::path::Path>,
 ) -> crate::error::RustymlResult<ModelCheckpoint<'static>> {
     let bytes = std::fs::read(path)?;

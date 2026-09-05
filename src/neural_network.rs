@@ -113,6 +113,8 @@ pub type Tensor = ArrayD<f32>;
 pub mod ctx;
 /// Neural-network error type, aggregated into the crate-wide [`Error`](crate::error::Error)
 pub mod error;
+/// A model whose layers form a directed graph, rather than a chain
+pub mod graph;
 /// How a layer draws the starting values of a weight array
 pub mod initializer;
 /// Neural network layer implementations
