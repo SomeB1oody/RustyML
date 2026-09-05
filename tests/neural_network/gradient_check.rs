@@ -40,6 +40,9 @@ use rustyml::neural_network::layers::convolution::separable_conv_2d::SeparableCo
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::embedding::Embedding;
 use rustyml::neural_network::layers::identity::Identity;
+use rustyml::neural_network::layers::merge::{
+    Add, Average, Concatenate, Maximum, Minimum, Multiply, Subtract,
+};
 use rustyml::neural_network::layers::permute::Permute;
 use rustyml::neural_network::layers::pooling::average_pooling_1d::AveragePooling1D;
 use rustyml::neural_network::layers::pooling::average_pooling_2d::AveragePooling2D;
@@ -70,7 +73,7 @@ use rustyml::neural_network::layers::reshape::Reshape;
 use rustyml::neural_network::layers::upsampling::{
     Interpolation, UpSampling1D, UpSampling2D, UpSampling3D,
 };
-use rustyml::neural_network::traits::{ParamId, UnaryLayer};
+use rustyml::neural_network::traits::{Layer, ParamId, UnaryLayer};
 
 /// Compares `layer.backward(ones)` against a central finite-difference estimate of
 /// d sum(output)/dx.
@@ -1539,4 +1542,176 @@ fn conv3d_transpose_same_padding_weight_gradient_matches_finite_difference() {
     .unwrap()
     .into_dyn();
     check_weight_gradient(&mut conv, &x, 1e-3, 2e-2);
+}
+
+// Merge layers: the same finite-difference rule, over a layer that takes several inputs
+
+/// Compares the analytic gradient of every input of a merge layer against a central difference
+///
+/// The rule is the one every check above uses: `L = sum(output)`, so `dL/dx` is what the
+/// backward pass gives for an upstream of ones. A merge layer gives 1 gradient per input, and
+/// each is checked against its own input
+///
+/// # Parameters
+///
+/// - `layer` - The merge layer under test, already built or built by this call
+/// - `inputs` - 1 tensor per input of the layer
+/// - `h` - Step of the central difference
+/// - `tolerance` - How far the 2 gradients may sit apart
+fn check_merge_input_gradients<L: Layer>(layer: &mut L, inputs: &[Tensor], h: f32, tolerance: f32) {
+    let shapes: Vec<Shape> = inputs
+        .iter()
+        .map(|tensor| Shape::known(tensor.shape()))
+        .collect();
+    layer.build_many(&shapes).unwrap();
+
+    let refs: Vec<&Tensor> = inputs.iter().collect();
+    let mut ctx = Ctx::training();
+    let output = layer.forward_many(&refs, &mut ctx).unwrap();
+    let analytic = layer
+        .backward_many(&Tensor::ones(output.raw_dim()), &mut ctx)
+        .unwrap();
+    assert_eq!(
+        analytic.len(),
+        inputs.len(),
+        "a merge layer gives 1 gradient per input"
+    );
+
+    // A forward pass of an inference context writes nothing, so the sum below can run as many
+    // times as the difference needs
+    let sum_of = |tensors: &[Tensor]| -> f32 {
+        let refs: Vec<&Tensor> = tensors.iter().collect();
+        layer
+            .forward_many(&refs, &mut Ctx::inference())
+            .unwrap()
+            .sum()
+    };
+
+    for (position, gradient) in analytic.iter().enumerate() {
+        assert_eq!(
+            gradient.shape(),
+            inputs[position].shape(),
+            "the gradient of input {position} must hold the shape of that input"
+        );
+        for index in 0..inputs[position].len() {
+            let mut raised = inputs.to_vec();
+            let mut lowered = inputs.to_vec();
+            raised[position].as_slice_mut().unwrap()[index] += h;
+            lowered[position].as_slice_mut().unwrap()[index] -= h;
+            let numeric = (sum_of(&raised) - sum_of(&lowered)) / (2.0 * h);
+            assert_abs_diff_eq!(
+                gradient.as_slice().unwrap()[index],
+                numeric,
+                epsilon = tolerance
+            );
+        }
+    }
+}
+
+/// A tensor of distinct values, so no position of a maximum or a minimum ties
+fn distinct(shape: &[usize], offset: f32) -> Tensor {
+    let count: usize = shape.iter().product();
+    let values: Vec<f32> = (0..count)
+        .map(|i| offset + (i as f32) * 0.37 - 1.0)
+        .collect();
+    Array::from_shape_vec(ndarray::IxDyn(shape), values).unwrap()
+}
+
+/// Add gives every input the whole gradient
+#[test]
+fn merge_add_input_gradients() {
+    let mut layer = Add::new();
+    let inputs = vec![distinct(&[2, 3], 0.0), distinct(&[2, 3], 1.5)];
+    check_merge_input_gradients(&mut layer, &inputs, 1e-2, 1e-2);
+}
+
+/// An input that broadcast reduces its gradient back to its own shape
+#[test]
+fn merge_add_reduces_a_broadcast_gradient() {
+    let mut layer = Add::new();
+    let inputs = vec![distinct(&[2, 3], 0.0), distinct(&[2, 1], 1.5)];
+    check_merge_input_gradients(&mut layer, &inputs, 1e-2, 1e-2);
+}
+
+/// Rank alignment inserts an axis after the batch axis, and the gradient sums it away
+#[test]
+fn merge_add_reduces_a_rank_aligned_gradient() {
+    let mut layer = Add::new();
+    let inputs = vec![distinct(&[2, 3, 4], 0.0), distinct(&[2, 4], 1.5)];
+    check_merge_input_gradients(&mut layer, &inputs, 1e-2, 2e-2);
+}
+
+/// Subtract negates the gradient of its second input
+#[test]
+fn merge_subtract_input_gradients() {
+    let mut layer = Subtract::new();
+    let inputs = vec![distinct(&[2, 3], 0.0), distinct(&[2, 3], 2.0)];
+    check_merge_input_gradients(&mut layer, &inputs, 1e-2, 1e-2);
+}
+
+/// Multiply gives each input the product of the others, which is the only non-linear merge
+#[test]
+fn merge_multiply_input_gradients() {
+    let mut layer = Multiply::new();
+    let inputs = vec![
+        distinct(&[2, 3], 0.5),
+        distinct(&[2, 3], 1.5),
+        distinct(&[2, 3], 2.5),
+    ];
+    check_merge_input_gradients(&mut layer, &inputs, 1e-2, 3e-2);
+}
+
+/// Multiply reduces a broadcast gradient back, over a product of 2 inputs
+#[test]
+fn merge_multiply_reduces_a_broadcast_gradient() {
+    let mut layer = Multiply::new();
+    let inputs = vec![distinct(&[2, 3], 0.5), distinct(&[2, 1], 1.5)];
+    check_merge_input_gradients(&mut layer, &inputs, 1e-2, 3e-2);
+}
+
+/// Average divides by the input count, so every gradient carries that factor
+#[test]
+fn merge_average_input_gradients() {
+    let mut layer = Average::new();
+    let inputs = vec![
+        distinct(&[2, 3], 0.0),
+        distinct(&[2, 3], 1.0),
+        distinct(&[2, 3], 2.0),
+    ];
+    check_merge_input_gradients(&mut layer, &inputs, 1e-2, 1e-2);
+}
+
+/// Maximum routes the gradient of a position to the input that wins it
+///
+/// The values are distinct, so no position ties and the function is differentiable at every
+/// point the difference reads
+#[test]
+fn merge_maximum_input_gradients() {
+    let mut layer = Maximum::new();
+    let inputs = vec![distinct(&[2, 3], 0.0), distinct(&[2, 3], 0.13)];
+    check_merge_input_gradients(&mut layer, &inputs, 1e-3, 1e-2);
+}
+
+/// Minimum routes the gradient of a position to the input that wins it
+#[test]
+fn merge_minimum_input_gradients() {
+    let mut layer = Minimum::new();
+    let inputs = vec![distinct(&[2, 3], 0.0), distinct(&[2, 3], 0.13)];
+    check_merge_input_gradients(&mut layer, &inputs, 1e-3, 1e-2);
+}
+
+/// Concatenate slices the gradient along its axis, in input order
+#[test]
+fn merge_concatenate_input_gradients() {
+    let mut layer = Concatenate::new(-1);
+    let inputs = vec![distinct(&[2, 3], 0.0), distinct(&[2, 2], 1.0)];
+    check_merge_input_gradients(&mut layer, &inputs, 1e-2, 1e-2);
+}
+
+/// Concatenate joins along a leading axis as well, because its axis counts from the full rank
+#[test]
+fn merge_concatenate_on_the_batch_axis_input_gradients() {
+    let mut layer = Concatenate::new(0);
+    let inputs = vec![distinct(&[2, 3], 0.0), distinct(&[4, 3], 1.0)];
+    check_merge_input_gradients(&mut layer, &inputs, 1e-2, 1e-2);
 }
