@@ -51,7 +51,7 @@ pub enum NnError {
     ///
     /// The payload is the layer's name (e.g. `"Dense"`, `"Conv2D"`)
     #[error(
-        "layer `{0}` is not built; build it with `Layer::build`, or add it to a \
+        "layer `{0}` is not built; build it with `UnaryLayer::build`, or add it to a \
          `SequentialBuilder` and build the model"
     )]
     NotBuilt(&'static str),

@@ -1,13 +1,23 @@
-//! Neural network primitives: layers, loss functions, optimizers, the sequential
-//! model, and the traits that tie them together
+//! Neural network primitives: layers, loss functions, optimizers, the 2 models, and the traits
+//! that tie them together
 //!
-//! A framework for constructing, training, and deploying feed-forward neural networks.
+//! The module builds, trains, and runs neural networks.
 //! Layers, optimizers, and losses live in the [`layers`](crate::neural_network::layers),
 //! [`optimizers`](crate::neural_network::optimizers), and [`losses`](crate::neural_network::losses)
 //! submodules. [`Sequential`](crate::neural_network::sequential::Sequential) stacks layers into a
-//! trainable model, and the shared interfaces live in [`traits`](crate::neural_network::traits).
+//! chain, and [`Graph`](crate::neural_network::graph::Graph) wires them into a directed graph.
+//! The shared interfaces live in [`traits`](crate::neural_network::traits).
 //! Every tensor in the framework is a [`Tensor`](crate::neural_network::Tensor), an `f32`
 //! n-dimensional array
+//!
+//! A layer computes, and it holds no cache and no gradient.
+//! [`forward`](crate::neural_network::traits::UnaryLayer::forward) and
+//! [`backward`](crate::neural_network::traits::UnaryLayer::backward) take `&self` and a
+//! [`Ctx`](crate::neural_network::Ctx). The context carries the training flag, the caches of the
+//! pass, every parameter gradient, and the non-trainable state that a training pass changes.
+//! [`Ctx::training`](crate::neural_network::Ctx::training) and
+//! [`Ctx::inference`](crate::neural_network::Ctx::inference) pick the mode. A built model is
+//! therefore `Send` and `Sync`, and several threads can run inference against 1 model
 //!
 //! # Core components
 //!
@@ -34,6 +44,16 @@
 //! - **Recurrent**: SimpleRNN, LSTM, and GRU sequence layers
 //! - **Regularization**: dropout (including spatial), noise injection, and normalization layers,
 //!   the last of which includes `UnitNormalization` for an L2 norm of 1 per group
+//! - **Merge**: `Add`, `Subtract`, `Multiply`, `Average`, `Maximum`, and `Minimum` reduce several
+//!   inputs element by element, and `Concatenate` joins them along 1 axis. Each layer takes
+//!   several inputs and gives 1 output, so a graph model joins its branches with them.
+//!   [`Concatenate::new`](crate::neural_network::layers::Concatenate::new) never fails, and its
+//!   axis counts against the full rank. The axis 0 therefore joins the batch axis, and a
+//!   negative axis counts back from the end.
+//!   [`Average`](crate::neural_network::layers::Average) is the 1 name that 2 categories of the
+//!   crate give to an item. The root of [`prelude`](crate::prelude) keeps the averaging mode of
+//!   the classification scores, so a caller that wants the layer names
+//!   `prelude::neural_network::Average` or `neural_network::layers::Average`
 //!
 //! ## Optimizers
 //! - **SGD**: stochastic gradient descent with momentum
@@ -60,14 +80,21 @@
 //!   The layer supplies the [`Fans`](crate::neural_network::Fans) pair, because a kernel shape
 //!   alone cannot tell a plain convolution from a transposed one
 //!
-//! ## Model
+//! ## Models
 //! - [`Sequential`](crate::neural_network::sequential::Sequential): a linear stack of layers with
 //!   an integrated training loop, prediction, and weight save and load. `fit` and
 //!   `fit_with_batches` return a [`History`](crate::neural_network::sequential::History) with 1
 //!   loss value per epoch. Both build on the public `train_batch` step. `evaluate` scores a model
 //!   without training it
+//! - [`Graph`](crate::neural_network::graph::Graph): a directed graph of layers, with the same
+//!   training loop, prediction, and weight save and load. It takes several inlets and gives
+//!   several outlets, and it holds a layer arena. Several nodes can call 1 layer of that arena.
+//!   Those nodes then share 1 set of arrays, and the sum of their gradients updates that set.
+//!   [`GraphBuilder`](crate::neural_network::graph::GraphBuilder) is the only way to reach one
 //!
 //! # Examples
+//!
+//! ## A chain of layers
 //!
 //! ```rust
 //! use rustyml::neural_network::{
@@ -102,6 +129,41 @@
 //!
 //! // Make predictions
 //! let predictions = model.predict(&x);
+//! ```
+//!
+//! ## A graph of layers, joined by a merge layer
+//!
+//! ```rust
+//! use rustyml::neural_network::{
+//!     Shape,
+//!     graph::GraphBuilder,
+//!     layers::{Activation, Concatenate, Dense},
+//!     optimizers::SGD,
+//!     losses::MeanSquaredError,
+//! };
+//! use ndarray::Array;
+//!
+//! // 2 inlets of 4 samples each, and 1 target of 2 values per sample
+//! let left = Array::ones((4, 3)).into_dyn();
+//! let right = Array::ones((4, 5)).into_dyn();
+//! let y = Array::ones((4, 2)).into_dyn();
+//!
+//! // The 2 inlets keep registration order, and every call takes its tensors in that order
+//! let mut builder = GraphBuilder::new();
+//! let a = builder.input(Shape::known(&[4, 3]));
+//! let b = builder.input(Shape::known(&[4, 5]));
+//! let joined = builder.add(Concatenate::new(-1), &[a, b]);
+//! let head = builder.add(Dense::new(2, Activation::Linear).unwrap(), &[joined]);
+//! let mut model = builder.build(&[head]).unwrap();
+//!
+//! // The merge layer adds the 2 feature counts, so the head reads 8 features
+//! assert_eq!(model.output_shapes()[0].to_string(), "(4, 2)");
+//!
+//! model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+//! model.fit(&[&left, &right], &[&y], 5).unwrap();
+//!
+//! let predictions = model.predict(&[&left, &right]).unwrap();
+//! assert_eq!(predictions[0].shape(), &[4, 2]);
 //! ```
 
 use ndarray::ArrayD;

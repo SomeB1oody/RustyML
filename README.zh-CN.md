@@ -25,7 +25,7 @@ RustyML 是一个机器学习与深度学习库，完全用 Rust 端到端实现
 
 - **纯 Rust，无 FFI**：内存安全、可移植，无需链接任何外部库。
 - **默认并行**：计算密集的内核使用 [Rayon](https://github.com/rayon-rs/rayon) 进行多线程计算。
-- **算法覆盖**：经典的监督与无监督学习、异常检测，以及一个神经网络框架。
+- **算法覆盖**：经典的监督与无监督学习、异常检测，以及一个同时提供顺序模型和图模型的神经网络框架。
 - **可复现**：一次 `set_global_seed` 调用即可让调用线程上所有随机化组件变得确定。按组件设置的 `random_state` 覆盖其余情形。
 - **模型持久化**：通过 [Serde](https://serde.rs/) 和 [postcard](https://docs.rs/postcard/) 将训练好的模型和网络权重保存为紧凑的二进制格式。
 - **评估指标**：回归、分类（二分类与多分类）、聚类，遵循 scikit-learn 的约定。
@@ -95,15 +95,18 @@ fn main() {
     let x = Array::ones((32, 784)).into_dyn();
     let y = Array::ones((32, 10)).into_dyn();
 
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(784, 128, Activation::ReLU).unwrap())
-        .add(Dense::new(128, 64, Activation::ReLU).unwrap())
-        .add(Dense::new(64, 10, Activation::Softmax).unwrap())
-        .compile(
-            Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(),
-            CategoricalCrossEntropy::new(false),
-        );
+    // builder 收集各层，build 依据输入形状分配每一个权重
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(128, Activation::ReLU).unwrap())
+        .add(Dense::new(64, Activation::ReLU).unwrap())
+        .add(Dense::new(10, Activation::Softmax { axis: -1 }).unwrap())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+
+    model.compile(
+        Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(),
+        CategoricalCrossEntropy::new(false),
+    );
 
     model.summary(); // 打印网络结构
 
@@ -119,6 +122,43 @@ fn main() {
 
     // 保存训练好的权重
     model.save_to_path("model.bin").unwrap();
+}
+```
+
+### 图模型
+
+顺序模型给每一层 1 个输入，而这个输入就是前一层的输出。`GraphBuilder` 取消了这个限制。一个节点
+就是某一层在其他节点输出上的 1 次调用。因此一个模型可以拥有多个入口、多个出口、一座共享的塔，或者
+一条残差连接。合并层族负责汇合这些分支：`Add`、`Subtract`、`Multiply`、`Average`、
+`Maximum`、`Minimum` 和 `Concatenate`。
+
+```rust
+use rustyml::prelude::neural_network::*;
+use ndarray::Array;
+
+fn main() {
+    // 4 个样本，每个 8 个特征，每个样本 2 个输出值
+    let x = Array::ones((4, 8)).into_dyn();
+    let y = Array::ones((4, 2)).into_dyn();
+
+    // 一个残差块：块的输入同时到达求和层和隐藏层
+    let mut builder = GraphBuilder::new();
+    let input = builder.input(Shape::known(&[4, 8]));
+    let hidden = builder.add(Dense::new(8, Activation::ReLU).unwrap(), &[input]);
+    let sum = builder.add(Add::new(), &[input, hidden]);
+    let head = builder.add(Dense::new(2, Activation::Linear).unwrap(), &[sum]);
+    let mut model = builder.build(&[head]).unwrap();
+
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
+
+    // 每个入口 1 个张量，每个出口 1 个目标
+    model.fit(&[&x], &[&y], 10).unwrap();
+
+    let predictions = model.predict(&[&x]).unwrap();
+    println!("Predictions shape: {:?}", predictions[0].shape());
 }
 ```
 

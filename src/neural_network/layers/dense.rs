@@ -292,8 +292,8 @@ impl Dense {
             .context("Failed to fold the leading axes of a Dense tensor")
     }
 
-    /// The layer's full forward transform, `activation(input * weights + bias)`. Shared by
-    /// [`UnaryLayer::forward`] and [`Layer::predict`]
+    /// The layer's full forward transform, `activation(input * weights + bias)`, which
+    /// [`UnaryLayer::forward`] runs
     ///
     /// The bias add rides the GEMM epilogue, so the pre-activation is written exactly once,
     /// with no separate broadcast add of the bias. The bias is the per-column addend, so it

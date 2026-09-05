@@ -33,6 +33,7 @@
   - [Recurrent Layers](./Chapter-03/3.7._Recurrent_Layers.md)
   - [Regularization and Normalization Layers](./Chapter-03/3.8._Regularization_and_Normalization_Layers.md)
   - [Saving and Loading Weights](./Chapter-03/3.9._Saving_and_Loading_Weights.md)
+  - [Graph Models and Merge Layers](./Chapter-03/3.10._Graph_Models_and_Merge_Layers.md)
 - [Data Preprocessing](./Chapter-04/4.0._Data_Preprocessing.md)
   - [Train-Test Split](./Chapter-04/4.1._Train_Test_Split.md)
   - [Standardization and Normalization](./Chapter-04/4.2._Standardization_and_Normalization.md)

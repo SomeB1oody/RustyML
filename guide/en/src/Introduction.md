@@ -26,11 +26,11 @@ fn main() {
 }
 ```
 
-The rest of this guide unpacks that pattern, one module at a time. Models share the `Fit` and `Predict` traits. Metrics always take `(y_true, y_pred)` in that order. A single `set_global_seed` call makes the whole crate deterministic.
+The rest of this guide unpacks that pattern, one module at a time. Models share the `Fit` and `Predict` traits. Metrics always take `(y_true, y_pred)` in that order. A single `set_global_seed` call, on the constructing thread, pins every component that has no seed of its own.
 
 ## Who it is for
 
-This guide serves 2 kinds of readers. The first is a **Rust developer** who wants machine learning without leaving the Rust ecosystem. That reader needs no `pip`, no linked BLAS, and no unsafe FFI to audit. A `cargo add` command adds a crate that follows Rust's rules on ownership, `Send`/`Sync`, and error handling. The second is an **ML practitioner coming from Python**, fluent in scikit-learn and Keras. That reader wants the same mental model in Rust. RustyML gives it: `fit`/`predict` methods and a Keras-style `Sequential` model built with `.add(...)`, `.build(...)`, and `.compile(...)`. Its confusion matrices and silhouette scores mean what they mean in scikit-learn. RustyML expresses these ideas as compiled, statically typed, parallel-by-default Rust. Where RustyML departs from scikit-learn or Keras, this guide states the difference and the reason for it.
+This guide serves 2 kinds of readers. The first is a **Rust developer** who wants machine learning without leaving the Rust ecosystem. That reader needs no `pip`, no linked BLAS, and no unsafe FFI to audit. A `cargo add` command adds a crate that follows Rust's rules on ownership, `Send`/`Sync`, and error handling. The second is an **ML practitioner coming from Python**, fluent in scikit-learn and in a deep-learning framework. That reader wants the same mental model in Rust. RustyML gives it: `fit`/`predict` methods, and a layer-stack `Sequential` model built with `.add(...)`, `.build(...)`, and `.compile(...)`. Its confusion matrices and silhouette scores mean what they mean in scikit-learn. RustyML expresses these ideas as compiled, statically typed, parallel-by-default Rust. Where RustyML departs from a familiar Python API, this guide states the difference and the reason for it.
 
 You do not need prior experience with Rust numerical code. You should be comfortable reading Rust and running `cargo`. Data flows through [`ndarray`](https://docs.rs/ndarray) arrays throughout the crate, so [Working with ndarray](./Chapter-01/1.3._Working_with_ndarray.md) covers that library before you meet it in every later chapter.
 
@@ -42,7 +42,7 @@ The crate splits into 5 feature-gated modules: `machine_learning`, `neural_netwo
 |---|---|---|
 | [1. Getting Started](./Chapter-01/1.0._Getting_Started.md) | Installation, feature flags, ndarray, your first end-to-end model, the prelude, error handling | the on-ramp |
 | [2. Classical Machine Learning](./Chapter-02/2.0._Classical_Machine_Learning.md) | Regression, classification, clustering, dimensionality reduction, anomaly detection | `machine_learning` |
-| [3. Neural Networks](./Chapter-03/3.0._Neural_Networks.md) | The `Sequential` model, dense/conv/recurrent layers, losses, optimizers, saving weights | `neural_network` |
+| [3. Neural Networks](./Chapter-03/3.0._Neural_Networks.md) | The `Sequential` and `Graph` models, dense/conv/recurrent and merge layers, losses, optimizers, saving weights | `neural_network` |
 | [4. Data Preprocessing](./Chapter-04/4.0._Data_Preprocessing.md) | Train/test splitting, standardization and normalization, label encoding | `utils` |
 | [5. Model Evaluation](./Chapter-05/5.0._Model_Evaluation.md) | Regression, classification, and clustering metrics | `metrics` |
 | [6. Math Utilities](./Chapter-06/6.0._Math_Utilities.md) | Distance metrics, matrix multiplication, deterministic parallel reductions | `math` |

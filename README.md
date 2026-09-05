@@ -27,7 +27,7 @@ abstractions.
 
 - **Pure Rust, no FFI**: memory-safe and portable, with nothing to link against.
 - **Parallelized by default**: heavy kernels use [Rayon](https://github.com/rayon-rs/rayon) for multi-threaded computation.
-- **Algorithm coverage**: classical supervised and unsupervised learning, anomaly detection, and a neural-network framework.
+- **Algorithm coverage**: classical supervised and unsupervised learning, anomaly detection, and a neural-network framework with a sequential model and a graph model.
 - **Reproducible**: a single `set_global_seed` call makes every randomized component on the calling thread deterministic. A per-component `random_state` covers the rest.
 - **Model persistence**: save and load trained models and network weights as compact binary, using [Serde](https://serde.rs/) and [postcard](https://docs.rs/postcard/).
 - **Evaluation metrics**: regression, classification (binary and multiclass), and clustering, matching scikit-learn conventions.
@@ -96,15 +96,18 @@ fn main() {
     let x = Array::ones((32, 784)).into_dyn();
     let y = Array::ones((32, 10)).into_dyn();
 
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(784, 128, Activation::ReLU).unwrap())
-        .add(Dense::new(128, 64, Activation::ReLU).unwrap())
-        .add(Dense::new(64, 10, Activation::Softmax).unwrap())
-        .compile(
-            Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(),
-            CategoricalCrossEntropy::new(false),
-        );
+    // The builder collects the layers, and `build` draws every weight from the input shape
+    let mut model = SequentialBuilder::new()
+        .add(Dense::new(128, Activation::ReLU).unwrap())
+        .add(Dense::new(64, Activation::ReLU).unwrap())
+        .add(Dense::new(10, Activation::Softmax { axis: -1 }).unwrap())
+        .build(&Shape::known(x.shape()))
+        .unwrap();
+
+    model.compile(
+        Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(),
+        CategoricalCrossEntropy::new(false),
+    );
 
     model.summary(); // print the architecture
 
@@ -120,6 +123,44 @@ fn main() {
 
     // Save the trained weights to a file
     model.save_to_path("model.bin").unwrap();
+}
+```
+
+### Graph Models
+
+A sequential model gives every layer 1 input, and that input is the output of the layer before
+it. `GraphBuilder` removes that limit. A node is 1 call of 1 layer on the outputs of other
+nodes. A model can therefore hold several inlets, several outlets, a shared tower, or a
+residual connection. The merge family joins the branches: `Add`, `Subtract`, `Multiply`,
+`Average`, `Maximum`, `Minimum`, and `Concatenate`.
+
+```rust
+use rustyml::prelude::neural_network::*;
+use ndarray::Array;
+
+fn main() {
+    // 4 samples of 8 features, and 2 output values per sample
+    let x = Array::ones((4, 8)).into_dyn();
+    let y = Array::ones((4, 2)).into_dyn();
+
+    // A residual block: the input of the block reaches the sum and the hidden layer alike
+    let mut builder = GraphBuilder::new();
+    let input = builder.input(Shape::known(&[4, 8]));
+    let hidden = builder.add(Dense::new(8, Activation::ReLU).unwrap(), &[input]);
+    let sum = builder.add(Add::new(), &[input, hidden]);
+    let head = builder.add(Dense::new(2, Activation::Linear).unwrap(), &[sum]);
+    let mut model = builder.build(&[head]).unwrap();
+
+    model.compile(
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
+
+    // 1 tensor per inlet, and 1 target per outlet
+    model.fit(&[&x], &[&y], 10).unwrap();
+
+    let predictions = model.predict(&[&x]).unwrap();
+    println!("Predictions shape: {:?}", predictions[0].shape());
 }
 ```
 

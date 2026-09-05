@@ -32,15 +32,24 @@
 //!   and predicting `-1` (outlier) / `+1` (inlier)
 //!
 //! ### [`neural_network`]
-//! Neural network framework built around a sequential model. Tensors are channels-last, and
-//! kernel shapes match Keras, so a layout carried over from Keras needs no permutation:
+//! Neural network framework with a sequential model and a graph model. Tensors are
+//! channels-last, and kernel shapes match Keras, so a layout carried over from Keras needs no
+//! permutation:
 //! - **Layers**: Dense, Embedding, SimpleRNN, LSTM, GRU, Convolution, Pooling, Upsampling,
-//!   Border, Shape, Normalization, Dropout
+//!   Border, Shape, Normalization, Dropout, Merge
+//! - **Merge Layers**: Add, Subtract, Multiply, Average, Maximum, Minimum, and Concatenate. Each
+//!   one takes several inputs and gives 1 output, so a graph model joins its branches with them
 //! - **Optimizers**: SGD, Adam, AdamW, RMSprop, AdaGrad
 //! - **Loss Functions**: MSE, MAE, Binary/Categorical/Sparse Categorical Cross-Entropy
-//! - **Models**: Sequential architecture for feed-forward networks. `fit` and `fit_with_batches`
-//!   return a `History` of one loss per epoch. A hand-written loop can call the public
-//!   `train_batch` instead, and `evaluate` scores the model without training it
+//! - **Models**: `Sequential` holds a chain of layers, and `Graph` holds a directed graph of
+//!   them. A graph model takes several inlets and gives several outlets, and several of its
+//!   nodes can call 1 layer, which is how it shares weights. `fit` and `fit_with_batches` return a
+//!   `History` of one loss per epoch. A hand-written loop can call the public `train_batch`
+//!   instead, and `evaluate` scores the model without training it
+//! - **Passes**: a layer computes, and it holds no cache and no gradient. `forward` and
+//!   `backward` take `&self` and a `Ctx`. That context carries the training flag, the caches of
+//!   the pass, every parameter gradient, and the non-trainable state that a training pass
+//!   changes
 //!
 //! ### [`utils`]
 //! Data preprocessing and dataset-splitting utilities:
@@ -496,7 +505,8 @@ pub mod utils;
 #[cfg(feature = "metrics")]
 pub mod metrics;
 
-/// Neural-network framework: layers, optimizers, loss functions, and the sequential model
+/// Neural-network framework: layers, optimizers, loss functions, the sequential model, and the
+/// graph model
 #[cfg(feature = "neural_network")]
 pub mod neural_network;
 
