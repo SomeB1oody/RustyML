@@ -1,22 +1,193 @@
-//! Gated Recurrent Unit (GRU) layer with reset, update, and candidate gates
+//! Gated Recurrent Unit (GRU) recurrent layer with update, reset, and candidate gates
 
 use crate::error::Error;
-use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
-use crate::neural_network::layers::recurrent::gate::{FusedGates, project_input};
-use crate::neural_network::layers::recurrent::validation::{
-    split_grad_output, validate_dimension_greater_than_zero, validate_input_3d,
-    validate_recurrent_dimensions,
-};
-use crate::neural_network::layers::recurrent::{apply_sigmoid, input_step};
-use crate::neural_network::layers::validation::start_build;
+use crate::neural_network::layers::recurrent::apply_sigmoid;
+use crate::neural_network::layers::recurrent::cell::{RecurrentGroup, RnnCell};
+use crate::neural_network::layers::recurrent::gate::FusedGates;
+use crate::neural_network::layers::recurrent::rnn::{Rnn, recurrent_layer_traits};
 use crate::neural_network::layers::validation::validate_weight_shape;
-use crate::neural_network::layers::{built_layer_shape_functions, named_weight_layer_functions};
-use crate::neural_network::traits::{LayerBase, ParamRef, UnaryLayer};
-use crate::neural_network::{Ctx, Shape, Tensor};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
 use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Bias, Parallelism};
-use ndarray::{Array2, Array3, ArrayView3, Axis, concatenate, s};
+use ndarray::{Array2, ArrayView2, Axis, Ix2, concatenate, s};
+
+/// The arithmetic of 1 timestep of a [`GRU`]
+///
+/// The cell carries 1 state, the hidden state. The update and the reset gate both project the
+/// previous hidden state, so their pre-activations come from 1 fused matrix product. The
+/// candidate instead projects `r_t .* h_prev`, so it needs a second product. That is why the
+/// column blocks of the recurrent kernel fall into 2 groups rather than 1.
+///
+/// # Notes
+///
+/// The record of 1 step holds 4 arrays, in this order: the reset gate, the update gate, the
+/// candidate, and `r_t .* h_prev`. The last one is a record and not a recomputation, because
+/// the gradient of the candidate block of the recurrent kernel pairs against it.
+#[derive(Debug)]
+pub(crate) struct GruCell {
+    /// Activation applied to the candidate hidden state each timestep
+    activation: Activation,
+}
+
+/// Record slot of the reset-gate activation
+const RESET_GATE: usize = 0;
+/// Record slot of the update-gate activation
+const UPDATE_GATE: usize = 1;
+/// Record slot of the candidate hidden state
+const CANDIDATE: usize = 2;
+/// Record slot of `r_t .* h_prev`, which the candidate block of the recurrent kernel projected
+const RESET_HIDDEN: usize = 3;
+
+impl RnnCell for GruCell {
+    const CELL_TYPE: &'static str = "GRU";
+    const GATE_BIASES: &'static [f32] = &[0.0, 0.0, 0.0];
+    const STATE_COUNT: usize = 1;
+    const RECORD_SLOTS: usize = 4;
+    const RECURRENT_GROUPS: &'static [RecurrentGroup] = &[
+        RecurrentGroup {
+            first: 0,
+            count: 2,
+            operand: None,
+        },
+        RecurrentGroup {
+            first: 2,
+            count: 1,
+            operand: Some(RESET_HIDDEN),
+        },
+    ];
+
+    fn new(activation: Activation) -> Self {
+        Self { activation }
+    }
+
+    fn step(
+        &self,
+        gates: &FusedGates,
+        xw_t: ArrayView2<'_, f32>,
+        state: &mut [Array2<f32>],
+        record: Option<&mut Vec<Array2<f32>>>,
+    ) -> Result<(), Error> {
+        let u = gates.units();
+        let act = self.activation;
+        // Bias blocks `[z | r]` and `[h]`, each folded into its own product's epilogue
+        let (bias_rz, bias_h) = gates
+            .bias
+            .as_slice()
+            .expect("fused bias must be contiguous")
+            .split_at(2 * u);
+        let h_prev = &state[0];
+
+        // Reset and update share h_prev, so their recurrent projections fuse into 1 product
+        let mut rz = xw_t.slice(s![.., 0..2 * u]).to_owned();
+        gemmkit_ndarray::gemm_fused(
+            1.0,
+            h_prev,
+            &gates.recurrent_kernel.slice(s![.., 0..2 * u]),
+            1.0,
+            &mut rz,
+            Some(Bias::PerCol(bias_rz)),
+            None,
+            Parallelism::Rayon(0),
+        );
+        let rz = apply_sigmoid(rz);
+        let z_t = rz.slice(s![.., 0..u]).to_owned();
+        let r_t = rz.slice(s![.., u..2 * u]).to_owned();
+
+        // r_t .* h_{t-1}, then the candidate hidden state
+        let r_h = &r_t * h_prev;
+        let mut h_candidate = xw_t.slice(s![.., 2 * u..]).to_owned();
+        let rk_h = gates.recurrent_kernel.slice(s![.., 2 * u..]);
+        gemmkit_ndarray::gemm_fused(
+            1.0,
+            &r_h,
+            &rk_h,
+            1.0,
+            &mut h_candidate,
+            Some(Bias::PerCol(bias_h)),
+            None,
+            Parallelism::Rayon(0),
+        );
+        let h_candidate = act
+            .forward(&h_candidate.into_dyn())?
+            .into_dimensionality::<Ix2>()
+            .unwrap();
+
+        // Hidden state update
+        let h_t = &z_t * h_prev + &(1.0 - &z_t) * &h_candidate;
+
+        if let Some(record) = record {
+            record.push(r_t);
+            record.push(z_t);
+            record.push(h_candidate);
+            record.push(r_h);
+        }
+        state[0] = h_t;
+        Ok(())
+    }
+
+    fn step_backward(
+        &self,
+        gates: &FusedGates,
+        state_prev: &[Array2<f32>],
+        _state_next: &[Array2<f32>],
+        record: &[Array2<f32>],
+        grad_state: &mut [Array2<f32>],
+    ) -> Result<Array2<f32>, Error> {
+        let u = gates.units();
+        let act = self.activation;
+        let h_prev = &state_prev[0];
+        let r_t = &record[RESET_GATE];
+        let z_t = &record[UPDATE_GATE];
+        let h_candidate = &record[CANDIDATE];
+        let batch = h_prev.shape()[0];
+
+        // Gradient through h_t = z_t .* h_{t-1} + (1 - z_t) .* h_candidate
+        let grad_z_t = &grad_state[0] * (h_prev - h_candidate);
+        let grad_h_candidate = &grad_state[0] * &(1.0 - z_t);
+        let grad_h_prev_from_update = &grad_state[0] * z_t;
+
+        // Gradient through h_candidate = activation(...), via the activation backward
+        let grad_h_candidate_raw = act
+            .backward(
+                &h_candidate.clone().into_dyn(),
+                &grad_h_candidate.into_dyn(),
+            )?
+            .into_dimensionality::<Ix2>()
+            .unwrap();
+
+        // Gradient through r_h = r_t .* h_{t-1} (1 recurrent product shared by both terms)
+        let grad_rh = dot(
+            &grad_h_candidate_raw,
+            &gates.recurrent_kernel.slice(s![.., 2 * u..]).t(),
+        );
+        let grad_r_t = &grad_rh * h_prev;
+        let grad_h_prev_from_reset = &grad_rh * r_t;
+
+        // Gate pre-activation gradients (sigmoid derivative)
+        let grad_z_raw = &grad_z_t * z_t * &(1.0 - z_t);
+        let grad_r_raw = &grad_r_t * r_t * &(1.0 - r_t);
+
+        // Assemble the fused update+reset dz for this timestep, in kernel block order
+        let mut dz_rz_t = Array2::<f32>::zeros((batch, 2 * u));
+        dz_rz_t.slice_mut(s![.., 0..u]).assign(&grad_z_raw);
+        dz_rz_t.slice_mut(s![.., u..2 * u]).assign(&grad_r_raw);
+
+        // Gradient with respect to the previous hidden state. The candidate block never enters
+        // this product, because its contribution already went through `grad_rh`
+        grad_state[0] = dot(
+            &dz_rz_t,
+            &gates.recurrent_kernel.slice(s![.., 0..2 * u]).t(),
+        ) + &grad_h_prev_from_reset
+            + &grad_h_prev_from_update;
+
+        let mut dz_t = Array2::<f32>::zeros((batch, 3 * u));
+        dz_t.slice_mut(s![.., 0..2 * u]).assign(&dz_rz_t);
+        dz_t.slice_mut(s![.., 2 * u..])
+            .assign(&grad_h_candidate_raw);
+        Ok(dz_t)
+    }
+}
 
 /// Gated Recurrent Unit (GRU) neural network layer
 ///
@@ -65,47 +236,7 @@ use ndarray::{Array2, Array3, ArrayView3, Axis, concatenate, s};
 /// println!("GRU output shape: {:?}", predictions.shape());
 /// // Output: [2, 3] (batch_size, units)
 /// ```
-#[derive(Debug)]
-pub struct GRU {
-    /// Feature count per timestep, which [`UnaryLayer::build`] reads from the input shape
-    input_dim: usize,
-    /// Shape the gates depend on, which is `(None, None, input_dim)`. `None` before the build
-    built: Option<Shape>,
-    /// Seed of the weight draw, or `None` to take the global seed or entropy
-    random_state: Option<u64>,
-    /// Number of GRU units (neurons) in the layer
-    units: usize,
-
-    /// Fused gate weights, column blocks in the order `[z | r | h]`
-    gates: FusedGates,
-
-    /// Activation applied to the candidate hidden state each timestep (Keras-style)
-    activation: Activation,
-    /// Returns the full sequence of hidden states when true, or only the last one when false
-    return_sequences: bool,
-    /// Processes the input timesteps from last to first when true
-    go_backwards: bool,
-}
-
-/// What the forward pass of [`GRU`] parks for its backward pass
-///
-/// The per-timestep values let the backward pass recompute the gate gradients without a second
-/// run of the forward recurrence
-#[derive(Debug)]
-struct GruCaches {
-    /// The input of the pass, with shape (batch_size, timesteps, input_dim)
-    input: Array3<f32>,
-    /// Hidden states `h_t`, with `h_0 = 0` prepended (length `timesteps + 1`)
-    hs: Vec<Array2<f32>>,
-    /// Reset-gate activations (sigmoid) per timestep
-    r: Vec<Array2<f32>>,
-    /// Update-gate activations (sigmoid) per timestep
-    z: Vec<Array2<f32>>,
-    /// Candidate hidden states (activation applied) per timestep
-    h_candidate: Vec<Array2<f32>>,
-    /// `r_t .* h_{t-1}` per timestep (the candidate's recurrent input)
-    rh: Vec<Array2<f32>>,
-}
+pub struct GRU(Rnn<GruCell>);
 
 impl GRU {
     /// Creates a GRU layer with the specified dimensions and activation
@@ -132,20 +263,7 @@ impl GRU {
     /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
     pub fn new(units: usize, activation: impl Into<Activation>) -> Result<Self, Error> {
-        validate_dimension_greater_than_zero(units, "units")?;
-        let activation = activation.into();
-        activation.validate()?;
-
-        Ok(Self {
-            input_dim: 0,
-            built: None,
-            random_state: None,
-            units,
-            gates: FusedGates::empty(),
-            activation,
-            return_sequences: false,
-            go_backwards: false,
-        })
+        Ok(Self(Rnn::new(units, activation)?))
     }
 
     /// Sets the seed used to initialize the gate weights and re-initializes them deterministically.
@@ -163,21 +281,8 @@ impl GRU {
     ///
     /// - `Self` - The updated layer
     pub fn with_random_state(mut self, random_state: u64) -> Self {
-        self.random_state = Some(random_state);
-        if self.built.is_some() {
-            self.draw_parameters();
-        }
+        self.0 = self.0.with_random_state(random_state);
         self
-    }
-
-    /// Draws the fused gates at the extents the build settled
-    ///
-    /// 1 generator threads the fused input kernel and then 1 orthogonal block per gate, in gate
-    /// order. See [`FusedGates::new`]
-    fn draw_parameters(&mut self) {
-        // The build validated both dimensions, so the draw cannot fail
-        self.gates = Self::init_gates(self.input_dim, self.units, self.random_state)
-            .expect("the build validated both dimensions");
     }
 
     /// Sets whether the layer returns every timestep's hidden state
@@ -200,7 +305,7 @@ impl GRU {
     /// The last slot of the returned sequence always equals the output of the same layer with
     /// `return_sequences` set to false.
     pub fn with_return_sequences(mut self, return_sequences: bool) -> Self {
-        self.return_sequences = return_sequences;
+        self.0.return_sequences = return_sequences;
         self
     }
 
@@ -219,20 +324,8 @@ impl GRU {
     ///
     /// - `Self` - The updated layer
     pub fn with_go_backwards(mut self, go_backwards: bool) -> Self {
-        self.go_backwards = go_backwards;
+        self.0.go_backwards = go_backwards;
         self
-    }
-
-    /// Initializes the fused `[z | r | h]` gate blocks from the given seed.
-    ///
-    /// 1 RNG is threaded through all 3 gate blocks. All biases start at 0.0.
-    fn init_gates(
-        input_dim: usize,
-        units: usize,
-        random_state: Option<u64>,
-    ) -> Result<FusedGates, Error> {
-        let mut rng = crate::random::make_rng(random_state);
-        FusedGates::new(input_dim, units, &[0.0, 0.0, 0.0], &mut rng)
     }
 
     /// Sets the fused weights for this GRU layer
@@ -255,22 +348,7 @@ impl GRU {
         recurrent_kernel: Array2<f32>,
         bias: Array2<f32>,
     ) -> Result<(), Error> {
-        if self.built.is_none() {
-            return Err(Error::not_built("GRU"));
-        }
-        validate_weight_shape("kernel", self.gates.kernel.shape(), kernel.shape())?;
-        validate_weight_shape(
-            "recurrent_kernel",
-            self.gates.recurrent_kernel.shape(),
-            recurrent_kernel.shape(),
-        )?;
-        validate_weight_shape("bias", self.gates.bias.shape(), bias.shape())?;
-
-        // Force standard layout: `parameters()` exposes the weights as flat slices
-        self.gates.kernel = kernel.as_standard_layout().into_owned();
-        self.gates.recurrent_kernel = recurrent_kernel.as_standard_layout().into_owned();
-        self.gates.bias = bias.as_standard_layout().into_owned();
-        Ok(())
+        self.0.set_weights(kernel, recurrent_kernel, bias)
     }
 
     /// Sets the weights gate by gate, packing them into the fused `[z | r | h]` layout
@@ -313,9 +391,9 @@ impl GRU {
         candidate_recurrent_kernel: Array2<f32>,
         candidate_bias: Array2<f32>,
     ) -> Result<(), Error> {
-        let per_gate_kernel = [self.input_dim, self.units];
-        let per_gate_recurrent = [self.units, self.units];
-        let per_gate_bias = [1, self.units];
+        let per_gate_kernel = [self.0.input_dim, self.0.units];
+        let per_gate_recurrent = [self.0.units, self.0.units];
+        let per_gate_bias = [1, self.0.units];
         for (name, expected, got) in [
             ("reset_kernel", &per_gate_kernel, reset_kernel.shape()),
             (
@@ -372,370 +450,6 @@ impl GRU {
 
         self.set_weights(kernel, recurrent_kernel, bias)
     }
-
-    /// Runs the recurrence and returns the layer output. This is the numeric body of
-    /// [`UnaryLayer::forward`].
-    ///
-    /// The output is the last hidden state, with shape (batch_size, units). With
-    /// `return_sequences` set, it is instead every hidden state in processing order, with shape
-    /// (batch_size, timesteps, units).
-    ///
-    /// When `caches` is `Some`, the pass records every per-timestep value the backward pass
-    /// needs. This includes the hidden states, the reset and update gate activations, the
-    /// candidate, and `r_t .* h_{t-1}`. An inference pass passes `None` and skips the recording.
-    /// Every record stays in processing order.
-    ///
-    /// Each timestep computes the reset and update gates with 1 fused GEMM, then the candidate
-    /// with a second GEMM whose input is `r_t .* h_{t-1}`.
-    ///
-    /// The GEMM calls use gemmkit's automatic parallelism, so gemmkit picks serial or parallel
-    /// execution based on its own work-size gate.
-    fn run(
-        &self,
-        x3: &ArrayView3<f32>,
-        mut caches: Option<&mut GruCaches>,
-    ) -> Result<Tensor, Error> {
-        let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
-        let u = self.units;
-        let act = self.activation;
-        // Bias blocks `[z | r]` and `[h]`, each folded into its own product's epilogue
-        let (bias_rz, bias_h) = self
-            .gates
-            .bias
-            .as_slice()
-            .expect("fused bias must be contiguous")
-            .split_at(2 * u);
-
-        let mut sequence = if self.return_sequences {
-            Some(Array3::<f32>::zeros((batch, timesteps, u)))
-        } else {
-            None
-        };
-
-        let mut h_prev = Array2::<f32>::zeros((batch, u));
-        if let Some(c) = caches.as_deref_mut() {
-            c.hs.push(h_prev.clone());
-        }
-
-        // Batched fused input projection for all 3 gates
-        let xw = project_input(&self.gates.kernel, x3);
-
-        for k in 0..timesteps {
-            let t = input_step(k, timesteps, self.go_backwards);
-            let xw_t = xw.index_axis(Axis(1), t); // [batch, 3*units]
-
-            // Reset and update share h_prev, so their recurrent projections fuse into 1 GEMM
-            let mut rz = xw_t.slice(s![.., 0..2 * u]).to_owned();
-            gemmkit_ndarray::gemm_fused(
-                1.0,
-                &h_prev,
-                &self.gates.recurrent_kernel.slice(s![.., 0..2 * u]),
-                1.0,
-                &mut rz,
-                Some(Bias::PerCol(bias_rz)),
-                None,
-                Parallelism::Rayon(0),
-            );
-            let rz = apply_sigmoid(rz);
-            let z_t = rz.slice(s![.., 0..u]).to_owned();
-            let r_t = rz.slice(s![.., u..2 * u]).to_owned();
-
-            // r_t .* h_{t-1}, then the candidate hidden state
-            let r_h = &r_t * &h_prev;
-            let mut h_candidate = xw_t.slice(s![.., 2 * u..]).to_owned();
-            let rk_h = self.gates.recurrent_kernel.slice(s![.., 2 * u..]);
-            gemmkit_ndarray::gemm_fused(
-                1.0,
-                &r_h,
-                &rk_h,
-                1.0,
-                &mut h_candidate,
-                Some(Bias::PerCol(bias_h)),
-                None,
-                Parallelism::Rayon(0),
-            );
-            let h_candidate = act
-                .forward(&h_candidate.into_dyn())?
-                .into_dimensionality::<ndarray::Ix2>()
-                .unwrap();
-
-            // Hidden state update
-            let h_t = &z_t * &h_prev + &(1.0 - &z_t) * &h_candidate;
-
-            if let Some(c) = caches.as_deref_mut() {
-                c.r.push(r_t);
-                c.z.push(z_t);
-                c.h_candidate.push(h_candidate);
-                c.rh.push(r_h);
-                c.hs.push(h_t.clone());
-            }
-            if let Some(seq) = sequence.as_mut() {
-                seq.index_axis_mut(Axis(1), k).assign(&h_t);
-            }
-
-            h_prev = h_t;
-        }
-
-        Ok(match sequence {
-            Some(seq) => seq.into_dyn(),
-            None => h_prev.into_dyn(),
-        })
-    }
 }
 
-impl LayerBase for GRU {
-    fn layer_type(&self) -> &str {
-        "GRU"
-    }
-
-    fn param_count(&self) -> ParamCounts {
-        // Read the arrays the layer holds rather than the configuration, so a change to
-        // the roster corrects the count with no second formula to keep in step
-        ParamCounts::trainable(
-            self.gates.kernel.len() + self.gates.recurrent_kernel.len() + self.gates.bias.len(),
-        )
-    }
-
-    fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
-        self.gates.parameters_mut()
-    }
-
-    // The layer keeps no input shape. It knows the feature count of 1 timestep, and it
-    // serves every batch size and every sequence length, so both of those axes are free
-    built_layer_shape_functions!();
-
-    named_weight_layer_functions!(
-        trainable "kernel" => gates.kernel,
-        trainable "recurrent_kernel" => gates.recurrent_kernel,
-        trainable "bias" => gates.bias,
-    );
-}
-
-impl UnaryLayer for GRU {
-    /// Reads the feature count from the last axis, and draws the fused gates
-    ///
-    /// The gates depend on the feature count and on the unit count, and on no other extent. The
-    /// build shape therefore fixes the last axis alone, and the layer takes a batch of any size
-    /// and a sequence of any length
-    fn build(&mut self, input: &Shape) -> Result<(), Error> {
-        input.check_rank("GRU", 3)?;
-        let Some(input_dim) = input.axes()[2] else {
-            return Err(Error::invalid_input(format!(
-                "GRU needs a fixed feature count on axis 2, and the shape {input} leaves \
-                 that axis free"
-            )));
-        };
-        validate_recurrent_dimensions(input_dim, self.units)?;
-        let canonical = Shape::new(vec![None, None, Some(input_dim)]);
-        let Some(built) = start_build(&self.built, "GRU", &canonical)? else {
-            return Ok(());
-        };
-        self.input_dim = input_dim;
-        self.built = Some(built);
-        self.draw_parameters();
-        Ok(())
-    }
-
-    /// An inference pass records no per-timestep value at all, and it parks no cache
-    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        if !self.is_built() {
-            return Err(Error::not_built("GRU"));
-        }
-        validate_input_3d(input)?;
-        let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
-
-        if !ctx.is_training() {
-            return self.run(&x3, None);
-        }
-
-        let timesteps = x3.shape()[1];
-        let mut caches = GruCaches {
-            input: x3.to_owned(),
-            hs: Vec::with_capacity(timesteps + 1),
-            r: Vec::with_capacity(timesteps),
-            z: Vec::with_capacity(timesteps),
-            h_candidate: Vec::with_capacity(timesteps),
-            rh: Vec::with_capacity(timesteps),
-        };
-        let output = self.run(&x3, Some(&mut caches))?;
-        ctx.push_cache("GRU", caches);
-        Ok(output)
-    }
-
-    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        // Configurable activation (Copy) used for the candidate derivative
-        let act = self.activation;
-
-        let GruCaches {
-            input: x3,
-            hs,
-            r: r_vals,
-            z: z_vals,
-            h_candidate: h_candidate_vals,
-            rh: rh_vals,
-        } = ctx.pop_cache("GRU")?;
-
-        let batch = x3.shape()[0];
-        let timesteps = x3.shape()[1];
-        let feat = x3.shape()[2];
-        let u = self.units;
-
-        // With `return_sequences`, every step also takes a direct contribution from `grad_seq`
-        let (mut grad_h, grad_seq) = split_grad_output(
-            grad_output,
-            "GRU",
-            self.return_sequences,
-            batch,
-            timesteps,
-            u,
-        )?;
-
-        // Fused pre-activation gradients for every timestep, gate blocks [z | r | h]
-        let mut dz3 = Array3::<f32>::zeros((batch, timesteps, 3 * u));
-
-        // Backpropagation through time
-        for k in (0..timesteps).rev() {
-            // The direct contribution accumulates onto the carried gradient. It must land before
-            // the update-gate gradient below, which consumes the total gradient of this step
-            if let Some(seq) = grad_seq.as_ref() {
-                grad_h += &seq.index_axis(Axis(1), k);
-            }
-
-            let h_prev = &hs[k];
-            let r_t = &r_vals[k];
-            let z_t = &z_vals[k];
-            let h_candidate = &h_candidate_vals[k];
-
-            // Gradient through h_t = z_t .* h_{t-1} + (1 - z_t) .* h_candidate
-            let grad_z_t = &grad_h * (h_prev - h_candidate);
-            let grad_h_candidate = &grad_h * &(1.0 - z_t);
-            let grad_h_prev_from_update = &grad_h * z_t;
-
-            // Gradient through h_candidate = activation(...), via the activation backward
-            let grad_h_candidate_raw = act
-                .backward(
-                    &h_candidate.clone().into_dyn(),
-                    &grad_h_candidate.into_dyn(),
-                )?
-                .into_dimensionality::<ndarray::Ix2>()
-                .unwrap();
-
-            // Gradient through r_h = r_t .* h_{t-1} (1 recurrent matmul shared by both terms)
-            let grad_rh = dot(
-                &grad_h_candidate_raw,
-                &self.gates.recurrent_kernel.slice(s![.., 2 * u..]).t(),
-            );
-            let grad_r_t = &grad_rh * h_prev;
-            let grad_h_prev_from_reset = &grad_rh * r_t;
-
-            // Gate pre-activation gradients (sigmoid derivative)
-            let grad_z_raw = &grad_z_t * z_t * &(1.0 - z_t);
-            let grad_r_raw = &grad_r_t * r_t * &(1.0 - r_t);
-
-            // Assemble the fused update+reset dz for this timestep, in kernel block order
-            let mut dz_rz_t = Array2::<f32>::zeros((batch, 2 * u));
-            dz_rz_t.slice_mut(s![.., 0..u]).assign(&grad_z_raw);
-            dz_rz_t.slice_mut(s![.., u..2 * u]).assign(&grad_r_raw);
-
-            // Gradient with respect to the previous hidden state
-            grad_h = dot(
-                &dz_rz_t,
-                &self.gates.recurrent_kernel.slice(s![.., 0..2 * u]).t(),
-            ) + &grad_h_prev_from_reset
-                + &grad_h_prev_from_update;
-
-            // The reductions below pair this step's gate gradients with the input row they came
-            // from, so the scatter uses the input timestep, not the processing step
-            let mut dz_t3 =
-                dz3.index_axis_mut(Axis(1), input_step(k, timesteps, self.go_backwards));
-            dz_t3.slice_mut(s![.., 0..2 * u]).assign(&dz_rz_t);
-            dz_t3
-                .slice_mut(s![.., 2 * u..])
-                .assign(&grad_h_candidate_raw);
-        }
-
-        // Batched reductions over all timesteps
-        let x_flat = x3
-            .to_shape((batch * timesteps, feat))
-            .expect("contiguous input reshape");
-        // `hs[k]` and `rh_vals[k]` belong to processing step `k`, and they pair with that step's
-        // gate gradients, which now sit at the step's input timestep
-        let mut h_prev3 = Array3::<f32>::zeros((batch, timesteps, u));
-        let mut rh3 = Array3::<f32>::zeros((batch, timesteps, u));
-        for k in 0..timesteps {
-            let t = input_step(k, timesteps, self.go_backwards);
-            h_prev3.index_axis_mut(Axis(1), t).assign(&hs[k]);
-            rh3.index_axis_mut(Axis(1), t).assign(&rh_vals[k]);
-        }
-        let h_prev_flat = h_prev3
-            .to_shape((batch * timesteps, u))
-            .expect("contiguous H_prev reshape");
-        let rh_flat = rh3
-            .to_shape((batch * timesteps, u))
-            .expect("contiguous RH reshape");
-        let dz_flat = dz3
-            .to_shape((batch * timesteps, 3 * u))
-            .expect("contiguous DZ reshape");
-
-        // Input-kernel gradient for all 3 gates in 1 GEMM
-        let grad_kernel = dot(&x_flat.t(), &dz_flat);
-        let grad_bias = dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0));
-
-        // Recurrent gradient: each product is written straight into its column block (`beta = 0`),
-        // so neither needs a temporary of its own
-        let mut grad_recurrent = Array2::<f32>::zeros((u, 3 * u));
-        gemmkit_ndarray::gemm(
-            1.0,
-            &h_prev_flat.t(),
-            &dz_flat.slice(s![.., 0..2 * u]),
-            0.0,
-            &mut grad_recurrent.slice_mut(s![.., 0..2 * u]),
-            Parallelism::Rayon(0),
-        );
-        gemmkit_ndarray::gemm(
-            1.0,
-            &rh_flat.t(),
-            &dz_flat.slice(s![.., 2 * u..]),
-            0.0,
-            &mut grad_recurrent.slice_mut(s![.., 2 * u..]),
-            Parallelism::Rayon(0),
-        );
-
-        // Input gradient for all 3 gates in 1 GEMM
-        let grad_x3 = crate::neural_network::layers::recurrent::gate::reshape_2d_to_3d(
-            dot(&dz_flat, &self.gates.kernel.t()),
-            (batch, timesteps, feat),
-        );
-
-        ctx.add_grad(
-            "kernel",
-            grad_kernel.as_standard_layout().to_owned().into_dyn(),
-        )?;
-        ctx.add_grad("recurrent_kernel", grad_recurrent.into_dyn())?;
-        ctx.add_grad("bias", grad_bias.as_standard_layout().to_owned().into_dyn())?;
-
-        Ok(grad_x3.into_dyn())
-    }
-
-    /// A returned sequence keeps the time axis, and a returned final state drops it
-    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
-        input.check_rank("GRU", 3)?;
-        let axes = input.axes();
-        // The unit count settles the answer, so an unbuilt layer gives it. A built layer holds
-        // a kernel of a fixed width, and it refuses a feature count that the kernel cannot take
-        if self.built.is_some()
-            && let Some(features) = axes[2]
-            && features != self.input_dim
-        {
-            return Err(Error::invalid_input(format!(
-                "GRU expects {} features per timestep, got {features}",
-                self.input_dim
-            )));
-        }
-        Ok(if self.return_sequences {
-            Shape::new(vec![axes[0], axes[1], Some(self.units)])
-        } else {
-            Shape::new(vec![axes[0], Some(self.units)])
-        })
-    }
-}
+recurrent_layer_traits!(GRU);

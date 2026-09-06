@@ -2,21 +2,109 @@
 //! timestep's hidden state
 
 use crate::error::Error;
-use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::activation::Activation;
-use crate::neural_network::layers::recurrent::input_step;
-use crate::neural_network::layers::recurrent::validation::{
-    split_grad_output, validate_dimension_greater_than_zero, validate_input_3d,
-    validate_recurrent_dimensions,
-};
-use crate::neural_network::layers::validation::start_build;
-use crate::neural_network::layers::validation::validate_weight_shape;
-use crate::neural_network::layers::{built_layer_shape_functions, named_weight_layer_functions};
-use crate::neural_network::traits::{LayerBase, ParamRef, UnaryLayer};
-use crate::neural_network::{Ctx, Fans, Initializer, Shape, Tensor};
+use crate::neural_network::layers::recurrent::cell::{RecurrentGroup, RnnCell};
+use crate::neural_network::layers::recurrent::gate::FusedGates;
+use crate::neural_network::layers::recurrent::rnn::{Rnn, recurrent_layer_traits};
+use crate::neural_network::traits::{LayerBase, UnaryLayer};
 use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Activation as FusedActivation, Bias, Parallelism};
-use ndarray::{Array, Array2, Array3, Axis};
+use ndarray::{Array2, ArrayView2, Ix2};
+
+/// The arithmetic of 1 timestep of a [`SimpleRNN`]
+///
+/// The cell holds 1 gate. A timestep needs 1 matrix product and at most 1 activation sweep. The
+/// timestep buffer starts as the projected `x_t @ kernel` slice. The recurrent product
+/// accumulates into it, and the bias rides the same epilogue. This removes 2 separate
+/// allocating broadcast adds that unfused code would need. `ReLU` also folds into the backend's
+/// vectorized epilogue, and `Linear` needs no pass at all. Every other activation runs as a
+/// separate vectorized [`Activation::forward`] pass, because a per-element closure epilogue
+/// would need 1 indirect scalar call per element.
+///
+/// A fused `f32` epilogue matches the unfused product plus the scalar activation bit for bit,
+/// with 1 exception. The fused `Relu` of the backend maps `NaN` to `0`, while the scalar closure
+/// of this crate propagates `NaN` instead.
+///
+/// The cell parks nothing of its own. The hidden state that leaves a step is the only value that
+/// its backward pass reads, and [`Rnn`] hands that state to every cell.
+#[derive(Debug)]
+pub(crate) struct SimpleRnnCell {
+    /// Activation applied at each timestep of the recurrence
+    activation: Activation,
+}
+
+impl RnnCell for SimpleRnnCell {
+    const CELL_TYPE: &'static str = "SimpleRNN";
+    const GATE_BIASES: &'static [f32] = &[0.0];
+    const STATE_COUNT: usize = 1;
+    const RECORD_SLOTS: usize = 0;
+    const RECURRENT_GROUPS: &'static [RecurrentGroup] = &[RecurrentGroup {
+        first: 0,
+        count: 1,
+        operand: None,
+    }];
+
+    fn new(activation: Activation) -> Self {
+        Self { activation }
+    }
+
+    fn step(
+        &self,
+        gates: &FusedGates,
+        xw_t: ArrayView2<'_, f32>,
+        state: &mut [Array2<f32>],
+        _record: Option<&mut Vec<Array2<f32>>>,
+    ) -> Result<(), Error> {
+        let bias = gates.bias.as_slice().expect("bias must be contiguous");
+        // z = x_t @ W + h_{t-1} @ U + b, with `x_t @ W` prefilled as the accumulator
+        let mut z = xw_t.to_owned();
+        let fused_act = match self.activation {
+            Activation::ReLU => Some(FusedActivation::Relu),
+            _ => None,
+        };
+        gemmkit_ndarray::gemm_fused(
+            1.0,
+            &state[0],
+            &gates.recurrent_kernel,
+            1.0,
+            &mut z,
+            Some(Bias::PerCol(bias)),
+            fused_act,
+            Parallelism::Rayon(0),
+        );
+        state[0] = match self.activation {
+            Activation::Linear | Activation::ReLU => z,
+            _ => self
+                .activation
+                .forward(&z.into_dyn())?
+                .into_dimensionality::<Ix2>()
+                .unwrap(),
+        };
+        Ok(())
+    }
+
+    fn step_backward(
+        &self,
+        gates: &FusedGates,
+        _state_prev: &[Array2<f32>],
+        state_next: &[Array2<f32>],
+        _record: &[Array2<f32>],
+        grad_state: &mut [Array2<f32>],
+    ) -> Result<Array2<f32>, Error> {
+        // The activation backward reads the state that LEAVES the step, which is what the
+        // activation produced, and the total gradient of that same state
+        let d_z = {
+            let h_t = state_next[0].clone().into_dyn();
+            let grad_h = grad_state[0].clone().into_dyn();
+            self.activation
+                .backward(&h_t, &grad_h)?
+                .into_dimensionality::<Ix2>()
+                .unwrap()
+        };
+        grad_state[0] = dot(&d_z, &gates.recurrent_kernel.t());
+        Ok(d_z)
+    }
+}
 
 /// Simple Recurrent Neural Network (SimpleRNN) layer
 ///
@@ -60,37 +148,13 @@ use ndarray::{Array, Array2, Array3, Axis};
 /// let pred = model.predict(&x);
 /// println!("SimpleRnn prediction:\n{:#?}\n", pred);
 /// ```
-#[derive(Debug)]
-pub struct SimpleRNN {
-    /// Feature count per timestep, which [`UnaryLayer::build`] reads from the input shape
-    input_dim: usize,
-    /// Shape the kernels depend on, which is `(None, None, input_dim)`. `None` before the
-    /// build
-    built: Option<Shape>,
-    /// Seed of the weight draw, or `None` to take the global seed or entropy
-    random_state: Option<u64>,
-    /// Number of output units (neurons)
-    units: usize,
-    /// Weight matrix connecting inputs to the layer with shape (input_dim, units)
-    kernel: Array2<f32>,
-    /// Weight matrix connecting previous hidden states with shape (units, units)
-    recurrent_kernel: Array2<f32>,
-    /// Bias vector for the layer with shape (1, units)
-    bias: Array2<f32>,
-    /// Activation function applied at each timestep of the recurrence
-    activation: Activation,
-    /// Returns the full sequence of hidden states when true, or only the last one when false
-    return_sequences: bool,
-    /// Processes the input timesteps from last to first when true
-    go_backwards: bool,
-}
+pub struct SimpleRNN(Rnn<SimpleRnnCell>);
 
 impl SimpleRNN {
-    /// Creates a SimpleRNN layer with the specified dimensions and activation
+    /// Creates a SimpleRNN layer with the specified unit count and activation
     ///
     /// # Parameters
     ///
-    /// - `input_dim` - Size of each input sample
     /// - `units` - Number of output units
     /// - `activation` - Activation function from the activation module (any [`Activation`]
     ///   variant, or any standalone activation layer)
@@ -110,22 +174,7 @@ impl SimpleRNN {
     /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
     pub fn new(units: usize, activation: impl Into<Activation>) -> Result<Self, Error> {
-        validate_dimension_greater_than_zero(units, "units")?;
-        let activation = activation.into();
-        activation.validate()?;
-
-        Ok(SimpleRNN {
-            input_dim: 0,
-            built: None,
-            random_state: None,
-            units,
-            kernel: Array::zeros((0, 0)),
-            recurrent_kernel: Array::zeros((0, 0)),
-            bias: Array::zeros((0, 0)),
-            activation,
-            return_sequences: false,
-            go_backwards: false,
-        })
+        Ok(Self(Rnn::new(units, activation)?))
     }
 
     /// Sets the seed used to initialize the weights and re-initializes them deterministically
@@ -143,10 +192,7 @@ impl SimpleRNN {
     ///
     /// - `Self` - The updated layer
     pub fn with_random_state(mut self, random_state: u64) -> Self {
-        self.random_state = Some(random_state);
-        if self.built.is_some() {
-            self.draw_parameters();
-        }
+        self.0 = self.0.with_random_state(random_state);
         self
     }
 
@@ -170,7 +216,7 @@ impl SimpleRNN {
     /// The last slot of the returned sequence always equals the output of the same layer with
     /// `return_sequences` set to false.
     pub fn with_return_sequences(mut self, return_sequences: bool) -> Self {
-        self.return_sequences = return_sequences;
+        self.0.return_sequences = return_sequences;
         self
     }
 
@@ -189,32 +235,14 @@ impl SimpleRNN {
     ///
     /// - `Self` - The updated layer
     pub fn with_go_backwards(mut self, go_backwards: bool) -> Self {
-        self.go_backwards = go_backwards;
+        self.0.go_backwards = go_backwards;
         self
     }
 
-    /// Initializes the input kernel (Xavier/Glorot) and recurrent kernel (orthogonal) from a seed
-    ///
-    /// Both draws share a single RNG, kernel first and then recurrent kernel, so a given seed
-    /// reproduces the exact same pair of matrices. The order is part of the contract of this
-    /// layer. A second generator, or the reverse order, changes the recurrent kernel
-    fn draw_parameters(&mut self) {
-        let mut rng = crate::random::make_rng(self.random_state);
-
-        self.kernel = Initializer::GlorotUniform.draw(
-            (self.input_dim, self.units),
-            Fans::new(self.input_dim, self.units),
-            &mut rng,
-        );
-
-        // Orthonormal columns keep the hidden-state transition norm-preserving
-        self.recurrent_kernel =
-            Initializer::Orthogonal.draw_orthogonal(self.units, Fans::NONE, &mut rng);
-
-        self.bias = Array::zeros((1, self.units));
-    }
-
     /// Sets the weights for this layer
+    ///
+    /// Each matrix takes the standard layout, because an optimizer reads every array of a layer
+    /// as a flat slice.
     ///
     /// # Parameters
     ///
@@ -229,6 +257,7 @@ impl SimpleRNN {
     ///
     /// # Errors
     ///
+    /// - `Error::NeuralNetwork(NnError::NotBuilt)` - If the layer is not built
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any supplied matrix does not match the
     ///   layer's existing shape
     pub fn set_weights(
@@ -237,339 +266,8 @@ impl SimpleRNN {
         recurrent_kernel: Array2<f32>,
         bias: Array2<f32>,
     ) -> Result<(), Error> {
-        if self.built.is_none() {
-            return Err(Error::not_built("SimpleRNN"));
-        }
-        validate_weight_shape("kernel", self.kernel.shape(), kernel.shape())?;
-        validate_weight_shape(
-            "recurrent_kernel",
-            self.recurrent_kernel.shape(),
-            recurrent_kernel.shape(),
-        )?;
-        validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
-        self.kernel = kernel;
-        self.recurrent_kernel = recurrent_kernel;
-        self.bias = bias;
-        Ok(())
-    }
-
-    /// Batched input projection: `x3 [batch, timesteps, input_dim] @ kernel` for all timesteps in a
-    /// single GEMM, returning `[batch, timesteps, units]`
-    ///
-    /// Collapsing the (batch, timesteps) axes into 1 matmul improves cache and SIMD use over
-    /// `timesteps` separate small GEMMs.
-    fn project_input(&self, x3: &ndarray::ArrayView3<f32>) -> Array3<f32> {
-        crate::neural_network::layers::recurrent::gate::project_input(&self.kernel, x3)
-    }
-
-    /// Runs the recurrence and returns the layer output, the numeric body of
-    /// [`UnaryLayer::forward`]
-    ///
-    /// The output is the last hidden state, with shape (batch_size, units). With
-    /// `return_sequences` set, it is instead every hidden state in processing order, with shape
-    /// (batch_size, timesteps, units).
-    ///
-    /// When `hidden_states` is `Some`, this method records every hidden state, with `h_0 = 0`
-    /// prepended, for the backward pass. An inference pass passes `None` and skips both the
-    /// recording and its clones. The record stays in processing order, so `hidden_states[k]` is
-    /// the state that enters processing step `k`.
-    ///
-    /// A timestep needs 1 GEMM call and at most 1 activation sweep. The timestep buffer starts
-    /// as the pre-projected `x_t @ kernel` slice. The recurrent product accumulates into it
-    /// because `beta = 1`, and the bias add rides the same GEMM epilogue. This removes 2
-    /// separate allocating broadcast adds that unfused code would need. `ReLU` also fuses into
-    /// the backend's vectorized `Relu` epilogue, and `Linear` needs no pass at all. Every other
-    /// activation instead runs as a separate vectorized [`Activation::forward`] pass. It runs
-    /// this way because a per-element closure epilogue (`gemm_map`) would need 1 indirect
-    /// scalar call per element.
-    ///
-    /// A fused `f32` epilogue matches the unfused product plus scalar activation bit for bit,
-    /// with 1 exception. gemmkit's fused `Relu` maps `NaN` to `0`, while this crate's scalar
-    /// closure propagates `NaN` instead. Outside that case, fusion changes no recorded hidden
-    /// state.
-    ///
-    /// Each call uses gemmkit's automatic parallelism. A timestep product is
-    /// `batch * units * units` of work. At small layer sizes, this sits below the backend's
-    /// work gate and stays on the calling thread, so the tight loop pays no parallel dispatch.
-    /// Wider layers cross the gate, and the backend spreads them itself.
-    fn run(
-        &self,
-        x3: &ndarray::ArrayView3<f32>,
-        mut hidden_states: Option<&mut Vec<Array2<f32>>>,
-    ) -> Result<Tensor, Error> {
-        let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
-        let xw = self.project_input(x3);
-        let bias = self.bias.as_slice().expect("bias must be contiguous");
-
-        let mut sequence = if self.return_sequences {
-            Some(Array3::<f32>::zeros((batch, timesteps, self.units)))
-        } else {
-            None
-        };
-
-        let mut h_prev = Array2::<f32>::zeros((batch, self.units));
-        if let Some(hs) = hidden_states.as_deref_mut() {
-            hs.push(h_prev.clone());
-        }
-
-        // An RNN requires sequential timestep processing
-        for k in 0..timesteps {
-            let t = input_step(k, timesteps, self.go_backwards);
-            // z = x_t @ W + h_{t-1} @ U + b, with `x_t @ W` prefilled as the accumulator
-            let mut z = xw.index_axis(Axis(1), t).to_owned();
-            let fused_act = match self.activation {
-                Activation::ReLU => Some(FusedActivation::Relu),
-                _ => None,
-            };
-            gemmkit_ndarray::gemm_fused(
-                1.0,
-                &h_prev,
-                &self.recurrent_kernel,
-                1.0,
-                &mut z,
-                Some(Bias::PerCol(bias)),
-                fused_act,
-                Parallelism::Rayon(0),
-            );
-            let h_t = match self.activation {
-                Activation::Linear | Activation::ReLU => z,
-                _ => self
-                    .activation
-                    .forward(&z.into_dyn())?
-                    .into_dimensionality::<ndarray::Ix2>()
-                    .unwrap(),
-            };
-            h_prev = h_t;
-            if let Some(seq) = sequence.as_mut() {
-                seq.index_axis_mut(Axis(1), k).assign(&h_prev);
-            }
-            if let Some(hs) = hidden_states.as_deref_mut() {
-                hs.push(h_prev.clone());
-            }
-        }
-        Ok(match sequence {
-            Some(seq) => seq.into_dyn(),
-            None => h_prev.into_dyn(),
-        })
+        self.0.set_weights(kernel, recurrent_kernel, bias)
     }
 }
 
-/// What the forward pass of [`SimpleRNN`] parks for its backward pass
-#[derive(Debug)]
-struct SimpleRnnCache {
-    /// The input of the pass, with shape (batch_size, timesteps, input_dim)
-    input: Array3<f32>,
-    /// Every hidden state in processing order, with `h_0 = 0` prepended
-    hidden_states: Vec<Array2<f32>>,
-}
-
-impl LayerBase for SimpleRNN {
-    fn layer_type(&self) -> &str {
-        "SimpleRNN"
-    }
-
-    fn param_count(&self) -> ParamCounts {
-        // Read the arrays the layer holds rather than the configuration, so a change to
-        // the roster corrects the count with no second formula to keep in step
-        ParamCounts::trainable(self.kernel.len() + self.recurrent_kernel.len() + self.bias.len())
-    }
-
-    fn parameters_mut(&mut self) -> Vec<ParamRef<'_>> {
-        let Self {
-            kernel,
-            recurrent_kernel,
-            bias,
-            ..
-        } = self;
-        vec![
-            ParamRef::weight(
-                "kernel",
-                kernel.as_slice_mut().expect("kernel must be contiguous"),
-            ),
-            ParamRef::weight(
-                "recurrent_kernel",
-                recurrent_kernel
-                    .as_slice_mut()
-                    .expect("recurrent kernel must be contiguous"),
-            ),
-            ParamRef::no_decay(
-                "bias",
-                bias.as_slice_mut().expect("bias must be contiguous"),
-            ),
-        ]
-    }
-
-    // The layer keeps no input shape. It knows the feature count of 1 timestep, and it
-    // serves every batch size and every sequence length, so both of those axes are free
-    built_layer_shape_functions!();
-
-    named_weight_layer_functions!(
-        trainable "kernel" => kernel,
-        trainable "recurrent_kernel" => recurrent_kernel,
-        trainable "bias" => bias,
-    );
-}
-
-impl UnaryLayer for SimpleRNN {
-    /// Reads the feature count from the last axis, and draws both kernels and the bias
-    ///
-    /// 1 generator threads the input kernel and then the orthogonal recurrent kernel, in that
-    /// order. A second generator, or the other order, changes every value of the second draw
-    ///
-    /// The kernels depend on the feature count and on the unit count, and on no other extent.
-    /// The build shape therefore fixes the last axis alone, and the layer takes a batch of any
-    /// size and a sequence of any length
-    fn build(&mut self, input: &Shape) -> Result<(), Error> {
-        input.check_rank("SimpleRNN", 3)?;
-        let Some(input_dim) = input.axes()[2] else {
-            return Err(Error::invalid_input(format!(
-                "SimpleRNN needs a fixed feature count on axis 2, and the shape {input} leaves \
-                 that axis free"
-            )));
-        };
-        validate_recurrent_dimensions(input_dim, self.units)?;
-        let canonical = Shape::new(vec![None, None, Some(input_dim)]);
-        let Some(built) = start_build(&self.built, "SimpleRNN", &canonical)? else {
-            return Ok(());
-        };
-        self.input_dim = input_dim;
-        self.built = Some(built);
-        self.draw_parameters();
-        Ok(())
-    }
-
-    /// An inference pass records no hidden state at all, and it parks no cache
-    fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        if !self.is_built() {
-            return Err(Error::not_built("SimpleRNN"));
-        }
-        validate_input_3d(input)?;
-        let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
-
-        if !ctx.is_training() {
-            return self.run(&x3, None);
-        }
-
-        let mut hs = Vec::with_capacity(x3.shape()[1] + 1);
-        let output = self.run(&x3, Some(&mut hs))?;
-        ctx.push_cache(
-            "SimpleRNN",
-            SimpleRnnCache {
-                input: x3.to_owned(),
-                hidden_states: hs,
-            },
-        );
-        Ok(output)
-    }
-
-    fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        let SimpleRnnCache {
-            input: x3,
-            hidden_states: hs,
-        } = ctx.pop_cache("SimpleRNN")?;
-
-        let batch = x3.shape()[0];
-        let timesteps = x3.shape()[1];
-        let feat = x3.shape()[2];
-
-        // With `return_sequences`, every step also takes a direct contribution from `grad_seq`
-        let (mut grad_h, grad_seq) = split_grad_output(
-            grad_output,
-            "SimpleRNN",
-            self.return_sequences,
-            batch,
-            timesteps,
-            self.units,
-        )?;
-
-        // Per-timestep d_z, stored so the input-side reductions can batch into single GEMMs
-        let mut dz_all = Array3::<f32>::zeros((batch, timesteps, self.units));
-        // backpropagation through time (BPTT)
-        for k in (0..timesteps).rev() {
-            // The direct contribution accumulates onto the carried gradient. It must land before
-            // the activation backward, which consumes the total gradient of this step's state
-            if let Some(seq) = grad_seq.as_ref() {
-                grad_h += &seq.index_axis(Axis(1), k);
-            }
-
-            let d_z = {
-                let h_t = hs[k + 1].clone().into_dyn();
-                let grad_h_dyn = grad_h.clone().into_dyn();
-                let grad_z_dyn = self.activation.backward(&h_t, &grad_h_dyn)?;
-                grad_z_dyn.into_dimensionality::<ndarray::Ix2>().unwrap()
-            };
-
-            // gradient with respect to the previous hidden state, used by the next iteration
-            // (sequential)
-            grad_h = dot(&d_z, &self.recurrent_kernel.t());
-            // The reductions below pair `d_z` with the input row it came from, so the scatter
-            // uses the input timestep, not the processing step
-            dz_all
-                .index_axis_mut(Axis(1), input_step(k, timesteps, self.go_backwards))
-                .assign(&d_z);
-        }
-
-        // Batched reductions over all timesteps
-        let dz_flat = dz_all
-            .to_shape((batch * timesteps, self.units))
-            .expect("contiguous DZ reshape");
-        let x_flat = x3
-            .to_shape((batch * timesteps, feat))
-            .expect("contiguous input reshape");
-
-        // `hs[k]` is the state that enters processing step `k`, and it pairs with the `d_z` of
-        // that same step, which now sits at the step's input timestep
-        let mut h_prev3 = Array3::<f32>::zeros((batch, timesteps, self.units));
-        for (k, h) in hs.iter().take(timesteps).enumerate() {
-            h_prev3
-                .index_axis_mut(Axis(1), input_step(k, timesteps, self.go_backwards))
-                .assign(h);
-        }
-        let h_prev_flat = h_prev3
-            .to_shape((batch * timesteps, self.units))
-            .expect("contiguous H_prev reshape");
-
-        // Each reduction is the whole per-call gradient, so it becomes the buffer directly rather
-        // than being added into a freshly zeroed one
-        let grad_k = dot(&x_flat.t(), &dz_flat);
-        let grad_rk = dot(&h_prev_flat.t(), &dz_flat);
-        let grad_b = dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0));
-
-        // Layout-tolerant reshape
-        let grad_x3 = crate::neural_network::layers::recurrent::gate::reshape_2d_to_3d(
-            dot(&dz_flat, &self.kernel.t()),
-            (batch, timesteps, feat),
-        );
-
-        ctx.add_grad("kernel", grad_k.as_standard_layout().to_owned().into_dyn())?;
-        ctx.add_grad(
-            "recurrent_kernel",
-            grad_rk.as_standard_layout().to_owned().into_dyn(),
-        )?;
-        ctx.add_grad("bias", grad_b.as_standard_layout().to_owned().into_dyn())?;
-
-        Ok(grad_x3.into_dyn())
-    }
-
-    /// A returned sequence keeps the time axis, and a returned final state drops it
-    fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
-        input.check_rank("SimpleRNN", 3)?;
-        let axes = input.axes();
-        // The unit count settles the answer, so an unbuilt layer gives it. A built layer holds
-        // a kernel of a fixed width, and it refuses a feature count that the kernel cannot take
-        if self.built.is_some()
-            && let Some(features) = axes[2]
-            && features != self.input_dim
-        {
-            return Err(Error::invalid_input(format!(
-                "SimpleRNN expects {} features per timestep, got {features}",
-                self.input_dim
-            )));
-        }
-        Ok(if self.return_sequences {
-            Shape::new(vec![axes[0], axes[1], Some(self.units)])
-        } else {
-            Shape::new(vec![axes[0], Some(self.units)])
-        })
-    }
-}
+recurrent_layer_traits!(SimpleRNN);

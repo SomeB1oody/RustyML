@@ -1,8 +1,18 @@
 //! Recurrent layers (SimpleRNN, GRU, LSTM) and their shared helpers
 //!
-//! Re-exports the 3 layer types and provides 2 shared helpers. A numerically stable sigmoid
-//! serves the GRU and LSTM gates, and 1 index map serves the `go_backwards` option of all 3
-//! layers. All 3 layers draw their recurrent kernels from
+//! All 3 layers are the same layer over a different cell. An internal `Rnn` type holds the
+//! scaffolding that does not depend on the cell: the build, the batched input projection, the
+//! walk along the time axis, the cache, the backpropagation through time, and the reduction of
+//! the per-step gate gradients. An internal `RnnCell` protocol holds the arithmetic of 1
+//! timestep, and the 3 cells of this module are its only implementations. Neither name is
+//! public, so the shape of the protocol can change with no effect on any public name.
+//!
+//! `SimpleRNN`, `LSTM` and `GRU` are each a newtype over 1 of those layers, so each one keeps
+//! its own documentation page, its own name in a compiler message, and its own `Debug` output.
+//!
+//! This module also provides 2 shared helpers. A numerically stable sigmoid serves the GRU and
+//! LSTM gates, and 1 index map serves the `go_backwards` option of all 3 layers. All 3 layers
+//! draw their recurrent kernels from
 //! [`Initializer::Orthogonal`](crate::neural_network::Initializer::Orthogonal).
 
 use ndarray::Array2;
@@ -47,12 +57,16 @@ fn input_step(step: usize, timesteps: usize, go_backwards: bool) -> usize {
     }
 }
 
-/// Shared gate parameters and helpers for the GRU and LSTM cells
+/// The protocol that 1 recurrent cell follows
+mod cell;
+/// Shared gate parameters and helpers for the 3 recurrent cells
 pub mod gate;
 /// The GRU (Gated Recurrent Unit) layer
 pub mod gru;
 /// The LSTM (Long Short-Term Memory) layer
 pub mod lstm;
+/// The 1 recurrent layer of the crate, and the driver of its cell
+mod rnn;
 /// The SimpleRNN layer
 pub mod simple_rnn;
 /// Dimension and shape validators for the recurrent layers

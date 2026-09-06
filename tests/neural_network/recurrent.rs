@@ -2143,3 +2143,95 @@ fn gru_return_sequences_go_backwards_matches_keras() {
         "grad_bias",
     );
 }
+
+// The 2 guards that the cell protocol made uniform
+
+/// All 3 layers accept a weight matrix in a non-standard memory order, and store it in the
+/// standard order
+///
+/// An optimizer reads every array of a layer as a flat slice, so an array in column-major order
+/// panics rather than returning an error. Before the 3 layers shared 1 `set_weights` body,
+/// `SimpleRNN` alone kept the array as given, so a transposed kernel passed `set_weights` and
+/// then panicked on the first training step. The other 2 layers already normalized the layout.
+#[test]
+fn set_weights_normalizes_a_column_major_array() {
+    /// Builds a kernel of the right shape whose memory order is column-major
+    fn column_major(rows: usize, columns: usize) -> Array2<f32> {
+        let values: Vec<f32> = (0..rows * columns).map(|i| i as f32).collect();
+        // `reversed_axes` gives an owned array of shape (rows, columns) that is not contiguous
+        // in the standard order
+        let array = Array2::from_shape_vec((columns, rows), values).expect("the shape holds");
+        let flipped = array.reversed_axes();
+        assert!(!flipped.is_standard_layout());
+        flipped
+    }
+
+    let shape = Shape::known(&[2, 4, 3]);
+
+    let mut simple = SimpleRNN::new(2, Activation::Tanh).unwrap();
+    simple.build(&shape).unwrap();
+    simple
+        .set_weights(
+            column_major(3, 2),
+            column_major(2, 2),
+            Array2::zeros((1, 2)),
+        )
+        .expect("a column-major array of the right shape is accepted");
+    assert_eq!(simple.parameters_mut().len(), 3);
+
+    let mut lstm = LSTM::new(2, Activation::Tanh).unwrap();
+    lstm.build(&shape).unwrap();
+    lstm.set_weights(
+        column_major(3, 8),
+        column_major(2, 8),
+        Array2::zeros((1, 8)),
+    )
+    .expect("a column-major array of the right shape is accepted");
+    assert_eq!(lstm.parameters_mut().len(), 3);
+
+    let mut gru = GRU::new(2, Activation::Tanh).unwrap();
+    gru.build(&shape).unwrap();
+    gru.set_weights(
+        column_major(3, 6),
+        column_major(2, 6),
+        Array2::zeros((1, 6)),
+    )
+    .expect("a column-major array of the right shape is accepted");
+    assert_eq!(gru.parameters_mut().len(), 3);
+}
+
+/// A built recurrent layer refuses a forward pass over a tensor that is not rank 3
+#[test]
+fn a_built_layer_refuses_an_input_that_is_not_rank_3() {
+    let shape = Shape::known(&[2, 4, 3]);
+    let flat: Tensor = Array::zeros((2, 3)).into_dyn();
+
+    let mut simple = SimpleRNN::new(2, Activation::Tanh).unwrap();
+    simple.build(&shape).unwrap();
+    let mut ctx = Ctx::inference();
+    let error = simple
+        .forward(&flat, &mut ctx)
+        .expect_err("a rank-2 tensor is not a sequence");
+    assert!(
+        matches!(error, Error::InvalidInput(_)),
+        "expected InvalidInput, got {error:?}"
+    );
+
+    let mut lstm = LSTM::new(2, Activation::Tanh).unwrap();
+    lstm.build(&shape).unwrap();
+    assert!(lstm.forward(&flat, &mut ctx).is_err());
+
+    let mut gru = GRU::new(2, Activation::Tanh).unwrap();
+    gru.build(&shape).unwrap();
+    assert!(gru.forward(&flat, &mut ctx).is_err());
+}
+/// The 3 public layers print under their own names
+#[test]
+fn debug_prints_the_layer_name() {
+    let text = format!("{:?}", SimpleRNN::new(2, Activation::Tanh).unwrap());
+    assert!(text.starts_with("SimpleRNN {"), "got {text}");
+    let text = format!("{:?}", LSTM::new(2, Activation::Tanh).unwrap());
+    assert!(text.starts_with("LSTM {"), "got {text}");
+    let text = format!("{:?}", GRU::new(2, Activation::Tanh).unwrap());
+    assert!(text.starts_with("GRU {"), "got {text}");
+}

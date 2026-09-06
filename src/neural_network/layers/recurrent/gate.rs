@@ -111,6 +111,18 @@ impl FusedGates {
         })
     }
 
+    /// Number of units per gate
+    ///
+    /// The recurrent kernel is `[units, gate count * units]`, so its first axis is the unit
+    /// count. A cell reads the count from here, and holds no second copy of it
+    ///
+    /// # Returns
+    ///
+    /// - `usize` - The unit count of 1 gate
+    pub fn units(&self) -> usize {
+        self.recurrent_kernel.shape()[0]
+    }
+
     /// Exposes the 3 fused trainable tensors (kernel, recurrent kernel, bias) as flat
     /// [`ParamRef`] slices for the optimizer to update
     ///
