@@ -62,6 +62,8 @@ mod pooling_avg;
 mod pooling_max;
 /// Tests for the recurrent layers: SimpleRNN, LSTM, and GRU.
 mod recurrent;
+/// Bit-exact regression of the whole recurrent family, over its draws and over 4 models.
+mod recurrent_regression;
 /// Tests for the reproducibility and RNG API.
 mod reproducibility;
 /// Tests for the Rescaling layer: the affine map, the gradient, layout, and error paths.
