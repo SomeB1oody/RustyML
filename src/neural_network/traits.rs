@@ -473,8 +473,10 @@ pub trait LayerBase: std::any::Any + Send + Sync {
     ///
     /// The name is the identity of the tensor, and the optimizer keys its per-parameter state
     /// on it (see [`ParamId`]). The same storage must therefore always come back under the same
-    /// name, and 2 tensors of 1 layer must never share a name. The order is free, and it is the
-    /// order that a global gradient norm reduces in, so a layer must keep it stable
+    /// name, and 2 tensors of 1 layer must never share a name. A model build refuses a layer
+    /// that breaks that rule, so the mistake never reaches a training step. The order is free,
+    /// and it is the order that a global gradient norm reduces in, so a layer must keep it
+    /// stable
     ///
     /// # Returns
     ///
@@ -495,7 +497,9 @@ pub trait LayerBase: std::any::Any + Send + Sync {
     /// `kernel`, `recurrent_kernel`, `depthwise_kernel`, `pointwise_kernel`, `bias`,
     /// `embeddings`, `alpha`, `gamma`, `beta`, `moving_mean`, `moving_variance`. A layer must
     /// give 1 array the same name on every call, and must never give 2 arrays the same name.
-    /// A name that [`parameters_mut`](LayerBase::parameters_mut) also uses must reach the same
+    /// A model build refuses a layer that gives 2 arrays 1 name, over this roster and over
+    /// [`parameters_mut`](LayerBase::parameters_mut) alike, because the 2 lists are separate
+    /// and nothing else binds them. A name that `parameters_mut` also uses must reach the same
     /// storage
     ///
     /// The order is free, and it is the order a checkpoint records. Layers without any array
