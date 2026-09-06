@@ -72,6 +72,8 @@ mod reproducibility;
 mod rescaling;
 /// Tests for the Reshape layer: target-shape resolution, error paths, and round trips.
 mod reshape;
+/// The Reverse layer, and the bidirectional graph it makes correct.
+mod reverse;
 /// Tests for `Sequential`: add, compile, fit, predict, and summary.
 mod sequential;
 /// Tests for `Sequential` model save and load round trips.

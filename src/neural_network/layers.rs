@@ -145,6 +145,8 @@ pub mod repeat_vector;
 pub mod rescaling;
 /// A layer that rewrites the axes after the batch axis into a target shape
 pub mod reshape;
+/// A layer that reverses the order along 1 axis
+pub mod reverse;
 /// Output-shape calculators for pooling and convolution layers
 mod shape_helpers;
 /// Upsampling layers that enlarge the spatial axes by a whole-number factor
@@ -167,6 +169,7 @@ pub use regularization::*;
 pub use repeat_vector::*;
 pub use rescaling::*;
 pub use reshape::*;
+pub use reverse::*;
 pub use upsampling::*;
 
 /// Generates the trait method stubs for layers without trainable parameters

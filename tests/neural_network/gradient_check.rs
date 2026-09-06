@@ -1715,3 +1715,16 @@ fn merge_concatenate_on_the_batch_axis_input_gradients() {
     let inputs = vec![distinct(&[2, 3], 0.0), distinct(&[4, 3], 1.0)];
     check_merge_input_gradients(&mut layer, &inputs, 1e-2, 1e-2);
 }
+
+/// The reversal is its own inverse, and its input gradient is the reversed upstream gradient
+#[test]
+fn reverse_input_gradient_matches_finite_difference() {
+    use rustyml::neural_network::layers::Reverse;
+
+    let values: Vec<f32> = (0..24).map(|v| v as f32 * 0.1 - 0.7).collect();
+    let x = Array::from_shape_vec((2, 4, 3), values).unwrap().into_dyn();
+    for axis in [1_i32, 2, -1, -2] {
+        let mut layer = Reverse::new(axis);
+        check_input_gradient(&mut layer, &x, 1e-3, 2e-3);
+    }
+}

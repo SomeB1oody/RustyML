@@ -20,7 +20,7 @@ pub use crate::neural_network::layers::regularization::*;
 pub use crate::neural_network::layers::upsampling::*;
 pub use crate::neural_network::layers::{
     Add, Average, Concatenate, Dense, Embedding, Flatten, Identity, Maximum, Minimum, Multiply,
-    Permute, RepeatVector, Rescaling, Reshape, Subtract,
+    Permute, RepeatVector, Rescaling, Reshape, Reverse, Subtract,
 };
 pub use crate::neural_network::losses::*;
 pub use crate::neural_network::optimizers::*;

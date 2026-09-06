@@ -29,8 +29,8 @@
 //!   their ends
 //! - **Upsampling**: `UpSampling1D/2D/3D` enlarge the spatial axes by a whole-number factor,
 //!   with 5 interpolation modes on the 2D layer
-//! - **Axis order**: `Permute` reorders the non-batch axes, and `RepeatVector` repeats a
-//!   feature vector into a sequence
+//! - **Axis order**: `Permute` reorders the non-batch axes, `Reverse` flips the order inside
+//!   1 axis, and `RepeatVector` repeats a feature vector into a sequence
 //! - **Identity**: passes its input through unchanged, as a placeholder where a model needs a
 //!   layer that does nothing
 //! - **Rescaling**: applies the fixed affine map `y = x * scale + offset` to every element, to
