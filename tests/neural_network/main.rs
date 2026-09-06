@@ -14,6 +14,8 @@ mod gradient_check;
 
 /// Tests for the activation layers and the `Activation` enum.
 mod activation;
+/// The address of an array, and the 2 guards that hold a layer to it.
+mod addressing;
 /// Tests for the border layers: ZeroPadding and Cropping in 1D, 2D, and 3D.
 mod border;
 /// Tests for Conv1D and Conv2D forward values, shapes, and error paths.

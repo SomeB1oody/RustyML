@@ -49,6 +49,140 @@ impl ParamId {
     }
 }
 
+/// Refuses a layer that gives 2 of its arrays 1 name
+///
+/// The name of an array is its address inside the layer. The gradient store, the per-parameter
+/// state of the optimizer, and the path of the checkpoint all key on it. 2 arrays under 1 name
+/// therefore share 1 gradient, 1 momentum buffer, and 1 checkpoint path, and every one of those
+/// is a wrong number that no later check reports.
+///
+/// [`LayerBase::parameters_mut`] and [`LayerBase::weights`] both state this rule in their own
+/// documentation, and nothing used to hold a layer to it. A model build calls this once per
+/// layer, before the model computes anything, so a layer that breaks the rule never reaches a
+/// training step.
+///
+/// The 2 rosters are separate hand-written lists, and nothing binds them together, so the check
+/// reads both.
+///
+/// # Parameters
+///
+/// - `scope` - Position of the layer in the model, which the message names
+/// - `layer` - The layer to check
+///
+/// # Returns
+///
+/// - `Result<(), Error>` - `Ok(())` when every array of the layer holds its own name
+///
+/// # Errors
+///
+/// - [`Error::InvalidInput`] - If 2 arrays of the layer share a name
+pub(crate) fn check_addresses(scope: usize, layer: &mut dyn LayerBase) -> Result<(), Error> {
+    let layer_type = layer.layer_type().to_string();
+    let weights: Vec<&'static str> = layer.weights().iter().map(|entry| entry.name).collect();
+    if let Some(name) = first_repeat(&weights) {
+        return Err(duplicate_address(scope, &layer_type, name, "weights"));
+    }
+    let parameters: Vec<&'static str> = layer
+        .parameters_mut()
+        .iter()
+        .map(|entry| entry.name)
+        .collect();
+    if let Some(name) = first_repeat(&parameters) {
+        return Err(duplicate_address(
+            scope,
+            &layer_type,
+            name,
+            "parameters_mut",
+        ));
+    }
+    Ok(())
+}
+
+/// The first name that the list holds twice, or `None` when every name is its own
+///
+/// A roster holds a handful of entries, so the pairwise walk costs less than a set
+fn first_repeat(names: &[&'static str]) -> Option<&'static str> {
+    names
+        .iter()
+        .enumerate()
+        .find(|(index, name)| names[..*index].contains(name))
+        .map(|(_, name)| *name)
+}
+
+/// Builds the refusal that [`check_addresses`] returns
+fn duplicate_address(scope: usize, layer_type: &str, name: &str, roster: &str) -> Error {
+    Error::invalid_input(format!(
+        "layer {scope} (`{layer_type}`) gives 2 of its arrays the name `{name}`, through \
+         `LayerBase::{roster}`. The name is the address of the array, and the gradient store, \
+         the state of the optimizer, and the path of the checkpoint all key on it, so the 2 \
+         arrays would share all 3. Give every array of 1 layer its own name. A layer that holds \
+         other layers must put its own prefix in front of the name of each array it passes on"
+    ))
+}
+
+/// Refuses a pass that parked a gradient at an address no parameter of the model reads
+///
+/// The optimizer walk is a pull: it enumerates the parameters and looks each address up, and it
+/// skips an address that holds no gradient. A gradient parked at any other address is therefore
+/// dropped in silence. That is what turns a layer that misspells 1 of its own names into a
+/// parameter that never trains, and it reports no error of its own.
+///
+/// The walk below is the same walk that the optimizer makes, so the count it reaches is the
+/// number of addresses the optimizer will read. A store that holds more than that holds an
+/// address that nothing claims.
+///
+/// # Parameters
+///
+/// - `layers` - Every layer of the model, in the order that gives the layer half of an address
+/// - `grads` - The gradient store of the pass
+///
+/// # Returns
+///
+/// - `Result<(), Error>` - `Ok(())` when every gradient of the store reaches a parameter
+///
+/// # Errors
+///
+/// - [`Error::Computation`] - If the store holds an address that no parameter reads
+pub(crate) fn check_every_gradient_is_claimed(
+    layers: &mut [Box<dyn Layer>],
+    grads: &Grads,
+) -> Result<(), Error> {
+    let mut claimed = 0_usize;
+    for (scope, layer) in layers.iter_mut().enumerate() {
+        for param in layer.parameters_mut() {
+            if grads.get(ParamId::new(scope, param.name)).is_some() {
+                claimed += 1;
+            }
+        }
+    }
+    if claimed == grads.len() {
+        return Ok(());
+    }
+
+    // The store is small and this arm runs once, on the way to an error, so the second walk
+    // costs nothing that matters
+    let mut reachable = Vec::new();
+    for (scope, layer) in layers.iter_mut().enumerate() {
+        for param in layer.parameters_mut() {
+            reachable.push(ParamId::new(scope, param.name));
+        }
+    }
+    let orphans: Vec<String> = grads
+        .iter()
+        .filter(|(id, _)| !reachable.contains(id))
+        .map(|(id, _)| format!("{}.{}", id.scope, id.name))
+        .collect();
+    Err(Error::computation(format!(
+        "the backward pass parked a gradient at {} address(es) that no parameter of the model \
+         reads: {}. An optimizer reads a gradient at the address that \
+         `LayerBase::parameters_mut` gives the parameter, so a gradient at any other address \
+         updates nothing and the parameter it was meant for keeps its value. A layer must add \
+         every gradient under a name that its own roster holds",
+        orphans.len(),
+        orphans.join(", ")
+    )))
+}
+
 /// A single trainable parameter tensor of a layer, exposed as a flat slice
 ///
 /// Layers yield their trainable tensors (weights, biases, kernels, gamma/beta, ...) as

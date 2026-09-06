@@ -15,7 +15,9 @@
 //! methods of the built model alone. Training a model that was never built is therefore a
 //! compile error, and no run-time state says whether a model is ready
 
-use super::traits::{Layer, Loss, Optimizer, ParamId};
+use super::traits::{
+    Layer, Loss, Optimizer, ParamId, check_addresses, check_every_gradient_is_claimed,
+};
 use crate::error::{Error, IoError};
 use crate::math::reduction::det_reduce;
 use crate::neural_network::NnError;
@@ -293,6 +295,12 @@ impl SequentialBuilder {
                 .map_err(|source| build_refusal(index, &layer_type, &shape, source))?;
             input_shapes.push(shape);
             shape = output;
+        }
+
+        // The arrays are real now, so every roster is the one the model will address. A layer
+        // that gives 2 arrays 1 name is refused here, before the model computes anything
+        for (index, layer) in self.layers.iter_mut().enumerate() {
+            check_addresses(index, &mut **layer)?;
         }
 
         Ok(Sequential {
@@ -623,6 +631,11 @@ impl Sequential {
                 ))
             })?;
         }
+
+        // Every gradient of the pass must reach a parameter. The optimizer walk below skips an
+        // address that holds no gradient, so a gradient at an address no parameter reads would
+        // otherwise be dropped without a word
+        check_every_gradient_is_claimed(&mut self.layers, ctx.grads())?;
 
         // Clip-by-global-norm
         let global_clipnorm = self

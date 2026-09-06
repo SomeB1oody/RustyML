@@ -48,7 +48,9 @@ use crate::neural_network::layers::checkpoint::{
     LoadReport, apply, apply_partial, capture, weight_path,
 };
 use crate::neural_network::sequential::{History, read_checkpoint};
-use crate::neural_network::traits::{Layer, Loss, Optimizer, ParamId};
+use crate::neural_network::traits::{
+    Layer, Loss, Optimizer, ParamId, check_addresses, check_every_gradient_is_claimed,
+};
 use crate::parallel_gates::sq_sum_f32_parallel_min_elems;
 use ndarray::{ArrayViewD, Axis};
 use ndarray_rand::rand::seq::SliceRandom;
@@ -347,6 +349,13 @@ impl GraphBuilder {
                         .map_err(|source| node_refusal(id, layer, &layer_type, source))?;
                 }
             }
+        }
+
+        // The arrays are real now, so every roster is the one the model will address. The walk
+        // is the arena, because the arena index is the layer half of every address. A layer that
+        // several nodes share holds 1 entry, so it is checked once
+        for (index, layer) in self.layers.iter_mut().enumerate() {
+            check_addresses(index, &mut **layer)?;
         }
 
         Ok(Graph {
@@ -673,6 +682,11 @@ impl Graph {
                 accumulate(&mut grads, from, gradient)?;
             }
         }
+
+        // Every gradient of the pass must reach a parameter. The optimizer walk below skips
+        // an address that holds no gradient, so a gradient at an address no parameter reads
+        // would otherwise be dropped without a word
+        check_every_gradient_is_claimed(&mut self.layers, ctx.grads())?;
 
         let global_clipnorm = self
             .optimizer

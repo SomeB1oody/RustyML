@@ -436,13 +436,23 @@ pub fn apply_partial(layers: &mut [Box<dyn Layer>], file: &ModelCheckpoint<'_>) 
         let mut taken = vec![false; saved.weights.len()];
         for target in layer.weights_mut().iter_mut() {
             let path = weight_path(scope, target.name);
-            // A record whose element count contradicts its own shape reaches no array either
-            let found = saved.weights.iter().position(|record| {
-                record.name == target.name
-                    && record.kind == target.kind
-                    && record.shape.as_slice() == target.value.shape()
-                    && record.data.len() == target.value.len()
-            });
+            // A record whose element count contradicts its own shape reaches no array either.
+            // A record that another array already took is skipped, so 2 arrays never read 1
+            // record. A model refuses 2 arrays of 1 layer under 1 name at its build, so this
+            // arm is unreachable from a model, and it stays correct for a caller that reaches
+            // `apply_partial` another way
+            let found = saved
+                .weights
+                .iter()
+                .enumerate()
+                .find(|(index, record)| {
+                    !taken[*index]
+                        && record.name == target.name
+                        && record.kind == target.kind
+                        && record.shape.as_slice() == target.value.shape()
+                        && record.data.len() == target.value.len()
+                })
+                .map(|(index, _)| index);
             match found {
                 Some(index) => {
                     taken[index] = true;
