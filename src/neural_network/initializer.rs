@@ -30,21 +30,21 @@
 //!
 //! # The draw order is part of the contract
 //!
-//! 4 layers thread 1 generator through more than 1 draw:
+//! 5 layers thread 1 generator through more than 1 draw, through 2 paths:
 //!
 //! - [`SeparableConv1D`](crate::neural_network::layers::SeparableConv1D) and
 //!   [`SeparableConv2D`](crate::neural_network::layers::SeparableConv2D) draw the depthwise
 //!   kernel first and the pointwise kernel second.
-//! - [`SimpleRNN`](crate::neural_network::layers::SimpleRNN) draws the input kernel first and
-//!   the orthogonal recurrent kernel second.
 //! - [`FusedGates`](crate::neural_network::layers::recurrent::gate::FusedGates), which serves
+//!   [`SimpleRNN`](crate::neural_network::layers::SimpleRNN),
 //!   [`LSTM`](crate::neural_network::layers::LSTM) and
 //!   [`GRU`](crate::neural_network::layers::GRU), draws the fused input kernel first and then 1
-//!   orthogonal block per gate, in gate order.
+//!   orthogonal block per gate, in gate order. A SimpleRNN holds 1 gate, so it draws the input
+//!   kernel and then 1 orthogonal block.
 //!
 //! 1 generator gives 1 stream, and each draw takes the next values of that stream. A second
 //! generator, or a different order, therefore changes every value from the second draw onward.
-//! The order is part of the contract of those 4 layers. Keep the draws of 1 layer in 1 function,
+//! The order is part of the contract of those 5 layers. Keep the draws of 1 layer in 1 function,
 //! against 1 generator.
 
 use crate::{Deserialize, Serialize};
