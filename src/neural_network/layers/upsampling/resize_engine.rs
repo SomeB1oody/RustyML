@@ -260,11 +260,11 @@ tunable_gate! {
     /// Test-only cap on the destination rows of 1 axis-pass task. See
     /// [`split_cap`](crate::parallel_gates::split_cap)
     ///
-    /// The production value 0 keeps the row count that [`TASK_ELEMENTS`] gives. Every fixture
-    /// tensor of the golden test net holds fewer destination elements than that budget, so an
-    /// axis pass would build exactly 1 task, and the row walk of [`apply_band`] would start at
-    /// row 0 of lane 0 every time. A cap of 1 or more splits it, and the task that crosses a
-    /// lane boundary then reads the lane arithmetic
+    /// The production value 0 keeps the row count that [`TASK_ELEMENTS`] gives. A small test
+    /// tensor holds fewer destination elements than that budget, so an axis pass would build
+    /// exactly 1 task, and the row walk of [`apply_band`] would start at row 0 of lane 0 every
+    /// time. A cap of 1 or more splits it, and the task that crosses a lane boundary then reads
+    /// the lane arithmetic
     ///
     /// Each destination row reads the source alone and adds its taps in a fixed order, so the
     /// cap changes no value. Reachable outside the crate only through `bench_internals`

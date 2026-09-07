@@ -128,9 +128,9 @@ tunable_gate! {
     /// Test-only cap on the output positions of 1 forward task. See
     /// [`split_cap`](crate::parallel_gates::split_cap)
     ///
-    /// The production value 0 keeps [`POOL_MIN_CHUNK_OUT`]. Every fixture input of the golden
-    /// test net holds fewer positions than that minimum, so the forward pass would build 1 task
-    /// per batch item and leave the position split unread. A cap of 1 or more splits it
+    /// The production value 0 keeps [`POOL_MIN_CHUNK_OUT`]. A small test input holds fewer
+    /// positions than that minimum, so the forward pass would build 1 task per batch item and
+    /// leave the position split unread. A cap of 1 or more splits it
     ///
     /// The same serial window loop folds every position, whatever the task boundaries are, so
     /// the cap changes no value. Reachable outside the crate only through `bench_internals`
@@ -141,9 +141,9 @@ tunable_gate! {
     /// Test-only cap on the channels of 1 backward slab. See
     /// [`split_cap`](crate::parallel_gates::split_cap)
     ///
-    /// The production value 0 keeps [`POOL_MIN_CHUNK_CHANNELS`]. Every fixture input of the
-    /// golden test net holds fewer channels than that minimum, so the backward pass would build
-    /// 1 slab per batch item and leave the channel split unread. A cap of 1 or more splits it
+    /// The production value 0 keeps [`POOL_MIN_CHUNK_CHANNELS`]. A small test input holds
+    /// fewer channels than that minimum, so the backward pass would build 1 slab per batch item
+    /// and leave the channel split unread. A cap of 1 or more splits it
     ///
     /// A slab owns a disjoint set of channels, and it accumulates in output-position order at
     /// every width, so the cap changes no value. Reachable outside the crate only through

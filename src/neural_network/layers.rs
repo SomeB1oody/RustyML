@@ -221,9 +221,12 @@ pub(in crate::neural_network::layers) use no_trainable_parameters_layer_function
 /// exposes the kernel alone and its checkpoint holds 1 path. An optional entry moves no other
 /// entry, because a checkpoint addresses an array by name and never by position
 ///
-/// Give an array the same name that [`LayerBase::parameters_mut`] gives it. Nothing in the compiler
-/// binds the 2, and the golden-fixture net asserts that a parameter and the array of the same
-/// name are 1 storage
+/// Give an array the same name that [`LayerBase::parameters_mut`] gives it. The compiler binds
+/// neither the name nor the storage. A parameter and the array of 1 name must be 1 storage,
+/// because an optimizer writes through the parameter and a checkpoint reads the array. Some
+/// tests hold that rule for 1 layer at a time, such as
+/// `dropping_gamma_does_not_give_beta_the_optimizer_state_of_gamma` of
+/// `tests/neural_network/optional_parameters.rs`. No test holds it for every layer type
 ///
 /// It is path-exported like `no_trainable_parameters_layer_functions`:
 /// `use crate::neural_network::layers::named_weight_layer_functions;`

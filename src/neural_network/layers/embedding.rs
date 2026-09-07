@@ -28,10 +28,10 @@ tunable_gate! {
     /// Test-only cap on the table rows of 1 gather task. See
     /// [`split_cap`](crate::parallel_gates::split_cap)
     ///
-    /// The production value 0 keeps the row count that [`TASK_ELEMENTS`] gives. Every fixture
-    /// input of the golden test net asks for fewer elements than that budget, so the gather
-    /// would build exactly 1 task, and its first row would be row 0 every time. A cap of 1 or
-    /// more splits it, and each task then reads its own first-row arithmetic
+    /// The production value 0 keeps the row count that [`TASK_ELEMENTS`] gives. A small test
+    /// input asks for fewer elements than that budget, so the gather would build exactly 1
+    /// task, and its first row would be row 0 every time. A cap of 1 or more splits it, and
+    /// each task then reads its own first-row arithmetic
     ///
     /// A gather is a copy, so the cap changes no value. Reachable outside the crate only
     /// through `bench_internals`

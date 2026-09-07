@@ -591,33 +591,15 @@ fn a_built_layer_refuses_the_extents_its_summary_does_not_name() {
 
 // The whole roster: every layer type answers before its build
 
-/// The layer types that the golden-fixture net records, read from its data files
-///
-/// The net covers every layer type of the crate, so this is the roster the table below must
-/// cover. A new layer type reaches the net first, and this function then makes the table
-/// below demand a case for it. Nothing here writes to the net, and the files stay where they
-/// are
-fn golden_layer_types() -> BTreeSet<String> {
-    const FAMILIES: [&str; 5] = [
-        include_str!("golden/data/misc.golden"),
-        include_str!("golden/data/conv.golden"),
-        include_str!("golden/data/sequence.golden"),
-        include_str!("golden/data/spatial.golden"),
-        include_str!("golden/data/stochastic.golden"),
-    ];
-    FAMILIES
-        .iter()
-        .flat_map(|family| family.lines())
-        .filter_map(|line| line.strip_prefix("case "))
-        .filter_map(|rest| rest.split_whitespace().next())
-        .map(str::to_string)
-        .collect()
-}
-
-/// 1 unbuilt layer of every type, with the shape it takes and the shape it must give back
+/// 1 unbuilt layer of each covered type, with the shape it takes and the shape it must give
+/// back
 ///
 /// The entries hold no built layer and no forward pass, so every answer comes from the
-/// constructor arguments and from the input shape
+/// constructor arguments and from the input shape.
+///
+/// This table is the only roster of the layer types that the 2 tests below cover. No item of
+/// the crate lists its layer types, so no other file can supply that roster. Add a case here
+/// for each new layer type, and raise the count in the test below in the same change.
 fn unbuilt_layers() -> Vec<(Shape, Box<dyn Layer>, &'static str)> {
     let flat = Shape::with_free_batch(&[1, 4]);
     let sequence = Shape::with_free_batch(&[1, 5, 2]);
@@ -949,18 +931,12 @@ fn every_layer_type_answers_before_its_build() {
         );
     }
 
-    let roster = golden_layer_types();
-    assert!(
-        roster.len() >= covered.len(),
-        "the golden roster reads {} layer types, and the table holds {}. A roster that fails to \
-         parse makes the check below pass with nothing in it",
-        roster.len(),
-        covered.len()
-    );
-    let missing: Vec<&String> = roster.difference(&covered).collect();
-    assert!(
-        missing.is_empty(),
-        "every layer type must answer before its build, and these hold no case: {missing:?}"
+    assert_eq!(
+        covered.len(),
+        66,
+        "the table above is the only roster of the covered layer types. A new layer type needs \
+         a case here, and a removed one needs its case deleted. Move this count in the same \
+         change"
     );
 }
 

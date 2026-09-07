@@ -129,9 +129,9 @@ pub const NEURAL_NETWORK_GATES: &[(&str, GateGetter, GateSetter)] = &[
 /// documents what each cap counts, and lists the drivers that must never take one.
 ///
 /// A gate picks the parallel branch of a kernel. A cap decides how many tasks that branch then
-/// builds. The 2 are separate: a fixture tensor of 256 elements or fewer clears no calibrated
-/// task-size rule, so the parallel branch of such a kernel runs with exactly 1 task until a cap
-/// splits it. Neither a gate nor a cap changes a result.
+/// builds. The 2 are separate: a small test tensor clears no calibrated task-size rule, so the
+/// parallel branch of such a kernel runs with exactly 1 task until a cap splits it. Neither a
+/// gate nor a cap changes a result.
 pub const NEURAL_NETWORK_SPLIT_CAPS: &[(&str, GateGetter, GateSetter)] =
     rustyml::bench_internals::SPLIT_CAPS;
 
@@ -237,7 +237,8 @@ impl GateGuard {
     ///
     /// Use this after [`GateGuard::with_split_cap`] for a driver that is not invariant to its
     /// task size. The value 0 is the production value, so that driver keeps its calibrated task
-    /// size while every other driver stays capped.
+    /// size while every other driver stays capped. `rustyml::bench_internals` names the 1 driver
+    /// that needs the exception today, and a caller that reaches that driver must take it.
     ///
     /// # Panics
     ///

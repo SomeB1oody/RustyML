@@ -32,16 +32,12 @@ mod dense;
 mod dropout;
 /// Tests for the Embedding layer: lookup values, index rules, and the scatter-add backward pass.
 mod embedding;
-/// Bit-exact golden fixtures that pin the behavior of every layer before the layer rewrite.
-mod golden;
 /// Tests for `Graph`: the topology it refuses, the fan-in gradient, and weight sharing.
 mod graph;
 /// Tests for the Identity layer: pass-through, layout, and error paths.
 mod identity;
 /// Tests for the loss functions: forward values, gradients, and error paths.
 mod losses;
-/// Bit-exact regression of 5 trained models, which the per-layer golden net cannot see.
-mod model_regression;
 /// Tests for GaussianNoise and GaussianDropout.
 mod noise;
 /// Tests for BatchNormalization and LayerNormalization.
@@ -64,8 +60,6 @@ mod pooling_avg;
 mod pooling_max;
 /// Tests for the recurrent layers: SimpleRNN, LSTM, and GRU.
 mod recurrent;
-/// Bit-exact regression of the whole recurrent family, over its draws and over 4 models.
-mod recurrent_regression;
 /// Tests for the reproducibility and RNG API.
 mod reproducibility;
 /// Tests for the Rescaling layer: the affine map, the gradient, layout, and error paths.

@@ -84,9 +84,9 @@ tunable_gate! {
     /// Test-only cap on the output positions of 1 forward task. See
     /// [`split_cap`](crate::parallel_gates::split_cap)
     ///
-    /// The production value 0 keeps [`CONV_MIN_CHUNK_POSITIONS`]. Every fixture input of the
-    /// golden test net holds fewer positions than that minimum, so the forward pass builds 1
-    /// task per batch item and leaves the position split unread. A cap of 1 or more splits it
+    /// The production value 0 keeps [`CONV_MIN_CHUNK_POSITIONS`]. A small test input holds
+    /// fewer positions than that minimum, so the forward pass builds 1 task per batch item and
+    /// leaves the position split unread. A cap of 1 or more splits it
     ///
     /// # This pass is NOT invariant to the row block today
     ///
@@ -99,8 +99,8 @@ tunable_gate! {
     ///
     /// The gate above therefore already changes result bits on its own, for any input whose
     /// output plane passes [`CONV_MIN_CHUNK_POSITIONS`], with no cap installed at all. That
-    /// contradicts what [`crate::tuning`] states about a gate. The golden test net leaves this
-    /// cap at 0 until the pass is invariant. See `tests/neural_network/golden/mod.rs`.
+    /// contradicts what [`crate::tuning`] states about a gate. A caller must leave this cap at
+    /// 0 until the pass is invariant.
     ///
     /// Reachable outside the crate only through `bench_internals`
     pub(crate) CONV_FORCED_CHUNK_POSITIONS

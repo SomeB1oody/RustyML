@@ -1,12 +1,12 @@
-//! Internal hooks for the `benches/` targets and for the golden-fixture test net
+//! Internal hooks for the `benches/` targets and for the integration tests
 //!
 //! Not part of the public API. This module is hidden from the documentation and carries no
 //! stability guarantee. It holds 2 hooks, and a production call path goes through neither
 //!
 //! - The calibration bench in `benches/calibrations/parallel_gates/` drives crate-internal
 //!   kernels with the parallel and serial gate forced to either side
-//! - The golden-fixture test net in `tests/neural_network/golden` caps the task size of each
-//!   parallel driver, so a small fixture input still builds more than 1 task
+//! - A task-size cap holds a parallel driver at a small task, so a test with a small input
+//!   still reaches the path that more than 1 task takes. No test installs a cap today
 
 /// Reads 1 task-size cap.
 #[cfg(feature = "neural_network")]
@@ -21,8 +21,8 @@ pub type SplitCapSetter = fn(usize);
 /// # What a cap does
 ///
 /// Each of these drivers splits its work into tasks, and each takes the task size from a
-/// calibrated rule with a floor of 64 positions or more. Every tensor of the golden test net
-/// holds 256 elements or fewer, so each rule gives a size at or above the whole input, and the
+/// calibrated rule with a floor of 64 positions or more. A small test tensor holds fewer
+/// elements than that floor, so each rule gives a size at or above the whole input, and the
 /// driver builds exactly 1 task. The parallel branch then runs, and the chunk arithmetic, the
 /// block indexing, and the partial reassembly stay unread
 ///
@@ -37,8 +37,8 @@ pub type SplitCapSetter = fn(usize);
 ///
 /// `conv.forced_chunk_positions` is the 1 entry for which this does not hold today. Its task is
 /// a GEMM, and the backend picks its accumulation order from the row count of the block, so the
-/// same rows give different result bits in a short block than in a long one. The golden test
-/// net therefore installs every cap but that one. See `CONV_FORCED_CHUNK_POSITIONS`
+/// same rows give different result bits in a short block than in a long one. A caller must
+/// therefore leave that 1 cap at 0. See `CONV_FORCED_CHUNK_POSITIONS`
 ///
 /// # The drivers that take no cap
 ///
@@ -47,7 +47,7 @@ pub type SplitCapSetter = fn(usize);
 /// bits. Those are `global_pool_forward` of the pooling engine, `par_col_sum` and `par_col_dot`
 /// of the normalization folds, and the per-group statistic fold of the normalization layers
 ///
-/// A driver whose tasks are already more than 1 at fixture size is also absent, because it
+/// A driver whose tasks are already more than 1 at a small test size is also absent, because it
 /// needs no cap. Those are the batch fans of the convolution backward pass, of the transposed
 /// convolution, and of the normalization row passes, and the per-output-row split of the
 /// depthwise convolution

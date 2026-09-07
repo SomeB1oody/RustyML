@@ -22,7 +22,7 @@ use std::fmt;
 /// [`Sequential::summary`](crate::neural_network::sequential::Sequential::summary) shows it: a
 /// parenthesized list, with a free axis printed as `None`. A rank-1 shape whose only axis is
 /// free keeps a trailing comma, and a rank-1 shape with a fixed extent does not. The 2 forms
-/// come from the 2 renderers that this type replaced, and the recorded fixtures hold both
+/// come from the 2 renderers that this type replaced
 ///
 /// # Examples
 ///
@@ -254,7 +254,7 @@ impl fmt::Display for Shape {
         }
         // A rank-1 shape whose only axis is free keeps the trailing comma of a 1-element
         // Python tuple, and a rank-1 shape with a fixed extent does not. The 2 forms are what
-        // the hand-written renderers produced, and the recorded fixtures hold both
+        // the hand-written renderers produced
         if self.0.len() == 1 && self.0[0].is_none() {
             formatter.write_str(",")?;
         }
@@ -296,8 +296,8 @@ mod tests {
 
     /// A rank-1 fixed shape carries no trailing comma, and a rank-1 free shape carries one
     ///
-    /// The 2 forms come from 2 renderers that this type replaced. The recorded fixtures hold
-    /// `(4)`, and the `Identity` and `Reshape` tests hold `(None,)`
+    /// The 2 forms come from 2 renderers that this type replaced. This test holds both, and
+    /// the `Identity` and `Reshape` tests hold `(None,)` as well
     #[test]
     fn display_keeps_both_rank_1_forms() {
         assert_eq!(Shape::known(&[4]).to_string(), "(4)");

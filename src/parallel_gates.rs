@@ -164,7 +164,7 @@ tunable_gate! {
         => sum_f64_parallel_min_elems / set_sum_f64_parallel_min_elems = 262_144
 }
 
-// The task-size caps of the golden-fixture test net
+// The task-size caps of the parallel drivers
 
 /// Applies a test-only cap to a calibrated task size
 ///
