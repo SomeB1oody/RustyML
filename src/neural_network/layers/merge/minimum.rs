@@ -1,4 +1,4 @@
-//! Minimum layer: the smaller value of several inputs, element by element
+//! The merge layer that takes the smaller value of its inputs, element by element
 
 use super::{
     broadcast_input, elementwise_merge_layer_functions, merge_layer_base_functions, merged_dims,
@@ -26,20 +26,14 @@ use ndarray::IxDyn;
 ///
 /// # The tie rule
 ///
-/// The whole gradient of a position reaches 1 input alone, which is the input that holds the
-/// smallest value there. Where 2 inputs or more hold that value, the gradient reaches the
-/// FIRST of them, and every later input receives 0
-///
-/// Keras 3 on jax splits such a tie evenly over the inputs that hold the value. That split is
-/// an artifact of the fold that jax differentiates, and no document of Keras states it as a
-/// contract. This crate pins the first-input rule instead, which [`Maximum`](super::Maximum)
-/// pins as well. The test `backward_gives_a_tie_to_the_first_input` holds the rule
+/// A tie routes the whole gradient to the first input that holds the winning value. Every
+/// other input that ties there takes 0. [`Maximum`](super::Maximum) resolves a tie by the same
+/// rule. The test `backward_gives_a_tie_to_the_first_input` pins the rule
 ///
 /// # Notes
 ///
 /// A NaN wins its position and keeps it. The first input that holds a NaN at a position takes
-/// the value and the whole gradient there, and no later value displaces it. A plain "less
-/// than" fold would drop a NaN that arrives after a number, and would hide a diverged model
+/// the whole gradient there, and no later value displaces it
 ///
 /// # Examples
 ///
@@ -72,12 +66,9 @@ pub struct Minimum {
 impl Minimum {
     /// Creates a new Minimum layer
     ///
-    /// The layer reads no configuration. [`Layer::build_many`] records the shapes of the
-    /// inputs, and the layer allocates nothing
-    ///
     /// # Returns
     ///
-    /// - `Self` - New `Minimum` layer instance
+    /// - `Self` - New `Minimum` layer instance, before its build
     pub fn new() -> Self {
         Minimum::default()
     }
@@ -91,11 +82,11 @@ impl Minimum {
 struct MinimumCache {
     /// Extent of every axis of the output, batch axis first
     output: Vec<usize>,
-    /// Shape of every input, in the order the forward pass took them
+    /// Extent of every axis of each input, in the order the forward pass took them
     inputs: Vec<Vec<usize>>,
     /// Position of the input that holds the smallest value, 1 entry per element of the output
     ///
-    /// The entries follow the standard order of the output. A tie names the first input that
+    /// The entries follow the C order of the output. A tie names the first input that
     /// holds the value, which is the [tie rule](Minimum) of the layer
     winners: Vec<usize>,
 }
@@ -133,13 +124,8 @@ impl Layer for Minimum {
             for ((value, &candidate), winner) in
                 folded.iter_mut().zip(lifted.iter()).zip(winners.iter_mut())
             {
-                // The fold is left-associative, so a later input needs a strictly smaller
-                // value to take a position. A tie therefore leaves the position with the
-                // first input that holds the winning value
-                //
-                // A NaN wins the position it reaches, and no later value displaces it. Every
-                // comparison against a NaN is false, so a plain "less than" fold would drop a
-                // NaN that arrives after a number
+                // A position that holds a NaN keeps it. No later candidate can replace a NaN
+                // value, however small the candidate is.
                 let takes = !value.is_nan() && (candidate.is_nan() || candidate < *value);
                 if takes {
                     *value = candidate;
@@ -205,7 +191,7 @@ impl Layer for Minimum {
 mod tests {
     use super::*;
 
-    /// Builds a tensor from its extents and its values, in the standard order
+    /// Builds a tensor from its extents and its values, in the C order
     fn tensor(dims: &[usize], values: &[f32]) -> Tensor {
         Tensor::from_shape_vec(IxDyn(dims), values.to_vec()).expect("the values fill the shape")
     }
@@ -269,10 +255,9 @@ mod tests {
         assert_eq!(ctx.pending_caches(), 0, "the backward pass took the cache");
     }
 
-    /// A tie gives the whole gradient to the first input that holds the winning value
+    /// A tie routes the whole gradient to the first input that holds the winning value
     ///
-    /// Keras 3 on jax splits the tie evenly, and this crate pins the first input instead. The
-    /// test holds that choice
+    /// All 3 inputs tie at 2 of the 3 positions, and the first input takes every position
     #[test]
     fn backward_gives_a_tie_to_the_first_input() {
         let a = tensor(&[1, 3], &[2.0, 2.0, 5.0]);
@@ -292,9 +277,6 @@ mod tests {
     }
 
     /// A NaN wins its position, and the first input that holds one keeps it
-    ///
-    /// A plain "less than" fold would drop a NaN that arrives after a number, and a diverged
-    /// model would then hide itself
     #[test]
     fn a_nan_wins_its_position() {
         let a = tensor(&[1, 2], &[1.0, f32::NAN]);

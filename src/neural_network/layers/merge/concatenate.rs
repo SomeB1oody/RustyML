@@ -10,7 +10,7 @@ use ndarray::{Axis, Slice};
 
 /// Joins every input along 1 axis
 ///
-/// The layer takes 1 input or more, and the output holds every input, one band after another,
+/// The layer takes 1 input or more, and the output holds every input, band after band,
 /// along the joined axis. It holds no trainable array, so no optimizer reaches it and a
 /// checkpoint of it records no array. The layer records 1 build shape per input, and it
 /// reports all of them
@@ -346,7 +346,7 @@ mod tests {
         Tensor::from_shape_vec(IxDyn(dims), values.to_vec()).unwrap()
     }
 
-    /// The output holds every input, one band after another, along the last axis
+    /// The output holds every input, band after band, along the last axis
     #[test]
     fn the_forward_pass_joins_along_the_last_axis() {
         let left = tensor(&[2, 2], &[1.0, 2.0, 3.0, 4.0]);

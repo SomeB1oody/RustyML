@@ -17,13 +17,13 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///
 /// The input shape is `[batch_size, depth, height, width, channels]`. Each of the 3 spatial
 /// axes shrinks by the amount at its 2 ends. The batch axis and the channel axis pass through
-/// unchanged
+/// unchanged.
 ///
 /// The layer holds no parameter. Each spatial axis must keep at least 1 position, so the
-/// forward pass fails when the 2 amounts on an axis together reach its extent
+/// forward pass fails when the 2 amounts on an axis together reach its extent.
 ///
 /// [`ZeroPadding3D`](crate::neural_network::layers::border::ZeroPadding3D) is the inverse
-/// layer, and it is also this layer's backward pass
+/// layer, and it is also this layer's backward pass.
 ///
 /// # Examples
 ///
@@ -56,7 +56,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 pub struct Cropping3D {
     /// Planes to remove at each of the 6 faces
     cropping: Border3D,
-    /// Shape the layer was built for, batch axis first. `None` before the build
+    /// Shape the layer was built for, batch axis first. `None` before the build.
     built: Option<Shape>,
 }
 
@@ -91,7 +91,7 @@ impl LayerBase for Cropping3D {
 
 impl UnaryLayer for Cropping3D {
     /// Records the shape the crop runs over. The layer holds no array, so nothing is
-    /// allocated. The shape algebra checks the rank and the crop fit
+    /// allocated. The shape algebra checks the rank and the crop fit.
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "Cropping3D", input)? else {
             return Ok(());

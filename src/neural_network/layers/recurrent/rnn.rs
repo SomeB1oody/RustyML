@@ -2,9 +2,9 @@
 //!
 //! Every recurrent layer of the crate is an [`Rnn`] over 1 [`RnnCell`]. The public names
 //! `SimpleRNN`, `LSTM` and `GRU` each hold 1 of these, and they forward every method to it. This
-//! module holds the parts that do not depend on which cell runs: the build, the batched input
-//! projection, the walk along the time axis, the cache, the backpropagation through time, and
-//! the reduction of the per-step gate gradients into 1 gradient per array.
+//! module holds the parts that do not depend on which cell runs: the build, batched input
+//! projection, and the walk along the time axis. It also holds the cache, the backpropagation
+//! through time, and the reduction of the per-step gate gradients into 1 gradient per array.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -26,9 +26,9 @@ use std::marker::PhantomData;
 
 /// A recurrent layer over 1 cell
 ///
-/// The layer takes an input of shape `(batch_size, timesteps, features)`. It returns the last
-/// hidden state, with shape `(batch_size, units)`, or every hidden state in processing order,
-/// with shape `(batch_size, timesteps, units)`.
+/// The layer takes an input of shape `[batch, timesteps, features]`. It returns the last
+/// hidden state, with shape `[batch, units]`, or every hidden state in processing order,
+/// with shape `[batch, timesteps, units]`.
 ///
 /// The gates are fused. All the input kernels sit side by side in 1 matrix, and so do all the
 /// recurrent kernels and all the biases. The column-block order is a property of the cell. This
@@ -56,14 +56,13 @@ pub(crate) struct Rnn<C: RnnCell> {
 /// What the forward pass parks for its backward pass
 ///
 /// The 2 record vectors are flat. The state of processing step `k` sits at
-/// `k * STATE_COUNT`, and the values that step `k` parked start at `k * RECORD_SLOTS`. A vector
-/// per step would allocate once per timestep, and a flat vector allocates once for the pass.
+/// `k * STATE_COUNT`, and the values that step `k` parked start at `k * RECORD_SLOTS`.
 ///
 /// The cell type is part of the cache type, so a cache of 1 recurrent layer cannot decode as the
 /// cache of another. The layer name that [`Ctx::push_cache`] records is the second guard.
 #[derive(Debug)]
 struct RnnCache<C: RnnCell> {
-    /// The input of the pass, with shape `(batch_size, timesteps, features)`
+    /// The input of the pass, with shape `[batch, timesteps, features]`
     input: Array3<f32>,
     /// The state entering each processing step, and the state leaving the last step
     states: Vec<Array2<f32>>,
@@ -158,9 +157,9 @@ impl<C: RnnCell> Rnn<C> {
     ///
     /// # Parameters
     ///
-    /// - `kernel` - Fused input kernel, with shape `(features, gate count * units)`
-    /// - `recurrent_kernel` - Fused recurrent kernel, with shape `(units, gate count * units)`
-    /// - `bias` - Fused bias, with shape `(1, gate count * units)`
+    /// - `kernel` - Fused input kernel, with shape `[features, gate count * units]`
+    /// - `recurrent_kernel` - Fused recurrent kernel, with shape `[units, gate count * units]`
+    /// - `bias` - Fused bias, with shape `[1, gate count * units]`
     ///
     /// # Returns
     ///
@@ -483,9 +482,9 @@ fn groups_partition_the_gates<C: RnnCell>() -> bool {
 /// Generates the 2 layer traits of a public recurrent layer, each method forwarding to the
 /// [`Rnn`] that the layer holds
 ///
-/// The public layers are newtypes over [`Rnn`], so each one keeps its own documentation page,
-/// its own name in a compiler message, and its own `Debug` output. Only these 12 methods are
-/// mechanical, so only these 12 come from a macro. Every method that a user calls directly is
+/// The public layers are newtypes over [`Rnn`]. Each one keeps its own documentation page,
+/// its own name in a compiler message, and its own `Debug` output. Only these 13 methods are
+/// mechanical, so only these 13 come from a macro. Every method that a user calls directly is
 /// written out in the file of its layer, with the prose of that layer
 ///
 /// The macro also gives the layer a `Debug` that prints what the base prints, so the layer

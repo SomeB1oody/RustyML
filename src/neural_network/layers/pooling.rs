@@ -1,7 +1,8 @@
 //! Pooling layers and the shared helpers that build them
 //!
 //! Re-exports every pooling layer (average, max, and their global variants in 1D/2D/3D)
-//! and defines the macros that generate the common `Layer` implementations for them
+//! and defines the macros that generate the shared `UnaryLayer` and `LayerBase` implementations
+//! for them
 
 /// 1D average pooling layer
 pub mod average_pooling_1d;
@@ -48,9 +49,14 @@ pub use max_pooling_3d::MaxPooling3D;
 // The `pub(in ...) use` lines below export the macros by path, so callers import them explicitly
 /// Generates the `UnaryLayer` function implementations for global pooling layers
 ///
-/// Global pooling reduces the spatial dimensions of the input to a single value per channel. It
+/// Global pooling reduces the spatial dimensions of the input to 1 value per channel. It
 /// applies a pooling operation (max or average) across all spatial dimensions. The output shape
 /// keeps only the batch size and the channel count
+///
+/// # Parameters
+///
+/// - `layer` - the layer name, used in error messages
+/// - `rank` - the input rank the layer accepts, used in error messages
 ///
 /// # Generated Functions
 ///
@@ -62,9 +68,6 @@ pub use max_pooling_3d::MaxPooling3D;
 ///
 /// The implementing struct must have the field:
 /// - `built: Option<Shape>` - the shape the layer was built for
-///
-/// The macro takes the layer name and the rank the layer accepts, both of which reach the
-/// error messages
 macro_rules! layer_functions_global_pooling {
     ($layer:literal, $rank:literal) => {
         /// Records the shape the layer serves. The layer holds no array, so nothing is
@@ -130,6 +133,10 @@ pub(in crate::neural_network::layers::pooling) use layer_base_functions_pooling;
 /// `[batch_size, length, channels]` and produce outputs with shape
 /// `[batch_size, output_length, channels]`
 ///
+/// # Parameters
+///
+/// - `layer` - the layer name, used in error messages
+///
 /// # Generated Functions
 ///
 /// - `build()` - records the shape the layer serves, and refuses a shape the window
@@ -143,8 +150,7 @@ pub(in crate::neural_network::layers::pooling) use layer_base_functions_pooling;
 /// - `built: Option<Shape>` - the shape the layer was built for
 /// - `pool_size: usize` - size of the pooling window
 /// - `stride: usize` - step size for the pooling operation
-///
-/// The macro takes the layer name, which reaches the error messages
+/// - `padding: PaddingType` - the padding mode applied before pooling
 macro_rules! layer_functions_1d_pooling {
     ($layer:literal) => {
         /// Records the shape the window runs over. The layer holds no array, so nothing is
@@ -173,7 +179,7 @@ macro_rules! layer_functions_1d_pooling {
             input.check_rank($layer, 3)?;
             let (batch, tail) = input.split_batch($layer)?;
             validate_pool_size_1d(self.pool_size, tail[0])?;
-            // The calculator reads the batch axis, so the list it takes starts with one
+            // The calculator indexes the batch axis at 0, so a placeholder value is prepended
             let mut dims = vec![0];
             dims.extend(tail);
             let output_shape =
@@ -192,6 +198,10 @@ macro_rules! layer_functions_1d_pooling {
 /// `[batch_size, height, width, channels]` and produce outputs with shape
 /// `[batch_size, output_height, output_width, channels]`
 ///
+/// # Parameters
+///
+/// - `layer` - the layer name, used in error messages
+///
 /// # Generated Functions
 ///
 /// - `build()` - records the shape the layer serves, and refuses a shape the window
@@ -205,8 +215,7 @@ macro_rules! layer_functions_1d_pooling {
 /// - `built: Option<Shape>` - the shape the layer was built for
 /// - `pool_size: (usize, usize)` - size of the pooling window as (height, width)
 /// - `strides: (usize, usize)` - step size for the pooling operation as (height_step, width_step)
-///
-/// The macro takes the layer name, which reaches the error messages
+/// - `padding: PaddingType` - the padding mode applied before pooling
 macro_rules! layer_functions_2d_pooling {
     ($layer:literal) => {
         /// Records the shape the window runs over. The layer holds no array, so nothing is
@@ -235,7 +244,7 @@ macro_rules! layer_functions_2d_pooling {
             input.check_rank($layer, 4)?;
             let (batch, tail) = input.split_batch($layer)?;
             validate_pool_size_2d(self.pool_size, tail[0], tail[1])?;
-            // The calculator reads the batch axis, so the list it takes starts with one
+            // The calculator indexes the batch axis at 0, so a placeholder value is prepended
             let mut dims = vec![0];
             dims.extend(tail);
             let output_shape = calculate_output_shape_2d_pooling(
@@ -255,8 +264,12 @@ macro_rules! layer_functions_2d_pooling {
 /// Generates the `UnaryLayer` function implementations for 3D pooling layers
 ///
 /// Applies to pooling layers that operate on 5D tensors with shape
-/// `[batch_size, depth, height, width, channels]`. These layers produce outputs with shape
+/// `[batch_size, depth, height, width, channels]` and produce outputs with shape
 /// `[batch_size, output_depth, output_height, output_width, channels]`
+///
+/// # Parameters
+///
+/// - `layer` - the layer name, used in error messages
 ///
 /// # Generated Functions
 ///
@@ -272,8 +285,7 @@ macro_rules! layer_functions_2d_pooling {
 /// - `pool_size: (usize, usize, usize)` - size of the pooling window as (depth, height, width)
 /// - `strides: (usize, usize, usize)` - step size for the pooling operation as
 ///   (depth_step, height_step, width_step)
-///
-/// The macro takes the layer name, which reaches the error messages
+/// - `padding: PaddingType` - the padding mode applied before pooling
 macro_rules! layer_functions_3d_pooling {
     ($layer:literal) => {
         /// Records the shape the window runs over. The layer holds no array, so nothing is
@@ -302,7 +314,7 @@ macro_rules! layer_functions_3d_pooling {
             input.check_rank($layer, 5)?;
             let (batch, tail) = input.split_batch($layer)?;
             validate_pool_size_3d(self.pool_size, tail[0], tail[1], tail[2])?;
-            // The calculator reads the batch axis, so the list it takes starts with one
+            // The calculator indexes the batch axis at 0, so a placeholder value is prepended
             let mut dims = vec![0];
             dims.extend(tail);
             let output_shape = calculate_output_shape_3d_pooling(

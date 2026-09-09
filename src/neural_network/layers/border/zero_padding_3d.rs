@@ -17,14 +17,14 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///
 /// The input shape is `[batch_size, depth, height, width, channels]`. Each of the 3 spatial
 /// axes grows by the amount at its 2 ends. The batch axis and the channel axis pass through
-/// unchanged
+/// unchanged.
 ///
 /// The layer holds no parameter. A volumetric convolution with
 /// [`PaddingType::Valid`](crate::neural_network::layers::convolution::PaddingType) after this
-/// layer keeps the border under the caller's control
+/// layer keeps the border under the caller's control.
 ///
 /// [`Cropping3D`](crate::neural_network::layers::border::Cropping3D) is the inverse layer, and
-/// it is also this layer's backward pass
+/// it is also this layer's backward pass.
 ///
 /// # Examples
 ///
@@ -57,7 +57,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 pub struct ZeroPadding3D {
     /// Zero planes to add at each of the 6 faces
     padding: Border3D,
-    /// Shape the layer was built for, batch axis first. `None` before the build
+    /// Shape the layer was built for, batch axis first. `None` before the build.
     built: Option<Shape>,
 }
 
@@ -92,7 +92,7 @@ impl LayerBase for ZeroPadding3D {
 
 impl UnaryLayer for ZeroPadding3D {
     /// Records the shape the pad runs over. The layer holds no array, so nothing is
-    /// allocated. The shape algebra checks the rank
+    /// allocated. The shape algebra checks the rank.
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "ZeroPadding3D", input)? else {
             return Ok(());

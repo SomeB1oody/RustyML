@@ -113,7 +113,7 @@ pub struct Sequential {
     input_shapes: Vec<Shape>,
     /// Optimizer used for updating parameters during training
     optimizer: Option<Box<dyn Optimizer>>,
-    /// Loss function used to compute training loss
+    /// Loss function used to score the model, in training and in `evaluate`
     loss: Option<Box<dyn Loss>>,
     /// Optional seed governing the fit-time batch shuffle. Falls back to the global seed or
     /// entropy. See crate::random
@@ -127,8 +127,10 @@ pub struct Sequential {
 /// [`build`](SequentialBuilder::build) takes the shape of the input, gives every layer the
 /// shape that reaches it, and threads each output shape into the next layer
 ///
-/// A layer allocates its arrays in [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build), so a model that was never built holds no
-/// weight at all. Splitting the 2 types is what makes that impossible to use by mistake:
+/// A layer allocates its arrays in
+/// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build), so a model that
+/// was never built holds no weight at all. Splitting the 2 types is what makes that
+/// impossible to use by mistake:
 /// `fit`, `train_batch`, `evaluate`, and `predict` are not methods of this type
 ///
 /// # Examples
@@ -220,9 +222,9 @@ impl SequentialBuilder {
     /// # Returns
     ///
     /// - `Self` - The builder, for chaining
-    // The name is the Keras name of this operation, and the signature is what a chained
-    // builder needs. `std::ops::Add` takes 2 values of 1 type and this takes a layer, so the 2
-    // have nothing in common but the word
+    // The name matches the usual word for appending a layer, and the signature is what a
+    // chained builder needs. `std::ops::Add` takes 2 values of 1 type and this takes a layer,
+    // so the 2 share only the word
     #[allow(clippy::should_implement_trait)]
     pub fn add<L: 'static + Layer>(mut self, layer: L) -> Self {
         self.layers.push(Box::new(layer));
@@ -232,9 +234,10 @@ impl SequentialBuilder {
     /// Builds every layer against `input_shape`, and gives back the model
     ///
     /// The walk runs from the input. Each layer is built for the shape that reaches it, and
-    /// [`UnaryLayer::compute_output_shape`](crate::neural_network::traits::UnaryLayer::compute_output_shape) gives the shape that reaches the next one. A layer that
-    /// refuses the shape stops the walk, and the message names the position of the layer and
-    /// its type. Nothing is allocated past that position
+    /// [`UnaryLayer::compute_output_shape`](super::traits::UnaryLayer::compute_output_shape)
+    /// gives the shape that reaches the next one. A layer that refuses the shape stops the
+    /// walk, and the message names the position of the layer and its type. Nothing is
+    /// allocated past that position
     ///
     /// # Parameters
     ///
@@ -255,14 +258,8 @@ impl SequentialBuilder {
             return Err(Error::NeuralNetwork(NnError::EmptyModel));
         }
 
-        // A feature axis of 0 elements carries no data, and many layers pass an extent through
-        // unchanged, so a whole stack would build and then produce empty tensors. The model
-        // input is the 1 place that can refuse it for every layer at once. A free axis stays
-        // free, because only a fixed extent of 0 is empty.
-        //
-        // The batch axis is exempt. A batch of 0 is an empty dataset rather than an empty
-        // layout, and `fit` and `predict` already answer it with `Error::EmptyInput` when the
-        // data arrives. Every other validator in this module skips axis 0 for the same reason
+        // Axis 0 is exempt, because `fit` and `predict` already refuse a batch of 0 as an empty
+        // dataset, and every other validator in this module skips axis 0 for the same reason
         if let Some(axis) = input_shape
             .axes()
             .iter()
@@ -315,8 +312,8 @@ impl SequentialBuilder {
 
 /// Names the layer that refused a shape during a model build
 ///
-/// A shape error used to appear in the middle of a forward pass, deep inside a model, with no
-/// layer named. The position and the type are what a caller needs to find the layer
+/// The position and the type are what a caller needs to find the failing layer. Without them,
+/// a shape error would carry no information about where in the stack it happened
 #[cold]
 fn build_refusal(index: usize, layer_type: &str, input: &Shape, source: Error) -> Error {
     Error::invalid_input(format!(
@@ -364,9 +361,9 @@ fn global_grad_norm(layers: &mut [Box<dyn Layer>], grads: &Grads) -> f32 {
 /// The per-epoch training loss that [`Sequential::fit`] and [`Sequential::fit_with_batches`]
 /// record
 ///
-/// This is Keras' `History`, in the shape this crate can fill today. It holds 1 entry per
-/// epoch, in epoch order, so `loss()[e]` is epoch `e`'s loss. `loss().len()` is the number of
-/// epochs that actually ran. Training for 0 epochs yields an empty slice
+/// It holds 1 entry per epoch, in epoch order, so `loss()[e]` is epoch `e`'s loss.
+/// `loss().len()` is the number of epochs that actually ran. Training for 0 epochs yields an
+/// empty slice
 ///
 /// # What the number means
 ///
@@ -378,13 +375,13 @@ fn global_grad_norm(layers: &mut [Box<dyn Layer>], grads: &Grads) -> f32 {
 /// because the epoch's own updates improved on the weights it measured. It reads **below** the
 /// truth once the step size starts overshooting and those updates make things worse.
 /// [`evaluate`](Sequential::evaluate) is the call that scores the weights the model currently
-/// holds. This matches Keras' convention for `History`
+/// holds
 ///
 /// Batches contribute in proportion to their sample count. So the short trailing batch that
 /// [`fit_with_batches`](Sequential::fit_with_batches) produces, when `batch_size` does not
 /// divide the dataset, pulls the epoch mean less than a full batch does. That makes the entry
-/// exactly the dataset-wide mean per-sample loss, matching Keras. Keras' loss metric accumulates
-/// each batch with `sample_weight = batch_size`, rather than taking a plain mean over batches
+/// exactly the dataset-wide mean per-sample loss: each batch accumulates with a weight equal
+/// to its sample count, rather than an unweighted mean over batches
 #[derive(Debug, Clone, PartialEq)]
 pub struct History {
     /// 1 loss value per epoch, in epoch order
@@ -495,8 +492,7 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// - `Ok(())` - If validation passes
-    /// - `Err(Error)` - If validation fails
+    /// - `Result<(), Error>` - Ok if validation passes, or the error that failed it
     fn validate_training_inputs(&self, x: &Tensor, y: &Tensor) -> Result<(), Error> {
         if self.optimizer.is_none() {
             return Err(Error::NeuralNetwork(NnError::NotCompiled("optimizer")));
@@ -518,8 +514,7 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// - `Ok(())` - If validation passes
-    /// - `Err(Error)` - If validation fails
+    /// - `Result<(), Error>` - Ok if validation passes, or the error that failed it
     fn validate_evaluation_inputs(&self, x: &Tensor, y: &Tensor) -> Result<(), Error> {
         if self.loss.is_none() {
             return Err(Error::NeuralNetwork(NnError::NotCompiled("loss function")));
@@ -537,12 +532,10 @@ impl Sequential {
             ));
         }
 
-        // Input shape validation
         if x.is_empty() || y.is_empty() {
             return Err(Error::empty_input("input tensors"));
         }
 
-        // Verify batch size match
         if x.shape()[0] != y.shape()[0] {
             return Err(Error::dimension_mismatch(x.shape()[0], y.shape()[0]));
         }
@@ -555,8 +548,7 @@ impl Sequential {
     /// [`fit`](Self::fit) and [`fit_with_batches`](Self::fit_with_batches) build on this unit.
     /// It is public so a custom loop can own the epoch structure: curriculum ordering, a
     /// per-step schedule, or an early-stopping probe between steps. This avoids reimplementing
-    /// the forward, loss, backward, clip, and update sequencing. Keras calls this
-    /// `train_on_batch`
+    /// the forward, loss, backward, clip, and update sequencing
     ///
     /// The whole of `x` is the batch. Nothing is split or shuffled. Mode-dependent layers run in
     /// **training** mode, so dropout samples a fresh mask and batch normalization updates its
@@ -570,9 +562,8 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// - `Ok(f32)` - The batch's loss, measured on the forward pass **before** this call's own
-    ///   parameter update, as Keras' `train_on_batch` reports it
-    /// - `Err(Error)` - If validation or training fails
+    /// - `Result<f32, Error>` - The batch's loss, measured on the forward pass before this
+    ///   call's own parameter update
     ///
     /// # Errors
     ///
@@ -609,10 +600,8 @@ impl Sequential {
         }
         let output = output.ok_or(Error::NeuralNetwork(NnError::EmptyModel))?;
 
-        // Calculate loss
         let loss_value = self.loss.as_ref().unwrap().compute_loss(y, &output)?;
 
-        // Calculate gradient of loss with respect to output
         let mut grad = self.loss.as_ref().unwrap().compute_grad(y, &output)?;
 
         // Advance the optimizer's global step once per batch, before the per-layer updates
@@ -637,7 +626,6 @@ impl Sequential {
         // otherwise be dropped without a word
         check_every_gradient_is_claimed(&mut self.layers, ctx.grads())?;
 
-        // Clip-by-global-norm
         let global_clipnorm = self
             .optimizer
             .as_ref()
@@ -654,10 +642,9 @@ impl Sequential {
             None => 1.0,
         };
 
-        // Parameter updates. The walk is forward, from the input, and it is the canonical order
-        // of the model: `global_grad_norm` above uses the same one. The index is the layer half
-        // of the parameter address that the optimizer keys its state on, so it must count from
-        // the input and never from the output
+        // Parameter updates walk forward, from the input: the same canonical order
+        // `global_grad_norm` above uses. The index is the layer half of the parameter address
+        // the optimizer keys its state on, so it must count from the input, never the output
         if let Some(ref mut optimizer) = self.optimizer {
             for (scope, layer) in self.layers.iter_mut().enumerate() {
                 optimizer.update(scope, &mut **layer, ctx.grads(), grad_scale);
@@ -705,7 +692,6 @@ impl Sequential {
         // With `epochs == 0`, the per-batch validation inside `train_batch` never happens
         self.validate_training_inputs(x, y)?;
 
-        // Create progress bar for training epochs
         #[cfg(feature = "show_progress")]
         let progress_bar = crate::create_progress_bar(
             epochs as u64,
@@ -715,11 +701,9 @@ impl Sequential {
         let mut loss = Vec::new();
 
         for _ in 0..epochs {
-            // Train on the entire dataset as 1 batch
             let epoch_loss = self.train_batch(x, y)?;
             loss.push(epoch_loss);
 
-            // Update progress bar with current loss
             #[cfg(feature = "show_progress")]
             {
                 progress_bar.set_message(format!("{:.6}", epoch_loss));
@@ -727,7 +711,6 @@ impl Sequential {
             }
         }
 
-        // Finish progress bar
         #[cfg(feature = "show_progress")]
         progress_bar.finish_with_message("Training completed");
 
@@ -774,12 +757,10 @@ impl Sequential {
         epochs: u32,
         batch_size: usize,
     ) -> Result<History, Error> {
-        // Validate inputs
         self.validate_training_inputs(x, y)?;
 
         let n_samples = x.shape()[0];
 
-        // Validate batch size
         if batch_size == 0 {
             return Err(Error::invalid_parameter(
                 "batch_size",
@@ -797,13 +778,11 @@ impl Sequential {
             ));
         }
 
-        // Creates batch tensors by gathering the selected rows along axis 0
         let create_batch_tensors =
             |x: &Tensor, y: &Tensor, indices: &[usize]| -> Result<(Tensor, Tensor), Error> {
                 Ok((x.select(Axis(0), indices), y.select(Axis(0), indices)))
             };
 
-        // Create sample indices for shuffling
         let mut indices: Vec<usize> = (0..n_samples).collect();
 
         // Seed the per-epoch shuffle once. `None` consults the thread-local global seed
@@ -814,7 +793,6 @@ impl Sequential {
         #[cfg(feature = "show_progress")]
         let total_iterations = epochs as u64 * total_batches as u64;
 
-        // Create progress bar for batch training
         #[cfg(feature = "show_progress")]
         let progress_bar = crate::create_progress_bar(
             total_iterations,
@@ -828,11 +806,6 @@ impl Sequential {
         for epoch in 0..epochs {
             indices.shuffle(&mut shuffle_rng);
 
-            // Each batch counts for as many samples as it holds, rather than 1 vote each. So the
-            // short trailing batch left when `batch_size` does not divide the dataset pulls the
-            // epoch figure less than a full batch does. That makes it exactly the dataset-wide
-            // mean per-sample loss, which is what Keras' loss metric does
-            // (`sample_weight = batch_size`).
             // The running sum is f64 because an epoch can hold many thousands of batches
             let (mut weighted_loss, mut samples_seen) = (0.0_f64, 0_usize);
 
@@ -862,7 +835,6 @@ impl Sequential {
             let _ = epoch;
         }
 
-        // Finish progress bar
         #[cfg(feature = "show_progress")]
         progress_bar.finish_with_message("Training completed");
 
@@ -871,7 +843,7 @@ impl Sequential {
 
     /// Computes the loss on data without training on it
     ///
-    /// Keras' `evaluate`: 1 inference-mode forward pass over the whole of `x`, scored with the
+    /// 1 inference-mode forward pass over the whole of `x`, scored with the
     /// compiled loss. Nothing is updated: no gradients, no parameters, and no batch-normalization
     /// running statistics. This is what a validation pass, an early-stopping test, or a
     /// checkpoint-selection rule needs. It borrows `&self`, so it can score a model between
@@ -880,7 +852,7 @@ impl Sequential {
     ///
     /// Layers behave exactly as in [`predict`](Self::predict): dropout and noise layers are the
     /// identity, and batch normalization reads its running statistics. On a model that contains
-    /// one of these layers, this number is therefore *not* the number [`fit`](Self::fit) records
+    /// 1 of these layers, this number is therefore *not* the number [`fit`](Self::fit) records
     /// for the same data. Training-mode dropout inflates that number. `evaluate`'s number is the
     /// more accurate of the 2
     ///
@@ -929,7 +901,6 @@ impl Sequential {
     /// - `Error::NeuralNetwork(NnError::EmptyModel)` - If the model has no layers
     /// - `Error::Computation` - If any layer fails during forward pass
     pub fn predict(&self, x: &Tensor) -> Result<Tensor, Error> {
-        // Input validation
         if x.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
@@ -979,13 +950,12 @@ impl Sequential {
         let mut trainable_param_count: usize = 0;
         let mut non_trainable_param_count: usize = 0;
 
-        // Per-type counter for Keras-style names: "dense", "dense_1", "conv2d", ...
+        // Per-type counter for names such as "dense", "dense_1", "conv2d", ...
         let mut type_counts: HashMap<&str, usize> = HashMap::new();
 
         for (index, layer) in self.layers.iter().enumerate() {
             let layer_type = layer.layer_type();
 
-            // Generate name from the layer type with a per-type index
             let count = type_counts.entry(layer_type).or_insert(0);
             let layer_name = if *count == 0 {
                 layer_type.to_lowercase()
@@ -1144,14 +1114,12 @@ impl Sequential {
         // `capture` borrows the live arrays, so nothing is copied before postcard reads them
         let bytes = postcard::to_allocvec(&capture(&self.layers))?;
 
-        // Create or overwrite the file
         let file = File::create(path)?;
         let mut writer = BufWriter::new(file);
 
-        // Write the serialized bytes to file
         writer.write_all(&bytes)?;
 
-        // Make sure all data is written to disk
+        // flush() surfaces a write error that drop would otherwise discard
         writer.flush()?;
 
         Ok(())
@@ -1295,7 +1263,7 @@ mod tests {
     /// is why [`Layer`](crate::neural_network::traits::LayerBase),
     /// [`Loss`](crate::neural_network::traits::Loss) and
     /// [`Optimizer`](crate::neural_network::traits::Optimizer) all carry those bounds. This
-    /// test fails to compile if any of the 3 loses one
+    /// test fails to compile if any of the 3 loses 1
     #[test]
     fn a_built_model_is_send_and_sync() {
         fn assert_send<T: Send>() {}

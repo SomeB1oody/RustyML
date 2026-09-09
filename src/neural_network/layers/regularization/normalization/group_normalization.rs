@@ -1,5 +1,6 @@
-//! Group Normalization layer: divides channels into groups and normalizes within each
-//! group per sample, independent of batch size
+//! Group Normalization layer: splits the channel axis into groups and normalizes each group
+//! over the spatial axes and its own channels, per sample. The result has no dependence on
+//! batch size
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -20,8 +21,9 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Group Normalization layer for neural networks
 ///
-/// Divides channels into groups and normalizes within each group per sample, reducing
-/// dependence on batch size. Channel divisibility is validated on every forward pass
+/// Splits the channel axis into `num_groups` groups. For each sample, it computes 1 mean and
+/// 1 variance per group, over the spatial axes and the channels inside that group. The group
+/// never reaches across the batch axis. Channel divisibility is validated on every forward pass
 ///
 /// # Examples
 ///
@@ -101,7 +103,7 @@ impl GroupNormalization {
 
     /// Sets whether the layer adds the shift `beta` (defaults to `true`)
     ///
-    /// With `center` set to false the layer holds no `beta`: `param_count` counts none for it,
+    /// With `center` set to false, the layer holds no `beta`. `param_count` counts none for it,
     /// `parameters` yields none for it, and a checkpoint of the layer holds no
     /// `<position>.beta` path. The normalized value passes through unshifted
     ///
@@ -124,10 +126,10 @@ impl GroupNormalization {
 
     /// Sets whether the layer applies the scale `gamma` (defaults to `true`)
     ///
-    /// With `scale` set to false the layer holds no `gamma`: `param_count` counts none for it,
+    /// With `scale` set to false, the layer holds no `gamma`. `param_count` counts none for it,
     /// `parameters` yields none for it, and a checkpoint of the layer holds no
-    /// `<position>.gamma` path. `beta` keeps its own name and its own optimizer state, because
-    /// a checkpoint and an optimizer both address an array by name and never by position
+    /// `<position>.gamma` path. `beta` keeps its own name and its own optimizer state. A
+    /// checkpoint and an optimizer both address an array by name and never by position
     ///
     /// # Parameters
     ///
@@ -280,7 +282,6 @@ impl UnaryLayer for GroupNormalization {
             self.epsilon,
         );
 
-        // Park the intermediates for the backward pass
         if ctx.is_training() {
             ctx.push_cache(
                 "GroupNormalization",

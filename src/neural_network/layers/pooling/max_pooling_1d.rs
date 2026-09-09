@@ -23,7 +23,13 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// Selects the maximum value within each pooling window along the length dimension.
 /// Input tensor shape: `[batch_size, length, channels]`. Output tensor shape:
 /// `[batch_size, pooled_length, channels]`. With `Valid` padding,
-/// `pooled_length = (length - pool_size) / stride + 1`.
+/// `pooled_length = (length - pool_size) / stride + 1`. With `Same` padding,
+/// `pooled_length = ceil(length / stride)`.
+///
+/// # Notes
+///
+/// When 2 or more elements in a window tie for the maximum, the layer keeps the earliest one.
+/// The scan order runs the last spatial axis fastest.
 ///
 /// # Examples
 ///
@@ -154,7 +160,7 @@ impl MaxPooling1D {
 
 /// What the forward pass of [`MaxPooling1D`] parks for its backward pass
 struct MaxPooling1DCache {
-    /// Shape of the tensor that entered the layer, to restore the rank of the gradient
+    /// Shape of the tensor that entered the layer, to restore the shape of the gradient
     input_shape: Vec<usize>,
     /// Flat per-output arg-max index of each pooling window, to route the gradient back
     argmax: Vec<usize>,

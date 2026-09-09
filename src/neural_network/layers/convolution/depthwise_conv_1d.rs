@@ -31,9 +31,8 @@ use ndarray::{Array1, Array3};
 /// kernels each input channel gets. The output channel for input channel `c` and multiplier index
 /// `m` is `c * depth_multiplier + m`
 ///
-/// This is the 1D form of
-/// [`DepthwiseConv2D`](crate::neural_network::layers::convolution::depthwise_conv_2d::DepthwiseConv2D).
-/// Both layers run the same shared kernel, because a sequence is a height-1 image
+/// This is the 1D form of [`DepthwiseConv2D`](super::depthwise_conv_2d::DepthwiseConv2D). Both
+/// layers run the same shared kernel, because a sequence is a height-1 image
 ///
 /// # Examples
 ///
@@ -176,7 +175,7 @@ impl DepthwiseConv1D {
     ///
     /// A dilation of `d` spaces the kernel taps `d` cells apart, so `kernel_size` taps span
     /// `(kernel_size - 1) * d + 1` input cells. The window still advances by the stride. A
-    /// dilation of 1 gives a solid kernel and the same result as before
+    /// dilation of 1 gives a solid kernel
     ///
     /// # Parameters
     ///
@@ -323,7 +322,7 @@ impl DepthwiseConv1D {
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` does not match
     ///   the existing shape
     /// - `Error::InvalidParameter` - If a bias is given to a layer that holds none, or none
-    ///   is given to a layer that holds one
+    ///   is given to a layer that holds 1
     pub fn set_weights(
         &mut self,
         weights: Array3<f32>,
@@ -349,7 +348,7 @@ impl DepthwiseConv1D {
     /// The shared kernel names 2 spatial axes, so this fixes the height at 1 and puts the length
     /// on the width axis. A `[batch, length, channels]` tensor and a
     /// `[kernel_size, channels, depth_multiplier]` weight already hold the values in that order,
-    /// so neither one needs a copy
+    /// so neither needs a copy
     ///
     /// # Errors
     ///
@@ -470,13 +469,12 @@ impl UnaryLayer for DepthwiseConv1D {
         };
         built.check_rank("DepthwiseConv1D", 3)?;
         let (batch, tail) = built.split_batch("DepthwiseConv1D")?;
-        // The family validators read a full extent list, and the batch extent is not part of
-        // what they check
+        // The family validators check a full extent list. The batch extent is not part of it
         let mut dims = vec![batch.unwrap_or(1)];
         dims.extend(tail);
         validate_input_shape_1d(&dims)?;
-        // The shape algebra holds every rule the geometry has, so a stack that cannot run is
-        // refused here, before the layer draws a single weight
+        // The shape algebra holds every geometry rule, so a bad stack is refused before any
+        // weight is drawn
         self.compute_output_shape(&built)?;
         self.channels = dims[2];
         self.built = Some(built);
@@ -552,7 +550,6 @@ impl UnaryLayer for DepthwiseConv1D {
         if self.built.is_some() && channels != self.channels {
             return Err(Error::dimension_mismatch(self.channels, channels));
         }
-        // A depthwise convolution emits `channels * depth_multiplier` channels
         Ok(Shape::from_batch(
             batch,
             &[
@@ -593,7 +590,7 @@ mod tests {
 
         let out = layer.forward(&input, &mut Ctx::inference()).unwrap();
         assert_eq!(out.shape(), &[1, 4, 2]);
-        // Channel 0: the 4 window sums from the width-2 kernel. Channel 1: 2 * 2 ones everywhere
+        // Channel 0: the 4 window sums from the length-2 kernel. Channel 1: 2 * 2 ones everywhere
         assert_eq!(
             out.iter().copied().collect::<Vec<f32>>(),
             vec![3.0, 4.0, 5.0, 4.0, 7.0, 4.0, 9.0, 4.0]

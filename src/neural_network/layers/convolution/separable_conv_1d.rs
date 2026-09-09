@@ -96,7 +96,7 @@ pub struct SeparableConv1D {
     /// Bias vector with shape \[filters\]
     ///
     /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
-    /// The pointwise stage adds nothing, `weights` hides the array, and `parameters` never
+    /// The pointwise stage adds nothing, `weights` hides the array, and `parameters_mut` never
     /// yields it, so a bias-free layer holds it and no more
     bias: Array1<f32>,
     /// Activation applied to the layer output
@@ -194,7 +194,7 @@ impl SeparableConv1D {
     /// A dilation of `d` spaces the depthwise taps `d` cells apart, so `kernel_size` taps span
     /// `(kernel_size - 1) * d + 1` input cells. The window still advances by the stride. The
     /// pointwise stage reads 1 tap, so no dilation can reach it. A dilation of 1 gives a solid
-    /// kernel and the same result as before
+    /// kernel, the same as a convolution with no dilation
     ///
     /// # Parameters
     ///
@@ -379,11 +379,11 @@ impl SeparableConv1D {
     /// Performs the pointwise (1-tap) convolution stage
     ///
     /// A 1-tap convolution is a per-position cross-channel matrix multiply. This delegates to the
-    /// shared [`conv_forward`] engine (im2col + gemm) rather than a hand-rolled loop nest. The
-    /// pointwise weights `[1, C*dm, filters]` already match the engine's flat `[k..., Cin, F]`
-    /// layout. The bias is already its per-filter `[F]` vector. The depthwise stage emits its
-    /// channels in `c * depth_multiplier + m` order, which is exactly the row order the pointwise
-    /// weight uses. Nothing repacks the data between the stages
+    /// shared [`conv_forward`] engine (im2col + gemm). The pointwise weights `[1, C*dm, filters]`
+    /// already match the engine's flat `[k..., Cin, F]` layout. The bias is already its
+    /// per-filter `[F]` vector. The depthwise stage emits its channels in
+    /// `c * depth_multiplier + m` order, which is exactly the row order the pointwise weight
+    /// uses. Nothing repacks the data between the stages
     fn pointwise_convolve(&self, input: &Tensor) -> Tensor {
         conv_forward(
             input,
@@ -404,7 +404,7 @@ impl SeparableConv1D {
     /// Sets whether the layer adds a bias to the pointwise output (defaults to `true`)
     ///
     /// With `use_bias` set to false the layer holds the 2 kernels alone: `param_count` counts
-    /// the 2 kernels, `parameters` yields the 2 kernels, and a checkpoint of the layer holds
+    /// the 2 kernels, `parameters_mut` yields the 2 kernels, and a checkpoint of the layer holds
     /// the paths `<position>.depthwise_kernel` and `<position>.pointwise_kernel`. A checkpoint
     /// written by a layer that has a bias therefore fails to load into a layer that has none,
     /// and the refusal names the path
@@ -434,9 +434,10 @@ impl SeparableConv1D {
     ///
     /// # Errors
     ///
-    /// - `Error` - If any supplied array shape does not match the existing layer weights
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any supplied array shape does not
+    ///   match the existing layer weights
     /// - `Error::InvalidParameter` - If a bias is given to a layer that holds none, or none
-    ///   is given to a layer that holds one
+    ///   is given to a layer that holds 1
     pub fn set_weights(
         &mut self,
         depthwise_weights: Array3<f32>,
@@ -562,7 +563,6 @@ impl UnaryLayer for SeparableConv1D {
         }
         self.validate_input(input)?;
 
-        // Depthwise convolution (each channel independently), then pointwise to combine
         let depthwise_output = self.depthwise_convolve(input)?;
         let output = self.pointwise_convolve(&depthwise_output);
 
@@ -586,7 +586,6 @@ impl UnaryLayer for SeparableConv1D {
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let cache: SeparableConv1DCache = ctx.pop_cache("SeparableConv1D")?;
 
-        // Backward through the activation first
         let grad_upstream = self.activation.backward(&cache.output, grad_output)?;
 
         let input = &cache.input;
@@ -623,7 +622,6 @@ impl UnaryLayer for SeparableConv1D {
         }
         let depthwise_grad = pw_grads.input_grad;
 
-        // Depthwise backward through the shared driver
         let input_std = input.as_standard_layout();
         let src = input_std
             .as_slice()

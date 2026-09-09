@@ -16,6 +16,8 @@ use std::hint::black_box;
 
 // conv engine: CONV_PARALLEL_MIN_FLOPS
 
+/// Runs the conv engine forward pass, serial and forced-parallel, across a batch-1 ladder of
+/// channel, filter, image, and kernel sizes, to calibrate CONV_PARALLEL_MIN_FLOPS
 pub fn calibrate_conv_forward() -> Section {
     let mut rows = Vec::new();
     // (cin, filters, img, k) at batch == 1, the case the gate must serve hardest. Tensors are
@@ -67,6 +69,8 @@ pub fn calibrate_conv_forward() -> Section {
 
 // pooling engine: POOL_PARALLEL_MIN_OPS
 
+/// Runs the max-pooling engine, serial and forced-parallel, across image, batch, and channel
+/// ladders, to calibrate POOL_PARALLEL_MIN_OPS
 pub fn calibrate_pooling() -> Section {
     let mut rows = Vec::new();
     let run = |input: &Tensor, force: bool| {
@@ -105,11 +109,8 @@ pub fn calibrate_pooling() -> Section {
             parallel_ns: p,
         });
     }
-    // Conv-scale channel counts. The 2 ladders above pin the channel count to 1 or 3. That is
-    // the regime a channels-last layout serves worst, because the channel axis is the
-    // vectorization width. A length-1 or length-3 pixel vector is its degenerate case. Those
-    // rows alone would calibrate the gate entirely on the extreme. These rows instead cover the
-    // channel counts a real network spends its time in
+    // The 2 ladders above pin the channel count to 1 or 3, the worst case for a channels-last
+    // layout. These rows instead cover the channel counts a real network uses
     for &(batch, c, img) in &[
         (1usize, 32usize, 28usize),
         (1, 32, 56),
@@ -140,6 +141,8 @@ pub fn calibrate_pooling() -> Section {
 
 // elementwise kernel classes: activation / dropout / optimizer thresholds
 
+/// Runs the f32 elementwise kernel classes, serial and forced-parallel, across an element-count
+/// ladder, to calibrate the activation, dropout, and optimizer parallel thresholds
 pub fn calibrate_elementwise() -> Vec<Section> {
     let sizes = [
         512usize, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 1048576,

@@ -75,7 +75,7 @@ impl Subtract {
     ///
     /// # Returns
     ///
-    /// - `Self` - The new layer, before any build
+    /// - `Self` - A new `Subtract` layer, which holds no build
     pub fn new() -> Self {
         Self::default()
     }

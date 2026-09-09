@@ -56,7 +56,6 @@ fn mse_gradient_value() {
     assert_allclose(&grad, &expected, 1e-6_f32);
 }
 
-/// Perfect prediction gives zero MSE loss and zero gradient everywhere
 #[test]
 fn mse_perfect_prediction_zero_loss_and_grad() {
     let mse = MeanSquaredError::new();
@@ -132,7 +131,6 @@ fn mae_gradient_value_including_zero_tie() {
     assert_allclose(&grad, &expected, 1e-6_f32);
 }
 
-/// Perfect prediction gives zero MAE loss and zero gradient everywhere
 #[test]
 fn mae_perfect_prediction_zero_loss_and_grad() {
     let mae = MeanAbsoluteError::new();
@@ -149,7 +147,6 @@ fn mae_perfect_prediction_zero_loss_and_grad() {
     assert_allclose(&grad, &zeros, 1e-7_f32);
 }
 
-/// Shape mismatch is rejected with an Err
 #[test]
 fn mae_shape_mismatch_returns_err() {
     let mae = MeanAbsoluteError::new();
@@ -274,7 +271,6 @@ fn bce_extreme_predictions_clipped_to_finite() {
     }
 }
 
-/// Shape mismatch is rejected with an Err
 #[test]
 fn bce_shape_mismatch_returns_err() {
     let bce = BinaryCrossEntropy::new();
@@ -343,7 +339,6 @@ fn cce_gradient_value() {
 
     let grad = cce.compute_grad(&y_true, &y_pred).unwrap();
 
-    // Flatten to check individual elements
     let flat: Vec<f32> = grad.iter().cloned().collect();
     assert_eq!(flat.len(), 9);
 
@@ -427,7 +422,6 @@ fn cce_extreme_predictions_clipped_to_finite() {
     }
 }
 
-/// Shape mismatch is rejected with an Err
 #[test]
 fn cce_shape_mismatch_returns_err() {
     let cce = CategoricalCrossEntropy::new(false);
@@ -449,7 +443,6 @@ fn cce_shape_mismatch_returns_err() {
     ));
 }
 
-/// Empty y_true is rejected with an Err
 #[test]
 fn cce_empty_input_returns_err() {
     let cce = CategoricalCrossEntropy::new(false);
@@ -728,7 +721,6 @@ fn scce_wrong_label_shape_returns_err() {
     );
 }
 
-/// SCCE rejects a batch-size mismatch between labels and predictions
 #[test]
 fn scce_batch_mismatch_returns_err() {
     let scce = SparseCategoricalCrossEntropy::new(false);
@@ -904,7 +896,7 @@ fn scce_loss_is_invariant_to_row_scaling() {
     );
 }
 
-/// Above rank 2 the normalizer still runs over the class axis alone, one distribution per site,
+/// Above rank 2 the normalizer still runs over the class axis alone, 1 distribution per site,
 /// never pooling the leading axes together
 #[test]
 fn cce_renormalizes_each_site_independently_above_rank_2() {

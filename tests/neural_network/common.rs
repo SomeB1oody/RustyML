@@ -1,4 +1,4 @@
-//! Shared helpers for the `neural_network` integration tests.
+//! Shared helpers for the `neural_network` integration tests
 
 #![allow(dead_code)]
 
@@ -8,14 +8,14 @@ use ndarray_rand::rand::rngs::StdRng;
 use rustyml::neural_network::traits::Layer;
 use std::sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-/// A deterministically seeded RNG, for reproducible tests.
+/// A deterministically seeded RNG, for reproducible tests
 ///
 /// Always seed test RNGs. Never seed the thread RNG. This keeps failures reproducible.
 pub fn seeded_rng(seed: u64) -> StdRng {
     StdRng::seed_from_u64(seed)
 }
 
-/// RAII guard for the crate-wide thread-local global seed.
+/// RAII guard for the crate-wide thread-local global seed
 ///
 /// [`GlobalSeedGuard::set`] installs the global seed (see [`rustyml::set_global_seed`]). The
 /// guard clears the seed on drop, even during a panic. This keeps a failing global-seed test
@@ -30,7 +30,7 @@ pub fn seeded_rng(seed: u64) -> StdRng {
 pub struct GlobalSeedGuard;
 
 impl GlobalSeedGuard {
-    /// Installs `seed` as the thread-local global seed. Clears it when the returned guard drops.
+    /// Installs `seed` as the thread-local global seed. Clears it when the returned guard drops
     pub fn set(seed: u64) -> Self {
         rustyml::set_global_seed(seed);
         GlobalSeedGuard
@@ -43,17 +43,15 @@ impl Drop for GlobalSeedGuard {
     }
 }
 
-// ---------------------------------------------------------------------------------------
 // The process-global tuning gates
-// ---------------------------------------------------------------------------------------
 
-/// Reads 1 tuning gate.
+/// Reads 1 tuning gate
 pub type GateGetter = fn() -> usize;
 
-/// Writes 1 tuning gate.
+/// Writes 1 tuning gate
 pub type GateSetter = fn(usize);
 
-/// Every tuning gate that a neural-network layer reads, as a name, a getter, and a setter.
+/// Every tuning gate that a neural-network layer reads, as a name, a getter, and a setter
 ///
 /// The names and the functions come from `rustyml::tuning`, the public entry point of the
 /// gates. The f64 gates and the tree gates are absent, because no layer reads them. The
@@ -122,7 +120,7 @@ pub const NEURAL_NETWORK_GATES: &[(&str, GateGetter, GateSetter)] = &[
     ),
 ];
 
-/// Every task-size cap that a neural-network layer reads, as a name, a getter, and a setter.
+/// Every task-size cap that a neural-network layer reads, as a name, a getter, and a setter
 ///
 /// A cap is process-global, exactly like a tuning gate, so [`GateGuard`] saves and restores it
 /// under the same lock. The table comes from `rustyml::bench_internals`, which owns the names,
@@ -135,7 +133,7 @@ pub const NEURAL_NETWORK_GATES: &[(&str, GateGetter, GateSetter)] = &[
 pub const NEURAL_NETWORK_SPLIT_CAPS: &[(&str, GateGetter, GateSetter)] =
     rustyml::bench_internals::SPLIT_CAPS;
 
-/// The 1 lock over the process-global tuning gates.
+/// The 1 lock over the process-global tuning gates
 ///
 /// A gate is a process-global atomic, and the default test harness runs the tests of 1 binary
 /// at the same time. A test that moves a gate therefore races every test that reads one. The
@@ -143,7 +141,7 @@ pub const NEURAL_NETWORK_SPLIT_CAPS: &[(&str, GateGetter, GateSetter)] =
 /// the suite is invoked.
 static GATE_LOCK: RwLock<()> = RwLock::new(());
 
-/// Guard for a test that depends on the gates as the crate configured them.
+/// Guard for a test that depends on the gates as the crate configured them
 ///
 /// [`read_gates`] builds it. Bind it for as long as the test reads a gate or runs a kernel
 /// whose path a gate selects. It holds the shared side of the lock, so any number of such tests
@@ -151,7 +149,7 @@ static GATE_LOCK: RwLock<()> = RwLock::new(());
 #[must_use = "bind the guard to a variable; an unbound guard releases the lock immediately"]
 pub struct GateReadGuard(RwLockReadGuard<'static, ()>);
 
-/// Takes the shared side of the tuning-gate lock. See [`GateReadGuard`].
+/// Takes the shared side of the tuning-gate lock. See [`GateReadGuard`]
 ///
 /// Never call this while a [`GateGuard`] of the same test is alive. The lock takes no upgrade,
 /// so the test would stop for ever.
@@ -161,7 +159,7 @@ pub fn read_gates() -> GateReadGuard {
     GateReadGuard(GATE_LOCK.read().unwrap_or_else(PoisonError::into_inner))
 }
 
-/// RAII guard for a test that moves a tuning gate or a task-size cap.
+/// RAII guard for a test that moves a tuning gate or a task-size cap
 ///
 /// [`GateGuard::acquire`] takes the exclusive side of the lock and saves every gate of
 /// [`NEURAL_NETWORK_GATES`] and every cap of [`NEURAL_NETWORK_SPLIT_CAPS`]. Move any gate
@@ -184,7 +182,7 @@ pub struct GateGuard {
 }
 
 impl GateGuard {
-    /// Takes the exclusive side of the lock, and saves every gate and every cap.
+    /// Takes the exclusive side of the lock, and saves every gate and every cap
     pub fn acquire() -> Self {
         let lock = GATE_LOCK.write().unwrap_or_else(PoisonError::into_inner);
         let saved: Vec<usize> = NEURAL_NETWORK_GATES
@@ -202,7 +200,7 @@ impl GateGuard {
         }
     }
 
-    /// Takes the exclusive side of the lock, and then puts `value` in every gate.
+    /// Takes the exclusive side of the lock, and then puts `value` in every gate
     ///
     /// A `value` of 0 sends every gated kernel down its parallel branch, because each gate
     /// compares its work estimate with `>=`. A `value` of `usize::MAX` holds every kernel on
@@ -219,7 +217,7 @@ impl GateGuard {
     }
 
     /// Puts `value` in every task-size cap of [`NEURAL_NETWORK_SPLIT_CAPS`], and gives the guard
-    /// back.
+    /// back
     ///
     /// A `value` of 1 or more holds each task of a capped driver at that many units or fewer,
     /// so a small input builds more than 1 task. The unit is the driver's own: output positions
@@ -233,7 +231,7 @@ impl GateGuard {
         self
     }
 
-    /// Puts 0 back in the 1 cap that `name` selects, and gives the guard back.
+    /// Puts 0 back in the 1 cap that `name` selects, and gives the guard back
     ///
     /// Use this after [`GateGuard::with_split_cap`] for a driver that is not invariant to its
     /// task size. The value 0 is the production value, so that driver keeps its calibrated task
@@ -265,7 +263,7 @@ impl Drop for GateGuard {
     }
 }
 
-/// Asserts 2 arrays or tensors are element-wise equal within `eps` (absolute difference).
+/// Asserts 2 arrays or tensors are element-wise equal within `eps` (absolute difference)
 ///
 /// For single scalars, use the `assert_abs_diff_eq!` or `assert_relative_eq!` macro from
 /// `approx` directly.
@@ -291,7 +289,7 @@ where
     }
 }
 
-/// 1 named array of a layer, or a panic that names what the layer holds instead.
+/// 1 named array of a layer, or a panic that names what the layer holds instead
 ///
 /// The checkpoint format addresses every array by name, so a test that reads a weight reads it
 /// by the same name. A wrong name is a test defect, and the panic lists the names the layer

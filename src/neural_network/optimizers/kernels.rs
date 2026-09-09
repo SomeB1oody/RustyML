@@ -3,8 +3,8 @@
 //! Each optimizer's per-parameter math lives here as a single function. Every function operates
 //! on a mutable `f32` parameter slice, a gradient slice, and any needed optimizer state slices.
 //! Every layer exposes its parameters as flat slices through
-//! [`LayerBase::parameters_mut`](crate::neural_network::traits::LayerBase::parameters_mut). These kernels work for
-//! any parameter shape
+//! [`LayerBase::parameters_mut`](crate::neural_network::traits::LayerBase::parameters_mut).
+//! These kernels work for any parameter shape
 
 use crate::parallel_gates::fused_slice_parallel_threshold;
 use rayon::prelude::*;
@@ -126,8 +126,8 @@ pub fn apply_weight_decay(param: &mut [f32], lr: f32, weight_decay: f32) {
 /// against the pre-step parameter
 ///
 /// Unlike [`apply_weight_decay`]'s decoupled shrink, this folds the penalty into the gradient. It
-/// then flows through Adam's moment estimates, and the adaptive denominator rescales it (the
-/// classic `Adam(weight_decay=...)` behavior, as opposed to `AdamW`). The optimizer calls this
+/// then flows through Adam's moment estimates, and the adaptive denominator rescales it: the
+/// classic coupled weight-decay behavior, unlike AdamW's decoupled form. The optimizer calls this
 /// function only when `weight_decay != 0`, so it always allocates the combined buffer
 ///
 /// # Parameters
@@ -168,16 +168,12 @@ pub fn l2_regularized_grad(grad: &[f32], param: &[f32], weight_decay: f32) -> Ve
 ///
 /// # Epsilon placement
 ///
-/// `epsilon` goes outside the square root here, and the denominator uses the bias-corrected `v`.
-/// This matches Keras' `Adam`, PyTorch, and Algorithm 1 of Kingma and Ba. Keras itself places
-/// epsilon inside the root for `RMSprop` and `Adagrad` instead, which is an inconsistency inside
-/// Keras, not in this crate
+/// `epsilon` goes outside the square root here, and the denominator uses the bias-corrected `v`,
+/// following Algorithm 1 of Kingma and Ba. Epsilon keeps the same scale at every timestep: it
+/// never folds into the bias-correction term
 ///
-/// 1 residual difference from Keras remains, and this crate does not match it. Keras folds
-/// bias correction into a scalar `alpha = lr*sqrt(1-beta2^t)/(1-beta1^t)` and divides by
-/// `sqrt(v) + epsilon` using the raw `v`. That makes its effective epsilon
-/// `epsilon/sqrt(1-beta2^t)`, which changes with the timestep. This crate follows PyTorch's
-/// form, where epsilon means the same thing at every timestep
+/// [`rmsprop_step`] and [`adagrad_step`] place epsilon inside the square root instead. See
+/// [`rmsprop_step`] for why an epsilon value cannot move between the 2 placements unchanged
 #[allow(clippy::too_many_arguments)]
 pub fn adam_step(
     param: &mut [f32],
@@ -238,9 +234,8 @@ pub fn adam_step(
 ///
 /// # Epsilon placement
 ///
-/// `epsilon` goes inside the square root here, matching Keras. PyTorch adds it after the root
-/// instead, and so does this crate's [`adam_step`]. Keras itself is inconsistent on this point:
-/// it places epsilon inside the root only for `RMSprop` and `Adagrad`
+/// `epsilon` goes inside the square root here. This crate's [`adam_step`] adds epsilon after the
+/// root instead, so the 2 kernels place epsilon on different scales
 ///
 /// Do not port an epsilon value between the 2 placements unchanged. Epsilon inside the root is
 /// on the gradient-squared scale. Epsilon outside the root is on the gradient scale. The 2
@@ -288,9 +283,9 @@ pub fn rmsprop_step(
 ///
 /// # Epsilon placement
 ///
-/// `epsilon` goes inside the square root here, matching Keras. See [`rmsprop_step`] for why the
-/// placement changes the scale on which epsilon is measured, and why a value cannot move between
-/// the 2 forms unchanged
+/// `epsilon` goes inside the square root here, the same placement as [`rmsprop_step`]. See
+/// [`rmsprop_step`] for why the placement changes the scale on which epsilon is measured, and why
+/// a value cannot move between the 2 forms unchanged
 pub fn adagrad_step(
     param: &mut [f32],
     grad: &[f32],

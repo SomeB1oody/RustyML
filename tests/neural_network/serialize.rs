@@ -193,7 +193,7 @@ fn dense_zero_weights_bias_only_value_check_and_round_trip() {
         .unwrap()
         .into_dyn();
 
-    // W=0 => any input maps to the bias
+    // W = 0, so any input maps to the bias
     let expected: Tensor = Array::from_shape_vec((2, 3), vec![0.5f32, -0.5, 1.0, 0.5, -0.5, 1.0])
         .unwrap()
         .into_dyn();
@@ -215,7 +215,6 @@ fn dense_zero_weights_bias_only_value_check_and_round_trip() {
     assert_allclose(&after, &expected, 1e-6_f32);
 }
 
-// 2-layer Dense model trained a few steps round-trips
 #[test]
 fn dense_two_layer_trained_round_trip() {
     let tmp = TempFile::new("dense2");
@@ -249,7 +248,6 @@ fn dense_two_layer_trained_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// Conv1D round-trip
 #[test]
 fn conv1d_round_trip() {
     let tmp = TempFile::new("conv1d");
@@ -273,7 +271,6 @@ fn conv1d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// Conv2D round-trip
 #[test]
 fn conv2d_round_trip() {
     let tmp = TempFile::new("conv2d");
@@ -300,7 +297,6 @@ fn conv2d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// Conv3D round-trip
 #[test]
 fn conv3d_round_trip() {
     let tmp = TempFile::new("conv3d");
@@ -327,7 +323,6 @@ fn conv3d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// DepthwiseConv2D round-trip
 #[test]
 fn depthwise_conv2d_round_trip() {
     let tmp = TempFile::new("depthwise_conv2d");
@@ -354,8 +349,6 @@ fn depthwise_conv2d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// DepthwiseConv1D round-trip
-///
 /// `depth_multiplier = 2` widens both the kernel and the bias, so the saved shapes differ from
 /// the constructor default. A container that dropped the multiplier would fail the shape check
 /// on load.
@@ -390,8 +383,6 @@ fn depthwise_conv1d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// SeparableConv1D round-trip
-///
 /// This carries 3 parameter tensors, so it checks that the container writes and reads all 3 in
 /// the same order.
 #[test]
@@ -424,7 +415,6 @@ fn separable_conv1d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// Conv1DTranspose round-trip
 #[test]
 fn conv1d_transpose_round_trip() {
     let tmp = TempFile::new("conv1d_transpose");
@@ -451,7 +441,6 @@ fn conv1d_transpose_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// Conv2DTranspose round-trip
 #[test]
 fn conv2d_transpose_round_trip() {
     let tmp = TempFile::new("conv2d_transpose");
@@ -478,7 +467,6 @@ fn conv2d_transpose_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// Conv3DTranspose round-trip
 #[test]
 fn conv3d_transpose_round_trip() {
     let tmp = TempFile::new("conv3d_transpose");
@@ -505,7 +493,6 @@ fn conv3d_transpose_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// SeparableConv2D round-trip
 #[test]
 fn separable_conv2d_round_trip() {
     let tmp = TempFile::new("separable_conv2d");
@@ -532,7 +519,6 @@ fn separable_conv2d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// SimpleRNN round-trip
 #[test]
 fn simple_rnn_round_trip() {
     let tmp = TempFile::new("simple_rnn");
@@ -556,7 +542,6 @@ fn simple_rnn_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// LSTM round-trip
 #[test]
 fn lstm_round_trip() {
     let tmp = TempFile::new("lstm");
@@ -580,7 +565,6 @@ fn lstm_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// GRU round-trip
 #[test]
 fn gru_round_trip() {
     let tmp = TempFile::new("gru");
@@ -823,7 +807,6 @@ fn batch_normalization_predict_is_deterministic_after_round_trip() {
     assert_allclose(&p2, &p1, 1e-7_f32);
 }
 
-// LayerNormalization round-trip
 #[test]
 fn layer_normalization_round_trip() {
     let tmp = TempFile::new("layer_norm");
@@ -850,7 +833,6 @@ fn layer_normalization_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// GroupNormalization round-trip
 #[test]
 fn group_normalization_round_trip() {
     let tmp = TempFile::new("group_norm");
@@ -877,7 +859,6 @@ fn group_normalization_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// InstanceNormalization round-trip
 #[test]
 fn instance_normalization_round_trip() {
     let tmp = TempFile::new("instance_norm");
@@ -913,7 +894,7 @@ fn mixed_model_with_dropout_round_trip() {
     let make_arch = || {
         SequentialBuilder::new()
             .add(Dense::new(4, Linear::new()).unwrap())
-            // empty input_shape => Dropout skips its shape validator at runtime
+            // An empty input_shape means Dropout skips its shape validator at runtime
             .add(Dropout::new(0.3).unwrap())
             .add(Dense::new(2, Linear::new()).unwrap())
             .build(&Shape::known(&[1, 3]))
@@ -926,7 +907,7 @@ fn mixed_model_with_dropout_round_trip() {
         .unwrap()
         .into_dyn();
 
-    // predict() uses eval mode => Dropout is transparent
+    // predict() runs in eval mode, so Dropout is transparent
     let before = model.predict(&x).unwrap();
     let fresh = round_trip(&model, make_arch, tmp.path());
     let after = fresh.predict(&x).unwrap();
@@ -1178,8 +1159,7 @@ fn load_wrong_format_version_gives_unsupported_format_error() {
 
 /// A file of the format version before this one is refused, and the refusal names both numbers
 ///
-/// Version 2 replaced the closed weight enum with the named checkpoint, so no byte of a
-/// version 1 file means what this build reads. The number in the header is what says so
+/// A version 1 file matches nothing this build reads. The number in the header is what says so
 #[test]
 fn load_older_format_version_names_the_version_it_found_and_the_one_it_wants() {
     let tmp = TempFile::new("older_version");

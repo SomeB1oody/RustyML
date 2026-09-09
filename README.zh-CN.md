@@ -42,7 +42,7 @@ ndarray = "0.17"
 
 想把构建裁小，就关掉默认并显式列出所需模块：
 
-```toml, ignore
+```toml,ignore
 # 全部模块（ml、nn、utils、metrics、math）
 rustyml = "*"
 
@@ -174,7 +174,7 @@ fn main() {
     let y_true = array![1.0, 0.0, 0.0, 1.0, 1.0];
     let y_pred = array![1.0, 0.0, 1.0, 1.0, 0.0];
 
-    // 两个参数的存储类型相互独立，持有所有权的数组和视图可以混用
+    // 2 个参数的存储类型相互独立，持有所有权的数组和视图可以混用
     let cm = ConfusionMatrix::new(&y_true, &y_pred.view());
     println!("Accuracy: {:.3}", cm.accuracy());
     println!("F1 score: {:.3}", cm.f1_score());

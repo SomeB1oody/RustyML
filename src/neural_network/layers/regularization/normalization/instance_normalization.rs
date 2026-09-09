@@ -1,4 +1,4 @@
-//! Instance Normalization layer that normalizes each sample and channel independently
+//! Instance Normalization layer: normalizes over the spatial axes, per sample and per channel
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -19,8 +19,9 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Instance Normalization layer for neural networks
 ///
-/// Normalizes each sample and channel independently, which is useful for
-/// style transfer and generative models
+/// Normalizes over the spatial axes, with 1 mean and 1 variance per sample and per channel. It
+/// never mixes across samples or across channels, which suits style transfer and generative
+/// models
 ///
 /// Instance normalization is group normalization with 1 group per channel, so it shares
 /// `group_norm_forward_core` / `group_norm_backward_core` with `num_groups` set to the channel
@@ -97,7 +98,7 @@ impl InstanceNormalization {
 
     /// Sets whether the layer adds the shift `beta` (defaults to `true`)
     ///
-    /// With `center` set to false the layer holds no `beta`: `param_count` counts none for it,
+    /// With `center` set to false, the layer holds no `beta`. `param_count` counts none for it,
     /// `parameters` yields none for it, and a checkpoint of the layer holds no
     /// `<position>.beta` path. The normalized value passes through unshifted
     ///
@@ -120,10 +121,10 @@ impl InstanceNormalization {
 
     /// Sets whether the layer applies the scale `gamma` (defaults to `true`)
     ///
-    /// With `scale` set to false the layer holds no `gamma`: `param_count` counts none for it,
+    /// With `scale` set to false, the layer holds no `gamma`. `param_count` counts none for it,
     /// `parameters` yields none for it, and a checkpoint of the layer holds no
-    /// `<position>.gamma` path. `beta` keeps its own name and its own optimizer state, because
-    /// a checkpoint and an optimizer both address an array by name and never by position
+    /// `<position>.gamma` path. `beta` keeps its own name and its own optimizer state. A
+    /// checkpoint and an optimizer both address an array by name and never by position
     ///
     /// # Parameters
     ///
@@ -154,7 +155,7 @@ impl InstanceNormalization {
     /// # Errors
     ///
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `gamma` or `beta` does not match the
-    ///   existing weight shape
+    ///   stored parameter shape
     pub fn set_weights(
         &mut self,
         gamma: impl Into<Option<Tensor>>,
@@ -285,7 +286,7 @@ impl UnaryLayer for InstanceNormalization {
 
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if !ctx.is_training() {
-            // During inference, pass the gradient through unchanged
+            // During inference, pass gradient through unchanged
             return Ok(grad_output.clone());
         }
 

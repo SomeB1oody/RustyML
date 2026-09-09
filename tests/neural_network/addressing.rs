@@ -3,11 +3,11 @@
 //! The name of an array is its address inside its layer. The gradient store, the per-parameter
 //! state of the optimizer, and the path of the checkpoint all key on `(layer position, name)`.
 //! [`LayerBase::parameters_mut`] and [`LayerBase::weights`] both state in their own
-//! documentation that 2 arrays of 1 layer must never share a name, and until these guards
-//! landed nothing held a layer to it.
+//! documentation that 2 arrays of 1 layer must never share a name. These guards are what
+//! enforces that rule.
 //!
 //! Both guards exist because `Layer` is public and unsealed, so a layer written outside this
-//! crate reaches every one of these paths.
+//! crate reaches every path here.
 //!
 //! The wrappers below are the shape that a layer holding other layers takes. A `Bidirectional`
 //! holds 2 recurrent children, and both children name an array `kernel`. Without the build
@@ -178,7 +178,6 @@ fn data(shape: &[usize]) -> Tensor {
     Array::from_shape_vec(IxDyn(shape), values).expect("the formula fills the shape")
 }
 
-/// A sequential model refuses a layer that gives 2 of its arrays 1 name
 #[test]
 fn a_sequential_build_refuses_2_arrays_under_1_name() {
     let Err(error) = SequentialBuilder::new()
@@ -252,9 +251,7 @@ fn a_training_step_refuses_an_unclaimed_gradient() {
     );
 }
 
-/// A model of layers that each name their own arrays trains as it always did
-///
-/// The 2 guards must cost a correct model nothing, so this is the control.
+/// The 2 guards must cost a correct model nothing, so this is the control
 #[test]
 fn a_model_whose_names_are_addresses_still_trains() {
     let mut model = SequentialBuilder::new()

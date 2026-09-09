@@ -86,7 +86,7 @@ fn permute_new_rejects_empty_dims() {
     );
 }
 
-/// An axis named twice is not a permutation
+/// An axis named 2 times is not a permutation
 #[test]
 fn permute_new_rejects_a_repeated_axis() {
     let result = Permute::new(vec![2, 2]);
@@ -143,7 +143,6 @@ fn permute_forward_rotates_three_axes_by_value() {
     assert_allclose(&out, &want, 1e-6_f32);
 }
 
-/// The identity permutation copies the input
 #[test]
 fn permute_forward_identity_copies_input() {
     let mut p = Permute::new(vec![1, 2, 3]).unwrap();
@@ -213,9 +212,9 @@ fn permute_feeds_softmax() {
     }
 }
 
-/// A forward pass with an inference context matches one with a training context. A layer now
-/// builds itself from the first tensor it receives no matter which context that pass runs in,
-/// so `output_shape` is known right after the first pass
+/// A forward pass with an inference context matches one with a training context. A layer
+/// builds itself from the first tensor it receives, whatever context that pass runs in, so
+/// `output_shape` is known right after the first pass
 #[test]
 fn permute_predict_matches_forward() {
     let x = ramp_of(&[2, 3, 4]);
@@ -230,7 +229,6 @@ fn permute_predict_matches_forward() {
 
 // Permute: backward
 
-/// The backward pass applies the inverse order
 #[test]
 fn permute_backward_applies_the_inverse_order() {
     let mut p = Permute::new(vec![2, 1]).unwrap();
@@ -246,7 +244,6 @@ fn permute_backward_applies_the_inverse_order() {
     assert_allclose(&grad_input, &want, 1e-6_f32);
 }
 
-/// A rotation and its inverse recover the input
 #[test]
 fn permute_rotation_round_trips_through_its_inverse() {
     let x = ramp_of(&[2, 3, 4, 5]);
@@ -344,7 +341,6 @@ fn permute_output_shape_before_and_after_forward() {
     assert_eq!(p.output_shape(), "(None, 4, 3)");
 }
 
-/// 1 layer instance serves every batch size
 #[test]
 fn permute_one_instance_serves_every_batch_size() {
     let mut p = Permute::new(vec![2, 1]).unwrap();
@@ -402,9 +398,9 @@ fn repeat_vector_forward_with_one_step_adds_an_axis() {
     assert_allclose(&out, &want, 1e-6_f32);
 }
 
-/// A forward pass with an inference context matches one with a training context. A layer now
-/// builds itself from the first tensor it receives no matter which context that pass runs in,
-/// so `output_shape` is known right after the first pass
+/// A forward pass with an inference context matches one with a training context. A layer
+/// builds itself from the first tensor it receives, whatever context that pass runs in, so
+/// `output_shape` is known right after the first pass
 #[test]
 fn repeat_vector_predict_matches_forward() {
     let x = t2(3, 4, ramp(12));
@@ -519,7 +515,6 @@ fn repeat_vector_output_shape_before_and_after_forward() {
     assert_eq!(r.output_shape(), "(None, 3, 5)");
 }
 
-/// 1 layer instance serves every batch size
 #[test]
 fn repeat_vector_one_instance_serves_every_batch_size() {
     let mut r = RepeatVector::new(4).unwrap();

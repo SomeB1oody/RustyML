@@ -2,13 +2,13 @@
 //!
 //! [`Add`], [`Subtract`], [`Multiply`], [`Average`], [`Maximum`], and [`Minimum`] reduce their
 //! inputs element by element. [`Concatenate`] joins its inputs along 1 axis. No layer of the
-//! family holds a trainable array, and every one of them implements
+//! family holds a trainable array, and each of them implements
 //! [`Layer`](crate::neural_network::traits::Layer) by hand.
 //! [`UnaryLayer`](crate::neural_network::traits::UnaryLayer) takes 1 input alone, so no layer
 //! of this family can implement it
 //!
 //! Each layer records `built: Option<Vec<Shape>>`, which holds 1 shape per input. The layer
-//! reports every one of those shapes, and a checkpoint records them all
+//! reports each of those shapes, and a checkpoint records them all
 //!
 //! # The shape rule of the 6 elementwise layers
 //!
@@ -38,7 +38,7 @@
 //! - `merged_dims` runs the same rule over the live tensors of a forward pass, and
 //!   `broadcast_input` lifts 1 of those tensors to the output extents.
 //! - `reduce_to` sums a gradient back to the shape of the input that broadcast to make it.
-//!   Every backward pass of the family ends with 1 call of it per input.
+//!   Every backward pass of the 6 elementwise layers ends with 1 call of it per input.
 //! - `merge_layer_base_functions` emits the build reports and the empty array roster of any
 //!   merge layer. `elementwise_merge_layer_functions` emits the arity, the build, and the
 //!   shape algebra of the 6 elementwise layers.
@@ -409,8 +409,11 @@ pub(in crate::neural_network::layers::merge) use merge_layer_base_functions;
 /// The 6 elementwise layers differ in their forward and backward passes alone, so those 2
 /// methods stay in the layer file
 ///
-/// The first argument is the layer name, which every message names. The second is the
-/// [`Arity`] of the layer, which is `Arity::AtLeast(1)` everywhere except [`Subtract`]
+/// # Parameters
+///
+/// - `layer` - Layer name, which every message names
+/// - `arity` - The [`Arity`] of the layer, which is `Arity::AtLeast(1)` everywhere except
+///   [`Subtract`]
 ///
 /// [`Layer::arity`]: crate::neural_network::traits::Layer::arity
 /// [`Layer::build_many`]: crate::neural_network::traits::Layer::build_many

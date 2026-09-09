@@ -1,9 +1,10 @@
 //! The shape of a tensor as a layer describes it, with a free axis for an extent that no
 //! configuration fixes
 //!
-//! [`Shape`] is what [`UnaryLayer::compute_output_shape`](crate::neural_network::traits::UnaryLayer::compute_output_shape)
-//! takes and returns. A layer maps an input shape to an output shape with the layer
-//! configuration alone, so a caller gets the answer before any tensor exists
+//! [`Shape`] is what
+//! [`crate::neural_network::traits::UnaryLayer::compute_output_shape`] takes and returns. A
+//! layer maps an input shape to an output shape with the layer configuration alone, so a caller
+//! gets the answer before any tensor exists
 
 use crate::error::Error;
 use crate::{Deserialize, Serialize};
@@ -21,8 +22,7 @@ use std::fmt;
 /// [`Display`](std::fmt::Display) prints the shape the way
 /// [`Sequential::summary`](crate::neural_network::sequential::Sequential::summary) shows it: a
 /// parenthesized list, with a free axis printed as `None`. A rank-1 shape whose only axis is
-/// free keeps a trailing comma, and a rank-1 shape with a fixed extent does not. The 2 forms
-/// come from the 2 renderers that this type replaced
+/// free keeps a trailing comma, and a rank-1 shape with a fixed extent does not
 ///
 /// # Examples
 ///
@@ -253,8 +253,7 @@ impl fmt::Display for Shape {
             }
         }
         // A rank-1 shape whose only axis is free keeps the trailing comma of a 1-element
-        // Python tuple, and a rank-1 shape with a fixed extent does not. The 2 forms are what
-        // the hand-written renderers produced
+        // Python tuple, and a rank-1 shape with a fixed extent does not
         if self.0.len() == 1 && self.0[0].is_none() {
             formatter.write_str(",")?;
         }
@@ -262,6 +261,7 @@ impl fmt::Display for Shape {
     }
 }
 
+/// Tests for [`Shape`] display and shape algebra
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,10 +294,8 @@ mod tests {
         assert_eq!(shape.to_string(), "(None, None, 3)");
     }
 
-    /// A rank-1 fixed shape carries no trailing comma, and a rank-1 free shape carries one
-    ///
-    /// The 2 forms come from 2 renderers that this type replaced. This test holds both, and
-    /// the `Identity` and `Reshape` tests hold `(None,)` as well
+    /// A rank-1 fixed shape carries no trailing comma, and a rank-1 free shape carries 1
+    /// trailing comma
     #[test]
     fn display_keeps_both_rank_1_forms() {
         assert_eq!(Shape::known(&[4]).to_string(), "(4)");

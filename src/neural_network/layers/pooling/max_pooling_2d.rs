@@ -24,7 +24,13 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// Input tensor shape: `[batch_size, height, width, channels]`. Output tensor shape:
 /// `[batch_size, pooled_height, pooled_width, channels]`. With `Valid` padding,
 /// `pooled_height = (height - pool_size_h) / stride_h + 1` and
-/// `pooled_width = (width - pool_size_w) / stride_w + 1`.
+/// `pooled_width = (width - pool_size_w) / stride_w + 1`. With `Same` padding,
+/// `pooled_height = ceil(height / stride_h)` and `pooled_width = ceil(width / stride_w)`.
+///
+/// # Notes
+///
+/// When 2 or more elements in a window tie for the maximum, the layer keeps the earliest one.
+/// The scan order runs the last spatial axis fastest.
 ///
 /// # Examples
 ///
@@ -149,7 +155,7 @@ impl MaxPooling2D {
 
 /// What the forward pass of [`MaxPooling2D`] parks for its backward pass
 struct MaxPooling2DCache {
-    /// Shape of the tensor that entered the layer, to restore the rank of the gradient
+    /// Shape of the tensor that entered the layer, to restore the shape of the gradient
     input_shape: Vec<usize>,
     /// Flat per-output arg-max index of each pooling window, to route the gradient back
     argmax: Vec<usize>,

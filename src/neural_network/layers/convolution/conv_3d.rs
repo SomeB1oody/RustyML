@@ -1,5 +1,8 @@
-//! 3D convolutional layer that applies a 3D convolution over volumetric input
-//! and delegates the forward/backward numerics to the dimension-generic convolution engine
+//! 3D convolutional layer for volumetric data such as medical images, 3D models, or video
+//! sequences
+//!
+//! Holds the layer weights and the activation, and delegates the forward/backward
+//! numerics to the dimension-generic convolution engine
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -79,20 +82,20 @@ pub struct Conv3D {
     filters: usize,
     /// Size of the convolution kernel as (depth, height, width)
     kernel_size: (usize, usize, usize),
-    /// Stride values as (depth_stride, height_stride, width_stride)
+    /// Stride values for the convolution operation as (depth_stride, height_stride, width_stride)
     strides: (usize, usize, usize),
     /// Tap spacing of the kernel as (depth, height, width). 1 gives a solid kernel on that axis
     dilation_rate: (usize, usize, usize),
     /// Type of padding to apply (`Valid` or `Same`)
     padding: PaddingType,
-    /// 5D filter weights with shape
+    /// 5D array of filter weights with shape
     /// \[kernel_depth, kernel_height, kernel_width, channels, filters\]
     weights: Array5<f32>,
-    /// 1D bias values with shape \[filters\]
+    /// 1D array of bias values with shape \[filters\]
     ///
     /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
-    /// The forward pass adds nothing, `weights` hides the array, and `parameters` never yields
-    /// it, so a bias-free layer holds it and no more
+    /// The forward pass adds nothing: it reads `weights` alone, and `parameters` never yields
+    /// the bias array, so a bias-free layer holds it and no more
     bias: Array1<f32>,
     /// Activation applied to the convolution output
     activation: Activation,
@@ -109,11 +112,16 @@ pub struct Conv3D {
 impl Conv3D {
     /// Creates a new Conv3D layer with the specified parameters
     ///
+    /// The constructor draws nothing. [`UnaryLayer::build`] reads the channel count from the
+    /// input shape, draws the kernel with Xavier (Glorot) uniform initialization, and sets
+    /// the bias to 0
+    ///
     /// # Parameters
     ///
-    /// - `filters` - Number of output filters
+    /// - `filters` - Number of convolution filters (output channels)
     /// - `kernel_size` - Size of the convolution kernel as (depth, height, width)
-    /// - `strides` - Stride values as (depth_stride, height_stride, width_stride)
+    /// - `strides` - Stride values for the convolution operation as (depth_stride, height_stride,
+    ///   width_stride)
     /// - `activation` - Activation applied to the convolution output
     ///
     /// # Returns
@@ -127,6 +135,10 @@ impl Conv3D {
     /// [`Conv3D::with_dilation_rate`]. By default, the layer seeds weights from the global seed
     /// or entropy. For reproducible initialization, set a seed with
     /// [`Conv3D::with_random_state`].
+    ///
+    /// The kernel is not bounded by the input axis here. Only [`PaddingType::Valid`] needs the
+    /// effective kernel to fit. The padding mode is not final until the build, so the build
+    /// applies that rule.
     ///
     /// # Errors
     ///
@@ -166,7 +178,7 @@ impl Conv3D {
     ///
     /// # Parameters
     ///
-    /// - `padding` - Padding type (`Valid` or `Same`)
+    /// - `padding` - Type of padding to apply (`Valid` or `Same`)
     ///
     /// # Returns
     ///
@@ -180,7 +192,7 @@ impl Conv3D {
     ///
     /// A dilation of `d` on an axis spaces the kernel taps `d` cells apart, so `k` taps span
     /// `(k - 1) * d + 1` input cells of that axis. The window still advances by the stride. A
-    /// dilation of 1 on every axis gives a solid kernel and the same result as before
+    /// dilation of 1 on every axis gives a solid kernel
     ///
     /// # Parameters
     ///
@@ -290,10 +302,10 @@ impl Conv3D {
 
     /// Sets whether the layer adds a bias to the convolution output (defaults to `true`)
     ///
-    /// With `use_bias` set to false the layer holds the kernel alone: `param_count` counts the
-    /// kernel alone, `parameters` yields the kernel alone, and a checkpoint of the layer holds
-    /// 1 array under the path `<position>.kernel`. A checkpoint written by a layer that has a
-    /// bias therefore fails to load into a layer that has none, and the refusal names the path
+    /// With `use_bias` set to false, the layer holds the kernel alone. `param_count` counts
+    /// the kernel alone, `parameters` yields the kernel alone, and a checkpoint holds 1 array
+    /// under the path `<position>.kernel`. A checkpoint written by a layer that has a bias
+    /// fails to load into a layer that has none, and the refusal names the path
     ///
     /// # Parameters
     ///
@@ -316,10 +328,17 @@ impl Conv3D {
     /// - `bias` - 1D array of bias values with shape \[filters\], or `None` for a layer
     ///   built with [`with_use_bias(false)`](Self::with_use_bias)
     ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - Ok when `weights` and `bias` match the layer's configured shape
+    ///
     /// # Errors
     ///
+    /// - `Error::NeuralNetwork(NnError::NotBuilt)` - If the layer holds no array yet
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` does not match the
     ///   layer's expected shape
+    /// - `Error::InvalidParameter` - If a bias is given to a layer that holds none, or none is
+    ///   given to a layer that holds 1
     pub fn set_weights(
         &mut self,
         weights: Array5<f32>,
@@ -414,7 +433,6 @@ impl UnaryLayer for Conv3D {
     fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         validate_built_input(&self.built, "Conv3D", input.shape())?;
 
-        // Convolution (dimension-generic engine), then activation
         let output = conv_forward(
             input,
             self.weights.as_slice().expect("weights must be contiguous"),
@@ -486,7 +504,8 @@ impl UnaryLayer for Conv3D {
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         input.check_rank("Conv3D", 5)?;
         let (batch, tail) = input.split_batch("Conv3D")?;
-        // `calculate_output_shape` reads the batch axis, so the list it takes starts with one
+        // `calculate_output_shape` expects the batch axis at index 0. This gives it a
+        // placeholder there and drops it from the result
         let mut dims = vec![0];
         dims.extend(tail);
         Ok(Shape::from_batch(

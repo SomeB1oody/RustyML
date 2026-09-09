@@ -69,7 +69,7 @@ fn max_pooling_1d_forward_values_pool3_stride1() {
 fn max_pooling_1d_forward_values_two_channels() {
     let mut layer = MaxPooling1D::new(2);
 
-    // Channels-last: each row is one position, holding (ch0, ch1)
+    // Channels-last: each row is 1 position, holding (ch0, ch1)
     // ch0 along the length is [0, 1, 2, 3, 4, 5]. ch1 is [10, 9, 8, 7, 6, 5].
     let data: Vec<f32> = vec![
         0.0, 10.0, // pos 0
@@ -135,7 +135,7 @@ fn max_pooling_1d_predict_equals_forward() {
 
 // MaxPooling1D - output_shape string
 
-/// output_shape reports the pooled spatial length as "(1, 4, 2)"
+/// output_shape reports the pooled spatial length as "(None, 4, 2)"
 #[test]
 fn max_pooling_1d_output_shape_string() {
     // [batch, length, channels] = [1, 8, 2]. The length pools to (8 - 2) / 2 + 1 = 4.
@@ -307,7 +307,7 @@ fn max_pooling_2d_predict_equals_forward() {
 
 // MaxPooling2D - output_shape string
 
-/// output_shape reports the pooled 2D shape as "(1, 3, 3, 3)"
+/// output_shape reports the pooled 2D shape as "(None, 3, 3, 3)"
 #[test]
 fn max_pooling_2d_output_shape_string() {
     // [batch, height, width, channels] = [1, 6, 6, 3]. 6 -> (6 - 2) / 2 + 1 = 3 on both axes.
@@ -463,7 +463,7 @@ fn max_pooling_3d_predict_equals_forward() {
 
 // MaxPooling3D - output_shape string
 
-/// output_shape reports the pooled 3D shape as "(1, 2, 2, 2, 2)"
+/// output_shape reports the pooled 3D shape as "(None, 2, 2, 2, 2)"
 #[test]
 fn max_pooling_3d_output_shape_string() {
     // [batch, depth, height, width, channels] = [1, 4, 4, 4, 2]. Each spatial axis 4 -> 2.
@@ -580,7 +580,7 @@ fn global_max_pooling_1d_forward_values() {
 fn global_max_pooling_1d_forward_values_batch() {
     let mut layer = GlobalMaxPooling1D::new();
 
-    // [batch, length, channels] = [2, 4, 3]. Each row is one position holding (ch0, ch1, ch2).
+    // [batch, length, channels] = [2, 4, 3]. Each row is 1 position holding (ch0, ch1, ch2).
     // batch 0: ch0 = [1,5,3,2], ch1 = [0,0,0,8], ch2 = [7,6,5,4]
     // batch 1: ch0 = [9,1,1,1], ch1 = [2,2,6,2], ch2 = [3,3,3,10]
     let data: Vec<f32> = vec![
@@ -937,12 +937,8 @@ fn max_pooling_2d_forward_non_square_spatial() {
 // MaxPooling2D - parallel assembly
 
 // The pooling engine runs in parallel once batch * out_positions * channels * window taps
-// clears the gate in `crate::tuning::pool`. Forward splits work over output-position blocks.
-// Backward splits over channel slabs, and it also needs more than 1 slab: a 1-item batch with
-// no more channels than the slab floor gives 1 task, which the engine keeps serial whatever the
-// gate says. Each test below picks a shape that clears the gate on its own axis, and the
-// backward shapes carry enough channels to split. Distinct per-position and per-channel values then catch a mis-ordered
-// reassembly of the split pieces.
+// clears the gate in `crate::tuning::pool`. Forward splits by output-position block, and
+// backward splits by channel slab, needing more than 1 slab to leave the serial path.
 
 /// Parallel forward keeps every output position and channel in place across position blocks
 #[test]
@@ -1042,17 +1038,9 @@ fn max_pool_2d_same_padding_3x3() {
 // Non-finite input: the arg-max of a window that no element wins
 
 // The max fold starts each window at `f32::NEG_INFINITY`, and `-inf > -inf` is false, so no
-// element of an all-negative-infinity window ever wins the fold. The recorded arg-max of such a
-// window is therefore the seed alone. The tests below pin that seed.
-//
-// The seed is the first element of the window itself, and it carries the channel of the output
-// element. Keras 3 on the JAX backend does the same for the windowed layers: it accepts the
-// non-finite input, gives `-inf` as the pooled value, and routes the whole upstream gradient of
-// the window to the first position that the window covers.
-//
-// Before this rule, the seed was flat offset 0, which is position 0 of the batch item on channel
-// 0. A window that starts after position 0 then sent its gradient outside itself, and a global
-// pool sent the gradient of every channel to channel 0.
+// element of an all-negative-infinity window ever wins the fold. The recorded arg-max is
+// therefore the seed alone: the first element of the window, on the channel of the output
+// element. Keras 3 on the JAX backend follows the same rule for the windowed layers.
 
 /// MaxPooling1D routes the gradient of an all-negative-infinity window to the first position of
 /// that window, on the channel of the output element

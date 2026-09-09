@@ -1,10 +1,10 @@
 //! The protocol that 1 recurrent cell follows
 //!
-//! A recurrent layer is 2 separable parts. The first part is the scaffolding: it reads the
-//! feature count from the input shape, draws the gates, projects the whole input in 1 matrix
-//! product, walks the time axis, keeps what the backward pass needs, and reduces the per-step
-//! gate gradients into 1 gradient per array. That part is the same for every cell, and
-//! [`Rnn`](super::rnn::Rnn) holds the only copy of it.
+//! A recurrent layer is 2 separable parts. The first part is the scaffolding. It reads the
+//! feature count from the input shape and draws the gates. It projects the whole input in 1
+//! matrix product, walks the time axis, and keeps what the backward pass needs. The scaffolding
+//! also reduces the per-step gate gradients into 1 gradient per array. That part is the same
+//! for every cell, and [`Rnn`](super::rnn::Rnn) holds the only copy of it.
 //!
 //! The second part is the arithmetic of 1 timestep. That part is what makes a SimpleRNN
 //! different from an LSTM. [`RnnCell`] is the protocol for it.
@@ -23,7 +23,7 @@ use ndarray::{Array2, ArrayView2};
 /// product of whatever entered the recurrent projection against the pre-activation gradient of
 /// the gate. Most cells project the previous hidden state into every gate, so 1 product covers
 /// the whole kernel. A GRU projects the previous hidden state into its update and reset blocks,
-/// and `r_t .* h_prev` into its candidate block, so a GRU needs 2 products.
+/// and `r_t .* h_prev` into its candidate block. A GRU therefore needs 2 products.
 ///
 /// The groups of a cell must cover every gate block exactly once. A gap leaves a column block of
 /// the gradient at 0, which stops 1 gate from learning and reports no error at all.
@@ -123,8 +123,8 @@ pub(crate) trait RnnCell: std::fmt::Debug + Send + Sync + 'static {
 
     /// Runs the backward pass of 1 timestep
     ///
-    /// On entry `grad_state` holds the gradient of the state that LEAVES the step, and the base
-    /// has already added the direct contribution of a returned sequence to slot 0. The cell
+    /// On entry `grad_state` holds the gradient of the state that LEAVES the step. The base has
+    /// already added the direct contribution of a returned sequence to slot 0. The cell
     /// overwrites `grad_state` with the gradient of the state that ENTERS the step.
     ///
     /// # Parameters

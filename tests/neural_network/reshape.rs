@@ -232,7 +232,6 @@ fn reshape_new_rejects_zero_extent() {
     );
 }
 
-/// The constructor rejects an extent below -1
 #[test]
 fn reshape_new_rejects_extent_below_minus_1() {
     let result = Reshape::new(vec![-2, 2]);
@@ -273,7 +272,6 @@ fn reshape_forward_rejects_rank_0_input() {
     );
 }
 
-/// forward rejects an empty tensor
 #[test]
 fn reshape_forward_rejects_empty_input() {
     let mut r = Reshape::new(vec![2, 2]).unwrap();
@@ -376,7 +374,6 @@ fn reshape_weights_is_empty() {
     assert!(r.weights().is_empty(), "Reshape must expose no weight");
 }
 
-/// layer_type names the layer
 #[test]
 fn reshape_layer_type_is_reshape() {
     let r = Reshape::new(vec![2, 2]).unwrap();

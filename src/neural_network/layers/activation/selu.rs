@@ -54,7 +54,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// ```
 #[derive(Debug)]
 pub struct SELU {
-    /// Shape the layer was built for. `None` before the build
+    /// Shape the layer was built for, batch axis first. `None` before the build
     built: Option<Shape>,
 }
 
@@ -86,8 +86,7 @@ impl LayerBase for SELU {
 }
 
 impl UnaryLayer for SELU {
-    /// Records the shape the layer serves. The layer holds no array, so nothing is
-    /// allocated
+    /// Records the shape the layer serves. The layer holds no array, so nothing is allocated
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "SELU", input)? else {
             return Ok(());
@@ -104,7 +103,6 @@ impl UnaryLayer for SELU {
 
         let output = Activation::SELU.forward(input)?;
 
-        // Cache activated output for backpropagation
         if ctx.is_training() {
             ctx.push_cache("SELU", output.clone());
         }

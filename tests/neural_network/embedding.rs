@@ -5,7 +5,7 @@
 //! `gradient_check.rs` covers gradient values against finite differences. This file does not
 //! duplicate them.
 //!
-//! The pinned reference numbers come from Keras 3.15 on the jax backend. Each one appears in
+//! The pinned reference numbers come from Keras 3.15 on the jax backend. Each number appears in
 //! the shortest decimal form that reads back as the same `f32`.
 
 use ndarray::{Array1, Array2, Array3, IxDyn};
@@ -150,7 +150,6 @@ fn embedding_forward_truncates_an_index_toward_zero() {
     assert_allclose(&out, &t2(5, 3, expected), 1e-6_f32);
 }
 
-/// The inference path gives the same values as the training path
 #[test]
 fn embedding_predict_equals_forward() {
     let layer = embedding_with_table(4, 3, reference_table());
@@ -191,7 +190,7 @@ fn embedding_accepts_an_input_that_is_not_in_c_order() {
 /// The gradient of a row is the sum over every position that selected it
 ///
 /// The values come from Keras 3.15 case `grad_repeated_indices_linear`. The index list selects
-/// row 1 4 times, row 3 twice, and rows 0 and 2 once each
+/// row 1 4 times, row 3 2 times, and rows 0 and 2 1 time each
 #[test]
 fn embedding_backward_matches_the_keras_scatter_add_reference() {
     let layer = embedding_with_table(4, 3, reference_table());
@@ -232,7 +231,6 @@ fn embedding_backward_matches_the_keras_scatter_add_reference() {
     assert_allclose(&grad, &expected, 1e-6_f32);
 }
 
-/// A row that no index selected keeps a gradient of exactly 0
 #[test]
 fn embedding_backward_leaves_an_unused_row_at_zero() {
     let table = vec![
@@ -391,7 +389,6 @@ fn embedding_rejects_an_index_outside_the_table() {
     }
 }
 
-/// A non-finite index names no row either
 #[test]
 fn embedding_rejects_a_non_finite_index() {
     let mut layer = Embedding::new(3, 2).unwrap();
@@ -575,7 +572,6 @@ fn embedding_trains_inside_a_sequential_model() {
     );
 }
 
-/// Training changes only the rows the batch selected
 #[test]
 fn embedding_training_leaves_an_unselected_row_untouched() {
     let x = t2(2, 2, vec![0.0, 1.0, 1.0, 0.0]);

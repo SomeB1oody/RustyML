@@ -31,6 +31,7 @@ abstractions.
 - **Reproducible**: a single `set_global_seed` call makes every randomized component on the calling thread deterministic. A per-component `random_state` covers the rest.
 - **Model persistence**: save and load trained models and network weights as compact binary, using [Serde](https://serde.rs/) and [postcard](https://docs.rs/postcard/).
 - **Evaluation metrics**: regression, classification (binary and multiclass), and clustering, matching scikit-learn conventions.
+
 ## Installation
 
 Add RustyML to your `Cargo.toml`:
@@ -43,7 +44,7 @@ ndarray = "0.17"
 
 To slim the build, opt out of the default and name what you need:
 
-```toml, ignore
+```toml,ignore
 # Everything (ml, nn, utils, metrics, math)
 rustyml = "*"
 
@@ -176,7 +177,7 @@ fn main() {
     let y_true = array![1.0, 0.0, 0.0, 1.0, 1.0];
     let y_pred = array![1.0, 0.0, 1.0, 1.0, 0.0];
 
-    // The two arguments carry independent storage types, so an owned array and a view mix
+    // The 2 arguments carry independent storage types, so an owned array and a view mix
     let cm = ConfusionMatrix::new(&y_true, &y_pred.view());
     println!("Accuracy: {:.3}", cm.accuracy());
     println!("F1 score: {:.3}", cm.f1_score());

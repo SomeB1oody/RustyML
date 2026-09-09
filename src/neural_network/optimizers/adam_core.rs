@@ -56,6 +56,20 @@ pub(super) struct AdamCore {
 
 impl AdamCore {
     /// Validates the hyperparameters and builds the core in the given decay mode
+    ///
+    /// # Parameters
+    ///
+    /// - `learning_rate` - step size for parameter updates
+    /// - `beta1` - decay rate for the first moment estimates
+    /// - `beta2` - decay rate for the second moment estimates
+    /// - `epsilon` - denominator stabilizer for numerical stability
+    /// - `weight_decay` - weight-decay coefficient. `0.0` disables it
+    /// - `decoupled` - `true` builds the core in AdamW mode (decoupled decay), `false` builds it
+    ///   in classic Adam mode (coupled L2 decay)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - the built core, or an error if a hyperparameter is out of range
     pub(super) fn new(
         learning_rate: f32,
         beta1: f32,
@@ -84,6 +98,15 @@ impl AdamCore {
     }
 
     /// Enables clip-by-global-norm gradient clipping (consuming builder)
+    ///
+    /// # Parameters
+    ///
+    /// - `global_clipnorm` - clip-by-global-norm threshold. Must be positive and finite
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - the updated core, or an error if `global_clipnorm` is not
+    ///   positive and finite
     pub(super) fn with_global_clipnorm(mut self, global_clipnorm: f32) -> Result<Self, Error> {
         validate_global_clipnorm(Some(global_clipnorm))?;
         self.global_clipnorm = Some(global_clipnorm);
@@ -101,6 +124,10 @@ impl AdamCore {
     }
 
     /// Retunes the step size, preserving all accumulated moment state
+    ///
+    /// # Parameters
+    ///
+    /// - `learning_rate` - the new learning rate to use for subsequent updates
     pub(super) fn set_learning_rate(&mut self, learning_rate: f32) {
         self.learning_rate = learning_rate;
     }
@@ -112,6 +139,15 @@ impl AdamCore {
     }
 
     /// Updates a layer's parameters, applying weight decay per the `decoupled` mode
+    ///
+    /// # Parameters
+    ///
+    /// - `scope` - position of this layer in the model, counted from the input. It is the layer
+    ///   half of the parameter address
+    /// - `layer` - the layer whose parameters should be updated
+    /// - `grads` - every gradient the backward pass produced
+    /// - `grad_scale` - uniform factor applied to every gradient before the update, to implement
+    ///   clip-by-global-norm. Pass `1.0` for an unscaled update
     pub(super) fn update(
         &mut self,
         scope: usize,

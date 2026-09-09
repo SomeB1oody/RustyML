@@ -26,8 +26,8 @@ use ndarray::{Array1, Array3};
 ///
 /// Runs a convolution backwards over its length axis, so it grows a sequence instead of
 /// shrinking one. Input shape is \[batch_size, length, channels\]. Output shape is
-/// \[batch_size, output_length, filters\]. This is the layer an audio or time-series decoder uses
-/// to reach the length the matching [`Conv1D`](super::conv_1d::Conv1D) consumed.
+/// \[batch_size, output_length, filters\]. This is the layer a decoder uses to reach the length
+/// the matching [`Conv1D`](super::conv_1d::Conv1D) consumed.
 ///
 /// The dimension-generic transposed-convolution math lives in the transposed-convolution engine.
 /// This layer holds the weights and the activation, and delegates the forward/backward
@@ -39,9 +39,10 @@ use ndarray::{Array1, Array3};
 /// input-channel axis, which is the reverse of the `Conv1D` kernel. A transposed convolution
 /// reads `channels` and writes `filters`, so this is the order its inner product needs.
 ///
-/// The output size follows 1 rule per padding mode:
+/// The output size follows 1 rule per padding mode. `keff` is the kernel size after dilation,
+/// defined in [`Conv1DTranspose::with_dilation_rate`]:
 ///
-/// - [`PaddingType::Valid`]: `input * stride + max(kernel - stride, 0)`
+/// - [`PaddingType::Valid`]: `input * stride + max(keff - stride, 0)`
 /// - [`PaddingType::Same`]: `input * stride`
 ///
 /// Unlike `Conv1D`, this layer puts no lower bound on the input length. A length-1 input under a
@@ -116,8 +117,8 @@ pub struct Conv1DTranspose {
     /// 1D array of bias values with shape \[filters\]
     ///
     /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
-    /// The forward pass adds nothing, `weights` hides the array, and `parameters` never yields
-    /// it, so a bias-free layer holds it and no more
+    /// The forward pass adds nothing, `param_count` hides the array, and `parameters_mut` never
+    /// yields it, so a bias-free layer holds it and no more
     bias: Array1<f32>,
     /// Activation applied to the transposed convolution output
     activation: Activation,
@@ -209,7 +210,7 @@ impl Conv1DTranspose {
     ///
     /// A dilation of `d` on an axis spaces the kernel taps `d` cells apart, so `k` taps span
     /// `(k - 1) * d + 1` output cells of that axis. The window still advances by the stride. A
-    /// dilation of 1 gives a solid kernel and the same result as before
+    /// dilation of 1 gives a solid kernel, with no gap between taps
     ///
     /// # Parameters
     ///
@@ -254,14 +255,11 @@ impl Conv1DTranspose {
     }
 
     /// Draws the kernel and zeroes the bias, at the extents the build settled
-    /// tensor
     ///
     /// The stored kernel puts the filter axis before the channel axis, and the fan pair does
     /// not follow that order. The layer names the 2 counts, so `fan_in` stays the channel side
     fn draw_parameters(&mut self) {
         let mut rng = crate::random::make_rng(self.random_state);
-        // The transposed kernel stores the filter axis before the channel axis, and the fan
-        // pair still comes from the 2 counts by name
         self.weights = Initializer::GlorotUniform.draw(
             (self.kernel_size, self.filters, self.channels),
             Fans::conv(self.channels, self.filters, self.kernel_size),
@@ -288,9 +286,9 @@ impl Conv1DTranspose {
     /// Sets whether the layer adds a bias to the convolution output (defaults to `true`)
     ///
     /// With `use_bias` set to false the layer holds the kernel alone: `param_count` counts the
-    /// kernel alone, `parameters` yields the kernel alone, and a checkpoint of the layer holds
-    /// 1 array under the path `<position>.kernel`. A checkpoint written by a layer that has a
-    /// bias therefore fails to load into a layer that has none, and the refusal names the path
+    /// kernel alone, `parameters_mut` yields the kernel alone, and a checkpoint of the layer
+    /// holds 1 array under the path `<position>.kernel`. A checkpoint written by a layer that has
+    /// a bias therefore fails to load into a layer that has none, and the refusal names the path
     ///
     /// # Parameters
     ///
@@ -314,8 +312,11 @@ impl Conv1DTranspose {
     ///
     /// # Errors
     ///
+    /// - `Error::NeuralNetwork(NnError::NotBuilt)` - If the layer has no build yet
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` does not match the
     ///   layer's expected shape
+    /// - `Error::InvalidParameter` - If `bias` is given for a layer built with `use_bias(false)`,
+    ///   or left out for a layer built with `use_bias(true)`
     pub fn set_weights(
         &mut self,
         weights: Array3<f32>,
@@ -469,7 +470,8 @@ impl UnaryLayer for Conv1DTranspose {
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         input.check_rank("Conv1DTranspose", 3)?;
         let (batch, tail) = input.split_batch("Conv1DTranspose")?;
-        // `calculate_output_shape` reads the batch axis, so the list it takes starts with one
+        // `calculate_output_shape` indexes from the batch axis, so the list it takes needs a
+        // placeholder value first
         let mut dims = vec![0];
         dims.extend(tail);
         Ok(Shape::from_batch(

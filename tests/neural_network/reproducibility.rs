@@ -43,7 +43,7 @@ fn max_abs_diff(a: &Tensor, b: &Tensor) -> f32 {
 }
 
 /// Build a tiny, built `Dense(4 -> 3, ReLU)`, applying `seed` via `with_random_state` when
-/// `Some`. `with_random_state` only records the seed; `build` is what draws the weights, so
+/// `Some`. `with_random_state` only records the seed. `build` is what draws the weights, so
 /// every caller of this helper gets a layer `predict` can already run
 fn dense_4_3(seed: Option<u64>) -> Dense {
     let dense = Dense::new(3, Activation::ReLU).expect("Dense::new(3) must succeed");
@@ -66,7 +66,7 @@ fn same_seed_same_init() {
     let pa = a.forward(&x, &mut Ctx::inference()).unwrap();
     let pb = b.forward(&x, &mut Ctx::inference()).unwrap();
 
-    // Identical seed => identical weights => identical predict output, zero epsilon
+    // An identical seed gives identical weights, so predict output matches at zero epsilon
     assert_allclose(&pa, &pb, 0.0_f32);
 }
 
@@ -127,7 +127,8 @@ fn local_overrides_global() {
         .forward(&x, &mut Ctx::inference())
         .unwrap();
 
-    // Local Some(5) ignores the global => identical weights => identical output, zero epsilon
+    // The local Some(5) ignores the global, so both sides give identical weights and output,
+    // at zero epsilon
     assert_allclose(&p_with_global, &p_without_global, 0.0_f32);
 }
 
@@ -160,7 +161,7 @@ fn training_reproducible() {
             SGD::new(0.05, 0.0, false, 0.0).unwrap(),
             MeanSquaredError::new(),
         );
-        // batch_size < n_samples => the seeded per-epoch shuffle is actually used
+        // batch_size < n_samples, so the seeded per-epoch shuffle is actually used
         model.fit_with_batches(&x, &y, 5, 2).unwrap();
         model
     };
@@ -172,7 +173,7 @@ fn training_reproducible() {
     let pa = model_a.predict(&x_test).unwrap();
     let pb = model_b.predict(&x_test).unwrap();
 
-    // Reproducible init + reproducible shuffle => identical trained weights => identical output
+    // Reproducible init and a reproducible shuffle give identical trained weights and output
     assert_allclose(&pa, &pb, 0.0_f32);
 }
 

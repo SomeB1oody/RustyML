@@ -62,8 +62,8 @@ fn dense_new_rejects_zero_dim() {
     );
 }
 
-/// `input_dim` is no longer a constructor parameter, so a zero last axis is refused at build
-/// time instead
+/// `input_dim` is not a constructor parameter, so a zero last axis is refused at build time
+/// instead
 #[test]
 fn dense_build_rejects_zero_input_dim() {
     let mut d = Dense::new(4, Linear::new()).unwrap();
@@ -666,7 +666,7 @@ fn dense_layer_type_is_dense() {
 
 // Flatten: constructor validation
 
-/// `Flatten` takes no shape now, so the rank rule moved to the build step
+/// `Flatten` takes no shape parameter, so the rank rule runs at build time
 #[test]
 fn flatten_build_rejects_fewer_than_3_dims() {
     let mut layer = Flatten::new();

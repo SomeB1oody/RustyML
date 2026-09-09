@@ -65,7 +65,6 @@ fn identity_passes_its_gradient_through_unchanged() {
     assert_eq!(grad, upstream);
 }
 
-/// `new` and `Default` build the same layer
 #[test]
 fn identity_default_matches_new() {
     let x = ramp(&[2, 3]);

@@ -17,15 +17,15 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///
 /// The input shape is `[batch_size, height, width, channels]`. The output shape is
 /// `[batch_size, height + top + bottom, width + left + right, channels]`. The batch axis and
-/// the channel axis pass through unchanged
+/// the channel axis pass through unchanged.
 ///
 /// The layer holds no parameter. Put it before a convolution with
 /// [`PaddingType::Valid`](crate::neural_network::layers::convolution::PaddingType) to control
 /// the border yourself. A convolution with `Same` padding splits an odd padding amount by its
-/// own rule. This layer instead takes the amount at each of the 4 edges
+/// own rule. This layer instead takes the amount at each of the 4 edges.
 ///
 /// [`Cropping2D`](crate::neural_network::layers::border::Cropping2D) is the inverse layer, and
-/// it is also this layer's backward pass
+/// it is also this layer's backward pass.
 ///
 /// # Examples
 ///
@@ -58,7 +58,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 pub struct ZeroPadding2D {
     /// Zero rows and columns to add at each of the 4 edges
     padding: Border2D,
-    /// Shape the layer was built for, batch axis first. `None` before the build
+    /// Shape the layer was built for, batch axis first. `None` before the build.
     built: Option<Shape>,
 }
 
@@ -94,7 +94,7 @@ impl LayerBase for ZeroPadding2D {
 
 impl UnaryLayer for ZeroPadding2D {
     /// Records the shape the pad runs over. The layer holds no array, so nothing is
-    /// allocated. The shape algebra checks the rank
+    /// allocated. The shape algebra checks the rank.
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "ZeroPadding2D", input)? else {
             return Ok(());

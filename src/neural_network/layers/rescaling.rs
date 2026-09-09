@@ -103,7 +103,7 @@ impl Rescaling {
         self
     }
 
-    /// Checks the rank and the element count of a tensor that enters the layer
+    /// Checks the rank and the element count of a tensor entering the layer
     ///
     /// # Errors
     ///

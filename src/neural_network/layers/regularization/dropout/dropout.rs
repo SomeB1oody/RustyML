@@ -28,16 +28,15 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 ///
 /// # Shape freedom
 ///
-/// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of
-/// any shape and of any rank, and 1 layer serves a rank-2 batch of feature vectors and a
-/// rank-4 batch of images alike. [`UnaryLayer::build`] records the shape it is given, and
-/// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape) reports it, but no later input is checked against it. The 2 noise
-/// layers,
-/// [`GaussianNoise`](crate::neural_network::layers::regularization::noise_injection::gaussian_noise::GaussianNoise)
-/// and
-/// [`GaussianDropout`](crate::neural_network::layers::regularization::noise_injection::gaussian_dropout::GaussianDropout),
-/// take the same freedom. The 3 spatial dropout layers do not, because each of them reads a
-/// channel axis at a fixed position and needs the rank that puts it there
+/// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of any
+/// shape at rank 1 or higher, and 1 layer serves a rank-2 batch of feature vectors and a rank-4
+/// batch of images alike. [`UnaryLayer::build`] records the shape it is given, and
+/// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape) reports it, but no
+/// later input is checked against it. The 2 noise layers,
+/// [`GaussianNoise`](crate::neural_network::layers::GaussianNoise) and
+/// [`GaussianDropout`](crate::neural_network::layers::GaussianDropout), take the same freedom. The
+/// 3 spatial dropout layers do not, because each of them reads a channel axis at a fixed position
+/// and needs the rank that puts it there
 ///
 /// # Examples
 ///
@@ -67,7 +66,7 @@ pub struct Dropout {
     /// An entry of `None` takes the extent of the input on that axis, and an entry of 1 makes
     /// the axis share 1 draw. A shorter vector lines up against the last axes of the input
     noise_shape: Option<Vec<Option<usize>>>,
-    /// Random number generator used to sample the dropout mask
+    /// Random number generator backing mask sampling
     rng: StdRng,
 }
 
@@ -80,7 +79,7 @@ impl Dropout {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - New Dropout layer instance, or a validation error
+    /// - `Result<Self, Error>` - New Dropout layer instance or a validation error
     ///
     /// # Notes
     ///
@@ -242,9 +241,10 @@ impl UnaryLayer for Dropout {
     /// Records the shape the layer serves. The layer holds no array, so nothing is
     /// allocated
     ///
-    /// The recorded shape is what [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape) reports, and no more. The layer owns
-    /// no array and reads no extent, so it checks no later input against it. See the
-    /// "Shape freedom" section of the type
+    /// The recorded shape is what
+    /// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape) reports, and no
+    /// more. The layer owns no array and reads no extent, so it checks no later input against it.
+    /// See the "Shape freedom" section of the type
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "Dropout", input)? else {
             return Ok(());
@@ -266,7 +266,6 @@ impl UnaryLayer for Dropout {
         }
 
         if !ctx.is_training() {
-            // Inference passes the input through unchanged
             return Ok(input.clone());
         }
 
@@ -278,7 +277,6 @@ impl UnaryLayer for Dropout {
         let noise_shape = self.resolve_noise_shape(input.shape())?;
 
         if self.rate == 1.0 {
-            // Dropping every unit yields all zeros
             return Ok(Tensor::zeros(input.raw_dim()));
         }
 
@@ -288,9 +286,7 @@ impl UnaryLayer for Dropout {
             .take_state::<StdRng>("rng")
             .unwrap_or_else(|| self.rng.clone());
 
-        // Sample a uniform value per draw. With no noise shape this is 1 value per input
-        // element. With one, the sampler runs at the smaller shape, so an axis of extent 1
-        // takes 1 draw that every position of that axis then shares
+        // Sampled at the resolved mask shape, coarser than the input where `noise_shape` says so
         let mut mask = Tensor::random_using(
             IxDyn(&noise_shape),
             Uniform::new(0.0, 1.0).unwrap(),
@@ -298,7 +294,6 @@ impl UnaryLayer for Dropout {
         );
         ctx.set_state("rng", rng);
 
-        // Threshold into a binary mask, in parallel for large masks
         if mask.len() >= cheap_map_parallel_threshold() {
             mask.par_mapv_inplace(|x| if x >= self.rate { 1.0 } else { 0.0 });
         } else {
@@ -315,9 +310,7 @@ impl UnaryLayer for Dropout {
     }
 
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        // A pass that drew no mask parked none, and the helper reads the mode and the rate
-        // before it reads the mask. It reports the missing mask with the same error that
-        // `pop_cache` gives, so a backward pass with no forward pass behind it still refuses
+        // A missing mask (no forward pass run) only errors when training with 0 < rate < 1
         let mask = ctx.pop_cache::<Tensor>("Dropout").ok();
         dropout_backward(grad_output, &mask, ctx.is_training(), self.rate, "Dropout")
     }

@@ -22,8 +22,8 @@ use ndarray::{Array2, ArrayView2, Axis, Ix2, concatenate, s};
 /// # Notes
 ///
 /// The record of 1 step holds 4 arrays, in this order: the reset gate, the update gate, the
-/// candidate, and `r_t .* h_prev`. The last one is a record and not a recomputation, because
-/// the gradient of the candidate block of the recurrent kernel pairs against it.
+/// candidate, and `r_t .* h_prev`. The recurrent-kernel gradient of the candidate block needs
+/// `r_t .* h_prev` as its operand, so the cell records it.
 #[derive(Debug)]
 pub(crate) struct GruCell {
     /// Activation applied to the candidate hidden state each timestep
@@ -36,7 +36,7 @@ const RESET_GATE: usize = 0;
 const UPDATE_GATE: usize = 1;
 /// Record slot of the candidate hidden state
 const CANDIDATE: usize = 2;
-/// Record slot of `r_t .* h_prev`, which the candidate block of the recurrent kernel projected
+/// Record slot of `r_t .* h_prev`, which the recurrent kernel's candidate block projects
 const RESET_HIDDEN: usize = 3;
 
 impl RnnCell for GruCell {
@@ -113,7 +113,6 @@ impl RnnCell for GruCell {
             .into_dimensionality::<Ix2>()
             .unwrap();
 
-        // Hidden state update
         let h_t = &z_t * h_prev + &(1.0 - &z_t) * &h_candidate;
 
         if let Some(record) = record {
@@ -196,8 +195,7 @@ impl RnnCell for GruCell {
 /// gates to control information flow and reduce vanishing gradients.
 ///
 /// All 3 gates are stored fused. The kernels are packed side by side into single matrices.
-/// Column blocks follow the order `[update | reset | candidate]` (`[z | r | h]`), matching
-/// Keras. This lets the input projection run as 1 GEMM instead of 3.
+/// Column blocks follow the order `[update | reset | candidate]` (`[z | r | h]`).
 ///
 /// Per timestep, the reset and update recurrent projections fuse into 1 GEMM. Only the
 /// candidate's recurrent projection stays separate, because its input `r_t .* h_{t-1}`
@@ -243,7 +241,7 @@ impl GRU {
     ///
     /// # Parameters
     ///
-    /// - `units` - Number of GRU units/neurons in the layer (determines output dimensionality)
+    /// - `units` - Number of output units in the layer
     /// - `activation` - Activation from the activation module (any [`Activation`] variant, or
     ///   any standalone activation layer)
     ///
@@ -266,7 +264,7 @@ impl GRU {
         Ok(Self(Rnn::new(units, activation)?))
     }
 
-    /// Sets the seed used to initialize the gate weights and re-initializes them deterministically.
+    /// Sets the seed used to initialize the gate weights and re-initializes them deterministically
     ///
     /// By default the draw takes the global seed or entropy (see [`crate::random`]). An unbuilt
     /// layer holds no gate weight, so this records the seed and draws nothing. A layer that is
@@ -333,13 +331,18 @@ impl GRU {
     /// # Parameters
     ///
     /// - `kernel` - Fused input kernel with shape (input_dim, 3 * units), gate column blocks in
-    ///   the order `[z | r | h]` (update, reset, candidate), matching Keras
+    ///   the order `[z | r | h]` (update, reset, candidate)
     /// - `recurrent_kernel` - Fused recurrent kernel with shape (units, 3 * units), same block
     ///   order
     /// - `bias` - Fused bias with shape (1, 3 * units), same block order
     ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - `Ok(())` when every array matches the shape the layer holds
+    ///
     /// # Errors
     ///
+    /// - `Error::NeuralNetwork(NnError::NotBuilt)` - If the layer is not built
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any provided weight does not match the
     ///   expected fused shape
     pub fn set_weights(
@@ -353,7 +356,7 @@ impl GRU {
 
     /// Sets the weights gate by gate, packing them into the fused `[z | r | h]` layout
     ///
-    /// Convenience wrapper over [`GRU::set_weights`] for callers that hold per-gate matrices
+    /// Convenience wrapper over [`GRU::set_weights`] for callers that hold per-gate matrices.
     ///
     /// # Parameters
     ///
@@ -368,6 +371,10 @@ impl GRU {
     ///   (units, units)
     /// - `candidate_bias` - Bias for the candidate gate with shape (1, units)
     ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - `Ok(())` when every per-gate weight matches the expected shape
+    ///
     /// # Notes
     ///
     /// The arguments stay in reset, update, candidate order, even though the fused kernel packs
@@ -376,9 +383,9 @@ impl GRU {
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any supplied weight shape does not
-    ///   match the expected per-gate shape
-    #[allow(clippy::too_many_arguments)]
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any provided weight does not match the
+    ///   expected per-gate shape
+    #[allow(clippy::too_many_arguments)] // 3 gates * (kernel, recurrent_kernel, bias)
     pub fn set_gate_weights(
         &mut self,
         reset_kernel: Array2<f32>,

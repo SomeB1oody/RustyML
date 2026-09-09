@@ -24,7 +24,8 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// Input tensor shape: `[batch_size, height, width, channels]`. Output tensor shape:
 /// `[batch_size, pooled_height, pooled_width, channels]`. With `Valid` padding,
 /// `pooled_height = (height - pool_size_h) / stride_h + 1` and
-/// `pooled_width = (width - pool_size_w) / stride_w + 1`.
+/// `pooled_width = (width - pool_size_w) / stride_w + 1`. With `Same` padding,
+/// `pooled_height = ceil(height / stride_h)` and `pooled_width = ceil(width / stride_w)`.
 ///
 /// # Examples
 ///

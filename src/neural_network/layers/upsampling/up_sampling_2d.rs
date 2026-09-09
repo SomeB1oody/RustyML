@@ -63,13 +63,6 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// assert_eq!(larger[[0, 1, 2, 0]], 2.0);
 /// assert_eq!(larger[[0, 3, 3, 0]], 4.0);
 /// ```
-///
-/// # Performance
-///
-/// [`Interpolation::Nearest`] copies whole runs of channels, so it runs at copy speed. Every
-/// other mode costs 1 multiply-add per tap per output element, and the taps grow with the
-/// kernel radius. The count is 3 for bilinear, 5 for bicubic, 7 for `Lanczos3`, and 11 for
-/// `Lanczos5`. The layer pays that cost once per spatial axis, not once per pixel pair
 #[derive(Debug)]
 pub struct UpSampling2D {
     /// Factor each spatial axis grows by

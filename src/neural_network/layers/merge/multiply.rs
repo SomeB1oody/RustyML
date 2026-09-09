@@ -72,11 +72,11 @@ pub struct Multiply {
 }
 
 impl Multiply {
-    /// Creates a new Multiply layer
+    /// Creates a layer that multiplies its inputs element by element
     ///
     /// # Returns
     ///
-    /// - `Self` - New `Multiply` layer instance, before any build
+    /// - `Self` - A new `Multiply` layer, which holds no build
     pub fn new() -> Self {
         Multiply::default()
     }
@@ -242,7 +242,7 @@ mod tests {
     /// An input that holds a 0 gives a correct gradient, which a quotient cannot
     ///
     /// A backward pass that divided the whole product by input `i` would give `0 / 0` at the
-    /// position of the 0. The product of every other input gives the value that Keras gives
+    /// position of the 0. The product of every other input gives the correct gradient there
     #[test]
     fn a_zero_in_an_input_gives_a_finite_gradient() {
         let first = tensor(&[1, 2], &[0.0, 2.0]);

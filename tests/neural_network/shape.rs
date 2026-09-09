@@ -1,4 +1,4 @@
-//! Integration tests for [`Shape`] and for the pure output-shape method of a layer.
+//! Integration tests for [`Shape`] and for the pure output-shape method of a layer
 //!
 //! 2 properties matter here. The first is purity: the answer is a function of the layer
 //! configuration and of the shape the caller passes, and of nothing a forward pass wrote. The
@@ -237,7 +237,6 @@ fn repeat_vector_refuses_a_rank_it_cannot_repeat() {
     assert!(message.contains("rank 2"), "{message}");
 }
 
-/// `Reshape` refuses an element count its target cannot match
 #[test]
 fn reshape_refuses_an_element_count_it_cannot_match() {
     let layer = Reshape::new(vec![2, 2]).unwrap();
@@ -483,8 +482,7 @@ fn a_model_build_refuses_an_oversized_valid_kernel() {
 /// A stack of 4 layers reports its final shape before any tensor exists
 ///
 /// This is what the pure method buys. The caller threads the output shape of each layer into
-/// the next one and learns the shape of the model output, with no forward pass anywhere. A
-/// later change moves this walk into the model itself
+/// the next one and learns the shape of the model output, with no forward pass anywhere
 #[test]
 fn a_whole_stack_answers_before_any_tensor_exists() {
     let layers: Vec<Box<dyn Layer>> = vec![
@@ -563,7 +561,7 @@ fn output_shape_reads_the_shape_the_layer_holds() {
     assert_eq!(global.output_shape(), "Unknown");
 }
 
-/// The printed output shape is now exactly what the forward pass enforces
+/// The printed output shape matches exactly what the forward pass enforces
 #[test]
 fn a_built_layer_refuses_the_extents_its_summary_does_not_name() {
     use ndarray::Array4;
@@ -579,8 +577,7 @@ fn a_built_layer_refuses_the_extents_its_summary_does_not_name() {
         .unwrap();
     assert_eq!(layer.output_shape(), "(None, 3, 3, 3)");
 
-    // The same layer used to accept any spatial extent, and its summary went on printing the
-    // declared one
+    // A spatial extent other than the one the build declared is refused
     let wider = Array4::<f32>::ones((2, 6, 6, 2)).into_dyn();
     assert!(layer.forward(&wider, &mut Ctx::inference()).is_err());
 

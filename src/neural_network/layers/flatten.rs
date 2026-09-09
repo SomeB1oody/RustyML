@@ -1,4 +1,5 @@
-//! Flatten layer that reshapes a 3D, 4D, or 5D tensor into a 2D tensor for dense layers
+//! Flatten layer that reshapes a 3D, 4D, or 5D tensor into a 2D tensor, and parks the input
+//! shape for backpropagation
 
 use crate::error::{Context, Error};
 use crate::neural_network::layers::ParamCounts;
@@ -17,7 +18,7 @@ use ndarray::IxDyn;
 /// The reshape itself is layout-agnostic. It collapses every axis after the batch axis in C
 /// order, without regard to which feature lands at which output index. Under the crate's
 /// channels-last layout, the channel axis is innermost. The flattened vector then runs position
-/// by position, with all channels of one position adjacent, rather than plane by plane. A
+/// by position, with all channels of 1 position adjacent, rather than plane by plane. A
 /// `Dense` layer trained against the other ordering then reads its inputs permuted, even though
 /// its weight shape stays the same. This is why saved models carry a format version (see
 /// [`MODEL_FORMAT_VERSION`](crate::neural_network::layers::checkpoint::MODEL_FORMAT_VERSION))
@@ -67,12 +68,12 @@ pub struct Flatten {
 impl Flatten {
     /// Creates a new Flatten layer
     ///
-    /// The layer takes no input shape. [`UnaryLayer::build`] gives it one, and a forward pass on
-    /// a layer that a caller drives by hand builds it from the tensor that arrives
+    /// The layer starts with no input shape. [`UnaryLayer::build`] sets it, and a forward pass
+    /// on a layer that a caller drives by hand builds it from the tensor that arrives
     ///
     /// # Returns
     ///
-    /// - `Flatten` - A new `Flatten` layer
+    /// - `Self` - New `Flatten` layer instance
     pub fn new() -> Self {
         Self { built: None }
     }
@@ -133,7 +134,6 @@ impl UnaryLayer for Flatten {
             ));
         }
 
-        // Reshape gradient back to input shape
         let reshaped_grad = grad_output
             .to_shape(IxDyn(input_shape.as_slice()))
             .context("reshape gradient")?

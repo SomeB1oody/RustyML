@@ -70,9 +70,9 @@ const SELU_SCALE: f32 = 1.050_701;
 
 /// The product `SELU_SCALE * SELU_ALPHA`, about 1.7580993
 ///
-/// The negative branch multiplies by this single constant rather than by the 2 factors in
-/// sequence. The backward pass then recovers the derivative as `a + SELU_SCALE_ALPHA`, which
-/// is exact for the value the forward pass wrote
+/// The negative branch multiplies by this single constant. The backward pass then recovers
+/// the derivative as `a + SELU_SCALE_ALPHA`, which is exact for the value the forward pass
+/// wrote
 const SELU_SCALE_ALPHA: f32 = SELU_SCALE * SELU_ALPHA;
 
 /// The slope of the hard sigmoid's linear segment, `1/6`
@@ -91,7 +91,8 @@ pub const DEFAULT_SOFTMAX_AXIS: i32 = -1;
 /// every layer to a single concrete type, instead of probing each `Layer<Act>` pairing
 ///
 /// Every standalone activation *layer* in this module delegates its math here. This enum is
-/// the single source of truth for both the forward transform and its derivative
+/// the single source of truth for both the forward transform and its derivative. The
+/// algorithm lives here, and not in a layer `impl` block
 ///
 /// # The output-only derivative contract
 ///
@@ -101,36 +102,13 @@ pub const DEFAULT_SOFTMAX_AXIS: i32 = -1;
 ///
 /// This admits every activation whose derivative has a closed form in `a`, which covers the
 /// full family below. It excludes GELU, SiLU (Swish), and Mish, whose `a = z * g(z)` shape has
-/// no closed-form inverse. Adding those needs a wider contract that also hands the backward
+/// no closed-form inverse. Supporting them needs a wider contract that also hands the backward
 /// pass the pre-activation.
 ///
 /// The 2 saturating variants pay a small accuracy cost for the contract. `ELU` and `SELU`
 /// recover their negative branch as `a + alpha`, a subtraction of 2 near-equal values far down
 /// the tail. The absolute error stays inside 1 unit in the last place of `alpha`, at inputs
 /// where the derivative is already close to 0.
-///
-/// # Adding a new activation
-///
-/// Implement the math on the enum, not in a layer.
-///
-/// 1. Add a variant to this enum
-/// 2. Handle it in [`Activation::forward`] (the transform) and [`Activation::backward`] (the
-///    derivative, expressed by the *activated output* `a`, not the pre-activation `z`)
-/// 3. Reject any unusable parameter in [`Activation::validate`], which every trainable layer's
-///    constructor calls
-/// 4. Add a thin standalone layer struct that mirrors [`ReLU`]. Give it an `output_cache`
-///    field. Its `Layer` impl validates the input, caches the output, and delegates to this
-///    enum. Add a `From<NewLayer> for Activation` impl so the layer works as an
-///    `impl Into<Activation>` argument
-///
-/// The algorithm lives on the enum, not in the layer `impl` blocks. The trainable layers
-/// (Dense, the convolutional layers, the recurrent layers) store an `Activation` value. Each
-/// layer calls these pure, stateless methods inside its own forward and backward passes.
-///
-/// A stateful `Layer` impl caches `output` and takes `&mut self`. It cannot serve that
-/// embedded, value-typed use without a generic activation type parameter or `Box<dyn Layer>`.
-/// Either option would duplicate the algorithm. The standalone structs stay thin wrappers,
-/// never the source of truth
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Activation {
     /// Identity activation, `f(x) = x`
@@ -360,13 +338,10 @@ impl Activation {
                 Ok(grad)
             }
             Activation::Sigmoid => {
-                // sigmoid'(z) = a * (1 - a)
                 let mut grad = grad_output.clone();
                 let sigmoid_grad = |g: &mut f32, &a: &f32| {
                     *g *= a * (1.0 - a);
                 };
-                // The derivative reuses the cached activation, so this pass calls no `exp`. It
-                // is a cheap map, not an exp map
                 if grad.len() >= cheap_map_parallel_threshold() {
                     Zip::from(&mut grad)
                         .and(activated)
@@ -377,12 +352,10 @@ impl Activation {
                 Ok(grad)
             }
             Activation::Tanh => {
-                // tanh'(z) = 1 - a^2
                 let mut grad = grad_output.clone();
                 let tanh_grad = |g: &mut f32, &a: &f32| {
                     *g *= 1.0 - a * a;
                 };
-                // Also a cheap map: the derivative is a product of the cached activation
                 if activated.len() >= cheap_map_parallel_threshold() {
                     Zip::from(&mut grad).and(activated).par_for_each(tanh_grad);
                 } else {
@@ -502,7 +475,6 @@ impl Activation {
                 Ok(grad)
             }
             Activation::Exponential => {
-                // exp'(z) = e^z = a
                 let mut grad = grad_output.clone();
                 let exponential_grad = |g: &mut f32, &a: &f32| {
                     *g *= a;
@@ -532,6 +504,10 @@ impl Activation {
     /// or scale of 0 collapses the whole negative side onto `a = 0`, which erases the branch.
     /// A negative one inverts the sign, which reads the wrong branch
     ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - Ok when the activation is usable
+    ///
     /// # The Softmax axis of an embedded activation
     ///
     /// An embedded [`Activation::Softmax`] accepts the default axis `-1` alone. This
@@ -547,10 +523,6 @@ impl Activation {
     /// tensor axis in each family. In `Dense` a non-final axis would normalize the folded
     /// rows, which are not the wanted lanes. A per-host axis rule is deferred, not
     /// impossible. Use the standalone [`Softmax`] layer for a different axis
-    ///
-    /// # Returns
-    ///
-    /// - `Result<(), Error>` - Ok when the activation is usable
     ///
     /// # Errors
     ///
@@ -706,7 +678,7 @@ fn softmax_forward(input: &Tensor, axis: i32) -> Result<Tensor, Error> {
         // Subtract the lane max so every exp argument is <= 0 (no overflow)
         let max_val = lane.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         lane.map_inplace(|x| *x = (*x - max_val).exp());
-        // The max-shift guarantees one of the terms is exp(0)=1.0, so the sum is always >= 1.0
+        // The max-shift guarantees 1 of the terms is exp(0)=1.0, so the sum is always >= 1.0
         let sum = lane.sum();
         lane.map_inplace(|x| *x /= sum);
     };
@@ -943,7 +915,7 @@ mod tests {
         }
     }
 
-    /// A 1-D input normalizes its single axis, the way the reference layer does
+    /// A 1-D input normalizes its single axis
     #[test]
     fn softmax_forward_accepts_1d_input() {
         use ndarray::Array1;

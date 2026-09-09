@@ -23,16 +23,10 @@ tunable_gate! {
     /// Total element ops (`destination elements * taps`) at or above which 1 axis pass runs in
     /// parallel
     ///
-    /// The gate counts element ops rather than elements, because the taps per output position
-    /// vary with the mode and the direction. A forward repeat pass reads 1 tap, and a forward
-    /// interpolated pass reads up to 11, the `Lanczos5` count. A backward pass reads more taps
-    /// than its forward pass, and the count grows with the factor. An element count alone would
-    /// put a wide pass and a narrow pass of the same output size on the same side of the gate.
-    /// One of them can do far more work
-    ///
-    /// The default is the point at which every mode at least breaks even against its own serial
-    /// path. Below it the repeat mode loses to the rayon task overhead, because it moves memory
-    /// and computes almost nothing. Above it every mode gains, and the wide kernels gain most
+    /// The gate counts element ops instead of elements, because the taps per destination
+    /// position change with the mode and the direction. An element count alone would put a wide
+    /// kernel and a narrow kernel of the same output size on the same side of the gate. 1 of
+    /// them does far more work
     ///
     /// Overridable through [`crate::tuning`]
     pub(crate) UPSAMPLE_PARALLEL_MIN_OPS
@@ -44,8 +38,8 @@ const MAX_TAPS: usize = 11;
 
 /// Smallest weight sum the pass still normalizes
 ///
-/// The pass divides a position's weights by their sum when the sum is at least this bound.
-/// Below the bound, the position keeps a weight of 0 for every tap. The bound is 1000 times the
+/// The pass divides a position's weights by their sum when the sum is above this bound. At or
+/// below the bound, the position keeps a weight of 0 for every tap. The bound is 1000 times the
 /// `f32` epsilon
 const MIN_WEIGHT_SUM: f64 = 1000.0 * f32::EPSILON as f64;
 
@@ -250,10 +244,9 @@ fn axis_band(
     })
 }
 
-/// Destination elements a task takes at a time, before the per-task setup is paid again
+/// Destination elements a task takes at a time
 ///
-/// A task walks its own rows, so it determines the axis position of its first row only. A run
-/// this size keeps that setup under 1 percent of the work, for any `inner` value the layers see
+/// A task walks its own rows, so it determines the axis position of its first row only
 const TASK_ELEMENTS: usize = 16_384;
 
 tunable_gate! {
@@ -518,6 +511,10 @@ pub(super) fn upsample_output_shape(
 }
 
 /// Checks that every upsampling factor is at least 1
+///
+/// # Parameters
+///
+/// - `factors` - Factor for each spatial axis
 ///
 /// # Errors
 ///

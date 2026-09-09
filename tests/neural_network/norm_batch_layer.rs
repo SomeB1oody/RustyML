@@ -1,6 +1,8 @@
 //! Integration tests for BatchNormalization and LayerNormalization forward, eval,
-//! running-stats, and error-path behavior. Expected values come from the mathematical
-//! definition. Gradient correctness lives in tests/neural_network/gradient_check.rs.
+//! running-stats, and error-path behavior
+//!
+//! Expected values come from the mathematical definition. Gradient correctness lives in
+//! tests/neural_network/gradient_check.rs.
 
 use ndarray::{ArrayD, Dimension};
 use rustyml::neural_network::Ctx;
@@ -31,7 +33,7 @@ fn tensor2(data: Vec<f32>, rows: usize, cols: usize) -> rustyml::neural_network:
 
 // Constructor validation
 
-/// `BatchNormalization` takes no shape now, so the rank rule moved to the build step
+/// `BatchNormalization` takes no shape at construction, so build validates the rank instead
 #[test]
 fn bn_build_rejects_empty_input_shape() {
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
@@ -89,7 +91,7 @@ fn bn_forward_rejects_wrong_input_shape() {
 }
 
 /// The build shape's leading axis is not a property of the layer.
-/// Enforcing it would reject every mini-batch, so a different batch size is accepted.
+/// Enforcing it would reject every mini-batch, so a different batch size is accepted
 #[test]
 fn bn_forward_accepts_different_batch_size() {
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
@@ -165,7 +167,6 @@ fn bn_running_stats_update_after_one_forward() {
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
     let mut ctx = Ctx::training();
 
-    // Training forward updates running stats
     bn.forward_mut(&input_train, &mut ctx).unwrap();
     // The forward pass proposed the new statistics in the context, and `apply_state` moves
     // them into the layer, exactly as `Sequential` does after each forward pass
@@ -572,7 +573,7 @@ fn ln_multiple_axes_output_has_mean_zero_and_var_one() {
 }
 
 /// LN Multiple([1]) on a [2, 3, 4] input normalizes axis=1's 3 elements for each (axis-0,
-/// axis-2) position. LN reduces whichever axes it is told to, independent of channels-last.
+/// axis-2) position. LN reduces whichever axes it is told to, independent of channels-last
 #[test]
 fn ln_multiple_single_axis_on_3d_input() {
     // shape [2, 3, 4]: axis 0 has 2 entries, axis 1 has 3 (the normalized axis), axis 2 has 4
@@ -726,10 +727,7 @@ fn ln_mode_switch_does_not_change_forward_output() {
     let input = tensor2(data, 2, 4);
     let mut ln = LayerNormalization::new(1e-5).unwrap();
 
-    // The output of a training pass
     let out_train = ln.forward_mut(&input, &mut Ctx::training()).unwrap();
-
-    // The output of an inference pass
     let out_eval = ln.forward(&input, &mut Ctx::inference()).unwrap();
 
     assert_allclose(&out_train, &out_eval, 1e-6);
@@ -771,7 +769,6 @@ fn ln_multiple_valid_axes_forward_succeeds() {
 
 // backward() before forward() must error
 
-/// BatchNormalization::backward called before any forward returns ForwardPassNotRun
 #[test]
 fn bn_backward_before_forward_errors() {
     let bn = BatchNormalization::new(0.9, 1e-5).unwrap();
@@ -787,7 +784,6 @@ fn bn_backward_before_forward_errors() {
     );
 }
 
-/// LayerNormalization::backward called before any forward returns ForwardPassNotRun
 #[test]
 fn ln_backward_before_forward_errors() {
     let ln = LayerNormalization::new(1e-5).unwrap();
@@ -881,7 +877,6 @@ fn bn_backward_eval_mode_passes_gradient_through() {
     let grad = tensor2(vec![0.5f32, -1.5, 2.0, -3.0, 4.5, -6.0], 2, 3);
     let grad_input = bn.backward(&grad, &mut ctx).unwrap();
 
-    // The backward pass of an inference context returns grad_output.clone()
     assert_allclose(&grad_input, &grad, 0.0f32);
 }
 
@@ -920,7 +915,7 @@ fn bn_new_scalar_param_branch_forward_1d() {
 }
 
 /// Spatial batch norm (rank > 2) normalizes each channel over its (N, H, W) values on a
-/// channels-last [N, H, W, C] input. The parameters are per-channel (2*C), not per spatial element.
+/// channels-last [N, H, W, C] input. The parameters are per-channel (2*C), not per spatial element
 #[test]
 fn bn_spatial_4d_normalizes_per_channel() {
     use rustyml::neural_network::Tensor;
@@ -941,10 +936,8 @@ fn bn_spatial_4d_normalizes_per_channel() {
     let out = bn.forward(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[1, 2, 2, 2]);
 
-    // Channel 0: mean 2.5, population variance ((-1.5)^2+(-0.5)^2+0.5^2+1.5^2)/4 = 1.25.
-    // Channel 1: mean 6.5 with the same spread, so it has the same variance and inverse std.
-    // The centered values of both channels are therefore [-1.5, -0.5, 0.5, 1.5].
-    // Channels-last interleaving puts the same offset side by side at each position.
+    // Both channels share the same spread, so both center to [-1.5, -0.5, 0.5, 1.5] with
+    // variance 1.25. Channels-last interleaving repeats each offset for both channels.
     let inv = 1.0 / (1.25f32 + 1e-5).sqrt();
     let expected: Tensor = ArrayD::from_shape_vec(
         vec![1, 2, 2, 2],
@@ -1031,19 +1024,14 @@ fn bn_run(shape: &[usize], gate: usize) -> (ArrayD<f32>, ArrayD<f32>, Vec<f32>) 
 
 /// Moving the BatchNormalization gates must not change a single bit
 ///
-/// `crate::tuning` documents that a gate selects an execution strategy and never changes a
-/// result. Every pass the 2 gates control is elementwise or a shape-blocked fold, so the serial
-/// and the parallel arm must agree exactly, and not merely to a tolerance. The shape clears the
-/// shipped threshold and its channel count divides neither the block size nor a power of 2, so
-/// the parallel arm's row chunking has to handle a partial block
+/// A gate selects an execution strategy and never changes a result, so the serial and the
+/// parallel arm must agree exactly, not merely to a tolerance. The test shape clears the
+/// shipped threshold, so the run exercises the parallel arm
 #[test]
 fn bn_gate_move_does_not_change_any_bit() {
     // 11 * 64 * 96 * 5 = 337,920 elements, above the shipped 262,144 gate
-    //
-    // The row count `M = 11 * 64 * 96 = 67,584` must NOT be a power of 2, and the channel count
-    // must divide neither a power of 2 nor the fold block size. A power-of-2 `M` makes the
-    // division by it exact, which hides any difference in how the 2 arms associate their
-    // multiplications, and a convenient channel count hides a partial row chunk
+    // The row count 67,584 is not a power of 2, and the channel count divides neither
+    // a power of 2 nor the fold block size
     let shape = [11usize, 64, 96, 5];
     let rows: usize = shape[..shape.len() - 1].iter().product();
     assert!(!rows.is_power_of_two(), "M must not be a power of 2");

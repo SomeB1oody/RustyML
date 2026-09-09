@@ -178,8 +178,8 @@ impl PReLU {
     ///
     /// # Notes
     ///
-    /// The resize refills every slope with the starting value that [`PReLU::new`] received, and
-    /// it drops any gradient the layer holds. Call this before [`PReLU::set_weights`]
+    /// The resize refills every slope with the starting value that [`PReLU::new`] received.
+    /// Call this before [`PReLU::set_weights`]
     ///
     /// # Errors
     ///
@@ -225,6 +225,7 @@ impl PReLU {
     ///
     /// # Errors
     ///
+    /// - `Error::NeuralNetwork(NnError::NotBuilt)` - If the layer holds no array yet
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `alpha` does not match the layer's
     ///   configured shape
     pub fn set_weights(&mut self, alpha: ArrayD<f32>) -> Result<(), Error> {
@@ -241,6 +242,7 @@ impl PReLU {
     ///
     /// # Errors
     ///
+    /// - `Error::NeuralNetwork(NnError::NotBuilt)` - If the layer holds no array yet
     /// - `Error::EmptyInput` - If the input holds no element
     /// - `Error::InvalidInput` - If the rank differs from the configured rank, or an axis that
     ///   is not shared has an extent the slope array cannot cover
@@ -364,8 +366,8 @@ impl UnaryLayer for PReLU {
 
     /// Training forward: caches the input, which the backward pass needs for both gradients
     ///
-    /// The output alone cannot serve. A slope of 0 maps the whole negative side onto 0, so the
-    /// output no longer says which elements were negative
+    /// The output alone cannot serve. A slope of 0 maps the whole negative side onto 0, which
+    /// erases which elements of the input were negative
     fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if self.built.is_none() {
             return Err(Error::not_built("PReLU"));

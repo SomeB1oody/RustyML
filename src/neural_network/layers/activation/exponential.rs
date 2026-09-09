@@ -100,7 +100,6 @@ impl UnaryLayer for Exponential {
 
         let output = Activation::Exponential.forward(input)?;
 
-        // Cache activated output for backpropagation
         if ctx.is_training() {
             ctx.push_cache("Exponential", output.clone());
         }

@@ -184,8 +184,6 @@ fn conv3d_known_weight_forward_values() {
     assert_abs_diff_eq!(out[[0, 1, 1, 1, 0]], 4.60_f32, epsilon = 1e-5);
 }
 
-// Conv3D - a forward pass with an inference context equals one with a training context
-
 /// A forward pass with an inference context returns the same values as one with a training
 /// context (Conv3D has no train/eval difference)
 #[test]
@@ -557,8 +555,6 @@ fn depthwise_conv2d_known_weight_single_channel() {
     assert_abs_diff_eq!(out[[0, 1, 1, 0]], 77.5_f32, epsilon = 1e-5);
 }
 
-// DepthwiseConv2D - a forward pass with an inference context equals one with a training context
-
 #[test]
 fn depthwise_conv2d_predict_equals_forward() {
     let mut conv = DepthwiseConv2D::new((2, 2), (1, 1), Linear::new()).unwrap();
@@ -833,8 +829,6 @@ fn separable_conv2d_same_padding_zero_pads_depthwise() {
         }
     }
 }
-
-// SeparableConv2D - a forward pass with an inference context equals one with a training context
 
 #[test]
 fn separable_conv2d_predict_equals_forward() {
@@ -1142,18 +1136,15 @@ fn separable_conv2d_dilated_same_padding_splits_with_the_extra_cell_at_the_end()
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-// ---------------------------------------------------------------------------------------
 // Effective kernels longer than the input, and dilated gradients, pinned to Keras 3.15.1
-// ---------------------------------------------------------------------------------------
 //
-// Keras 3.15.1 on the jax backend produced every expected value in this section. Each case
-// gives the layer the weights, the input, and the upstream gradient that the ramps below
-// build. A rerun of the probe therefore reproduces the numbers. Every ramp value is exact in
-// f32, so no rounding enters the comparison.
+// Keras 3.15.1 on the jax backend produced every expected value in this section, from the
+// weights, the input, and the upstream gradient the ramps below build. Every ramp value is
+// exact in f32, so no rounding enters the comparison, and a rerun of the probe reproduces the
+// same numbers.
 //
 // A kernel whose effective extent is longer than the input axis is legal under `Same` and
-// `Causal` padding, and Keras accepts it. Only `Valid` rejects it, because no complete window
-// fits there.
+// `Causal` padding. Only `Valid` rejects it, because no complete window fits there.
 
 /// Kernel ramp: element `i` holds `((i % 7) - 3) * 0.25`
 fn ramp_kernel(count: usize) -> Vec<f32> {

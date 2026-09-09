@@ -117,10 +117,8 @@ fn transpose_geometry(
     let out_sp: Vec<usize> = (0..in_sp.len())
         .map(|d| transpose_output_length(in_sp[d], k_dims[d], strides[d], dilation[d], padding))
         .collect();
-    // The plain convolution from `out_sp` back to `in_sp` is the one this pass transposes, so its
-    // geometry is this pass's geometry. `conv_geometry` cannot fail here. Its `Valid` branch
-    // rejects only an output axis smaller than the kernel. Both output rules above make every
-    // axis at least the kernel size, for an input of 1 or more
+    // `conv_geometry` cannot fail here. Its `Valid` branch rejects only an output axis smaller
+    // than the kernel, and both output-length rules above keep every axis at least kernel size
     let (check_sp, pad_before, padded_sp) =
         conv_geometry(&out_sp, k_dims, strides, dilation, padding.into())?;
     debug_assert_eq!(
@@ -169,8 +167,21 @@ fn parallel_plan(gemm_flops: usize, batch: usize) -> (bool, Parallelism) {
     (parallel, gemm_par)
 }
 
-/// Runs the forward transposed convolution. `weight_shape` is `[k..., F, Cin]`, `bias` is
-/// `[F]` or `None` for a layer built without one, and `strides` has 1 entry per spatial axis
+/// Runs the forward transposed convolution
+///
+/// # Parameters
+///
+/// - `input` - Input tensor, `[batch, spatial..., Cin]`
+/// - `weights` - Flat kernel weights, `[k..., F, Cin]`
+/// - `weight_shape` - Shape of the kernel, `[k..., F, Cin]`
+/// - `bias` - Per-filter bias `[F]`, or `None` for a layer built without one
+/// - `strides` - Stride of each spatial axis
+/// - `dilation` - Tap spacing of each spatial axis
+/// - `padding` - Padding mode
+///
+/// # Returns
+///
+/// - `Result<Tensor, Error>` - Transposed convolution output, `[batch, out_spatial..., F]`
 ///
 /// # Errors
 ///
@@ -225,10 +236,7 @@ pub(super) fn conv_transpose_forward(
         let dcol = dcol.as_slice().expect("matmul result is standard layout");
 
         let mut pad_out = vec![0.0f32; padded_item];
-        // Tap outer, position inner. At a fixed tap, consecutive input positions write runs that
-        // advance by the stride. Adjacent runs touch at unit stride, so the read-modify-write
-        // side stays 1 forward stream. Windows overlap whenever `stride < kernel`, which is why
-        // this accumulates instead of copying
+        // Windows overlap whenever `stride < kernel`, so this accumulates instead of copying
         for kk in 0..k_plane {
             let off = kk * in_plane;
             let kbase = kk * filters;
@@ -280,9 +288,22 @@ pub(super) fn conv_transpose_forward(
         .expect("transposed convolution output length matches shape"))
 }
 
-/// Runs the backward transposed convolution. `input` is the original forward input.
-/// `grad_output` is the gradient of the transposed-convolution output, taken after the
-/// activation's backward pass
+/// Runs the backward transposed convolution
+///
+/// # Parameters
+///
+/// - `grad_output` - Gradient of the transposed-convolution output, taken after the activation's
+///   backward pass
+/// - `input` - Original forward input
+/// - `weights` - Flat kernel weights, `[k..., F, Cin]`
+/// - `weight_shape` - Shape of the kernel, `[k..., F, Cin]`
+/// - `strides` - Stride of each spatial axis
+/// - `dilation` - Tap spacing of each spatial axis
+/// - `padding` - Padding mode
+///
+/// # Returns
+///
+/// - `Result<ConvGradients, Error>` - Weight, bias, and input gradients
 ///
 /// # Errors
 ///
@@ -386,8 +407,8 @@ pub(super) fn conv_transpose_backward(
         (wg, bias_p, dx.into_raw_vec_and_offset().0)
     };
 
-    // Each item runs 2 GEMMs (weight gradient and input gradient) of about
-    // `2 * in_plane * Cin * k_total` FLOPs apiece
+    // Each item runs 2 GEMMs, weight gradient and input gradient, about
+    // `4 * in_plane * Cin * k_total` FLOPs total
     let gemm_flops = 4usize
         .saturating_mul(batch)
         .saturating_mul(in_plane)
@@ -421,7 +442,7 @@ pub(super) fn conv_transpose_backward(
 }
 
 /// Tests the output-length formula, the geometry derivation, and the forward scatter against
-/// hand-derived values.
+/// hand-derived values
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -504,11 +525,8 @@ mod tests {
     }
 
     // conv_transpose_forward: hand-derived values
-    //
-    // These tests check the forward pass against numbers worked out by hand from the scatter
-    // definition. A gradient check compares a layer against a finite difference of itself, so it
-    // agrees even when an axis is transposed. Only an independently derived value catches a moved
-    // axis.
+    // Checked against numbers worked out by hand from the scatter definition, which catches an
+    // axis-transposition error that a gradient check would miss
 
     /// 1-D, 1 batch item, 2 input positions at 1 channel, a length-2 all-ones kernel, 1 filter,
     /// stride 1, `Valid`. Input `[1, 2]` scatters to `[1, 1+2, 2]`, and the bias lands once per

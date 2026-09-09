@@ -14,16 +14,14 @@ use ndarray::{Array2, ArrayView2, Ix2};
 /// The arithmetic of 1 timestep of a [`SimpleRNN`]
 ///
 /// The cell holds 1 gate. A timestep needs 1 matrix product and at most 1 activation sweep. The
-/// timestep buffer starts as the projected `x_t @ kernel` slice. The recurrent product
-/// accumulates into it, and the bias rides the same epilogue. This removes 2 separate
-/// allocating broadcast adds that unfused code would need. `ReLU` also folds into the backend's
-/// vectorized epilogue, and `Linear` needs no pass at all. Every other activation runs as a
-/// separate vectorized [`Activation::forward`] pass, because a per-element closure epilogue
-/// would need 1 indirect scalar call per element.
+/// timestep buffer starts as the projected `x_t @ kernel` slice, and the recurrent product and
+/// the bias both accumulate into it. `ReLU` folds into the same fused epilogue, and `Linear`
+/// needs no further pass. Every other activation runs a separate pass through
+/// [`Activation::forward`].
 ///
 /// A fused `f32` epilogue matches the unfused product plus the scalar activation bit for bit,
-/// with 1 exception. The fused `Relu` of the backend maps `NaN` to `0`, while the scalar closure
-/// of this crate propagates `NaN` instead.
+/// with 1 exception. The fused `Relu` maps `NaN` to `0`, while the scalar closure of this crate
+/// propagates `NaN` instead.
 ///
 /// The cell parks nothing of its own. The hidden state that leaves a step is the only value that
 /// its backward pass reads, and [`Rnn`] hands that state to every cell.
@@ -91,8 +89,8 @@ impl RnnCell for SimpleRnnCell {
         _record: &[Array2<f32>],
         grad_state: &mut [Array2<f32>],
     ) -> Result<Array2<f32>, Error> {
-        // The activation backward reads the state that LEAVES the step, which is what the
-        // activation produced, and the total gradient of that same state
+        // The activation backward reads the state that leaves the step, which is what the
+        // activation produced. It also reads the total gradient of that same state.
         let d_z = {
             let h_t = state_next[0].clone().into_dyn();
             let grad_h = grad_state[0].clone().into_dyn();
@@ -110,7 +108,7 @@ impl RnnCell for SimpleRnnCell {
 ///
 /// Processes a 3D input tensor with shape (batch_size, timesteps, input_dim) and returns
 /// the last hidden state with shape (batch_size, units). It applies an activation from the
-/// activation module at each timestep
+/// activation module at each timestep.
 ///
 /// [`SimpleRNN::with_return_sequences`] makes the layer return every timestep's hidden state,
 /// with shape (batch_size, timesteps, units). [`SimpleRNN::with_go_backwards`] processes the
@@ -155,9 +153,9 @@ impl SimpleRNN {
     ///
     /// # Parameters
     ///
-    /// - `units` - Number of output units
-    /// - `activation` - Activation function from the activation module (any [`Activation`]
-    ///   variant, or any standalone activation layer)
+    /// - `units` - Number of output units in the layer
+    /// - `activation` - Activation from the activation module (any [`Activation`] variant, or
+    ///   any standalone activation layer)
     ///
     /// # Returns
     ///
@@ -165,8 +163,9 @@ impl SimpleRNN {
     ///
     /// # Notes
     ///
-    /// By default, the constructor seeds weights from the global seed or entropy. Set a seed
-    /// with [`SimpleRNN::with_random_state`] for reproducible initialization.
+    /// The constructor draws nothing. [`UnaryLayer::build`] reads the feature count from the
+    /// input shape and draws the weights then. The draw takes the global seed or entropy by
+    /// default. For reproducible initialization, set a seed with [`SimpleRNN::with_random_state`].
     ///
     /// # Errors
     ///
@@ -179,10 +178,10 @@ impl SimpleRNN {
 
     /// Sets the seed used to initialize the weights and re-initializes them deterministically
     ///
-    /// By default, `SimpleRNN::new` seeds the weights from the global seed or entropy (see
-    /// [`crate::random`]). This method re-runs the kernel (Xavier/Glorot) and recurrent-kernel
-    /// (orthogonal) initialization with `random_state`, so call it before assigning custom
-    /// weights or training. The bias stays zero-initialized.
+    /// By default the draw takes the global seed or entropy (see [`crate::random`]). An unbuilt
+    /// layer holds no weight, so this records the seed and draws nothing. A layer that is already
+    /// built redraws its kernel (Xavier/Glorot) and recurrent kernel (orthogonal) from the new
+    /// seed, so the order of the 2 calls does not matter. The bias stays zero-initialized.
     ///
     /// # Parameters
     ///

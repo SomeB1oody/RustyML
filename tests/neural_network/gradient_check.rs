@@ -445,7 +445,6 @@ fn check_weight_gradient(layer: &mut dyn UnaryLayer, x: &Tensor, eps: f32, tol: 
     let upstream = Tensor::ones(out.raw_dim());
     layer.backward(&upstream, &mut ctx).unwrap();
 
-    // Snapshot each parameter tensor's current values and analytic gradients
     let params = param_snapshots(layer, &ctx);
 
     for (p_idx, (values, grads)) in params.iter().enumerate() {
@@ -594,9 +593,8 @@ fn depthwise_conv2d_weight_gradient_matches_finite_difference() {
     check_weight_gradient(&mut conv, &x, 1e-3, 2e-2);
 }
 
-// Weighted-loss gradient checks: L = sum(output) is degenerate when the output sum stays
-// constant in the input (softmax, zero-mean normalizers). These checks use a weighted loss
-// L = sum(W * output) instead.
+// Weighted-loss checks: L = sum(output) is degenerate for a layer whose output sum stays
+// constant in the input (softmax, zero-mean normalizers). These use L = sum(W * output) instead.
 
 /// A fixed, non-uniform weight tensor shaped like `like`, with all entries in [0.7, 1.3]
 fn loss_weights(like: &Tensor) -> Tensor {
@@ -657,10 +655,9 @@ fn softmax_input_gradient_matches_finite_difference() {
     check_input_gradient_weighted(&mut softmax, &x, 1e-3, 2e-2);
 }
 
-// The remaining standalone activation layers. Each map is elementwise, so L = sum(output) stays
-// non-degenerate and the ones-based helper applies. A central finite difference is only valid
-// where the function is differentiable. Every probe below keeps each element clear of a kink by
-// much more than `eps`.
+// The remaining activation layers map elementwise, so the ones-based helper stays non-degenerate.
+// A central difference needs differentiability, so every probe stays clear of a kink by more
+// than `eps`.
 
 /// LeakyReLU with a non-default slope, so a backward pass that assumes the 0.3 default fails
 #[test]
@@ -865,9 +862,9 @@ fn global_average_pooling_3d_input_gradient_matches_finite_difference() {
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
-// Reshape (no trainable parameters -> input gradient only)
-// A reshape is a pure index remapping, so each input gradient is exactly 1. A shape-only assertion
-// misses a backward pass that reshapes to the wrong target or that permutes the elements.
+// Reshape (no trainable parameters, input gradient only). A reshape is a pure index remap, so
+// each input gradient equals exactly 1, and a shape-only check would miss a wrong target or a
+// permuted element.
 
 #[test]
 fn reshape_split_input_gradient_matches_finite_difference() {
@@ -892,12 +889,10 @@ fn reshape_merge_input_gradient_matches_finite_difference() {
     check_input_gradient(&mut reshape, &x, 1e-3, 1e-2);
 }
 
-// Border layers (no trainable parameters -> input gradient only).
-// A zero-padding layer drops the gradient of every padded position, and a cropping layer drops
-// the gradient of every removed position. Every other position keeps its gradient
-// unchanged. The weighted loss gives each output position its own weight, so a border that
-// lands 1 position off changes the analytic gradient. Every border below is uneven, which a
-// symmetric border would hide. All 6 layers are exactly linear, so the tolerance is tight.
+// Border layers (no trainable parameters, input gradient only). Zero-padding drops the gradient
+// of every padded position, and cropping drops it for every removed position, leaving the rest
+// unchanged. The weighted loss catches a border that lands 1 position off, which a symmetric
+// border would hide. All 6 layers are exactly linear, so the tolerance stays tight.
 
 #[test]
 fn zero_padding_1d_input_gradient_matches_finite_difference() {
@@ -941,11 +936,10 @@ fn cropping_3d_input_gradient_matches_finite_difference() {
     check_input_gradient_weighted(&mut crop, &x, 1e-3, 1e-2);
 }
 
-// Permute and RepeatVector (no trainable parameters -> input gradient only).
-// A permute routes each output gradient back to exactly 1 input, so the weighted loss catches an
-// inverse order that is wrong. A repeat sends every step of the output back to the same input, so
-// each input gradient is the sum of its n step weights. The ones-based helper would hide both,
-// because it makes every gradient 1 and n.
+// Permute and RepeatVector (no trainable parameters, input gradient only). A permute routes each
+// output gradient to exactly 1 input, so the weighted loss catches a wrong inverse order. A
+// repeat sums its n step weights into each input gradient, which the ones-based helper would
+// also hide.
 
 #[test]
 fn permute_swap_input_gradient_matches_finite_difference() {
@@ -969,16 +963,14 @@ fn repeat_vector_input_gradient_matches_finite_difference() {
     check_input_gradient_weighted(&mut repeat, &x, 1e-3, 1e-2);
 }
 
-// Upsampling layers (no trainable parameters -> input gradient only).
-// Every output position is a weighted sum of input positions, so the input gradient is the
-// transposed weight table. The weighted loss gives each output position its own weight, which is
-// what makes a misplaced tap visible. The ones-based helper would hide it, because the weights of
-// an output position always sum to 1. Every factor below is uneven per axis, which an equal
-// factor would hide.
+// Upsampling layers (no trainable parameters, input gradient only). Each output position is a
+// weighted sum of input positions, so the weighted loss exposes a misplaced tap that the
+// ones-based helper would hide, since an output position's weights always sum to 1. Every
+// factor below is uneven per axis, since an equal factor would hide the same bug.
 //
-// The step is 1e-1 rather than the usual 1e-3, because these layers are exactly linear. A linear
-// function has no truncation error at any step, so the only error left is the float32 rounding
-// of the 2 loss values. A wider step divides that rounding by more.
+// The step here is 1e-1 rather than the usual 1e-3: these layers are exactly linear, so a
+// central difference has no truncation error, leaving only float32 rounding of the 2 loss
+// values. A wider step divides that rounding by more.
 
 #[test]
 fn up_sampling_1d_input_gradient_matches_finite_difference() {
@@ -1065,10 +1057,9 @@ fn unit_normalization_separated_axes_input_gradient_matches_finite_difference() 
     check_input_gradient_weighted(&mut unit, &x, 1e-3, 5e-2);
 }
 
-// Convolution with `Same` padding takes a different backward code path than `Valid` (every
-// earlier conv check here uses `Valid`). The ones-based helper still works, since a
-// convolution's output sum is not constant in the input, and odd kernels keep the padding
-// symmetric.
+// `Same` padding takes a different backward path than `Valid`, which every earlier conv check
+// here uses. The ones-based helper still works, since a convolution's output sum is not
+// constant in the input. Odd kernels below keep the padding symmetric.
 
 #[test]
 fn conv1d_same_padding_input_gradient_matches_finite_difference() {
@@ -1388,12 +1379,11 @@ fn batch_normalization_spatial_weight_gradient_matches_finite_difference() {
     check_weight_gradient_weighted(&mut bn, &x, 1e-3, 5e-2);
 }
 
-// A transposed convolution runs the same 2 halves as a plain one, in the other order. Its
-// forward pass is the plain backward's col2im scatter, and its backward pass is the plain
-// forward's im2col gather. So the 2 directions here exercise code that no plain convolution
-// check reaches: the forward scatter's crop, and the backward gather's pad. Both padding modes
-// and a stride above 1 need their own case, because the crop and the pad are 0 under `Valid`
-// at stride 1.
+// A transposed convolution runs a plain one's 2 halves in the other order: its forward pass is
+// the plain backward's col2im scatter, and its backward pass is the plain forward's im2col
+// gather. This exercises code no plain check reaches: the scatter's crop and the gather's pad.
+// Both need their own case with `Same` padding and a stride above 1, since the crop and the pad
+// are 0 under `Valid` at stride 1.
 
 #[test]
 fn conv1d_transpose_input_gradient_matches_finite_difference() {

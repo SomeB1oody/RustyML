@@ -82,7 +82,6 @@ fn avg_pool_1d_forward_multi_batch() {
     assert_abs_diff_eq!(out[[1, 1, 0]], 6.0_f32, epsilon = 1e-5);
 }
 
-/// predict() returns the same result as forward()
 #[test]
 fn avg_pool_1d_predict_equals_forward() {
     let mut layer = AveragePooling1D::new(2).with_stride(2).unwrap();
@@ -127,21 +126,18 @@ fn avg_pool_1d_wrong_rank_input_errors() {
     assert!(layer_pred.forward(&bad, &mut Ctx::inference()).is_err());
 }
 
-/// The build rejects a pool size of 0
 #[test]
 fn avg_pool_1d_build_rejects_zero_pool_size() {
     let result = AveragePooling1D::new(0).build(&Shape::known(&[2, 8, 3]));
     assert!(result.is_err(), "pool_size=0 must be rejected");
 }
 
-/// Constructor rejects stride=0
 #[test]
 fn avg_pool_1d_constructor_rejects_zero_stride() {
     let result = AveragePooling1D::new(2).with_stride(0);
     assert!(result.is_err(), "stride=0 must be rejected");
 }
 
-/// The build rejects a pool size larger than the input length
 #[test]
 fn avg_pool_1d_build_rejects_pool_size_larger_than_length() {
     let result = AveragePooling1D::new(8).build(&Shape::known(&[2, 4, 3]));
@@ -155,7 +151,6 @@ fn avg_pool_1d_build_rejects_wrong_rank() {
     assert!(result.is_err(), "a rank-2 build shape must be rejected");
 }
 
-/// layer_type() and output_shape() return correct strings
 #[test]
 fn avg_pool_1d_layer_type_and_output_shape() {
     let mut layer = AveragePooling1D::new(2).with_stride(2).unwrap();
@@ -298,7 +293,6 @@ fn avg_pool_2d_build_rejects_wrong_rank() {
     assert!(result.is_err(), "a rank-3 build shape must be rejected");
 }
 
-/// Constructor rejects zero stride
 #[test]
 fn avg_pool_2d_constructor_rejects_zero_stride() {
     let result = AveragePooling2D::new((2, 2)).with_strides((0, 2));
@@ -331,7 +325,6 @@ fn avg_pool_2d_build_rejects_a_zero_spatial_extent() {
     );
 }
 
-/// layer_type() and output_shape() return correct strings
 #[test]
 fn avg_pool_2d_layer_type_and_output_shape() {
     let mut layer = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
@@ -448,7 +441,6 @@ fn avg_pool_3d_build_rejects_wrong_rank() {
     assert!(result.is_err(), "a rank-4 build shape must be rejected");
 }
 
-/// Constructor rejects zero strides
 #[test]
 fn avg_pool_3d_constructor_rejects_zero_stride() {
     let result = AveragePooling3D::new((2, 2, 2)).with_strides((0, 2, 2));
@@ -472,7 +464,6 @@ fn avg_pool_3d_build_rejects_a_zero_spatial_extent() {
     );
 }
 
-/// layer_type() and output_shape() return correct strings
 #[test]
 fn avg_pool_3d_layer_type_and_output_shape() {
     let mut layer = AveragePooling3D::new((2, 2, 2))
@@ -588,7 +579,6 @@ fn global_avg_pool_1d_wrong_rank_input_errors() {
     assert!(layer_pred.forward(&bad, &mut Ctx::inference()).is_err());
 }
 
-/// layer_type() returns correct string
 #[test]
 fn global_avg_pool_1d_layer_type() {
     let layer = GlobalAveragePooling1D::new();
@@ -722,7 +712,6 @@ fn global_avg_pool_2d_wrong_rank_input_errors() {
     assert!(layer_pred.forward(&bad, &mut Ctx::inference()).is_err());
 }
 
-/// layer_type() returns correct string
 #[test]
 fn global_avg_pool_2d_layer_type() {
     let layer = GlobalAveragePooling2D::new();
@@ -850,7 +839,6 @@ fn global_avg_pool_3d_wrong_rank_input_errors() {
     assert!(layer_pred.forward(&bad, &mut Ctx::inference()).is_err());
 }
 
-/// layer_type() returns correct string
 #[test]
 fn global_avg_pool_3d_layer_type() {
     let layer = GlobalAveragePooling3D::new();

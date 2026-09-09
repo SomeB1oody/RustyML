@@ -20,10 +20,10 @@ use ndarray_rand::rand_distr::Normal;
 ///
 /// # Shape freedom
 ///
-/// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of
-/// any shape and of any rank. [`UnaryLayer::build`] records the shape it is given, and
-/// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape)(crate::neural_network::traits::Layer::output_shape) reports it, but
-/// no later input is checked against it. See the "Shape freedom" section of
+/// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of any
+/// shape at rank 1 or higher. [`UnaryLayer::build`] records the shape it is given, and
+/// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape) reports it, but no
+/// later input is checked against it. See the "Shape freedom" section of
 /// [`Dropout`](crate::neural_network::layers::regularization::dropout::dropout::Dropout)
 ///
 /// # Examples
@@ -58,7 +58,7 @@ impl GaussianNoise {
     ///
     /// # Parameters
     ///
-    /// - `stddev` - Standard deviation of the Gaussian noise, must be non-negative
+    /// - `stddev` - Standard deviation of the Gaussian noise, must be finite and non-negative
     ///
     /// # Returns
     ///
@@ -71,7 +71,7 @@ impl GaussianNoise {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `stddev` is negative
+    /// - `Error::InvalidParameter` - If `stddev` is negative or not finite
     pub fn new(stddev: f32) -> Result<Self, Error> {
         validate_stddev(stddev)?;
 
@@ -128,9 +128,9 @@ impl UnaryLayer for GaussianNoise {
     /// allocated
     ///
     /// The recorded shape is what
-    /// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape)(crate::neural_network::traits::Layer::output_shape) reports, and
-    /// no more. The layer owns no array and reads no extent, so it checks no later input
-    /// against it. See the "Shape freedom" section of the type
+    /// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape) reports, and no
+    /// more. The layer owns no array and reads no extent, so it checks no later input against it.
+    /// See the "Shape freedom" section of the type
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "GaussianNoise", input)? else {
             return Ok(());
@@ -149,7 +149,6 @@ impl UnaryLayer for GaussianNoise {
             return Err(Error::not_built("GaussianNoise"));
         }
 
-        // During inference or when stddev is 0, pass input through unchanged
         if !ctx.is_training() || self.stddev == 0.0 {
             return Ok(input.clone());
         }
@@ -160,7 +159,6 @@ impl UnaryLayer for GaussianNoise {
             .take_state::<StdRng>("rng")
             .unwrap_or_else(|| self.rng.clone());
 
-        // Sample mean-0 Gaussian noise and add it to the input
         let noise = Tensor::random_using(
             input.raw_dim(),
             Normal::new(0.0, self.stddev).unwrap(),

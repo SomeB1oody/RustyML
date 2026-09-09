@@ -1,7 +1,7 @@
 //! Prelude that re-exports the crate's machine learning, metrics, neural network, and utility items
 //!
 //! A single import point for the crate's most commonly used types, traits, and functions. `use
-//! rustyml::prelude::*` pulls in every enabled category at once. Alternatively, import one
+//! rustyml::prelude::*` pulls in every enabled category at once. Alternatively, import 1
 //! category at a time through the [`machine_learning`], [`metrics`], [`neural_network`], and
 //! [`utils`] submodules. Each category is feature-gated, so the prelude exposes only the items
 //! whose feature is enabled
@@ -29,16 +29,18 @@
 //! // `use rustyml::prelude::metrics::*;`          for the metric functions
 //! ```
 
-/// Prelude module for machine learning functionality
+/// Prelude re-exports for the machine learning estimators, traits, and shared enums
 #[cfg(feature = "machine_learning")]
 pub mod machine_learning;
-/// Prelude module for metric functions
+/// Prelude re-exports for evaluation metrics
 #[cfg(feature = "metrics")]
 pub mod metrics;
-/// Prelude module for neural network framework
+/// Prelude re-exports for the neural network framework: tensors, layers, losses, optimizers,
+/// and models
 #[cfg(feature = "neural_network")]
 pub mod neural_network;
-/// Prelude module for utility functions
+/// Prelude re-exports for the utils module: preprocessing, dataset splitting, and shared
+/// estimator traits
 #[cfg(feature = "utils")]
 pub mod utils;
 
@@ -52,11 +54,8 @@ pub use self::neural_network::*;
 #[cfg(feature = "utils")]
 pub use self::utils::*;
 
-// `Average` is the 1 name that 2 categories of the crate give to an item. The metrics category
-// gives the averaging mode of the classification scores, and the neural network category gives
-// the merge layer that averages its inputs. A glob of the 2 categories cannot give the name 1
-// meaning, so this explicit re-export settles it and the root keeps the averaging mode. The
-// merge layer stays reachable as `prelude::neural_network::Average`, and as
-// `neural_network::layers::Average`
+// `Average` names 2 different items: the metrics averaging mode and the neural network merge
+// layer. Both globs above export it, so this explicit re-export breaks the tie and keeps the
+// averaging mode at the root. The layer stays reachable as `neural_network::layers::Average`
 #[cfg(feature = "metrics")]
 pub use crate::metrics::Average;

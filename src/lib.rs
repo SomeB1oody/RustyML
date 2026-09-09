@@ -14,7 +14,6 @@
 //!
 //! - `metrics` panics instead of returning `Result`
 //! - `roc_curve` always returns the full threshold sweep
-//! - `MeanShift` has an opt-in Gaussian kernel
 //!
 //! ## Architecture
 //!
@@ -32,9 +31,8 @@
 //!   and predicting `-1` (outlier) / `+1` (inlier)
 //!
 //! ### [`neural_network`]
-//! Neural network framework with a sequential model and a graph model. Tensors are
-//! channels-last, and kernel shapes match Keras, so a layout carried over from Keras needs no
-//! permutation:
+//! Neural network framework with a sequential model and a graph model. Tensors and kernel
+//! shapes are channels-last, so a channels-last layout needs no permutation:
 //! - **Layers**: Dense, Embedding, SimpleRNN, LSTM, GRU, Convolution, Pooling, Upsampling,
 //!   Border, Shape, Normalization, Dropout, Merge
 //! - **Merge Layers**: Add, Subtract, Multiply, Average, Maximum, Minimum, and Concatenate. Each
@@ -44,7 +42,7 @@
 //! - **Models**: `Sequential` holds a chain of layers, and `Graph` holds a directed graph of
 //!   them. A graph model takes several inlets and gives several outlets, and several of its
 //!   nodes can call 1 layer, which is how it shares weights. `fit` and `fit_with_batches` return a
-//!   `History` of one loss per epoch. A hand-written loop can call the public `train_batch`
+//!   `History` of 1 loss per epoch. A hand-written loop can call the public `train_batch`
 //!   instead, and `evaluate` scores the model without training it
 //! - **Passes**: a layer computes, and it holds no cache and no gradient. `forward` and
 //!   `backward` take `&self` and a `Ctx`. That context carries the training flag, the caches of
@@ -65,7 +63,7 @@
 //! - **Regression**: MSE, RMSE, MAE, R^2 score
 //! - **Classification**: Accuracy, Confusion Matrix, AUC-ROC, F1-score
 //! - **Clustering**: Adjusted Rand Index, Normalized/Adjusted Mutual Information, Silhouette
-//!   Score. Every one of them takes `isize` labels, the type the clustering estimators return
+//!   Score. Every 1 of them takes `isize` labels, the type the clustering estimators return
 //!
 //! ### [`math`]
 //! Low-level numeric primitives shared across modules:
@@ -214,7 +212,7 @@
 //!
 //! The default enables everything. A scikit-learn workflow reaches across modules
 //! (`utils::train_test_split` -> `machine_learning` -> `metrics`), so a fresh `cargo add rustyml`
-//! should have all of it. Features are additive. Naming one does not turn the rest off, so to
+//! should have all of it. Features are additive. Naming 1 does not turn the rest off, so to
 //! restrict a build, set `default-features = false` and list what you need.
 
 #[cfg(any(
@@ -259,9 +257,9 @@ fn create_progress_bar(total: u64, template: &str) -> ProgressBar {
 ///
 /// # Parameters
 ///
-/// - `$method_name` - The name of the getter method (e.g. get_fit_intercept)
-/// - `$field_name` - The name of the field to access (e.g. fit_intercept)
-/// - `$return_type` - The return type of the getter method
+/// - `$method_name` - the name of the getter method (e.g. get_fit_intercept)
+/// - `$field_name` - the name of the field to access (e.g. fit_intercept)
+/// - `$return_type` - the return type of the getter method
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 macro_rules! get_field {
     ($method_name:ident, $field_name:ident, $return_type:ty) => {
@@ -281,9 +279,9 @@ macro_rules! get_field {
 ///
 /// # Parameters
 ///
-/// - `$method_name` - The identifier for the generated getter method name
-/// - `$field_name` - The identifier of the struct field to access
-/// - `$return_type` - The type for the return value (typically a reference type like `&Type`)
+/// - `$method_name` - the identifier for the generated getter method name
+/// - `$field_name` - the identifier of the struct field to access
+/// - `$return_type` - the type for the return value (typically a reference type like `&Type`)
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 macro_rules! get_field_as_ref {
     ($method_name:ident, $field_name:ident, $return_type:ty) => {
@@ -299,28 +297,31 @@ macro_rules! get_field_as_ref {
 
 /// Generates `save_to_path` and `load_from_path` methods for model structs
 ///
-/// - `save_to_path` - Saves the model to a binary file at the specified path
-/// - `load_from_path` - Loads a model from a binary file at the specified path
+/// - `save_to_path` - saves the model to a binary file at the specified path
+/// - `load_from_path` - loads a model from a binary file at the specified path
 ///
 /// # Parameters
 ///
-/// - `$model_type` - The type of the model struct (e.g. LinearRegression, LogisticRegression)
+/// - `$model_type` - the type of the model struct (e.g. LinearRegression, LogisticRegression)
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 macro_rules! model_save_and_load_methods {
     ($model_type:ty) => {
         /// Saves the trained model to a binary file at the specified path
         ///
-        /// Serializes the entire model state including coefficients, intercept,
-        /// hyperparameters, and training metadata to a compact binary format using postcard
+        /// Serializes the entire model state, including coefficients, intercept,
+        /// hyperparameters, and training metadata, to a compact binary format using postcard
         ///
         /// # Parameters
         ///
-        /// - `path` - File path where the model will be saved (e.g. "stored_model.bin")
+        /// - `path` - file path where the model is saved (e.g. "stored_model.bin")
         ///
         /// # Returns
         ///
-        /// - `Ok(())` - Model successfully saved to file
-        /// - `Err(Error::Io)` - File creation/write failed, or serialization failed
+        /// - `Result<(), Error>` - success, or an error if saving failed
+        ///
+        /// # Errors
+        ///
+        /// - `Error::Io` - file creation or write failed, or serialization failed
         pub fn save_to_path(&self, path: &str) -> Result<(), crate::error::Error> {
             use std::fs::File;
             use std::io::{BufWriter, Write};
@@ -344,13 +345,16 @@ macro_rules! model_save_and_load_methods {
         ///
         /// # Parameters
         ///
-        /// - `path` - File path from which to load the model (e.g. "stored_model.bin")
+        /// - `path` - file path from which to load the model (e.g. "stored_model.bin")
         ///
         /// # Returns
         ///
-        /// - `Ok(Self)` - Successfully loaded model instance
-        /// - `Err(Error::Io)` - File not found/read failed, or deserialization failed
-        ///   (invalid format or corrupted data)
+        /// - `Result<Self, Error>` - the loaded model instance, or an error if loading failed
+        ///
+        /// # Errors
+        ///
+        /// - `Error::Io` - file not found or read failed, or deserialization failed (invalid
+        ///   format or corrupted data)
         pub fn load_from_path(path: &str) -> Result<Self, crate::error::Error> {
             let bytes = std::fs::read(path)?;
 
@@ -364,13 +368,12 @@ macro_rules! model_save_and_load_methods {
 /// Generates a runtime-tunable `usize` parallelism gate: a private atomic backing store plus a
 /// `pub(crate)` getter and setter
 ///
-/// Replaces a `const` gate threshold with an [`AtomicUsize`](std::sync::atomic::AtomicUsize)
-/// initialized to the same default, so the value can be overridden at runtime without a
-/// recompile. Every leading attribute (`#[cfg(...)]`, doc comments) is applied to all 3
-/// generated items, so a gate keeps the exact feature-gating of the constant it replaces. The
-/// hot-path read is a single `Relaxed` load. The gate only selects a strategy and never changes a
-/// result, so no stronger ordering is needed. The public [`crate::tuning`] facade wraps the
-/// generated setters into one discoverable surface
+/// The backing store is an [`AtomicUsize`](std::sync::atomic::AtomicUsize) initialized to a
+/// default value, so the gate can be overridden at runtime without a recompile. Every leading
+/// attribute (`#[cfg(...)]`, doc comments) is applied to all 3 generated items, so the getter and
+/// setter keep the exact feature-gating written at the invocation. The read is a single
+/// `Relaxed` load, and the gate only selects a strategy and never changes a result. The public
+/// [`crate::tuning`] facade wraps the generated setters into 1 discoverable surface
 ///
 /// # Syntax
 ///
@@ -408,7 +411,7 @@ macro_rules! model_save_and_load_methods {
 /// pub(crate) fn set_some_gate(value: usize) { SOME_GATE.store(value, Relaxed); }
 /// ```
 ///
-/// Call sites read the gate through `some_gate()` instead of the old `SOME_GATE` constant
+/// Call sites read the gate through `some_gate()`, never through `SOME_GATE` directly
 #[allow(unused_macros)]
 macro_rules! tunable_gate {
     (
@@ -469,8 +472,8 @@ pub mod random;
 ))]
 pub use random::{clear_global_seed, set_global_seed};
 
-/// Crate-internal parallel/serial gate thresholds, one constant per calibrated kernel cost
-/// class (`f32` classes for the neural-network layers, `f64` classes for ML/utils)
+/// Crate-internal parallel/serial gate thresholds, 1 runtime-tunable gate per calibrated
+/// kernel cost class (`f32` classes for the neural-network layers, `f64` classes for ML/utils)
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",

@@ -153,7 +153,7 @@ fn p_relu_rejects_the_batch_axis_in_shared_axes() {
 }
 
 /// An axis at or above the rank names no axis of the input. `with_shared_axes` accepts any
-/// axis number, because it does not yet know the rank; `build` is where the rank is known and
+/// axis number, because it does not yet know the rank. `build` is where the rank is known and
 /// the axis is checked against it
 #[test]
 fn p_relu_rejects_a_shared_axis_at_or_above_the_rank() {
@@ -415,9 +415,10 @@ fn p_relu_exposes_no_parameter_before_the_first_backward() {
     assert_eq!(ctx.grads().len(), 1);
 }
 
-/// Resizing the slope array leaves a gradient of an earlier pass that no longer matches it
+/// Resizing the slope array leaves a gradient of an earlier pass that does not match the new
+/// shape
 ///
-/// The context owns the gradient now, so the layer holds no stale one. The gradient of the
+/// The context owns the gradient, so the layer holds no stale one. The gradient of the
 /// pass before the resize still has the shape of the slope array before the resize, which is
 /// what an optimizer must not write into the resized array
 #[test]
@@ -696,7 +697,6 @@ fn p_relu_reports_its_type_and_output_shape() {
     assert_eq!(layer.output_shape(), "(None, 3, 4)");
 }
 
-/// An inference pass runs the same transform as a training pass and writes no cache
 #[test]
 fn p_relu_predict_equals_forward_and_caches_nothing() {
     let layer = p_relu_with(vec![2, 3], vec![], vec![0.25, -0.1, 0.5]);

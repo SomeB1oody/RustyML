@@ -1,13 +1,11 @@
 //! Shared parallel/serial gate thresholds for the elementwise kernel classes
 //!
-//! Every gated pass in the crate belongs to one of a few cost classes. Declaring one gate per
-//! class here keeps its value in one place. Call sites import the getter for their kernel's
+//! Every gated pass in the crate belongs to 1 of a few cost classes. Declaring 1 gate per
+//! class here keeps its value in 1 place. Call sites import the getter for their kernel's
 //! class instead of restating the value.
 //!
 //! The classes come in 2 element widths. The `f32` gates serve the neural-network layers.
-//! The `f64` gates serve the classical-ML and utils modules. An f64 stream moves twice the
-//! bytes per element of an f32 stream. An f64 `exp` also costs more than an f32 `exp`. The
-//! 2 widths use separate gates.
+//! The `f64` gates serve the classical-ML and utils modules. The 2 widths use separate gates.
 //!
 //! Each gate is a runtime-tunable atomic (see `tunable_gate!`). Override the default at
 //! runtime through [`crate::tuning`]. A gate only picks serial versus rayon. Because the gated
@@ -27,17 +25,17 @@
 //! - `BATCH_NORM_PARALLEL_THRESHOLD` (a per-layer mapping), plus the 2 gates the 3
 //!   normalization layers share, `COL_FOLD_PARALLEL_MIN_ELEMS` and `ROW_PASS_PARALLEL_MIN_ELEMS`
 //!
-//! 2 thresholds are plain constants rather than gates. `metrics` fixes its silhouette threshold,
-//! because its parallel fill is not bit-for-bit equal to its serial fill, so a movable value
-//! there would change a returned score. `math` fixes its exp-reduction threshold, because the
-//! block size already sets the smallest value that gives more than 1 task.
+//! 2 thresholds are plain constants rather than gates. `metrics` fixes its silhouette threshold.
+//! Its parallel fill is not bit-for-bit equal to its serial fill, so a movable value there
+//! would change a returned score. `math` fixes its exp-reduction threshold, because the block
+//! size already sets the smallest value that gives more than 1 task.
 
 // f32 classes (neural-network layers)
 
 tunable_gate! {
     /// Cheap memory-bound `f32` maps: the activations with no transcendental call, such as
     /// ReLU's `max(0, x)`, the dropout layers' compare-into-mask thresholding, and similar
-    /// one-stream copy-speed loops. Gated on the total element count.
+    /// 1-stream copy-speed loops. Gated on the total element count.
     #[cfg(feature = "neural_network")]
     pub(crate) CHEAP_MAP_PARALLEL_THRESHOLD
         => cheap_map_parallel_threshold / set_cheap_map_parallel_threshold = 4_000_000
@@ -103,7 +101,7 @@ tunable_gate! {
 
 tunable_gate! {
     /// Cheap memory-bound `f64` maps: centering, scaling, normalization, kernel-matrix
-    /// centering, and similar one- or two-stream copy-speed loops. Gated on the total element
+    /// centering, and similar 1- or 2-stream copy-speed loops. Gated on the total element
     /// count.
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
     pub(crate) CHEAP_MAP_F64_PARALLEL_THRESHOLD
@@ -156,9 +154,9 @@ tunable_gate! {
     /// same machine.
     ///
     /// A caller whose work metric is a product, and not the length of the axis the fold blocks,
-    /// must also check that axis against 2 blocks of
-    /// [`DET_REDUCE_BLOCK`](crate::math::reduction::DET_REDUCE_BLOCK). The gate can otherwise
-    /// clear on a wide, short input while the fold still has 1 task.
+    /// must also check that axis. It must reach 2 blocks of
+    /// [`DET_REDUCE_BLOCK`](crate::math::reduction::DET_REDUCE_BLOCK) or more. The gate can
+    /// otherwise clear on a wide, short input while the fold still has 1 task.
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
     pub(crate) SUM_F64_PARALLEL_MIN_ELEMS
         => sum_f64_parallel_min_elems / set_sum_f64_parallel_min_elems = 262_144
@@ -169,17 +167,24 @@ tunable_gate! {
 /// Applies a test-only cap to a calibrated task size
 ///
 /// A parallel driver first computes the task size that its calibrated rule gives, and then
-/// passes that size through this function. `natural` is the calibrated size, and it is 1 or
-/// more. `forced` is the cap that the matching `tunable_gate!` store holds.
+/// passes that size through this function.
 ///
-/// The production value of every such store is 0, which keeps `natural` and adds 1 relaxed
-/// load. A value of 1 or more holds each task at that size or below, so an input far under the
-/// calibrated size still builds more than 1 task.
+/// The production value of every `tunable_gate!` store that backs `forced` is 0, which keeps
+/// `natural` and adds 1 relaxed load. A value of 1 or more holds each task at that size or
+/// below. An input far under the calibrated size then still builds more than 1 task.
 ///
 /// A task size decides only where the task boundaries fall. Each driver that reads a capped
-/// size runs the same serial kernel over each task and joins the results in task order, so the
-/// result is the same at every cap. See `crate::bench_internals` for the surface that installs
-/// a cap, and for the drivers that must never take one.
+/// size runs the same serial kernel over each task, and joins the results in task order. The
+/// result is therefore the same at every cap. See `crate::bench_internals` for the surface that
+/// installs a cap, and for the drivers that must never take one.
+///
+/// # Parameters
+/// - `natural` - The calibrated task size. It is 1 or more.
+/// - `forced` - The cap that the matching `tunable_gate!` store holds.
+///
+/// # Returns
+/// - `usize` - The task size to use: `natural` when `forced` is 0, otherwise the smaller of
+///   the 2.
 #[cfg(feature = "neural_network")]
 #[inline]
 pub(crate) fn split_cap(natural: usize, forced: usize) -> usize {

@@ -11,7 +11,8 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Linear (identity) activation layer
 ///
-/// Applies the identity function `f(x) = x` elementwise, preserving the input shape
+/// Applies the identity function `f(x) = x` elementwise, preserving the input shape. Common
+/// inputs include 2D tensors for dense layers and 4D tensors for convolutional layers
 ///
 /// # Examples
 ///
@@ -94,7 +95,6 @@ impl UnaryLayer for Linear {
             ctx.push_cache("Linear", input.shape().to_vec());
         }
 
-        // Identity: f(x) = x
         Ok(input.clone())
     }
 
@@ -105,7 +105,7 @@ impl UnaryLayer for Linear {
             return Err(Error::shape_mismatch(input_shape, grad_output.shape()));
         }
 
-        // Derivative is 1, so the gradient passes through unchanged
+        // Linear derivative is 1, so the gradient passes through unchanged
         Ok(grad_output.clone())
     }
 }

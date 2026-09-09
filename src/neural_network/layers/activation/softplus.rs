@@ -16,8 +16,8 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// Applies `ln(1 + e^x)` elementwise to the input tensor, keeping the original shape.
 /// Common inputs include 2D tensors for dense layers and 4D tensors for convolutional layers
 ///
-/// Softplus is a smooth approximation of ReLU. The output is strictly positive, and the
-/// gradient never reaches 0, so there is no dead-unit failure mode
+/// Softplus is a smooth approximation of ReLU. The output is strictly positive. The gradient
+/// never reaches 0, so there is no dead-unit failure mode
 ///
 /// [`Activation::Softplus`] provides the activation math. This layer only adds boundary
 /// validation and the caching needed for backpropagation
@@ -117,7 +117,7 @@ impl UnaryLayer for Softplus {
             return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
         }
 
-        // Softplus derivative is the logistic sigmoid of the input
+        // Softplus derivative is 1 / (1 + e^(-x))
         Activation::Softplus.backward(&output, grad_output)
     }
 }

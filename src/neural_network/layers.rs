@@ -1,12 +1,12 @@
 //! Neural network layers: the layer subsystem aggregator
 //!
 //! Declares every layer submodule and glob-re-exports the public layer types. It also defines
-//! the shared infrastructure used across the subsystem: the
-//! [`ParamCounts`](crate::neural_network::layers::ParamCounts) report (how many parameter
-//! elements a layer holds, split into trainable and non-trainable), and the 2 macros that
-//! give a layer its weight methods. `no_trainable_parameters_layer_functions` emits the stubs
-//! of a parameter-free layer, and `named_weight_layer_functions` builds the named array list
-//! of a layer that holds arrays.
+//! the infrastructure shared across the subsystem. The
+//! [`ParamCounts`](crate::neural_network::layers::ParamCounts) report says how many parameter
+//! elements a layer holds, split into trainable and non-trainable. 2 macros give a layer its
+//! weight methods. `no_trainable_parameters_layer_functions` emits the stubs of a parameter-free
+//! layer. `named_weight_layer_functions` builds the named array list of a layer that holds
+//! arrays.
 //!
 //! The submodules fall into a few categories:
 //!
@@ -26,9 +26,11 @@
 //!   - [`repeat_vector`](crate::neural_network::layers::repeat_vector)
 //!   - [`rescaling`](crate::neural_network::layers::rescaling)
 //!   - [`reshape`](crate::neural_network::layers::reshape)
+//!   - [`reverse`](crate::neural_network::layers::reverse)
 //!   - [`upsampling`](crate::neural_network::layers::upsampling)
-//! - Shared (private) helpers: `conv_op_helpers` (2D/4D convolution zero-padding) and
-//!   `shape_helpers` (pooling/convolution output-shape calculators)
+//! - Shared (private) helpers: `conv_op_helpers` (the depthwise convolution kernel, shared by
+//!   the depthwise and separable convolution layers) and `shape_helpers` (pooling/convolution
+//!   output-shape calculators)
 //! - Validation: `validation` (shared input/weight checks)
 //! - Serialization: [`checkpoint`](crate::neural_network::layers::checkpoint)
 //!   (the named on-disk format, and the load that applies it)
@@ -38,8 +40,8 @@
 /// The 2 counts are independent, and a layer reports both. A Dense layer holds trainable
 /// elements only. A pooling or activation layer holds none of either.
 /// [`BatchNormalization`] holds both: `gamma` and `beta` are trainable, and the running mean
-/// and the running variance are not. The running statistics move on every training forward pass, but no optimizer ever
-/// sees them, so they are non-trainable exactly as Keras 3 reports them
+/// and the running variance are not. The running statistics move on every training forward
+/// pass. No optimizer updates them, so they stay non-trainable
 ///
 /// [`Sequential::summary`](crate::neural_network::sequential::Sequential::summary) adds the 2
 /// columns over the model and prints the total of both
@@ -117,7 +119,7 @@ pub mod activation;
 pub mod border;
 /// The named checkpoint format: what a saved model holds, and how a load applies it
 pub mod checkpoint;
-/// Convolution-internal helpers (output assembly, gradient accumulation, padding)
+/// The depthwise convolution kernel, shared by the depthwise and separable convolution layers
 mod conv_op_helpers;
 /// Convolutional layer for neural networks
 pub mod convolution;
@@ -206,20 +208,20 @@ pub(in crate::neural_network::layers) use no_trainable_parameters_layer_function
 /// Generates the `weights` and `weights_mut` methods of a layer that holds arrays
 ///
 /// 1 list serves both directions, so the name, the kind, and the order of an array cannot
-/// drift between the read path and the write path. The checkpoint format reads the name and
-/// the kind from it, so this list is the layer half of every checkpoint path
+/// drift between the read and write paths. The checkpoint format reads the name and the kind
+/// from it, so this list is the layer half of every checkpoint path
 ///
 /// Each entry reads `trainable "<name>" => <field>` or `non_trainable "<name>" => <field>`.
-/// The name is the Keras 3 name of the array, and the field is the field of the layer struct
-/// that holds it. A field of a nested struct is written with dots, such as `gates.kernel`.
-/// The 2 halves stay next to each other, so a renamed field breaks this list instead of
-/// leaving a stale name behind
+/// The name is the name of the array in the checkpoint, and the field is the field of the
+/// layer struct that holds it. A field of a nested struct is written with dots, such as
+/// `gates.kernel`. The 2 halves stay next to each other, so a renamed field breaks this list
+/// instead of leaving a stale name behind
 ///
 /// An entry that ends in `if <flag>` is optional. The flag is a `bool` field of the same
 /// layer, and the array reaches the list only while the flag is true. `Dense` writes
-/// `trainable "bias" => bias if use_bias`, so a layer built with `use_bias` set to false
-/// exposes the kernel alone and its checkpoint holds 1 path. An optional entry moves no other
-/// entry, because a checkpoint addresses an array by name and never by position
+/// `trainable "bias" => bias if use_bias`. A layer built with `use_bias` set to false exposes
+/// the kernel alone, so its checkpoint holds 1 path. An optional entry moves no other entry,
+/// because a checkpoint addresses an array by name and never by position
 ///
 /// Give an array the same name that [`LayerBase::parameters_mut`] gives it. The compiler binds
 /// neither the name nor the storage. A parameter and the array of 1 name must be 1 storage,
@@ -265,16 +267,16 @@ pub(in crate::neural_network::layers) use named_weight_layer_functions;
 
 /// Generates the 2 build reports of a layer that holds a `built: Option<Shape>` field
 ///
-/// [`Layer::known_input_shape`] gives the shape the layer built for, and
-/// [`Layer::build_config`] gives the same shape with the batch axis freed, which is what a
+/// [`LayerBase::known_input_shapes`] gives the shape the layer built for, and
+/// [`LayerBase::build_config`] gives the same shape with the batch axis freed, which is what a
 /// checkpoint records. A layer whose displayed input shape comes from somewhere else uses
-/// `build_config_function` instead and writes its own `known_input_shape`
+/// `build_config_function` instead and writes its own `known_input_shapes`
 ///
 /// It is path-exported like `no_trainable_parameters_layer_functions`:
 /// `use crate::neural_network::layers::built_layer_shape_functions;`
 ///
-/// [`Layer::known_input_shape`]: crate::neural_network::traits::Layer::known_input_shape
-/// [`Layer::build_config`]: crate::neural_network::traits::UnaryLayer::build_config
+/// [`LayerBase::known_input_shapes`]: crate::neural_network::traits::LayerBase::known_input_shapes
+/// [`LayerBase::build_config`]: crate::neural_network::traits::LayerBase::build_config
 macro_rules! built_layer_shape_functions {
     () => {
         fn known_input_shapes(&self) -> Option<Vec<$crate::neural_network::Shape>> {
@@ -288,9 +290,9 @@ macro_rules! built_layer_shape_functions {
 }
 pub(in crate::neural_network::layers) use built_layer_shape_functions;
 
-/// Generates [`Layer::build_config`] of a layer that holds a `built: Option<Shape>` field
+/// Generates [`LayerBase::build_config`] of a layer that holds a `built: Option<Shape>` field
 ///
-/// [`Layer::build_config`]: crate::neural_network::traits::UnaryLayer::build_config
+/// [`LayerBase::build_config`]: crate::neural_network::traits::LayerBase::build_config
 macro_rules! build_config_function {
     () => {
         fn is_built(&self) -> bool {

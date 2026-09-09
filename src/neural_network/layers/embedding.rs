@@ -20,8 +20,7 @@ const INIT_LIMIT: f32 = 0.05;
 
 /// Target element count for 1 parallel gather task
 ///
-/// The gather copies whole rows, so a task holds `max(1, TASK_ELEMENTS / output_dim)` rows. This
-/// keeps each task large enough to cover the scheduling cost at any vector width
+/// The gather copies whole rows, so a task holds `max(1, TASK_ELEMENTS / output_dim)` rows
 const TASK_ELEMENTS: usize = 16_384;
 
 tunable_gate! {
@@ -30,7 +29,7 @@ tunable_gate! {
     ///
     /// The production value 0 keeps the row count that [`TASK_ELEMENTS`] gives. A small test
     /// input asks for fewer elements than that budget, so the gather would build exactly 1
-    /// task, and its first row would be row 0 every time. A cap of 1 or more splits it, and
+    /// task. Its first row would then be row 0 every time. A cap of 1 or more splits it, and
     /// each task then reads its own first-row arithmetic
     ///
     /// A gather is a copy, so the cap changes no value. Reachable outside the crate only
@@ -43,7 +42,7 @@ tunable_gate! {
 ///
 /// The layer holds an `(input_dim, output_dim)` table. The forward pass reads row `i` for every
 /// index `i` in the input and stacks the rows into a new trailing axis. An input of shape
-/// `[d0, d1, ..., dk]` gives an output of shape `[d0, d1, ..., dk, output_dim]`, so the output
+/// `[d0, d1, ..., dk]` gives an output of shape `[d0, d1, ..., dk, output_dim]`. The output
 /// rank is always 1 more than the input rank
 ///
 /// This is the entry point for text and for any other categorical sequence. A word index enters,
@@ -223,6 +222,7 @@ impl Embedding {
     ///
     /// # Errors
     ///
+    /// - `Error::NeuralNetwork(NnError::NotBuilt)` - If the layer holds no array yet
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `embeddings` does not match the
     ///   layer's configured shape
     pub fn set_weights(&mut self, embeddings: Array2<f32>) -> Result<(), Error> {
@@ -257,11 +257,8 @@ impl Embedding {
 
         let mut indices = Vec::with_capacity(input.len());
         for &value in input.iter() {
-            // The cast saturates. It folds every value at or below 0, and every `NaN`, into row
-            // 0. It folds `inf` and every huge value into `usize::MAX`. The first 2 tests
-            // reject what the low end of that fold would hide. The third test rejects the rest.
-            // Comparing after the cast keeps the upper bound exact, which a comparison against
-            // `input_dim as f32` would not be for a table of over 2^24 rows
+            // The cast saturates, so a value at or below -1.0, or NaN, must fail before the
+            // cast turns it into row 0. The post-cast bound stays exact past 2^24 rows
             let index = value as usize;
             if value.is_nan() || value <= -1.0 || index >= self.input_dim {
                 return Err(Error::invalid_input(format!(
@@ -288,9 +285,6 @@ impl Embedding {
             .expect("the table is kept in C order");
 
         let data = if elements >= cheap_map_parallel_threshold() {
-            // A `vec!` of 0 asks the allocator for pages that are already 0, so no element is
-            // written twice. Each worker then faults in the pages of its own block, and that
-            // parallel first touch is most of what the gate buys
             let mut data = vec![0.0f32; elements];
             let rows_per_task =
                 split_cap((TASK_ELEMENTS / width).max(1), embedding_forced_task_rows());
@@ -332,8 +326,6 @@ impl LayerBase for Embedding {
     }
 
     fn param_count(&self) -> ParamCounts {
-        // Read the arrays the layer holds rather than the configuration, so a change to
-        // the roster corrects the count with no second formula to keep in step
         ParamCounts::trainable(self.embeddings.len())
     }
 

@@ -176,7 +176,6 @@ fn dropout_rate_zero_backward_passes_gradient_through() {
 
 #[test]
 fn dropout_eval_backward_passes_gradient_through() {
-    // Inference mode: backward() passes gradient through unchanged
     let mut layer = Dropout::new(0.5).unwrap();
     let mut ctx = Ctx::inference();
 
@@ -252,8 +251,8 @@ fn dropout_backward_before_forward_returns_forward_pass_not_run() {
 
 #[test]
 fn spatial_dropout_backward_before_forward_reports_concrete_layer_name() {
-    // Regression: shared dropout_backward must name the concrete SpatialDropout layer
-    // in ForwardPassNotRun, not a hardcoded "Dropout"
+    // The shared dropout_backward helper must name the concrete SpatialDropout layer in
+    // ForwardPassNotRun, not a hardcoded Dropout name
     // Channels-last: (batch=2, length=8, channels=4)
     let d1 = SpatialDropout1D::new(0.5).unwrap();
     let err1 = d1
@@ -305,7 +304,7 @@ fn spatial_dropout_backward_before_forward_reports_concrete_layer_name() {
 fn dropout_forward_accepts_a_shape_the_build_did_not_name() {
     let mut layer = Dropout::new(0.5).unwrap();
     layer.build(&Shape::known(&[2, 4])).unwrap();
-    // The feature count differs from the 1 the build named
+    // The feature count differs from the value the build named
     let input = Array::ones((2, 5)).into_dyn();
     let out = layer
         .forward(&input, &mut Ctx::training())
@@ -373,7 +372,6 @@ fn dropout_accepts_any_rank() {
 
 #[test]
 fn spatial_dropout_1d_rate_zero_is_identity() {
-    // rate=0 -> identity in training mode
     // Channels-last: (batch=2, length=8, channels=4)
     let mut layer = SpatialDropout1D::new(0.0).unwrap();
     let mut ctx = Ctx::training();
@@ -385,7 +383,6 @@ fn spatial_dropout_1d_rate_zero_is_identity() {
 
 #[test]
 fn spatial_dropout_1d_rate_one_yields_zeros() {
-    // rate=1 -> all zeros
     // Channels-last: (batch=1, length=5, channels=3)
     let mut layer = SpatialDropout1D::new(1.0).unwrap();
     let mut ctx = Ctx::training();
@@ -464,7 +461,6 @@ fn spatial_dropout_1d_kept_channel_exact_scale() {
     let mut layer = SpatialDropout1D::new(rate).unwrap();
     let mut ctx = Ctx::training();
 
-    // Give each spatial position a distinct value
     let data: Vec<f32> = (0..40).map(|i| i as f32 + 1.0).collect();
     let input = Tensor::from_shape_vec(ndarray::IxDyn(&[1, 4, 10]), data).unwrap();
 
@@ -528,7 +524,6 @@ fn spatial_dropout_1d_backward_channel_consistency() {
 
 #[test]
 fn spatial_dropout_1d_rejects_invalid_rate() {
-    // Channels-last: (batch=1, length=8, channels=4)
     assert!(matches!(
         SpatialDropout1D::new(-0.1).unwrap_err(),
         Error::InvalidParameter { .. }
@@ -883,7 +878,6 @@ fn dropout_predict_does_not_overwrite_mask_from_forward() {
     let grad = ones(&[10]);
     let grad_in = layer.backward(&grad, &mut ctx).unwrap();
 
-    // Zero where output was zero, 2.0 where output was 2.0
     for (o, g) in fwd_output.iter().zip(grad_in.iter()) {
         if *o == 0.0 {
             approx::assert_abs_diff_eq!(*g, 0.0_f32, epsilon = 1e-5);
@@ -893,16 +887,14 @@ fn dropout_predict_does_not_overwrite_mask_from_forward() {
     }
 }
 
-// ---------------------------------------------------------------------------------------
 // Dropout noise_shape
 //
 // `noise_shape` sets the shape of the random mask, which then broadcasts up to the input. An
-// entry of 1 gives that axis 1 SHARED draw, so the same units drop at every position of the
-// axis. The point is a correlated draw, not independent draws whose average happens to agree.
+// entry of 1 gives that axis 1 shared draw, so the same units drop at every position of the
+// axis: a correlated draw, not an average of independent draws.
 //
-// Every expectation below comes from a Keras 3.15.1 probe on the jax backend. The probe
-// recovered the mask over 40 seeds per case and derived the resolved mask shape from the axes
-// that stay constant in every seed:
+// Every expectation below comes from a Keras 3.15.1 probe on the jax backend, over 40 seeds
+// per case, reading the resolved mask shape from the axes that stay constant in every seed:
 //
 //   input (2,3,4)  noise_shape None        -> mask (2,3,4)
 //   input (2,3,4)  noise_shape (2,1,4)     -> mask (2,1,4)
@@ -913,9 +905,8 @@ fn dropout_predict_does_not_overwrite_mask_from_forward() {
 //   input (2,3,4)  noise_shape (1,)        -> mask (1,1,1)
 //   input (2,3,4)  noise_shape (None,1,4)  -> mask (2,1,4)
 //   input (2,4,3,5) noise_shape (1,3,1)    -> mask (1,1,3,1)
-// ---------------------------------------------------------------------------------------
 
-/// The dropout rate every noise_shape test uses, and the kept-element scale that goes with it
+/// The dropout rate every noise_shape test uses
 const NS_RATE: f32 = 0.5;
 /// The kept-element scale of `NS_RATE`, which is `1 / (1 - rate)`
 const NS_SCALE: f32 = 2.0;
@@ -1392,7 +1383,7 @@ fn dropout_noise_shape_shares_two_axes_of_a_rank_four_input() {
     }
 }
 
-/// The layer keeps its mask at the small shape, so a whole batch of shared draws stays cheap
+/// The layer keeps its mask at the small shape, not at the full input shape
 ///
 /// The check reads the mask through the observable behavior: a `[1, 1, 4]` mask over a large
 /// input has exactly 4 distinct draws, whatever the input size

@@ -8,11 +8,11 @@
 //! - A task-size cap holds a parallel driver at a small task, so a test with a small input
 //!   still reaches the path that more than 1 task takes. No test installs a cap today
 
-/// Reads 1 task-size cap.
+/// Reads 1 task-size cap
 #[cfg(feature = "neural_network")]
 pub type SplitCapGetter = fn() -> usize;
 
-/// Writes 1 task-size cap.
+/// Writes 1 task-size cap
 #[cfg(feature = "neural_network")]
 pub type SplitCapSetter = fn(usize);
 
@@ -20,11 +20,11 @@ pub type SplitCapSetter = fn(usize);
 ///
 /// # What a cap does
 ///
-/// Each of these drivers splits its work into tasks, and each takes the task size from a
-/// calibrated rule with a floor of 64 positions or more. A small test tensor holds fewer
-/// elements than that floor, so each rule gives a size at or above the whole input, and the
-/// driver builds exactly 1 task. The parallel branch then runs, and the chunk arithmetic, the
-/// block indexing, and the partial reassembly stay unread
+/// Each of these drivers splits its work into tasks, and each takes the task size from a rule
+/// calibrated for production inputs. A small test tensor holds fewer elements than that size.
+/// The rule then gives a size at or above the whole input, and the driver builds exactly 1
+/// task. The parallel branch then runs, and the chunk arithmetic, the block indexing, and the
+/// partial reassembly stay unread
 ///
 /// A cap holds the task at that size or below. The production value of every cap is 0, which
 /// keeps the calibrated size. See the `split_cap` helper of `crate::parallel_gates`
@@ -36,8 +36,8 @@ pub type SplitCapSetter = fn(usize);
 /// reduction. The task size therefore decides where the boundaries fall and nothing else
 ///
 /// `conv.forced_chunk_positions` is the 1 entry for which this does not hold today. Its task is
-/// a GEMM, and the backend picks its accumulation order from the row count of the block, so the
-/// same rows give different result bits in a short block than in a long one. A caller must
+/// a GEMM. The backend picks its accumulation order from the row count of the block. The same
+/// rows then give different result bits in a short block than in a long one. A caller must
 /// therefore leave that 1 cap at 0. See `CONV_FORCED_CHUNK_POSITIONS`
 ///
 /// # The drivers that take no cap
@@ -48,9 +48,9 @@ pub type SplitCapSetter = fn(usize);
 /// of the normalization folds, and the per-group statistic fold of the normalization layers
 ///
 /// A driver whose tasks are already more than 1 at a small test size is also absent, because it
-/// needs no cap. Those are the batch fans of the convolution backward pass, of the transposed
-/// convolution, and of the normalization row passes, and the per-output-row split of the
-/// depthwise convolution
+/// needs no cap. Those are the batch fans of the convolution backward pass, the transposed
+/// convolution, and the normalization row passes. The per-output-row split of the depthwise
+/// convolution is also absent for that reason
 #[cfg(feature = "neural_network")]
 pub const SPLIT_CAPS: &[(&str, SplitCapGetter, SplitCapSetter)] = &[
     (

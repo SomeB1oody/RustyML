@@ -87,7 +87,6 @@ fn relu_forward_all_positive() {
     assert_allclose(&output, &input, 1e-6_f32);
 }
 
-/// predict() equals forward()
 #[test]
 fn relu_predict_equals_forward() {
     let mut layer = ReLU::new();
@@ -191,7 +190,6 @@ fn sigmoid_forward_antisymmetry() {
     }
 }
 
-/// predict() equals forward()
 #[test]
 fn sigmoid_predict_equals_forward() {
     let mut layer = Sigmoid::new();
@@ -298,7 +296,6 @@ fn tanh_forward_outputs_bounded() {
     }
 }
 
-/// predict() equals forward()
 #[test]
 fn tanh_predict_equals_forward() {
     let mut layer = Tanh::new();
@@ -421,7 +418,6 @@ fn softmax_forward_two_rows_same_difference() {
     assert_abs_diff_eq!(flat[3], 0.73106_f32, epsilon = 1e-4);
 }
 
-/// predict() equals forward()
 #[test]
 fn softmax_predict_equals_forward() {
     let mut layer = Softmax::new();
@@ -453,8 +449,7 @@ fn softmax_backward_before_forward_is_error() {
 
 /// 1-D input normalizes its single axis, the way the reference layer does
 ///
-/// The crate used to reject every input below rank 2. The reference layer accepts a rank-1
-/// input, so this pins the agreement
+/// The reference layer accepts a rank-1 input, so this pins the agreement
 #[test]
 fn softmax_1d_input_normalizes_the_single_axis() {
     let mut layer = Softmax::new();
@@ -572,7 +567,6 @@ fn linear_non_finite_input_propagates() {
     );
 }
 
-/// predict() likewise passes non-finite values through unchanged
 #[test]
 fn linear_predict_non_finite_propagates() {
     let layer = Linear::new();
@@ -599,7 +593,6 @@ fn leaky_relu_forward_known_values() {
     assert_allclose(&output, &expected, 1e-6_f32);
 }
 
-/// predict() equals forward()
 #[test]
 fn leaky_relu_predict_equals_forward() {
     let mut layer = LeakyReLU::new(0.3).expect("slope 0.3 is valid");
@@ -669,7 +662,6 @@ fn elu_forward_known_values() {
     assert_allclose(&output, &expected, 1e-6_f32);
 }
 
-/// predict() equals forward()
 #[test]
 fn elu_predict_equals_forward() {
     let mut layer = ELU::new(1.0).expect("alpha 1.0 is valid");
@@ -739,7 +731,6 @@ fn selu_forward_known_values() {
     assert_allclose(&output, &expected, 1e-6_f32);
 }
 
-/// predict() equals forward()
 #[test]
 fn selu_predict_equals_forward() {
     let mut layer = SELU::new();
@@ -825,7 +816,6 @@ fn softplus_forward_outputs_positive() {
     }
 }
 
-/// predict() equals forward()
 #[test]
 fn softplus_predict_equals_forward() {
     let mut layer = Softplus::new();
@@ -890,7 +880,6 @@ fn softsign_forward_outputs_bounded() {
     }
 }
 
-/// predict() equals forward()
 #[test]
 fn softsign_predict_equals_forward() {
     let mut layer = Softsign::new();
@@ -935,7 +924,6 @@ fn hard_sigmoid_forward_known_values() {
     assert_allclose(&output, &expected, 1e-6_f32);
 }
 
-/// predict() equals forward()
 #[test]
 fn hard_sigmoid_predict_equals_forward() {
     let mut layer = HardSigmoid::new();
@@ -995,7 +983,6 @@ fn exponential_forward_known_values() {
     assert_allclose(&output, &expected, 1e-3_f32);
 }
 
-/// predict() equals forward()
 #[test]
 fn exponential_predict_equals_forward() {
     let mut layer = Exponential::new();
@@ -1049,7 +1036,6 @@ fn exponential_backward_derivative_equals_output() {
 // Activation enum: forward() delegates to the standalone layers, so its output
 // must match theirs
 
-/// Activation::Linear.forward is identity
 #[test]
 fn activation_enum_linear_is_identity() {
     let input = tensor2(1, 3, vec![-1.0, 0.0, 2.0]);
@@ -1130,28 +1116,24 @@ fn activation_enum_softmax_rejects_an_out_of_range_axis() {
 
 // From<Layer> -> Activation conversions (confirms the enum round-trips)
 
-/// From<Linear> for Activation yields Activation::Linear
 #[test]
 fn from_linear_yields_activation_linear() {
     let act: Activation = Linear::new().into();
     assert_eq!(act, Activation::Linear);
 }
 
-/// From<ReLU> for Activation yields Activation::ReLU
 #[test]
 fn from_relu_yields_activation_relu() {
     let act: Activation = ReLU::new().into();
     assert_eq!(act, Activation::ReLU);
 }
 
-/// From<Sigmoid> for Activation yields Activation::Sigmoid
 #[test]
 fn from_sigmoid_yields_activation_sigmoid() {
     let act: Activation = Sigmoid::new().into();
     assert_eq!(act, Activation::Sigmoid);
 }
 
-/// From<Tanh> for Activation yields Activation::Tanh
 #[test]
 fn from_tanh_yields_activation_tanh() {
     let act: Activation = Tanh::new().into();
@@ -1309,10 +1291,8 @@ fn sigmoid_backward_derivative_from_definition() {
 }
 
 // Parameterized activations: bounds, defaults, and agreement with the enum.
-// The lower bound on `negative_slope` and on `alpha` is strict. The backward pass separates
-// the 2 branches by the sign of the activated output. A value of 0 collapses the whole
-// negative side onto a = 0, which erases the branch. A negative value reads the wrong branch.
-// Use Activation::ReLU for a slope of 0.
+// The lower bound on `negative_slope` and `alpha` is strict: 0 or below erases or misreads
+// the branch that backward selects by sign. Use Activation::ReLU for a slope of 0.
 
 /// LeakyReLU::new rejects a slope of 0 and a negative slope
 #[test]
@@ -1443,13 +1423,10 @@ fn softplus_layer_matches_activation_enum() {
     assert_allclose(&layer_out, &enum_out, 0.0_f32);
 }
 
-// ---------------------------------------------------------------------------------------
 // The Softmax axis.
 //
-// The reference layer takes an `axis` argument. It resolves a negative value against the rank
-// of the input on each call. It fails the call when the resolved index falls outside that rank.
-// The pinned float32 values below come from that reference layer, at version 3.15.1
-// ---------------------------------------------------------------------------------------
+// The reference layer resolves a negative `axis` against the rank on each call, and fails
+// when the index falls outside it. The pinned values below match that layer, version 3.15.1.
 
 /// The rank-3 input that the axis tests share, in C order
 fn axis_input() -> Tensor {

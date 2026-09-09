@@ -1,7 +1,9 @@
 //! Integration tests for GroupNormalization and InstanceNormalization: forward
 //! values, error paths, mode behavior, eval-mode backward passthrough, and
-//! predict == forward. Expected values come from the mathematical definition.
-//! Gradient correctness lives in gradient_check.rs.
+//! predict == forward
+//!
+//! Expected values come from the mathematical definition. Gradient correctness lives in
+//! gradient_check.rs.
 //!
 //! Both layers read the crate's channels-last layout: an input is
 //! `[batch, spatial..., channels]`, and the channel axis is always the trailing one.
@@ -123,9 +125,8 @@ fn group_norm_two_batches_forward_values() {
 
     let output = gn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
-    // Group 0 of batch 0 is channels 0-1 = {1,2,3,4,5,6} (mean 3.5).
-    // Group 1 is channels 2-3 = {7..12} (mean 9.5).
-    // Both, and both groups of batch 1, share the population variance.
+    // Group 0 (channels 0-1) is {1,2,3,4,5,6} (mean 3.5), and group 1 (channels 2-3) is
+    // {7..12} (mean 9.5). Both groups, in both batches, share the population variance
     // (2.5^2 + 1.5^2 + 0.5^2 + 0.5^2 + 1.5^2 + 2.5^2) / 6 = 17.5 / 6.
     let std_val = (17.5_f32 / 6.0 + 1e-5).sqrt();
     let n = [-2.5_f32, -1.5, -0.5, 0.5, 1.5, 2.5].map(|c| c / std_val);
@@ -201,7 +202,7 @@ fn group_norm_constant_input_yields_zero_output() {
 }
 
 /// The group boundary runs across the trailing (channel) axis. This test uses 2 groups of
-/// wildly different scales, so a wrong split axis would blend them and change the results.
+/// wildly different scales, so a wrong split axis would blend them and change the results
 #[test]
 fn group_norm_channel_axis_is_last() {
     // [batch=1, positions=2, channels=4], 2 groups of 2 channels
@@ -286,7 +287,7 @@ fn group_norm_constructor_invalid_parameter_errors() {
     }
 }
 
-/// `GroupNormalization` takes no shape now, so the rank rule moved to the build step
+/// `GroupNormalization` takes no shape at construction, so build validates the rank instead
 #[test]
 fn group_norm_error_empty_input_shape() {
     let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
@@ -314,7 +315,6 @@ fn group_norm_error_channels_not_divisible_by_groups_at_forward() {
     );
 }
 
-/// `backward` before `forward` returns `NnError::ForwardPassNotRun`
 #[test]
 fn group_norm_error_backward_before_forward() {
     let gn = GroupNormalization::new(2, 1e-5).unwrap();
@@ -408,9 +408,8 @@ fn instance_norm_custom_gamma_beta_forward_values() {
 /// is a ternary ramp with variance 2/3
 #[test]
 fn instance_norm_multiple_batches_forward_values() {
-    // [batch=2, positions=3, channels=3]. Per channel the instances are
-    // batch0: ch0=[0,1,2], ch1=[3,4,5], ch2=[-1,0,1]
-    // batch1: ch0=[10,11,12], ch1=[-5,-4,-3], ch2=[100,101,102]
+    // [batch=2, positions=3, channels=3]. Per channel: batch0 ch0=[0,1,2], ch1=[3,4,5],
+    // ch2=[-1,0,1]. Batch1 ch0=[10,11,12], ch1=[-5,-4,-3], ch2=[100,101,102].
     // Channels-last stores position p as [ch0[p], ch1[p], ch2[p]]
     let input = Array::from_shape_vec(
         (2, 3, 3),
@@ -464,7 +463,7 @@ fn instance_norm_constant_input_yields_zero_output() {
 }
 
 /// IN takes its instances along the trailing (channel) axis. This test uses 2 channels of
-/// very different spreads, so reading the axis anywhere else would mix them and change the results.
+/// very different spreads, so reading the axis anywhere else would mix them and change the results
 #[test]
 fn instance_norm_channel_axis_is_last() {
     // [batch=1, positions=3, channels=2]: ch0 = [1,2,3], ch1 = [10,20,30]
@@ -619,7 +618,7 @@ fn instance_norm_constructor_invalid_parameter_errors() {
     }
 }
 
-/// `InstanceNormalization` takes no shape now, so the rank rule moved to the build step
+/// `InstanceNormalization` takes no shape at construction, so build validates the rank instead
 #[test]
 fn instance_norm_error_empty_input_shape() {
     let mut inn = InstanceNormalization::new(1e-5).unwrap();
@@ -631,7 +630,6 @@ fn instance_norm_error_empty_input_shape() {
     );
 }
 
-/// `backward` before `forward` returns `NnError::ForwardPassNotRun`
 #[test]
 fn instance_norm_error_backward_before_forward() {
     let inn = InstanceNormalization::new(1e-5).unwrap();

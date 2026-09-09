@@ -330,10 +330,8 @@ fn conv2d_transpose_grows_a_single_pixel_into_the_whole_kernel() {
     let expected = t4((1, 3, 3, 1), taps.iter().map(|v| 2.0 * v).collect());
     assert_allclose(&output, &expected, 1e-6f32);
 
-    // A plain Conv2D has no valid output position on this input. The refusal belongs to the
-    // build and not to the constructor, because `Same` padding makes the same geometry legal
-    // and the padding mode is chosen after construction. The build is the first step that sees
-    // both the padding mode and the input shape
+    // A plain Conv2D refuses this input only at build, not at construction, because build is
+    // the first step that sees both the padding mode and the input shape
     let mut plain = rustyml::neural_network::layers::convolution::conv_2d::Conv2D::new(
         1,
         (3, 3),

@@ -108,7 +108,7 @@ fn depthwise_conv1d_forward_rejects_wrong_channels() {
     );
 }
 
-/// A 4D input reaching a 1D layer returns InvalidInput rather than reading the wrong axes.
+/// A 4D input reaching a 1D layer returns InvalidInput rather than reading the wrong axes
 #[test]
 fn depthwise_conv1d_forward_rejects_non_3d_input() {
     let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
@@ -297,7 +297,6 @@ fn depthwise_conv1d_backward_before_forward_errors() {
     assert!(conv.backward(&grad, &mut Ctx::training()).is_err());
 }
 
-/// A rejected input leaves no partial cache behind
 #[test]
 fn depthwise_conv1d_rejected_forward_leaves_no_cache() {
     let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
@@ -313,7 +312,6 @@ fn depthwise_conv1d_rejected_forward_leaves_no_cache() {
     );
 }
 
-/// `set_weights` rejects an array whose shape does not match the layer
 #[test]
 fn depthwise_conv1d_set_weights_shape_mismatch_errors() {
     let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
@@ -457,7 +455,6 @@ fn depthwise_conv1d_parallel_path_matches_the_serial_path() {
 
 // SeparableConv1D - constructor validation
 
-/// Each invalid constructor argument returns the matching error.
 #[test]
 fn separable_conv1d_new_rejects_invalid_args() {
     enum Want {
@@ -499,7 +496,7 @@ fn separable_conv1d_new_rejects_invalid_args() {
     }
 }
 
-/// A 4D input reaching a 1D layer returns InvalidInput rather than reading the wrong axes.
+/// A 4D input reaching a 1D layer returns InvalidInput rather than reading the wrong axes
 #[test]
 fn separable_conv1d_forward_rejects_non_3d_input() {
     let mut conv = SeparableConv1D::new(2, 2, 1, 1, Linear::new()).unwrap();
@@ -600,7 +597,6 @@ fn separable_conv1d_known_weight_forward_values() {
     );
 }
 
-/// `Same` padding zero-pads the depthwise stage of the separable layer too
 #[test]
 fn separable_conv1d_same_padding_zero_pads_depthwise() {
     let mut conv = SeparableConv1D::new(1, 3, 1, 1, Linear::new())
@@ -718,7 +714,6 @@ fn separable_conv1d_matches_a_depthwise_then_pointwise_stack() {
 
 // SeparableConv1D - the remaining contract
 
-/// `predict` in eval mode returns the same values as `forward`
 #[test]
 fn separable_conv1d_predict_equals_forward() {
     let mut conv = SeparableConv1D::new(3, 3, 2, 2, Linear::new()).unwrap();

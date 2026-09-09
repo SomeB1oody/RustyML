@@ -22,7 +22,7 @@ use ndarray::{Array, Array2, ArrayView2, Axis, CowArray, Ix2};
 /// `output = activation(input * weights)` and holds the kernel alone
 ///
 /// The layer contracts the last axis only. The input shape is
-/// `(batch_size, ..., input_dim)` with rank 2 or more, and the output shape is the same shape
+/// `(batch_size, ..., input_dim)` with rank 2 or more. The output shape is the same shape
 /// with the last axis replaced by `output_dim`. The kernel stays `(input_dim, output_dim)`
 /// for every rank, and every leading position shares it. Rank 3 is the common case for
 /// sequence data, where the layer transforms each timestep with the same weights
@@ -95,7 +95,7 @@ pub struct Dense {
     /// Bias vector with shape (1, output_dim)
     ///
     /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
-    /// The forward pass drops the bias epilogue, `weights` hides the array, and `parameters`
+    /// The forward pass drops the bias epilogue, `weights` hides the array, and `parameters_mut`
     /// never yields it, so a bias-free layer holds it and no more
     bias: Array2<f32>,
     /// Activation function applied to the linear output
@@ -111,7 +111,7 @@ impl Dense {
     ///
     /// - `units` - Number of units/neurons in the layer (determines output dimensionality)
     /// - `activation` - Activation applied to the linear output (any value convertible into
-    ///   [`Activation`], e.g. `Activation::ReLU` or a standalone activation layer)
+    ///   [`Activation`], for example `Activation::ReLU` or a standalone activation layer)
     ///
     /// # Returns
     ///
@@ -125,11 +125,10 @@ impl Dense {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `units` is zero
+    /// - `Error::InvalidParameter` - If `units` is 0
     /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
     pub fn new(units: usize, activation: impl Into<Activation>) -> Result<Self, Error> {
-        // Validate that dimensions are greater than zero
         if units == 0 {
             return Err(Error::invalid_parameter("units", "must be greater than 0"));
         }
@@ -187,10 +186,10 @@ impl Dense {
     /// Sets whether the layer adds a bias to the linear output (defaults to `true`)
     ///
     /// With `use_bias` set to false the layer computes `activation(input * weights)`. It holds
-    /// the kernel alone: `param_count` counts the kernel alone, `parameters` yields the kernel
-    /// alone, and a checkpoint of the layer holds 1 array under the path `<position>.kernel`.
-    /// A checkpoint written by a layer that has a bias therefore fails to load into a layer
-    /// that has none, and the refusal names the path
+    /// the kernel alone. `param_count` counts the kernel alone, and `parameters_mut` yields the
+    /// kernel alone. A checkpoint of the layer then holds 1 array, under the path
+    /// `<position>.kernel`. A checkpoint written by a layer that has a bias therefore fails to
+    /// load into a layer that has none. The refusal names the path
     ///
     /// # Parameters
     ///
@@ -222,7 +221,7 @@ impl Dense {
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` do not match the
     ///   layer's configured shape
     /// - `Error::InvalidParameter` - If a bias is given to a layer that holds none, or none is
-    ///   given to a layer that holds one
+    ///   given to a layer that holds 1
     pub fn set_weights(
         &mut self,
         weights: Array2<f32>,
@@ -299,9 +298,9 @@ impl Dense {
     /// with no separate broadcast add of the bias. The bias is the per-column addend, so it
     /// lowers to [`Bias::PerCol`]
     ///
-    /// The activation stays a fused epilogue only where the backend has a vectorized one,
-    /// `ReLU` ([`FusedActivation::Relu`]). `Linear` needs no separate pass, since it changes
-    /// nothing. Every other activation runs as a separate [`Activation::forward`] pass
+    /// The activation stays a fused epilogue only for `ReLU` ([`FusedActivation::Relu`]).
+    /// `Linear` needs no separate pass, since it changes nothing. Every other activation runs
+    /// as a separate [`Activation::forward`] pass
     ///
     /// A fused `f32` epilogue matches the unfused product plus scalar activation bit for bit,
     /// with 1 exception. gemmkit's fused `Relu` maps `NaN` to `0.0`, while this crate's
@@ -391,8 +390,6 @@ impl LayerBase for Dense {
     }
 
     fn param_count(&self) -> ParamCounts {
-        // Read the arrays the layer holds rather than the configuration, so dropping the bias
-        // corrects the count with no second formula to keep in step
         let bias = if self.use_bias { self.bias.len() } else { 0 };
         ParamCounts::trainable(self.weights.len() + bias)
     }
@@ -458,11 +455,11 @@ impl UnaryLayer for Dense {
         Ok(())
     }
 
-    /// Fuses the linear product, bias add, and (for `ReLU`) the activation into one gemmkit
+    /// Fuses the linear product, bias add, and (for `ReLU`) the activation into 1 gemmkit
     /// call. See `Dense::project` for the `NaN` handling of the fused `ReLU`
     ///
-    /// The input has rank 2 or more. The leading axes fold into 1 row axis, so a rank-3 input
-    /// costs the same 1 matrix product as a rank-2 input with the same number of rows
+    /// The input has rank 2 or more. The leading axes fold into 1 row axis, so every rank uses
+    /// the same 1 matrix product for the same row count
     fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if self.built.is_none() {
             return Err(Error::not_built("Dense"));
@@ -487,7 +484,6 @@ impl UnaryLayer for Dense {
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let cache: DenseCache = ctx.pop_cache("Dense")?;
 
-        // Upstream gradient must match the cached output shape
         if grad_output.shape() != cache.output.shape() {
             return Err(Error::shape_mismatch(
                 cache.output.shape(),
@@ -505,7 +501,7 @@ impl UnaryLayer for Dense {
         ctx.add_grad("kernel", grad_w.as_standard_layout().to_owned().into_dyn())?;
 
         // A bias-free layer computes no bias gradient, so the store holds none and no
-        // optimizer state is ever keyed on one
+        // optimizer state is ever keyed on 1
         if self.use_bias {
             let grad_b = grad_upstream_2d.sum_axis(Axis(0)).insert_axis(Axis(0));
             ctx.add_grad("bias", grad_b.as_standard_layout().to_owned().into_dyn())?;

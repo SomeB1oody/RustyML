@@ -1,4 +1,4 @@
-//! Global max pooling layer for 1D inputs.
+//! Global max pooling layer for 1D inputs
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -82,7 +82,7 @@ impl Default for GlobalMaxPooling1D {
 struct GlobalMaxPooling1DCache {
     /// Shape of the input tensor
     input_shape: Vec<usize>,
-    /// Flat per-channel arg-max offsets that the forward pass recorded, one per output element
+    /// Flat per-channel arg-max offsets that the forward pass recorded, 1 per output element
     argmax: Option<Vec<usize>>,
 }
 

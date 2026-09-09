@@ -17,16 +17,16 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///
 /// The input shape is `[batch_size, height, width, channels]`. The output shape is
 /// `[batch_size, height - top - bottom, width - left - right, channels]`. The batch axis and
-/// the channel axis pass through unchanged
+/// the channel axis pass through unchanged.
 ///
 /// The layer holds no parameter. Each spatial axis must keep at least 1 position, so the
-/// forward pass fails when the 2 amounts on an axis together reach its extent
+/// forward pass fails when the 2 amounts on an axis together reach its extent.
 ///
 /// A common use is a decoder that upsamples past the wanted size. The layer then trims the
-/// output to the size of the matching encoder feature map
+/// output to the size of the matching encoder feature map.
 ///
 /// [`ZeroPadding2D`](crate::neural_network::layers::border::ZeroPadding2D) is the inverse
-/// layer, and it is also this layer's backward pass
+/// layer, and it is also this layer's backward pass.
 ///
 /// # Examples
 ///
@@ -59,7 +59,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 pub struct Cropping2D {
     /// Rows and columns to remove at each of the 4 edges
     cropping: Border2D,
-    /// Shape the layer was built for, batch axis first. `None` before the build
+    /// Shape the layer was built for, batch axis first. `None` before the build.
     built: Option<Shape>,
 }
 
@@ -95,7 +95,7 @@ impl LayerBase for Cropping2D {
 
 impl UnaryLayer for Cropping2D {
     /// Records the shape the crop runs over. The layer holds no array, so nothing is
-    /// allocated. The shape algebra checks the rank and the crop fit
+    /// allocated. The shape algebra checks the rank and the crop fit.
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "Cropping2D", input)? else {
             return Ok(());

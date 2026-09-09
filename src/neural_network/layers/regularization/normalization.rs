@@ -1,5 +1,5 @@
 //! Normalization layers (batch, group, instance, layer, unit) and the shared
-//! group-normalization core.
+//! group-normalization core
 //!
 //! Group and instance normalization are the same operation at different group counts, so both
 //! delegate to `group_norm_forward_core` / `group_norm_backward_core` here.
@@ -13,11 +13,11 @@ use ndarray::{Array1, IxDyn};
 use rayon::prelude::*;
 
 tunable_gate! {
-    /// Element count (`M x C`) above which [`folds::par_col_sum`] and [`folds::par_col_dot`]
+    /// Element count (`M * C`) above which [`folds::par_col_sum`] and [`folds::par_col_dot`]
     /// run their row-block fold on rayon
     ///
     /// All 3 normalization layers reach these 2 kernels with the same `[M, C]` view and the same
-    /// per-element cost, so 1 gate serves all of them. BatchNorm folds its per-channel mean,
+    /// per-element cost. 1 gate serves all of them. BatchNorm folds its per-channel mean,
     /// variance, and backward sums. LayerNorm and GroupNorm fold their gamma and beta gradients.
     /// A `[batch, *spatial, channels]` input collapses to the same view as a 2-D input, with
     /// `M = batch * spatial`
@@ -71,13 +71,12 @@ struct GroupStats {
 /// Per-group mean and variance for batch item `b` of a `[batch, positions, channels]` buffer, in
 /// 1 pass over the data, by the shifted-sum method
 ///
-/// The textbook two-pass form reads the batch item once for the mean and again for the squared
-/// deviations. Under this layout a batch item is `positions` strided runs of `channels_per_group`,
-/// so that second read walks the same batch item again. Accumulating `sum(x - K)` and
-/// `sum((x - K)^2)` together gets both statistics from 1 walk, and `var = s2/n - (s1/n)^2`
-/// recovers the variance.
+/// The 2-pass form reads the batch item once for the mean and again for the squared deviations.
+/// Under this layout a batch item is `positions` strided runs of `channels_per_group`, so that
+/// second read walks the same batch item again. Accumulating `sum(x - K)` and `sum((x - K)^2)`
+/// together gets both statistics from 1 walk, and `var = s2/n - (s1/n)^2` recovers the variance.
 ///
-/// `K` is the batch item's first element rather than zero. That choice keeps `s1/n` a small
+/// `K` is the group's first element rather than zero. That choice keeps `s1/n` a small
 /// residual (`mean - K`) instead of the mean itself. As a result, `s2/n` and `(s1/n)^2` differ by
 /// about the variance rather than by the square of the mean. A plain `E[x^2] - E[x]^2` would
 /// cancel catastrophically in f32 on the inputs a normalization layer sees, where the mean often
@@ -98,11 +97,6 @@ fn group_stats(x: &[f32], b: usize, layout: &GroupLayout, parallel: bool) -> Gro
         .flat_map(|&k| std::iter::repeat_n(k, cpg))
         .collect();
 
-    // Accumulates per channel, then reduces to per group once at the end, instead of looping
-    // groups-outer with a `channels_per_group`-long inner loop. For instance normalization,
-    // where `num_groups == channels`, that inner loop would shrink to 1 element, leaving a
-    // scalar walk with a dependent load-store per group. Per-channel accumulation keeps the
-    // inner loop 1 flat pass over contiguous rows at every group count
     let fold = |p0: usize| -> (Vec<f32>, Vec<f32>) {
         let len = block.min(positions - p0);
         let mut c1 = vec![0.0f32; channels];
@@ -201,6 +195,15 @@ pub(super) struct GroupLayout {
 
 impl GroupLayout {
     /// Derives the layout of a `[batch, spatial..., channels]` input split into `num_groups`
+    ///
+    /// # Parameters
+    ///
+    /// - `shape` - The input shape, batch axis first and channel axis last
+    /// - `num_groups` - Number of groups the channel axis splits into
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The derived layout
     pub(super) fn new(shape: &[usize], num_groups: usize) -> Self {
         let channels = shape[shape.len() - 1];
         let positions: usize = shape[1..shape.len() - 1].iter().product();
@@ -221,7 +224,18 @@ impl GroupLayout {
 /// `channels`-long rows, so nothing is gathered, permuted, or copied out to make a group
 /// contiguous
 ///
-/// Returns `(output, x_normalized, inv_std)` with `inv_std` shaped `[batch * num_groups]`
+/// # Parameters
+///
+/// - `input` - Channels-last input of shape `[batch, spatial..., channels]`
+/// - `num_groups` - Number of groups the channel axis splits into
+/// - `gamma` - Scale parameter, shaped `[channels]`
+/// - `beta` - Shift parameter, shaped `[channels]`
+/// - `epsilon` - Small constant for numerical stability
+///
+/// # Returns
+///
+/// - `(Tensor, Tensor, Tensor)` - `(output, x_normalized, inv_std)`, with `inv_std` shaped
+///   `[batch * num_groups]`
 pub(super) fn group_norm_forward_core(
     input: &Tensor,
     num_groups: usize,
@@ -250,11 +264,9 @@ pub(super) fn group_norm_forward_core(
     let mut inv_std = Array1::<f32>::zeros(layout.batch * num_groups);
     let item = layout.positions * layout.channels;
 
-    // Batch items are independent. Once the batch alone fills the pool, they spread across
-    // rayon and each item's statistics fold runs serially inside its task. Below that, the
-    // batch is too short to fill the machine. The split then moves inside: 1 item at a time,
-    // with its fold spread over position blocks. The convolution engine makes the same choice
-    // for its per-item GEMMs
+    // Batch items are independent. When there are at least as many as the thread count, the
+    // batch spreads across rayon and each item folds its statistics serially. Otherwise the
+    // split moves inside a single item, over its position blocks
     let batch_parallel = parallel && layout.batch >= rayon::current_num_threads();
     let stats_parallel = parallel && !batch_parallel;
 
@@ -321,7 +333,20 @@ pub(super) fn group_norm_forward_core(
 ///
 /// `dx = inv_std * (g * gamma - (sum_g + x_norm * sum_g_xnorm) / group_size)`
 ///
-/// Returns `(grad_input, grad_gamma, grad_beta)` with the parameter gradients shaped `[channels]`
+/// # Parameters
+///
+/// - `grad_output` - Gradient of the loss with respect to the layer output, same shape as the
+///   forward input
+/// - `x_normalized` - The normalized values the forward pass cached
+/// - `inv_std` - Per-group inverse standard deviation the forward pass cached, shaped
+///   `[batch * num_groups]`
+/// - `num_groups` - Number of groups the channel axis splits into
+/// - `gamma` - Scale parameter, shaped `[channels]`
+///
+/// # Returns
+///
+/// - `(Tensor, Tensor, Tensor)` - `(grad_input, grad_gamma, grad_beta)`, with the parameter
+///   gradients shaped `[channels]`
 pub(super) fn group_norm_backward_core(
     grad_output: &Tensor,
     x_normalized: &Tensor,
@@ -440,17 +465,13 @@ pub use instance_normalization::InstanceNormalization;
 pub use layer_normalization::{LayerNormalization, LayerNormalizationAxis};
 pub use unit_normalization::{UnitNormalization, UnitNormalizationAxis};
 
-// Macros are defined after the `mod` declarations and path-exported via a `pub(in ...) use`
-// re-export. Callers therefore import them explicitly instead of relying on textual macro
-// ordering
+// The macro below needs a `pub(in ...) use` re-export because it is defined after the `mod`
+// declarations that use it, so callers import it explicitly rather than by declaration order
 /// Common implementation of the pure output-shape method of a normalization layer
 ///
 /// A normalization layer changes values and not extents, so its output shape repeats its input
-/// shape. The macro takes the layer name, which reaches the error messages
-///
-/// # Generated Functions
-///
-/// - `compute_output_shape()` - the input shape, unchanged
+/// shape. The macro takes the layer name, which reaches the error messages, and generates a
+/// `compute_output_shape` function that returns the input shape unchanged
 macro_rules! normalization_layer_output_shape_function {
     ($layer:literal) => {
         fn compute_output_shape(

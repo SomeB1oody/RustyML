@@ -1,4 +1,4 @@
-//! Global average pooling layer for 3D inputs.
+//! Global average pooling layer for 3D inputs
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

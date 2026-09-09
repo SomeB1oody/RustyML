@@ -70,13 +70,13 @@ pub struct Average {
 impl Average {
     /// Creates a layer that averages its inputs element by element
     ///
-    /// The layer takes no shape here. [`Layer::build_many`] gives it 1 shape per input, and
-    /// [`Layer::forward_many_mut`] builds a layer that a caller drives by hand from the tensors
-    /// that arrive
+    /// The layer takes no shape here. [`Layer::build_many`] gives it 1 shape per input.
+    /// [`Layer::forward_many_mut`] builds the layer as well, when a caller drives it by hand
+    /// from the tensors that arrive
     ///
     /// # Returns
     ///
-    /// - `Average` - A new layer, before its build
+    /// - `Self` - A new `Average` layer, which holds no build
     pub fn new() -> Self {
         Self { built: None }
     }
@@ -139,7 +139,7 @@ impl Layer for Average {
     ///
     /// The forward pass scales every input by the same reciprocal of the input count, so every
     /// gradient carries that same factor. An input that broadcast reached several positions of
-    /// the output, and `reduce_to` sums its gradient back over every one of them
+    /// the output, and `reduce_to` sums its gradient back over each of them
     ///
     /// # Errors
     ///

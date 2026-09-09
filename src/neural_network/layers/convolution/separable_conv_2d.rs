@@ -33,9 +33,9 @@ use ndarray::{Array1, Array4};
 /// \[batch_size, height', width', filters\]
 ///
 /// The intermediate channel for input channel `c` and multiplier index `m` is
-/// `c * depth_multiplier + m`, which is Keras' ordering. It is also the row order of the
-/// pointwise weight `\[1, 1, channels * depth_multiplier, filters\]`. This lets the 2 stages
-/// line up with no repacking between them
+/// `c * depth_multiplier + m`. It is also the row order of the
+/// pointwise weight `\[1, 1, channels * depth_multiplier, filters\]`. This aligns the 2 stages
+/// with no repacking between them
 ///
 /// The separable convolution runs 2 steps:
 /// 1. Depthwise convolution: convolves each input channel with its own set of filters
@@ -80,7 +80,8 @@ pub struct SeparableConv2D {
     kernel_size: (usize, usize),
     /// Stride values for the convolution as (vertical, horizontal)
     strides: (usize, usize),
-    /// Tap spacing of the depthwise kernel as (vertical, horizontal). 1 gives a solid axis
+    /// Tap spacing of the depthwise kernel as (vertical, horizontal). 1 gives a solid kernel on
+    /// that axis
     dilation_rate: (usize, usize),
     /// Padding applied to the spatial dimensions (`Valid` or `Same`)
     padding: PaddingType,
@@ -93,7 +94,7 @@ pub struct SeparableConv2D {
     /// Bias vector with shape \[filters\]
     ///
     /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
-    /// The pointwise stage adds nothing, `weights` hides the array, and `parameters` never
+    /// The pointwise stage adds nothing, `weights` hides the array, and `parameters_mut` never
     /// yields it, so a bias-free layer holds it and no more
     bias: Array1<f32>,
     /// Activation applied to the layer output
@@ -194,7 +195,7 @@ impl SeparableConv2D {
     /// A dilation of `d` on an axis spaces the depthwise taps `d` cells apart, so `k` taps span
     /// `(k - 1) * d + 1` input cells of that axis. The window still advances by the stride. The
     /// pointwise stage reads 1 tap, so no dilation can reach it. A dilation of 1 on both axes
-    /// gives a solid kernel and the same result as before
+    /// gives a solid kernel, the same as a convolution with no dilation
     ///
     /// # Parameters
     ///
@@ -355,7 +356,7 @@ impl SeparableConv2D {
     /// The depthwise kernel is sized from the declared channel count, so an input carrying more
     /// channels would read past the end of it. This turns that into an error at the layer
     /// boundary. It also applies the `Valid` fit rule, because a `Valid` window that is longer
-    /// than the input spatial gives no complete window
+    /// than the input spatial dimension gives no complete window
     fn validate_input(&self, input: &Tensor) -> Result<(), Error> {
         validate_built_input(&self.built, "SeparableConv2D", input.shape())?;
         validate_valid_kernel_fits(
@@ -400,11 +401,11 @@ impl SeparableConv2D {
     /// Performs the pointwise (1x1) convolution stage
     ///
     /// A 1x1 convolution is a per-position cross-channel matrix multiply. This delegates to the
-    /// shared [`conv_forward`] engine (im2col + gemm) rather than a hand-rolled loop nest. The
-    /// pointwise weights `[1, 1, C*dm, filters]` already match the engine's flat `[k..., Cin, F]`
-    /// layout. The bias is already its per-filter `[F]` vector. The depthwise stage emits its
-    /// channels in `c * depth_multiplier + m` order, which is exactly the row order the pointwise
-    /// weight is indexed by. Nothing repacks the data between the stages
+    /// shared [`conv_forward`] engine (im2col + gemm). The pointwise weights
+    /// `[1, 1, C*dm, filters]` already match the engine's flat `[k..., Cin, F]` layout. The bias
+    /// is already its per-filter `[F]` vector. The depthwise stage emits its channels in
+    /// `c * depth_multiplier + m` order, which is exactly the row order the pointwise weight is
+    /// indexed by. Nothing repacks the data between the stages
     fn pointwise_convolve(&self, input: &Tensor) -> Tensor {
         conv_forward(
             input,
@@ -474,7 +475,7 @@ impl SeparableConv2D {
     /// Sets whether the layer adds a bias to the pointwise output (defaults to `true`)
     ///
     /// With `use_bias` set to false the layer holds the 2 kernels alone: `param_count` counts
-    /// the 2 kernels, `parameters` yields the 2 kernels, and a checkpoint of the layer holds
+    /// the 2 kernels, `parameters_mut` yields the 2 kernels, and a checkpoint of the layer holds
     /// the paths `<position>.depthwise_kernel` and `<position>.pointwise_kernel`. A checkpoint
     /// written by a layer that has a bias therefore fails to load into a layer that has none,
     /// and the refusal names the path
@@ -504,9 +505,10 @@ impl SeparableConv2D {
     ///
     /// # Errors
     ///
-    /// - `Error` - If any supplied array shape does not match the existing layer weights
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any supplied array shape does not
+    ///   match the existing layer weights
     /// - `Error::InvalidParameter` - If a bias is given to a layer that holds none, or none
-    ///   is given to a layer that holds one
+    ///   is given to a layer that holds 1
     pub fn set_weights(
         &mut self,
         depthwise_weights: Array4<f32>,
@@ -632,7 +634,6 @@ impl UnaryLayer for SeparableConv2D {
         }
         self.validate_input(input)?;
 
-        // Depthwise convolution (each channel independently), then pointwise (1x1) to combine
         let depthwise_output = self.depthwise_convolve(input);
         let output = self.pointwise_convolve(&depthwise_output);
 
@@ -656,7 +657,6 @@ impl UnaryLayer for SeparableConv2D {
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let cache: SeparableConv2DCache = ctx.pop_cache("SeparableConv2D")?;
 
-        // Backward through the activation first
         let grad_upstream = self.activation.backward(&cache.output, grad_output)?;
 
         let input = &cache.input;
@@ -693,7 +693,6 @@ impl UnaryLayer for SeparableConv2D {
         }
         let depthwise_grad = pw_grads.input_grad;
 
-        // Depthwise backward through the shared driver
         let input_std = input.as_standard_layout();
         let src = input_std
             .as_slice()
@@ -729,7 +728,7 @@ impl UnaryLayer for SeparableConv2D {
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         input.check_rank("SeparableConv2D", 4)?;
         let (batch, tail) = input.split_batch("SeparableConv2D")?;
-        // `calculate_output_shape` reads the batch axis, so the list it takes starts with one
+        // `calculate_output_shape` reads the batch axis, so this list needs a placeholder in front
         let mut dims = vec![0];
         dims.extend(tail);
         Ok(Shape::from_batch(

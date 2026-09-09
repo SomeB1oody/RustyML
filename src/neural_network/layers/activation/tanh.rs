@@ -1,4 +1,5 @@
-//! Tanh (hyperbolic tangent) activation layer
+//! Tanh (hyperbolic tangent) activation layer that applies `tanh(x)` elementwise and parks the
+//! output for backpropagation
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -12,10 +13,11 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Tanh (hyperbolic tangent) activation layer
 ///
-/// Applies `tanh(x)` element-wise to the input tensor, mapping values to (-1, 1) while
-/// preserving the input shape
+/// Applies `tanh(x)` elementwise to the input tensor, mapping values to (-1, 1) and keeping the
+/// original shape. Common inputs include 2D tensors for dense layers and 4D tensors for
+/// convolutional layers
 ///
-/// [`Activation::Tanh`] provides the activation math. This layer adds boundary
+/// [`Activation::Tanh`] provides the activation math. This layer only adds boundary
 /// validation and the caching needed for backpropagation
 ///
 /// # Examples
@@ -95,10 +97,10 @@ impl UnaryLayer for Tanh {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Apply tanh. Large-magnitude inputs saturate toward -1/+1 by construction
+        // Large-magnitude inputs saturate toward -1/+1 by construction
         let output = Activation::Tanh.forward(input)?;
 
-        // Cache the activated output for backpropagation
+        // Cache activated output for backpropagation
         if ctx.is_training() {
             ctx.push_cache("Tanh", output.clone());
         }
@@ -109,12 +111,12 @@ impl UnaryLayer for Tanh {
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let output: Tensor = ctx.pop_cache("Tanh")?;
 
-        // tanh preserves shape, so the gradient must match the cached output
+        // Tanh preserves shape, so gradient must match the cached output
         if grad_output.shape() != output.shape() {
             return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
         }
 
-        // Derivative: d/dx tanh(x) = 1 - tanh^2(x)
+        // Tanh derivative is 1 - tanh(x)^2
         Activation::Tanh.backward(&output, grad_output)
     }
 }

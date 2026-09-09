@@ -52,7 +52,7 @@
 //!   negative axis counts back from the end.
 //!   [`Average`](crate::neural_network::layers::Average) is the 1 name that 2 categories of the
 //!   crate give to an item. The root of [`prelude`](crate::prelude) keeps the averaging mode of
-//!   the classification scores, so a caller that wants the layer names
+//!   the classification scores, so a caller that wants the layer must write
 //!   `prelude::neural_network::Average` or `neural_network::layers::Average`
 //!
 //! ## Optimizers
@@ -71,7 +71,7 @@
 //! - [`Shape`](crate::neural_network::Shape): the shape of a tensor as a layer describes it,
 //!   with a free axis for an extent that no configuration fixes. Every layer maps an input
 //!   shape to an output shape through
-//!   [`UnaryLayer::compute_output_shape`](crate::neural_network::traits::UnaryLayer::compute_output_shape),
+//!   [`compute_output_shape`](crate::neural_network::traits::UnaryLayer::compute_output_shape),
 //!   which reads the layer configuration alone and answers before any tensor exists
 //!
 //! ## Weight initialization

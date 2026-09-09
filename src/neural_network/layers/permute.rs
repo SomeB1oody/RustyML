@@ -23,8 +23,14 @@ use ndarray::IxDyn;
 /// Unlike [`Reshape`](crate::neural_network::layers::reshape::Reshape), this layer moves data.
 /// A reshape reads the same buffer in the same order under a new shape. A permute reads it in a
 /// new order, so the output holds the same values at different positions. When the axis meaning
-/// must follow the values, use a permute. One example is a layer that reads the last axis as
+/// must follow the values, use a permute. 1 example is a layer that reads the last axis as
 /// the channel axis
+///
+/// # Notes
+///
+/// The axis order changes which stride pattern the data occupies, but not the output's layout.
+/// Every layer here emits C order, so this layer copies the reordered view into a fresh
+/// array before it returns
 ///
 /// # Examples
 ///
@@ -54,14 +60,6 @@ use ndarray::IxDyn;
 /// // The batch axis stays first, and the other 2 axes trade places
 /// assert_eq!(swapped.shape(), &[2, 3, 5]);
 /// ```
-///
-/// # Performance
-///
-/// A permute reads the input in an order its memory layout does not follow, so it costs more
-/// than a plain copy. The cost depends on which axis moves. A permute that leaves the last axis
-/// last keeps whole rows contiguous, and it stays close to copy speed. A permute that moves the
-/// last axis cuts the contiguous run to 1 element, and it costs several times more. When the
-/// model allows a choice, put a permute where the tensor is small
 #[derive(Debug)]
 pub struct Permute {
     /// Axis order the forward pass applies, batch axis included and counted from 0
@@ -173,7 +171,7 @@ impl Permute {
 /// `permuted_axes` reorders the strides and shares the buffer, so it moves no data. `to_owned`
 /// on such a view keeps those reordered strides, which leaves the result out of C order. Every
 /// layer here emits C order, so a consumer can read any layer output as 1 contiguous slice.
-/// This layer pays for a real copy to hold that contract
+/// This layer copies the data to meet that contract
 fn permute_into(input: &Tensor, axes: &[usize]) -> Tensor {
     let view = input.view().permuted_axes(IxDyn(axes));
     let mut output = Tensor::zeros(view.raw_dim());

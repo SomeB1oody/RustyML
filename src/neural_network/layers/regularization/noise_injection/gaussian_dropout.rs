@@ -22,10 +22,10 @@ use ndarray_rand::rand_distr::Normal;
 ///
 /// # Shape freedom
 ///
-/// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of
-/// any shape and of any rank. [`UnaryLayer::build`] records the shape it is given, and
-/// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape)(crate::neural_network::traits::Layer::output_shape) reports it, but
-/// no later input is checked against it. See the "Shape freedom" section of
+/// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of any
+/// shape at rank 1 or higher. [`UnaryLayer::build`] records the shape it is given, and
+/// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape) reports it, but no
+/// later input is checked against it. See the "Shape freedom" section of
 /// [`Dropout`](crate::neural_network::layers::regularization::dropout::dropout::Dropout)
 ///
 /// # Examples
@@ -130,9 +130,9 @@ impl UnaryLayer for GaussianDropout {
     /// allocated
     ///
     /// The recorded shape is what
-    /// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape)(crate::neural_network::traits::Layer::output_shape) reports, and
-    /// no more. The layer owns no array and reads no extent, so it checks no later input
-    /// against it. See the "Shape freedom" section of the type
+    /// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape) reports, and no
+    /// more. The layer owns no array and reads no extent, so it checks no later input against it.
+    /// See the "Shape freedom" section of the type
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "GaussianDropout", input)? else {
             return Ok(());
@@ -146,17 +146,16 @@ impl UnaryLayer for GaussianDropout {
     ///
     /// An inference pass is the identity, and it draws nothing at all
     fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        // `rate` was already validated in `new()`, and the input needs no check
+        // `rate` was validated in `new()`, and the input needs no check
         if !self.is_built() {
             return Err(Error::not_built("GaussianDropout"));
         }
 
-        // During inference or when rate is 0, pass input through unchanged
         if !ctx.is_training() || self.rate == 0.0 {
             return Ok(input.clone());
         }
 
-        // Noise stddev grows from 0 (rate = 0) toward inf as rate approaches 1
+        // Noise stddev grows from 0 at rate 0 toward infinity as rate approaches 1
         let stddev = (self.rate / (1.0 - self.rate)).sqrt();
 
         // The stream lives in the context for the length of the pass, so the layer stays
@@ -165,7 +164,6 @@ impl UnaryLayer for GaussianDropout {
             .take_state::<StdRng>("rng")
             .unwrap_or_else(|| self.rng.clone());
 
-        // Multiplicative Gaussian noise with mean 1 and the computed stddev
         let noise =
             Tensor::random_using(input.raw_dim(), Normal::new(1.0, stddev).unwrap(), &mut rng);
         ctx.set_state("rng", rng);

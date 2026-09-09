@@ -3,8 +3,8 @@
 //! Expected values are hand-computed from the mathematical definitions. Backward/gradient values
 //! are covered by tests/neural_network/gradient_check.rs and are not duplicated here, except for
 //! the `return_sequences` and `go_backwards` gradients at the end of this file. Those 2 flags
-//! change the backward pass itself, and the finite-difference harness of `gradient_check.rs`
-//! drives every layer with a constant upstream gradient, which hides 2 of their failure modes
+//! change the backward pass itself. The finite-difference harness of `gradient_check.rs` drives
+//! every layer with a constant upstream gradient, which hides 2 of their failure modes
 
 use crate::common::assert_allclose;
 use approx::assert_abs_diff_eq;
@@ -55,7 +55,6 @@ fn simple_rnn_forward_1step_1unit_tanh() {
     assert_allclose(&out, &expected, 1e-6);
 }
 
-/// SimpleRNN over 2 timesteps threads hidden state between steps (Tanh)
 #[test]
 fn simple_rnn_forward_2step_tanh_state_threading() {
     let mut rnn = SimpleRNN::new(1, Tanh::new()).unwrap();
@@ -163,8 +162,6 @@ fn simple_rnn_new_rejects_zero_dimension() {
     );
 }
 
-/// `input_dim` is no longer a constructor parameter, so a zero feature count is refused at
-/// build time instead
 #[test]
 fn simple_rnn_build_rejects_zero_input_dim() {
     let mut rnn = SimpleRNN::new(3, Tanh::new()).unwrap();
@@ -187,7 +184,6 @@ fn simple_rnn_forward_rejects_2d_input() {
     );
 }
 
-/// SimpleRNN forward rejects a 1D input
 #[test]
 fn simple_rnn_forward_rejects_1d_input() {
     let mut rnn = SimpleRNN::new(1, Tanh::new()).unwrap();
@@ -214,8 +210,9 @@ fn simple_rnn_backward_before_forward_errors() {
     );
 }
 
-/// SimpleRNN backward with units == 1 and input_dim > 1 must not panic on the grad_x reshape.
-/// Regression test: `dot` can return a column-major grad_x here, and the reshape must tolerate it.
+/// SimpleRNN backward with units == 1 and input_dim > 1 must not panic on the grad_x reshape
+///
+/// `dot` can return a column-major grad_x here, and the reshape must tolerate it.
 #[test]
 fn simple_rnn_backward_units_one_multi_feature_reshapes() {
     let mut rnn = SimpleRNN::new(1, Tanh::new()).unwrap();
@@ -227,7 +224,6 @@ fn simple_rnn_backward_units_one_multi_feature_reshapes() {
     assert_eq!(grad_x.shape(), &[1, 2, 2]);
 }
 
-/// SimpleRNN set_weights rejects a kernel with wrong shape
 #[test]
 fn simple_rnn_set_weights_wrong_kernel_shape_errors() {
     let mut rnn = SimpleRNN::new(3, Tanh::new()).unwrap();
@@ -284,7 +280,7 @@ fn lstm_forward_1step_1unit_tanh() {
 /// Forget-gate bias of 1.0 yields a different final state than 0.0 across timesteps
 #[test]
 fn lstm_forget_bias_is_one_not_zero() {
-    // 2 LSTMs: one with forget_bias=1.0 (the default), one with 0.0
+    // 2 LSTMs: 1 with forget_bias=1.0 (the default), 1 with 0.0
     let mut lstm_correct = LSTM::new(1, Tanh::new()).unwrap();
     lstm_correct.build(&Shape::known(&[1, 1, 1])).unwrap();
     let mut lstm_zero_forget = LSTM::new(1, Tanh::new()).unwrap();
@@ -379,7 +375,6 @@ fn lstm_forward_2step_cell_state_threads_through() {
     assert_allclose(&out, &expected, 1e-5);
 }
 
-/// LSTM output shape is (batch=2, units=3)
 #[test]
 fn lstm_output_shape_batch2_units3() {
     let mut lstm = LSTM::new(3, Tanh::new()).unwrap();
@@ -442,8 +437,6 @@ fn lstm_new_rejects_zero_dimension() {
     );
 }
 
-/// `input_dim` is no longer a constructor parameter, so a zero feature count is refused at
-/// build time instead
 #[test]
 fn lstm_build_rejects_zero_input_dim() {
     let mut lstm = LSTM::new(3, Tanh::new()).unwrap();
@@ -688,7 +681,6 @@ fn gru_fused_kernel_first_block_is_the_update_gate() {
     );
 }
 
-/// GRU output shape is (batch=2, units=4)
 #[test]
 fn gru_output_shape_batch2_units4() {
     let mut gru = GRU::new(4, Tanh::new()).unwrap();
@@ -747,8 +739,6 @@ fn gru_new_rejects_zero_dimension() {
     );
 }
 
-/// `input_dim` is no longer a constructor parameter, so a zero feature count is refused at
-/// build time instead
 #[test]
 fn gru_build_rejects_zero_input_dim() {
     let mut gru = GRU::new(3, Tanh::new()).unwrap();
@@ -771,7 +761,6 @@ fn gru_forward_rejects_2d_input() {
     );
 }
 
-/// GRU forward rejects a 4D input
 #[test]
 fn gru_forward_rejects_4d_input() {
     let mut gru = GRU::new(1, Tanh::new()).unwrap();
@@ -846,7 +835,6 @@ fn simple_rnn_accepts_activation_enum_tanh() {
     assert_allclose(&out, &expected, 1e-6);
 }
 
-/// LSTM accepts Activation enum
 #[test]
 fn lstm_accepts_activation_enum_tanh() {
     let mut lstm = LSTM::new(1, Activation::Tanh).unwrap();
@@ -880,7 +868,6 @@ fn lstm_accepts_activation_enum_tanh() {
     assert_allclose(&out, &expected, 1e-5);
 }
 
-/// GRU accepts Activation enum
 #[test]
 fn gru_accepts_activation_enum_tanh() {
     let mut gru = GRU::new(1, Activation::Tanh).unwrap();
@@ -1000,10 +987,8 @@ fn lstm_param_count_formula() {
 }
 
 // return_sequences and go_backwards
-//
-// The 3 layers share 1 set of fixed weights and 1 fixed input here, so the same numbers pin all
-// 4 combinations of the 2 flags. The weights and the input are exact multiples of 1/8, which f32
-// holds without rounding.
+// The 3 layers share 1 set of fixed weights and 1 input. The values are exact multiples of 1/8,
+// which f32 holds without rounding, so the same numbers pin all 4 flag combinations.
 
 /// The fixed rank-3 input of the flag tests, with shape (batch 2, timesteps 3, features 2)
 ///
@@ -1436,9 +1421,10 @@ fn go_backwards_equals_the_forward_layer_on_reversed_input() {
 
 /// Every SimpleRNN gradient matches a finite difference, for all 4 flag combinations
 ///
-/// The upstream gradient varies along the time axis. A constant one would hide 2 defects: a
-/// backward pass that reads the upstream time axis in the reverse direction, and 1 that
-/// overwrites the carried gradient of a step instead of adding the direct contribution to it.
+/// The upstream gradient varies along the time axis. A constant one would hide 2 defects. The
+/// first is a backward pass that reads the upstream time axis in the reverse direction. The
+/// second overwrites the carried gradient of a step instead of adding the direct contribution to
+/// it.
 #[test]
 fn simple_rnn_gradients_match_finite_difference_for_every_flag_combination() {
     let x = flag_input();
@@ -1546,8 +1532,8 @@ fn output_shape_shows_the_time_axis_when_return_sequences() {
 ///
 /// Every expected value comes from Keras 3.15.1 with the same weights, the same input, and the
 /// same time-varying upstream gradient. The gradients pin the 2 rules that a plausible but wrong
-/// backward pass breaks. The upstream slice of a step must add to the carried gradient, and the
-/// gate gradient of a step must go to the input timestep of that step.
+/// backward pass breaks. The upstream slice of a step must add to the carried gradient. The gate
+/// gradient of a step must go to the input timestep of that step.
 #[test]
 fn simple_rnn_return_sequences_matches_keras() {
     let x = flag_input();
@@ -1621,8 +1607,8 @@ fn simple_rnn_return_sequences_matches_keras() {
 ///
 /// Every expected value comes from Keras 3.15.1 with the same weights, the same input, and the
 /// same time-varying upstream gradient. The gradients pin the 2 rules that a plausible but wrong
-/// backward pass breaks. The upstream slice of a step must add to the carried gradient, and the
-/// gate gradient of a step must go to the input timestep of that step.
+/// backward pass breaks. The upstream slice of a step must add to the carried gradient. The gate
+/// gradient of a step must go to the input timestep of that step.
 #[test]
 fn simple_rnn_return_sequences_go_backwards_matches_keras() {
     let x = flag_input();
@@ -1696,8 +1682,8 @@ fn simple_rnn_return_sequences_go_backwards_matches_keras() {
 ///
 /// Every expected value comes from Keras 3.15.1 with the same weights, the same input, and the
 /// same time-varying upstream gradient. The gradients pin the 2 rules that a plausible but wrong
-/// backward pass breaks. The upstream slice of a step must add to the carried gradient, and the
-/// gate gradient of a step must go to the input timestep of that step.
+/// backward pass breaks. The upstream slice of a step must add to the carried gradient. The gate
+/// gradient of a step must go to the input timestep of that step.
 #[test]
 fn lstm_return_sequences_matches_keras() {
     let x = flag_input();
@@ -1814,8 +1800,8 @@ fn lstm_return_sequences_matches_keras() {
 ///
 /// Every expected value comes from Keras 3.15.1 with the same weights, the same input, and the
 /// same time-varying upstream gradient. The gradients pin the 2 rules that a plausible but wrong
-/// backward pass breaks. The upstream slice of a step must add to the carried gradient, and the
-/// gate gradient of a step must go to the input timestep of that step.
+/// backward pass breaks. The upstream slice of a step must add to the carried gradient. The gate
+/// gradient of a step must go to the input timestep of that step.
 #[test]
 fn lstm_return_sequences_go_backwards_matches_keras() {
     let x = flag_input();
@@ -1932,8 +1918,8 @@ fn lstm_return_sequences_go_backwards_matches_keras() {
 ///
 /// Every expected value comes from Keras 3.15.1 with the same weights, the same input, and the
 /// same time-varying upstream gradient. The gradients pin the 2 rules that a plausible but wrong
-/// backward pass breaks. The upstream slice of a step must add to the carried gradient, and the
-/// gate gradient of a step must go to the input timestep of that step.
+/// backward pass breaks. The upstream slice of a step must add to the carried gradient. The gate
+/// gradient of a step must go to the input timestep of that step.
 #[test]
 fn gru_return_sequences_matches_keras() {
     let x = flag_input();
@@ -2040,8 +2026,8 @@ fn gru_return_sequences_matches_keras() {
 ///
 /// Every expected value comes from Keras 3.15.1 with the same weights, the same input, and the
 /// same time-varying upstream gradient. The gradients pin the 2 rules that a plausible but wrong
-/// backward pass breaks. The upstream slice of a step must add to the carried gradient, and the
-/// gate gradient of a step must go to the input timestep of that step.
+/// backward pass breaks. The upstream slice of a step must add to the carried gradient. The gate
+/// gradient of a step must go to the input timestep of that step.
 #[test]
 fn gru_return_sequences_go_backwards_matches_keras() {
     let x = flag_input();
@@ -2150,9 +2136,7 @@ fn gru_return_sequences_go_backwards_matches_keras() {
 /// standard order
 ///
 /// An optimizer reads every array of a layer as a flat slice, so an array in column-major order
-/// panics rather than returning an error. Before the 3 layers shared 1 `set_weights` body,
-/// `SimpleRNN` alone kept the array as given, so a transposed kernel passed `set_weights` and
-/// then panicked on the first training step. The other 2 layers already normalized the layout.
+/// panics rather than returning an error.
 #[test]
 fn set_weights_normalizes_a_column_major_array() {
     /// Builds a kernel of the right shape whose memory order is column-major

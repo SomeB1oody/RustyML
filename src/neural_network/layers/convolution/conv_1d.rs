@@ -1,4 +1,7 @@
 //! 1D convolutional layer for sequential data such as time series, audio, or text
+//!
+//! Holds the layer weights and the activation, and delegates the forward/backward
+//! numerics to the dimension-generic convolution engine
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -90,8 +93,8 @@ pub struct Conv1D {
     /// 1D array of bias values with shape \[filters\]
     ///
     /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
-    /// The forward pass adds nothing, `weights` hides the array, and `parameters` never yields
-    /// it, so a bias-free layer holds it and no more
+    /// The forward pass adds nothing: it reads `weights` alone, and `parameters` never yields
+    /// the bias array, so a bias-free layer holds it and no more
     bias: Array1<f32>,
     /// Activation applied to the convolution output
     activation: Activation,
@@ -108,11 +111,15 @@ pub struct Conv1D {
 impl Conv1D {
     /// Creates a new Conv1D layer with the specified parameters
     ///
+    /// The constructor draws nothing. [`UnaryLayer::build`] reads the channel count from the
+    /// input shape, draws the kernel with Xavier (Glorot) uniform initialization, and sets
+    /// the bias to 0
+    ///
     /// # Parameters
     ///
-    /// - `filters` - Number of output filters (channels)
+    /// - `filters` - Number of convolution filters (output channels)
     /// - `kernel_size` - Size of the convolution kernel
-    /// - `stride` - Stride for the convolution operation
+    /// - `stride` - Stride value for the convolution operation
     /// - `activation` - Activation applied to the convolution output
     ///
     /// # Returns
@@ -173,7 +180,7 @@ impl Conv1D {
     ///
     /// # Parameters
     ///
-    /// - `padding` - Padding mode (`Valid`, `Same`, or `Causal`)
+    /// - `padding` - Type of padding to apply (`Valid`, `Same`, or `Causal`)
     ///
     /// # Returns
     ///
@@ -187,7 +194,7 @@ impl Conv1D {
     ///
     /// A dilation of `d` spaces the kernel taps `d` cells apart, so `kernel_size` taps span
     /// `(kernel_size - 1) * d + 1` input cells. The window still advances by the stride. A
-    /// dilation of 1 gives a solid kernel and the same result as before
+    /// dilation of 1 gives a solid kernel
     ///
     /// # Parameters
     ///
@@ -275,10 +282,10 @@ impl Conv1D {
 
     /// Sets whether the layer adds a bias to the convolution output (defaults to `true`)
     ///
-    /// With `use_bias` set to false the layer holds the kernel alone: `param_count` counts the
-    /// kernel alone, `parameters` yields the kernel alone, and a checkpoint of the layer holds
-    /// 1 array under the path `<position>.kernel`. A checkpoint written by a layer that has a
-    /// bias therefore fails to load into a layer that has none, and the refusal names the path
+    /// With `use_bias` set to false, the layer holds the kernel alone. `param_count` counts
+    /// the kernel alone, `parameters` yields the kernel alone, and a checkpoint holds 1 array
+    /// under the path `<position>.kernel`. A checkpoint written by a layer that has a bias
+    /// fails to load into a layer that has none, and the refusal names the path
     ///
     /// # Parameters
     ///
@@ -300,10 +307,17 @@ impl Conv1D {
     /// - `bias` - 1D array of bias values with shape \[filters\], or `None` for a layer
     ///   built with [`with_use_bias(false)`](Self::with_use_bias)
     ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - Ok when `weights` and `bias` match the layer's configured shape
+    ///
     /// # Errors
     ///
+    /// - `Error::NeuralNetwork(NnError::NotBuilt)` - If the layer holds no array yet
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` does not match the
     ///   layer's expected shape
+    /// - `Error::InvalidParameter` - If a bias is given to a layer that holds none, or none is
+    ///   given to a layer that holds 1
     pub fn set_weights(
         &mut self,
         weights: Array3<f32>,
@@ -398,7 +412,6 @@ impl UnaryLayer for Conv1D {
     fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         validate_built_input(&self.built, "Conv1D", input.shape())?;
 
-        // Convolution (dimension-generic engine), then activation
         let output = conv_forward(
             input,
             self.weights.as_slice().expect("weights must be contiguous"),
@@ -427,7 +440,6 @@ impl UnaryLayer for Conv1D {
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let cache: Conv1DCache = ctx.pop_cache("Conv1D")?;
 
-        // Apply activation backward pass
         let grad_upstream = self.activation.backward(&cache.output, grad_output)?;
 
         let grads = conv_backward(

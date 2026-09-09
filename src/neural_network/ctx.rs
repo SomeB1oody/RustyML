@@ -1,16 +1,16 @@
-//! The per-pass context that carries everything a forward pass used to write into a layer
+//! The per-pass context that carries the values a forward pass and its backward pass share
 //!
-//! A layer computes. It does not remember. [`UnaryLayer::forward`](crate::neural_network::traits::UnaryLayer::forward)
-//! takes `&self`, so the values that only exist between a forward pass and its backward pass
-//! have no place inside the layer. [`Ctx`] is that place. One context serves one pass, and it
-//! holds 4 channels:
+//! A layer computes. It does not remember.
+//! [`UnaryLayer::forward`](crate::neural_network::traits::UnaryLayer::forward) takes `&self`,
+//! so the values that only exist between a forward pass and its backward pass have no place
+//! inside the layer. [`Ctx`] is that place. 1 context serves 1 pass, and it holds 4 channels:
 //!
 //! 1. The training flag, which every mode-dependent layer reads.
 //! 2. The cache, which a forward pass writes and the matching backward pass reads.
 //! 3. The gradient store, which a backward pass writes and the optimizer reads.
-//! 4. The state channel, which carries the non-trainable values that a training pass changes,
-//!    such as the running statistics of a normalization layer and the random stream of a
-//!    dropout layer.
+//! 4. The state channel, which carries the non-trainable values that a training pass changes.
+//!    Examples include the running statistics of a normalization layer and the random stream
+//!    of a dropout layer.
 //!
 //! The context lives for 1 pass. A gradient therefore cannot survive into the next step, and a
 //! cache cannot survive into the next pass.
@@ -25,15 +25,15 @@ use std::collections::HashMap;
 /// The position of 1 layer in the model that drives it
 ///
 /// [`Sequential`](crate::neural_network::sequential::Sequential) gives each layer its index,
-/// counted from the input. A model that holds a layer arena gives each layer its arena index,
-/// so 1 layer that several positions of the model share keeps 1 identity. A caller that drives
-/// 1 layer by hand takes the default of 0
+/// counted from the input. A model that holds a layer arena gives each layer its arena index.
+/// That lets 1 layer shared by several positions of the model keep 1 identity. A caller that
+/// drives 1 layer by hand takes the default of 0
 pub type LayerId = usize;
 
 /// The position of 1 CALL of a layer in the pass that drives it
 ///
 /// A layer and a call of that layer are not the same identity. A model that holds a layer
-/// arena can call 1 layer at several positions, and each of those calls has its own input, its
+/// arena can call 1 layer at several positions. Each of those calls has its own input, its
 /// own output, and therefore its own cache. The gradients of those calls sum into 1 parameter,
 /// so a gradient is addressed by the layer. A cache is not, and it is addressed by the call
 ///
@@ -47,8 +47,9 @@ type Slot = Box<dyn Any + Send + Sync>;
 /// 1 parked cache, together with the type name of the layer that parked it
 ///
 /// The name is what makes a mis-addressed take an error. A cache is `dyn Any`, and most layers
-/// park a plain tensor or a plain shape, so a take that reaches the stack of another layer
-/// would find a value of the right type and give back the wrong numbers
+/// park a plain tensor or a plain shape. The type alone therefore separates almost nothing.
+/// A take that reaches the stack of another layer would find a value of the right type and
+/// give back the wrong numbers
 struct CacheSlot {
     /// The type name of the layer that parked the value
     layer: &'static str,
@@ -63,8 +64,8 @@ struct CacheSlot {
 ///
 /// The order of [`iter`](Grads::iter) follows [`ParamId`], which sorts by layer position and
 /// then by name. A caller that needs the canonical order of the model walks the layers instead
-/// and looks each name up, because the layer order is the order that every reduction of this
-/// crate uses
+/// and looks each name up. The layer order is the order that every reduction of this crate
+/// uses
 #[derive(Debug, Default)]
 pub struct Grads {
     /// 1 entry per parameter that a backward pass gave a gradient
@@ -246,8 +247,8 @@ pub struct Ctx {
     /// 1 stack of caches per CALL, in the order the forward pass pushed them
     ///
     /// The key is the call and not the layer. A branch of a model that never reaches the loss
-    /// leaves its cache behind, and a stack shared with another call of the same layer would
-    /// then hand that stale cache to the wrong backward pass
+    /// leaves its cache behind. A stack shared with another call of the same layer would then
+    /// hand that stale cache to the wrong backward pass
     caches: HashMap<CallId, Vec<CacheSlot>>,
     /// The non-trainable values that the forward pass proposed to change
     states: HashMap<(LayerId, &'static str), Slot>,
@@ -293,7 +294,7 @@ impl Ctx {
         self.training
     }
 
-    /// The layer that the channel calls belong to
+    /// The layer that the gradient channel and the state channel belong to
     ///
     /// # Returns
     ///
@@ -316,8 +317,8 @@ impl Ctx {
     /// Points every channel at 1 layer that the model calls once, and gives back the layer
     /// they left
     ///
-    /// A model calls this before it calls a layer, so the caches, the state, and the gradients
-    /// of that call reach the address of that layer. A caller that drives 1 layer by hand
+    /// A model calls this before it calls a layer. The caches, the state, and the gradients of
+    /// that call then reach the address of that layer. A caller that drives 1 layer by hand
     /// never calls it, and everything lands at layer 0
     ///
     /// # Parameters
@@ -430,7 +431,7 @@ impl Ctx {
     ///
     /// # Returns
     ///
-    /// - `usize` - The total over every layer
+    /// - `usize` - The total over every call
     pub fn pending_caches(&self) -> usize {
         self.caches.values().map(Vec::len).sum()
     }
@@ -503,8 +504,8 @@ impl Ctx {
     /// How many proposed state changes no layer has taken back
     ///
     /// The count is 0 after a full pass, because a model applies the state of every layer it
-    /// calls. A value left here is a defect: the layer that wrote it did not take it back, so
-    /// its running statistics or its random stream never moved
+    /// calls. A value left here is a defect: the layer that wrote it did not take it back.
+    /// Its running statistics or its random stream never moved
     ///
     /// # Returns
     ///
@@ -629,8 +630,8 @@ mod tests {
         assert_eq!(ctx.pop_cache::<Vec<usize>>("Dense").unwrap(), vec![2, 3]);
     }
 
-    /// A layer that parks 1 type and takes back another is a defect of that layer, and the
-    /// message says so instead of reporting a missing forward pass
+    /// A layer that parks 1 type and takes back another is a defect of that layer. The message
+    /// says so instead of reporting a missing forward pass
     #[test]
     fn a_cache_of_another_type_is_refused() {
         let mut ctx = Ctx::training();

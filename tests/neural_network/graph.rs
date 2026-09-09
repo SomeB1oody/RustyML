@@ -2,8 +2,7 @@
 //!
 //! The sharpest tests here compare a graph against a sequential model that computes the same
 //! function. A graph whose fan-in accumulator drops a contribution still runs, still trains,
-//! and gives a plausible answer, so an equality against a model with no fan-in is what catches
-//! it.
+//! and gives a plausible answer. An equality against a model with no fan-in is what catches it.
 
 use ndarray::{Array, IxDyn};
 use rustyml::error::Error;
@@ -29,7 +28,7 @@ fn data(shape: &[usize]) -> Tensor {
 /// `Add(h, h)` is `2 * h`, and `Rescaling(2.0)` is the same function with no fan-in at all.
 /// The 2 models must therefore agree on every loss and on every trained array. A fan-in
 /// accumulator that kept the last contribution instead of the sum would halve the gradient
-/// that reaches the layer under the node, and the trained kernel would drift on the first step
+/// that reaches the layer under the node. The trained kernel would then drift on the first step
 #[test]
 fn a_node_read_twice_receives_the_sum_of_both_gradients() {
     let x = data(&[6, 4]);

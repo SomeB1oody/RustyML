@@ -23,7 +23,8 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// Computes the mean value within each pooling window along the length dimension.
 /// Input tensor shape: `[batch_size, length, channels]`. Output tensor shape:
 /// `[batch_size, pooled_length, channels]`. With `Valid` padding,
-/// `pooled_length = (length - pool_size) / stride + 1`.
+/// `pooled_length = (length - pool_size) / stride + 1`. With `Same` padding,
+/// `pooled_length = ceil(length / stride)`.
 ///
 /// # Examples
 ///

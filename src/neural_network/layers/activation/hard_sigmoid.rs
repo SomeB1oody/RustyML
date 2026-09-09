@@ -102,7 +102,6 @@ impl UnaryLayer for HardSigmoid {
 
         let output = Activation::HardSigmoid.forward(input)?;
 
-        // Cache activated output for backpropagation
         if ctx.is_training() {
             ctx.push_cache("HardSigmoid", output.clone());
         }

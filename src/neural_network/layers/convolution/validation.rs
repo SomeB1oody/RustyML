@@ -7,9 +7,13 @@ use crate::neural_network::layers::convolution::convolution_engine::{
 
 /// Validates the filters parameter
 ///
+/// # Parameters
+///
+/// - `filters` - Number of filters
+///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if filters is 0
+/// - `Error::InvalidParameter` - If filters is 0
 pub(super) fn validate_filters(filters: usize) -> Result<(), Error> {
     if filters == 0 {
         return Err(Error::invalid_parameter(
@@ -22,9 +26,13 @@ pub(super) fn validate_filters(filters: usize) -> Result<(), Error> {
 
 /// Validates kernel size for 1D convolution
 ///
+/// # Parameters
+///
+/// - `kernel_size` - Kernel size of the single spatial axis
+///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if kernel_size is 0
+/// - `Error::InvalidParameter` - If kernel_size is 0
 pub(super) fn validate_kernel_size_1d(kernel_size: usize) -> Result<(), Error> {
     if kernel_size == 0 {
         return Err(Error::invalid_parameter(
@@ -37,9 +45,13 @@ pub(super) fn validate_kernel_size_1d(kernel_size: usize) -> Result<(), Error> {
 
 /// Validates kernel size for 2D convolution
 ///
+/// # Parameters
+///
+/// - `kernel_size` - Kernel size of each spatial axis, as `(height, width)`
+///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if any dimension is 0
+/// - `Error::InvalidParameter` - If any dimension is 0
 pub(super) fn validate_kernel_size_2d(kernel_size: (usize, usize)) -> Result<(), Error> {
     if kernel_size.0 == 0 || kernel_size.1 == 0 {
         return Err(Error::invalid_parameter(
@@ -52,9 +64,13 @@ pub(super) fn validate_kernel_size_2d(kernel_size: (usize, usize)) -> Result<(),
 
 /// Validates kernel size for 3D convolution
 ///
+/// # Parameters
+///
+/// - `kernel_size` - Kernel size of each spatial axis, as `(depth, height, width)`
+///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if any dimension is 0
+/// - `Error::InvalidParameter` - If any dimension is 0
 pub(super) fn validate_kernel_size_3d(kernel_size: (usize, usize, usize)) -> Result<(), Error> {
     if kernel_size.0 == 0 || kernel_size.1 == 0 || kernel_size.2 == 0 {
         return Err(Error::invalid_parameter(
@@ -67,9 +83,13 @@ pub(super) fn validate_kernel_size_3d(kernel_size: (usize, usize, usize)) -> Res
 
 /// Validates strides for 1D convolution
 ///
+/// # Parameters
+///
+/// - `stride` - Stride of the single spatial axis
+///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if stride is 0
+/// - `Error::InvalidParameter` - If stride is 0
 pub(super) fn validate_strides_1d(stride: usize) -> Result<(), Error> {
     if stride == 0 {
         return Err(Error::invalid_parameter(
@@ -82,9 +102,13 @@ pub(super) fn validate_strides_1d(stride: usize) -> Result<(), Error> {
 
 /// Validates strides for 2D convolution
 ///
+/// # Parameters
+///
+/// - `strides` - Stride of each spatial axis, as `(height, width)`
+///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if any stride is 0
+/// - `Error::InvalidParameter` - If any stride is 0
 pub(super) fn validate_strides_2d(strides: (usize, usize)) -> Result<(), Error> {
     if strides.0 == 0 || strides.1 == 0 {
         return Err(Error::invalid_parameter(
@@ -97,9 +121,13 @@ pub(super) fn validate_strides_2d(strides: (usize, usize)) -> Result<(), Error> 
 
 /// Validates strides for 3D convolution
 ///
+/// # Parameters
+///
+/// - `strides` - Stride of each spatial axis, as `(depth, height, width)`
+///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if any stride is 0
+/// - `Error::InvalidParameter` - If any stride is 0
 pub(super) fn validate_strides_3d(strides: (usize, usize, usize)) -> Result<(), Error> {
     if strides.0 == 0 || strides.1 == 0 || strides.2 == 0 {
         return Err(Error::invalid_parameter(
@@ -112,6 +140,10 @@ pub(super) fn validate_strides_3d(strides: (usize, usize, usize)) -> Result<(), 
 
 /// Validates input shape for 1D convolution
 ///
+/// # Parameters
+///
+/// - `input_shape` - Shape of the input tensor
+///
 /// # Notes
 ///
 /// The kernel size is not part of this rule. A kernel longer than the input axis stays legal
@@ -120,9 +152,7 @@ pub(super) fn validate_strides_3d(strides: (usize, usize, usize)) -> Result<(), 
 ///
 /// # Errors
 ///
-/// Returns `Error::InvalidInput` if:
-/// - Shape is not 3D
-/// - Input channels is 0
+/// - `Error::InvalidInput` - If the shape is not 3D, or if the channel count is 0
 pub(super) fn validate_input_shape_1d(input_shape: &[usize]) -> Result<(), Error> {
     if input_shape.len() != 3 {
         return Err(Error::invalid_input(
@@ -139,15 +169,17 @@ pub(super) fn validate_input_shape_1d(input_shape: &[usize]) -> Result<(), Error
 
 /// Validates input shape for 2D convolution
 ///
+/// # Parameters
+///
+/// - `input_shape` - Shape of the input tensor
+///
 /// # Notes
 ///
 /// The kernel size is not part of this rule. See [`validate_input_shape_1d`]
 ///
 /// # Errors
 ///
-/// Returns `Error::InvalidInput` if:
-/// - Shape is not 4D
-/// - Input channels is 0
+/// - `Error::InvalidInput` - If the shape is not 4D, or if the channel count is 0
 pub(super) fn validate_input_shape_2d(input_shape: &[usize]) -> Result<(), Error> {
     if input_shape.len() != 4 {
         return Err(Error::invalid_input(
@@ -164,15 +196,17 @@ pub(super) fn validate_input_shape_2d(input_shape: &[usize]) -> Result<(), Error
 
 /// Validates input shape for 3D convolution
 ///
+/// # Parameters
+///
+/// - `input_shape` - Shape of the input tensor
+///
 /// # Notes
 ///
 /// The kernel size is not part of this rule. See [`validate_input_shape_1d`]
 ///
 /// # Errors
 ///
-/// Returns `Error::InvalidInput` if:
-/// - Shape is not 5D
-/// - Any dimension is 0
+/// - `Error::InvalidInput` - If the shape is not 5D, or if any dimension is 0
 pub(super) fn validate_input_shape_3d(input_shape: &[usize]) -> Result<(), Error> {
     if input_shape.len() != 5 {
         return Err(Error::invalid_input(
@@ -202,7 +236,7 @@ pub(super) fn validate_input_shape_3d(input_shape: &[usize]) -> Result<(), Error
 ///
 /// # Errors
 ///
-/// Returns `Error::InvalidInput` if the shape does not have `rank + 2` axes, or if any axis is 0
+/// - `Error::InvalidInput` - If the shape does not have `rank + 2` axes, or if any axis is 0
 pub(super) fn validate_transpose_input_shape(
     input_shape: &[usize],
     rank: usize,
@@ -247,13 +281,14 @@ pub(super) fn validate_dilation(dilation: &[usize]) -> Result<(), Error> {
 /// `Valid` padding the layer reads only complete windows, so an extent longer than the input axis
 /// gives an output size of 0. That configuration is rejected. `Same` and `Causal` padding add the
 /// missing cells on the borders, so every extent stays legal and this rule does not apply. A
-/// transposed convolution grows its input and puts no such bound on it, so it does not call this
+/// transposed convolution grows its input and puts no such bound on it, so this check never fails
+/// there
 ///
 /// This is the guard of the free functions that carry no layer name, such as
-/// [`conv_forward_impl`](super::convolution_engine::conv_forward_impl). Every layer applies the
-/// same rule at its build through [`valid_output_size`], which names the layer and the axis. A
-/// layer therefore refuses an oversized kernel before it allocates, and this guard never fires
-/// through a layer
+/// [`conv_forward_impl`](super::convolution_engine::conv_forward_impl). Every layer this rule
+/// bounds applies it at its build through [`valid_output_size`], which names the layer and the
+/// axis. Such a layer therefore refuses an oversized kernel before it allocates, and this guard
+/// never fires through a layer
 ///
 /// # Parameters
 ///
@@ -369,9 +404,13 @@ pub(super) fn validate_stride_dilation_exclusive(
 
 /// Validates depth multiplier for depthwise separable convolution
 ///
+/// # Parameters
+///
+/// - `depth_multiplier` - Depth multiplier applied to the input channel count
+///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if depth_multiplier is 0
+/// - `Error::InvalidParameter` - If depth_multiplier is 0
 pub(super) fn validate_depth_multiplier(depth_multiplier: usize) -> Result<(), Error> {
     if depth_multiplier == 0 {
         return Err(Error::invalid_parameter(

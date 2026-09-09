@@ -15,14 +15,13 @@
 //! ```
 //!
 //! The layer type is the string that [`LayerBase::layer_type`] returns, and a load compares it
-//! per position. Name and shape alone are too weak for that comparison:
+//! per position. Name and shape alone are too weak for that comparison.
 //! `InstanceNormalization`, `GroupNormalization`, and a rank-2 `LayerNormalization` all hold
-//! `gamma` and `beta` of the same extent, so nothing but the type name tells them apart
+//! `gamma` and `beta` of the same extent. Only the type name tells them apart
 //!
 //! The kind of a record says whether an optimizer updates the array. It separates the
-//! `moving_mean` and the `moving_variance` of
-//! [`BatchNormalization`](crate::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization)
-//! from the trainable `gamma` and `beta` that stand next to them in the same layer
+//! `moving_mean` and the `moving_variance` of [`BatchNormalization`] from the trainable
+//! `gamma` and `beta` that stand next to them in the same layer
 //!
 //! # Strict is the default
 //!
@@ -34,7 +33,7 @@
 //! [`LayerBase::layer_type`]: crate::neural_network::traits::LayerBase::layer_type
 //! [`apply`]: crate::neural_network::layers::checkpoint::apply
 //! [`apply_partial`]: crate::neural_network::layers::checkpoint::apply_partial
-//! [`UnaryLayer::build`]: crate::neural_network::traits::UnaryLayer::build
+//! [`BatchNormalization`]: crate::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization
 
 use crate::error::{Error, IoError};
 use crate::neural_network::Shape;
@@ -52,17 +51,18 @@ pub const MODEL_MAGIC: u32 = 0x524D_4C4D;
 
 /// On-disk model format version written by this build
 ///
-/// Version 2 is the named checkpoint. It addresses every array by `<scope>.<name>`, it carries
-/// the kind of each array, and it reserves the build slot. Version 1 held a closed enum of
-/// per-layer weight containers, whose variant index it wrote in place of any name. No byte of
-/// the 2 layouts agrees, so every version 1 file stops loading, and the refusal names both
-/// versions
+/// Version 3 is the named checkpoint. It addresses every array by `<scope>.<name>`, it carries
+/// the kind of each array, and it records 1 build shape per input of a layer. Version 2
+/// recorded a single build shape. Version 1 held a closed enum of per-layer weight containers,
+/// and it wrote the variant index of each container in place of any name. No byte of these
+/// layouts agrees between versions, so a file from an earlier version stops loading, and the
+/// refusal names both versions
 ///
-/// Bump this on any change to the layout of a record, to the order of the fields of a
-/// structure, or to the meaning of a field. The load path checks the layer count, the layer
-/// type of each position, and the name, the kind, and the shape of every array. Those checks
-/// can all pass for a file that another release wrote, so this number is what makes such a
-/// file fail instead of loading values that mean something else
+/// Bump this on any change to a record layout, a field order, or a field meaning. The load
+/// path checks the layer count, the layer type of each position, and the name, the kind, and
+/// the shape of every array. Those checks can all pass for a file that another release wrote.
+/// This number is what makes such a file fail instead of loading values that mean something
+/// else
 pub const MODEL_FORMAT_VERSION: u32 = 3;
 
 /// The shapes that a layer was built for
@@ -77,8 +77,8 @@ pub const MODEL_FORMAT_VERSION: u32 = 3;
 /// merge layer takes several
 ///
 /// The batch axis is free. A layer serves every batch size, so the batch extent is not part of
-/// what the layer was built for, and a model built for 32 samples takes the checkpoint of a
-/// model built for 1
+/// what the layer was built for. A model built for 32 samples takes the checkpoint of a model
+/// built for 1
 ///
 /// A load compares the field when the file and the layer both carry one, and skips the
 /// comparison in every other case. A layer that owns no array and reads no extent of its
@@ -160,12 +160,16 @@ pub struct WeightRecord<'a> {
 /// The `'a` lifetime is threaded from the layer, as in [`WeightRecord`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerCheckpoint<'a> {
-    /// The string that [`LayerBase::layer_type`](crate::neural_network::traits::LayerBase::layer_type) returned. A load compares it against the layer
+    /// The string that [`LayerBase::layer_type`] returned. A load compares it against the layer
     /// at the same position
+    ///
+    /// [`LayerBase::layer_type`]: crate::neural_network::traits::LayerBase::layer_type
     pub layer_type: Cow<'a, str>,
     /// The shape the layer was built for, when the layer reports one. See [`BuildConfig`]
     pub build: Option<BuildConfig>,
-    /// Every array the layer holds, in the order [`LayerBase::weights`](crate::neural_network::traits::LayerBase::weights) gives them
+    /// Every array the layer holds, in the order [`LayerBase::weights`] gives them
+    ///
+    /// [`LayerBase::weights`]: crate::neural_network::traits::LayerBase::weights
     pub weights: Vec<WeightRecord<'a>>,
 }
 
@@ -176,8 +180,7 @@ pub struct LayerCheckpoint<'a> {
 pub struct ModelCheckpoint<'a> {
     /// Magic tag identifying a RustyML model file. See [`MODEL_MAGIC`]
     ///
-    /// This field comes first, so a file written before this header existed misreads its
-    /// leading layer count as the tag. Load then rejects it before it can apply any weights
+    /// A file saved before this tag existed is refused rather than loaded with wrong values
     pub magic: u32,
     /// On-disk format version of this file. See [`MODEL_FORMAT_VERSION`]
     pub format_version: u32,
@@ -244,8 +247,8 @@ pub fn capture(layers: &[Box<dyn Layer>]) -> ModelCheckpoint<'_> {
                     name: Cow::Borrowed(entry.name),
                     kind: entry.kind,
                     shape: entry.value.shape().to_vec(),
-                    // `to_slice` keeps the lifetime of the layer, so a C-order array rides
-                    // into the file with no copy at all
+                    // `to_slice` keeps the lifetime of the layer, so a contiguous array is
+                    // borrowed here instead of copied
                     data: match entry.value.to_slice() {
                         Some(run) => Cow::Borrowed(run),
                         None => Cow::Owned(entry.value.iter().copied().collect()),
@@ -273,7 +276,7 @@ pub fn capture(layers: &[Box<dyn Layer>]) -> ModelCheckpoint<'_> {
 /// 5. The kind of each array.
 /// 6. The shape of each array, and the element count of the record.
 ///
-/// The second pass writes. A refusal therefore leaves the model exactly as it was, and a model
+/// The second pass writes. A refusal therefore leaves the model exactly as it was. A model
 /// never holds the arrays of 1 file next to the arrays of another
 ///
 /// # Parameters
@@ -377,11 +380,11 @@ pub fn apply(layers: &mut [Box<dyn Layer>], file: &ModelCheckpoint<'_>) -> Resul
 
 /// Applies what the file and the model agree on, and reports the rest
 ///
-/// This is the opt-in lenient load. It writes an array when the position holds the same layer
-/// type, when the 2 sides agree on the build shape, and when the file holds the same name, the
-/// same kind, and the same shape. Everything else goes into the report and nothing else fails.
-/// A position whose layer type differs contributes every path of that layer to both lists,
-/// because a name and a shape cannot tell 2 normalization layers apart
+/// This is the opt-in lenient load. It writes an array in 3 cases. The position holds the
+/// same layer type, the 2 sides agree on the build shape, and the file holds the same name,
+/// kind, and shape. Everything else goes into the report and nothing else fails.
+/// A position whose layer type differs contributes every path of that layer to both lists.
+/// A name and a shape cannot tell 2 normalization layers apart
 ///
 /// A position whose build shape differs does the same. [`apply`] refuses such a file, and this
 /// skips the layer: the 2 paths agree that a layer built for another input takes no weights.
@@ -417,10 +420,8 @@ pub fn apply_partial(layers: &mut [Box<dyn Layer>], file: &ModelCheckpoint<'_>) 
             continue;
         };
 
-        // The lenient load skips a whole layer whose build shape disagrees, rather than
-        // writing weights into a layer that was built for another input. A conv kernel does
-        // not change with the spatial extents, so the per-array shape check below cannot see
-        // such a disagreement. Nothing fails here: every path of both sides is reported
+        // A build shape mismatch skips the whole layer. The per-array shape check below
+        // cannot catch it, because a kernel shape does not depend on the spatial extent
         if let (Some(wanted), Some(found)) = (layer.build_config(), saved.build.as_ref())
             && wanted != *found
         {
@@ -436,11 +437,7 @@ pub fn apply_partial(layers: &mut [Box<dyn Layer>], file: &ModelCheckpoint<'_>) 
         let mut taken = vec![false; saved.weights.len()];
         for target in layer.weights_mut().iter_mut() {
             let path = weight_path(scope, target.name);
-            // A record whose element count contradicts its own shape reaches no array either.
-            // A record that another array already took is skipped, so 2 arrays never read 1
-            // record. A model refuses 2 arrays of 1 layer under 1 name at its build, so this
-            // arm is unreachable from a model, and it stays correct for a caller that reaches
-            // `apply_partial` another way
+            // `taken` stops 2 target arrays from matching 1 record
             let found = saved
                 .weights
                 .iter()

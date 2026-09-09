@@ -4,11 +4,15 @@ use crate::error::Error;
 
 /// Validates pool size for 1D pooling
 ///
+/// # Parameters
+///
+/// - `pool_size` - the size of the pooling window
+/// - `input_length` - the input length along the pooled axis
+///
 /// # Errors
 ///
-/// Returns [`Error::InvalidParameter`] if:
-/// - pool_size is 0
-/// - pool_size is greater than input length
+/// Returns [`Error::InvalidParameter`] if pool_size is 0, or if it exceeds the input length
+/// (which would underflow the output-shape calculation)
 pub(super) fn validate_pool_size_1d(pool_size: usize, input_length: usize) -> Result<(), Error> {
     if pool_size == 0 {
         return Err(Error::invalid_parameter(
@@ -26,6 +30,12 @@ pub(super) fn validate_pool_size_1d(pool_size: usize, input_length: usize) -> Re
 }
 
 /// Validates pool size for 2D pooling
+///
+/// # Parameters
+///
+/// - `pool_size` - the pooling window size as (height, width)
+/// - `input_height` - the input height
+/// - `input_width` - the input width
 ///
 /// # Errors
 ///
@@ -52,6 +62,13 @@ pub(super) fn validate_pool_size_2d(
 }
 
 /// Validates pool size for 3D pooling
+///
+/// # Parameters
+///
+/// - `pool_size` - the pooling window size as (depth, height, width)
+/// - `input_depth` - the input depth
+/// - `input_height` - the input height
+/// - `input_width` - the input width
 ///
 /// # Errors
 ///
@@ -80,6 +97,10 @@ pub(super) fn validate_pool_size_3d(
 
 /// Validates stride for 1D pooling
 ///
+/// # Parameters
+///
+/// - `stride` - the step size for the pooling operation
+///
 /// # Errors
 ///
 /// Returns [`Error::InvalidParameter`] if stride is 0
@@ -95,6 +116,10 @@ pub(super) fn validate_stride_1d(stride: usize) -> Result<(), Error> {
 
 /// Validates strides for 2D pooling
 ///
+/// # Parameters
+///
+/// - `strides` - the step sizes as (height_step, width_step)
+///
 /// # Errors
 ///
 /// Returns [`Error::InvalidParameter`] if any stride is 0
@@ -109,6 +134,10 @@ pub(super) fn validate_strides_2d(strides: (usize, usize)) -> Result<(), Error> 
 }
 
 /// Validates strides for 3D pooling
+///
+/// # Parameters
+///
+/// - `strides` - the step sizes as (depth_step, height_step, width_step)
 ///
 /// # Errors
 ///

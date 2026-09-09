@@ -31,9 +31,9 @@ pub enum LayerNormalizationAxis {
     Default,
     /// Normalize along a single custom specified axis
     Custom(usize),
-    /// Normalize jointly over several axes (a Keras-style axis list). Statistics are computed
-    /// over the combined elements of those axes. `gamma` and `beta` are 1-D, with length equal
-    /// to the product of those axes' sizes
+    /// Normalize jointly over several axes, given as a list. Statistics are computed over the
+    /// combined elements of those axes. `gamma` and `beta` are 1-D, with length equal to the
+    /// product of those axes' sizes
     Multiple(Vec<usize>),
 }
 
@@ -336,13 +336,13 @@ pub struct LayerNormalization {
     ///
     /// The array stays allocated and holds every element at 1 when `scale` is false. A scale of
     /// 1 changes no value, so the forward pass reads it and gives the same result that dropping
-    /// the multiply gives. `weights` hides the array and `parameters` never yields it
+    /// the multiply gives. `weights` hides the array and `parameters_mut` never yields it
     gamma: Tensor,
     /// Shift parameter (trainable)
     ///
     /// The array stays allocated and holds every element at 0 when `center` is false. A shift
     /// of 0 changes every value except a negative zero, which it turns into a positive zero.
-    /// `weights` hides the array and `parameters` never yields it
+    /// `weights` hides the array and `parameters_mut` never yields it
     beta: Tensor,
     /// Whether the layer adds the shift `beta`
     center: bool,
@@ -505,8 +505,8 @@ impl LayerNormalization {
 
     /// Sets whether the layer adds the shift `beta` (defaults to `true`)
     ///
-    /// With `center` set to false the layer holds no `beta`: `param_count` counts none for it,
-    /// `parameters` yields none for it, and a checkpoint of the layer holds no
+    /// With `center` set to false, the layer holds no `beta`. `param_count` counts none for it,
+    /// `parameters_mut` yields none for it, and a checkpoint of the layer holds no
     /// `<position>.beta` path. The normalized value passes through unshifted
     ///
     /// # Parameters
@@ -519,7 +519,7 @@ impl LayerNormalization {
     pub fn with_center(mut self, center: bool) -> Self {
         self.center = center;
         if !center {
-            // Put the array back at the identity shift, so an array the layer no longer holds
+            // Put the array back at the identity shift, so an array the layer does not hold
             // reaches no result
             self.beta = Tensor::zeros(self.beta.shape());
         }
@@ -528,10 +528,10 @@ impl LayerNormalization {
 
     /// Sets whether the layer applies the scale `gamma` (defaults to `true`)
     ///
-    /// With `scale` set to false the layer holds no `gamma`: `param_count` counts none for it,
-    /// `parameters` yields none for it, and a checkpoint of the layer holds no
+    /// With `scale` set to false, the layer holds no `gamma`. `param_count` counts none for it,
+    /// `parameters_mut` yields none for it, and a checkpoint of the layer holds no
     /// `<position>.gamma` path. `beta` keeps its own name and its own optimizer state, because
-    /// a checkpoint and an optimizer both address an array by name and never by position
+    /// a checkpoint and an optimizer both address an array by name, never by position
     ///
     /// # Parameters
     ///
@@ -543,7 +543,7 @@ impl LayerNormalization {
     pub fn with_scale(mut self, scale: bool) -> Self {
         self.scale = scale;
         if !scale {
-            // Put the array back at the identity scale, so an array the layer no longer holds
+            // Put the array back at the identity scale, so an array the layer does not hold
             // reaches no result
             self.gamma = Tensor::ones(self.gamma.shape());
         }
@@ -799,8 +799,8 @@ impl LayerBase for LayerNormalization {
     }
 
     fn param_count(&self) -> ParamCounts {
-        // Read the arrays the layer holds rather than the configuration, so dropping
-        // `gamma` or `beta` corrects the count with no second formula to keep in step
+        // Read the arrays the layer holds, not the configuration, so dropping `gamma` or `beta`
+        // corrects the count with no second formula to keep in step
         let gamma = if self.scale { self.gamma.len() } else { 0 };
         let beta = if self.center { self.beta.len() } else { 0 };
         ParamCounts::trainable(gamma + beta)
@@ -815,7 +815,7 @@ impl LayerBase for LayerNormalization {
             ..
         } = self;
         let mut params = Vec::new();
-        // Each tensor is pushed on its own, so a tensor the layer drops holds back no other
+        // Each array is pushed on its own, so an array the layer drops holds back no other
         if *scale {
             params.push(ParamRef::no_decay(
                 "gamma",
@@ -894,8 +894,8 @@ impl LayerNormalization {
     /// Forward for a non-trailing `Custom` axis: the broadcast ndarray path
     ///
     /// The groups are strided mid-axis lanes that ndarray reduces in place, so this path stays
-    /// transpose-free by construction. It remains serial because its access pattern, not
-    /// compute, is the cost. An inference pass takes the twin that writes no cache
+    /// transpose-free by construction and runs serially. An inference pass takes the twin that
+    /// writes no cache
     fn forward_strided(
         &self,
         input: &Tensor,
@@ -1031,7 +1031,6 @@ impl LayerNormalization {
             ctx.add_grad("beta", grad_beta)?;
         }
 
-        // Gradient with respect to normalized input: reshape gamma for broadcasting
         let mut gamma_shape = vec![1; grad_output.ndim()];
         for (i, &dim) in self.gamma.shape().iter().enumerate() {
             gamma_shape[axis_idx + i] = dim;
@@ -1044,16 +1043,13 @@ impl LayerNormalization {
 
         let grad_x_normalized = grad_output * &gamma_broadcast;
 
-        // Inverse standard deviation and size of the normalization dimension
         let inv_std = std_dev.mapv(|x| 1.0 / x);
         let norm_size = grad_output.shape()[axis_idx] as f32;
 
-        // Gradient with respect to variance
         let grad_var = (&grad_x_normalized * x_centered * -0.5).sum_axis(Axis(axis_idx));
         let grad_var = grad_var.insert_axis(Axis(axis_idx));
         let grad_var = &grad_var * &inv_std * &inv_std * &inv_std;
 
-        // Gradient with respect to mean
         let grad_mean_1 = (&grad_x_normalized * -1.0).sum_axis(Axis(axis_idx));
         let grad_mean_1 = grad_mean_1.insert_axis(Axis(axis_idx));
         let grad_mean_1 = &grad_mean_1 * &inv_std;
@@ -1064,7 +1060,6 @@ impl LayerNormalization {
         let grad_mean_2 = &grad_var * (&x_sum * -2.0 / norm_size);
         let grad_mean = grad_mean_1 + grad_mean_2;
 
-        // Gradient with respect to input
         let grad_input = &grad_x_normalized * &inv_std
             + &grad_var * (x_centered * 2.0 / norm_size)
             + &grad_mean / norm_size;
@@ -1151,7 +1146,7 @@ mod tests {
         }
     }
 
-    /// merge then unmerge round-trip holds when axes require a non-trivial permutation
+    /// merge then unmerge round-trip holds when axes need a non-trivial permutation
     /// ([2,3,4], axes=[0,2])
     #[test]
     fn test_merge_unmerge_round_trip_nontrivial_perm() {

@@ -29,26 +29,17 @@ use ndarray::IxDyn;
 ///
 /// # The tie rule
 ///
-/// A tie routes the whole gradient to the FIRST input that holds the winning value. This rule
-/// is a deliberate choice of this crate, and not the only defensible one. A tied position has
-/// no single derivative, so an even share over every input that holds the winning value is
-/// equally correct math. This crate sends the whole gradient to 1 input instead, for 3 reasons:
-///
-/// 1. The routing is a plain arg-max, so the backward pass needs 1 index per output position
-///    and no count of the inputs that tied.
-/// 2. The gradient of a position reaches exactly 1 input, which keeps the rule stable when the
-///    input count grows.
-/// 3. [`MaxPooling2D`](crate::neural_network::layers::pooling::max_pooling_2d::MaxPooling2D)
-///    already routes a tied window position to the first position that holds the winning value.
-///
-/// The test `tie_routes_the_gradient_to_the_first_input` pins the rule
+/// A tie routes the whole gradient to the first input that holds the winning value. Every
+/// other input that ties there takes 0.
+/// [`MaxPooling2D`](crate::neural_network::layers::pooling::max_pooling_2d::MaxPooling2D)
+/// resolves a tied window position by the same rule. The test
+/// `tie_routes_the_gradient_to_the_first_input` pins the rule
 ///
 /// # Notes
 ///
 /// A NaN wins its position and keeps it. The first input that holds a NaN at a position takes
-/// the value and the whole gradient there, and no later value displaces it. A plain "greater
-/// than" fold would drop a NaN that arrives after a number, and would hide a diverged model.
-/// The max pooling layers of this crate keep a NaN the same way
+/// the whole gradient there, and no later value displaces it. The max pooling layers of this
+/// crate keep a NaN the same way
 ///
 /// # Examples
 ///
@@ -85,7 +76,7 @@ use ndarray::IxDyn;
 /// ```
 #[derive(Debug, Default)]
 pub struct Maximum {
-    /// The shapes the layer was built for, 1 per input. `None` before the build
+    /// Shape of every input the layer was built for, batch axis first. `None` before the build
     built: Option<Vec<Shape>>,
 }
 
@@ -101,12 +92,19 @@ impl Maximum {
 }
 
 /// What the forward pass of [`Maximum`] parks for its backward pass
+///
+/// The winner list is the whole answer of the backward pass, so the cache holds no tensor of
+/// the forward pass. It costs 1 entry per element of the output, whatever number of inputs the
+/// layer took
 struct MaximumCache {
     /// Extent of every axis of the output, batch axis first
     output: Vec<usize>,
     /// Extent of every axis of each input, in the order the forward pass took them
     inputs: Vec<Vec<usize>>,
     /// The input that won each output position, in the C order of the output
+    ///
+    /// A tie names the first input that holds the winning value, which is the
+    /// [tie rule](Maximum) of the layer
     winners: Vec<usize>,
 }
 
@@ -126,6 +124,12 @@ impl Layer for Maximum {
     /// Every input reaches the extents of the output first, so 1 flat scan per input settles
     /// both the value and the winner. The scan keeps the association of a pairwise fold,
     /// because a position changes hands only for a strictly larger value
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the layer received no input, or if the shape rule of the
+    ///   family refuses the shapes of the tensors
+    /// - `Error::Computation` - If an input cannot take the rank of the output
     fn forward_many(&self, inputs: &[&Tensor], ctx: &mut Ctx) -> Result<Tensor, Error> {
         Arity::AtLeast(1).check("Maximum", inputs.len())?;
         let dims = merged_dims("Maximum", inputs)?;
@@ -137,13 +141,8 @@ impl Layer for Maximum {
             for ((value, &candidate), winner) in
                 folded.iter_mut().zip(lifted.iter()).zip(winners.iter_mut())
             {
-                // The fold is left-associative, so a later input needs a strictly larger
-                // value to take a position. A tie therefore leaves the position with the
-                // first input that holds the winning value.
-                //
-                // A NaN wins the position it reaches, and no later value displaces it. Every
-                // comparison against a NaN is false, so a plain "greater than" fold would
-                // drop a NaN that arrives after a number
+                // A position that holds a NaN keeps it. No later candidate can replace a NaN
+                // value, however large the candidate is.
                 let takes = !value.is_nan() && (candidate.is_nan() || candidate > *value);
                 if takes {
                     *value = candidate;
@@ -174,6 +173,14 @@ impl Layer for Maximum {
     /// The other inputs take 0 at that position. An input that broadcast in the forward pass
     /// then sums its gradient back to its own shape, so every gradient comes back at the shape
     /// of its own input
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::ForwardPassNotRun)` - If `ctx` holds no cache of this
+    ///   layer
+    /// - `Error::ShapeMismatch` - If `grad_output` does not carry the shape of the output that
+    ///   the forward pass gave
+    /// - `Error::Computation` - If a routed buffer cannot take the shape of the output
     fn backward_many(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Vec<Tensor>, Error> {
         let cache: MaximumCache = ctx.pop_cache("Maximum")?;
         if grad_output.shape() != cache.output.as_slice() {
@@ -260,9 +267,7 @@ mod tests {
 
     /// A tie routes the whole gradient to the first input that holds the winning value
     ///
-    /// This is the deliberate rule of the crate, and an even share over the tied inputs is the
-    /// alternative that this test rules out. The third input ties on the middle position and
-    /// takes nothing at all
+    /// The third input ties on the middle position and takes nothing at all
     #[test]
     fn tie_routes_the_gradient_to_the_first_input() {
         let first = tensor(&[1, 3], &[1.0, 2.0, 3.0]);

@@ -45,8 +45,10 @@ use rayon::slice::{ParallelSlice, ParallelSliceMut};
 ///
 /// # Errors
 ///
-/// Returns an error when the forward pass has not been run and no mask is available, or when
-/// the stored mask does not broadcast up to the shape of `grad_output`
+/// - `Error::NeuralNetwork(NnError::ForwardPassNotRun)` - If the forward pass has not been run
+///   and no mask is available
+/// - `Error::ShapeMismatch` - If the stored mask does not broadcast up to the shape of
+///   `grad_output`
 fn dropout_backward(
     grad_output: &Tensor,
     mask: &Option<Tensor>,
@@ -55,12 +57,10 @@ fn dropout_backward(
     layer_name: &'static str,
 ) -> Result<Tensor, Error> {
     if !training || rate == 0.0 {
-        // Inference or zero rate: pass the gradient through unchanged
         return Ok(grad_output.clone());
     }
 
     if rate == 1.0 {
-        // Rate of 1.0 drops everything, so the gradient is zero
         return Ok(Tensor::zeros(grad_output.raw_dim()));
     }
 
@@ -123,8 +123,8 @@ fn broadcast_dropout_scale(t: &Tensor, mask: &Tensor, rate: f32) -> Result<Tenso
 /// elementwise scale.
 ///
 /// Each output element depends only on its own input element and its channel's scalar. The
-/// `parallel` flag therefore never changes the result, only whether the pass runs in parallel
-/// above `parallel_threshold`.
+/// `parallel_threshold` value therefore never changes the result, only whether the pass runs
+/// in parallel.
 ///
 /// Gives the same result as the explicit `t * broadcast(mask) * scale`. The mask is binary, so
 /// `(x * 1) * scale == x * (1 * scale)` and `(x * 0) * scale == x * (0 * scale)` both hold
@@ -149,9 +149,8 @@ fn spatial_dropout_scale(
     let mut out = Tensor::zeros(t.raw_dim());
     let dst = out.as_slice_mut().unwrap();
 
-    // Repetitions of the channel vector per tile. This snaps down to a divisor of `positions`, so
-    // each tile-sized block stays inside 1 batch item. A single parallel pass can then walk the
-    // whole tensor instead of 1 rayon launch per item.
+    // Reps snaps down to a divisor of `positions`, so each tile-sized block stays inside 1
+    // batch item.
     let mut reps = (1024 / channels).clamp(1, positions);
     while reps > 1 && !positions.is_multiple_of(reps) {
         reps -= 1;
@@ -284,6 +283,8 @@ mod tests {
         );
     }
 
+    /// Serial and parallel paths produce the same per-element result
+    ///
     /// Each output element of the per-channel scale depends only on its own input element and its
     /// channel's scalar. There is no reduction, so the serial and parallel paths must produce the
     /// same result. The `parallel_threshold` gate only controls performance. This test covers
@@ -319,7 +320,7 @@ mod tests {
                 "parallel flag changed the bits at [{batch}, {positions}, {channels}]"
             );
 
-            // Matches the explicit `t * broadcast(mask) * scale` 2-step form it replaces
+            // Matches the explicit `t * broadcast(mask) * scale` 2-step form
             let scale = 1.0 / (1.0 - rate);
             let item = positions * channels;
             let mut expected = vec![0.0f32; total];

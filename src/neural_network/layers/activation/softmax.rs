@@ -141,7 +141,6 @@ impl UnaryLayer for Softmax {
         // The axis resolves against the rank of this input, and an out-of-range axis fails here
         let output = Activation::Softmax { axis: self.axis }.forward(input)?;
 
-        // Cache output for backpropagation
         if ctx.is_training() {
             ctx.push_cache("Softmax", output.clone());
         }

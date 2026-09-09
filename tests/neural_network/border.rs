@@ -266,9 +266,9 @@ fn cropping_2d_with_zero_amounts_copies_input() {
     assert_allclose(&out, &x, 1e-6_f32);
 }
 
-/// A forward pass with an inference context matches one with a training context. A layer now
-/// builds itself from the first tensor it receives no matter which context that pass runs in,
-/// so `output_shape` is known right after the first pass, and not only after a later one
+/// A forward pass with an inference context matches one with a training context. A layer builds
+/// itself from the first tensor it receives, no matter which context that pass runs in.
+/// `output_shape` is therefore known right after the first pass, and not only after a later one
 #[test]
 fn predict_matches_forward_and_the_first_pass_builds_the_layer() {
     let x = ramp_of(&[2, 4, 4, 3]);
@@ -504,7 +504,6 @@ fn border_layers_backward_wrong_grad_shape_returns_err() {
 
 // Layer metadata
 
-/// layer_type names each layer
 #[test]
 fn border_layer_types_are_named() {
     assert_eq!(ZeroPadding1D::new(1).layer_type(), "ZeroPadding1D");
@@ -542,9 +541,8 @@ fn border_output_shape_is_unknown_before_forward() {
     assert_eq!(Cropping2D::new(1).output_shape(), "Unknown");
 }
 
-/// After the first forward pass, output_shape reports the shape the layer built for. A layer
-/// driven directly builds from the exact tensor it receives, so the batch axis prints its real
-/// extent and not "None"
+/// After the first forward pass, output_shape reports the shape the layer built for. The batch
+/// axis prints as `None`, because a built layer serves any batch size
 #[test]
 fn border_output_shape_after_forward() {
     let mut pad = ZeroPadding2D::new(((1, 2), (0, 1)));

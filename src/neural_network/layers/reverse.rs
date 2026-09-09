@@ -17,10 +17,10 @@ use ndarray::{Axis, Slice};
 ///
 /// The main use is the time axis of a recurrent branch that reads its input from last to first.
 /// [`SimpleRNN::with_go_backwards`](crate::neural_network::layers::SimpleRNN::with_go_backwards)
-/// and its 2 siblings return their states in PROCESSING order, so slot 0 of a returned sequence
-/// holds the state that came from the LAST input timestep. A merge layer that joins such a
+/// and its 2 siblings return their states in PROCESSING order. Slot 0 of a returned sequence
+/// then holds the state that came from the LAST input timestep. A merge layer that joins such a
 /// branch to a forward branch would pair mismatched timesteps. This layer puts the backward
-/// branch back into input order first. See the module documentation of
+/// branch back into input order before such a merge. See the module documentation of
 /// [`graph`](crate::neural_network::graph) for the whole model.
 ///
 /// # Notes
@@ -33,19 +33,19 @@ use ndarray::{Axis, Slice};
 ///
 /// **The input must hold at least 3 axes.** A rank-2 input is 1 batch of feature vectors, and
 /// it holds no time axis and no spatial axis. Reversing the feature order of such an input is
-/// not an operation of this crate, and it is what a caller gets by mistake after leaving
+/// not an operation of this crate. It is what a caller gets by mistake, after leaving
 /// `return_sequences` unset on a recurrent branch. The build refuses that input rather than
 /// reordering the features without a word.
 ///
 /// **A padded sequence needs care.** This crate carries no mask. Padding that sits at the end
-/// of a sequence sits at the FRONT after this layer, so a recurrent layer that reads the
-/// reversed sequence starts on the padding. Reverse the values of a ragged batch yourself, per
+/// of a sequence sits at the FRONT after this layer. A recurrent layer that reads the reversed
+/// sequence then starts on the padding. Reverse the values of a ragged batch yourself, per
 /// sample, before the model reads them.
 ///
 /// **The reported type carries the axis.** A checkpoint compares the type of every layer of a
 /// position, and it compares the shapes that the layer built for. This layer changes no shape
-/// and holds no array, so the axis is the only thing that separates 2 of them, and the type is
-/// the only field a strict load would see it in. The type is therefore `Reverse(1)` and not
+/// and holds no array. The axis is the only thing that separates 2 of them, and it is the only
+/// field where a strict load can see a difference. The type is therefore `Reverse(1)` and not
 /// `Reverse`, and a load that meets a different axis refuses.
 ///
 /// # Examples
@@ -78,7 +78,7 @@ pub struct Reverse {
     axis: i32,
     /// The reported type of the layer, which carries the axis
     name: String,
-    /// Shape the layer built for, or `None` before the build
+    /// Shape the layer was built for, batch axis first. `None` before the build
     built: Option<Shape>,
 }
 
@@ -86,8 +86,8 @@ impl Reverse {
     /// Creates a layer that reverses the order along 1 axis
     ///
     /// The call cannot fail. The axis counts against the full rank of the input, and the layer
-    /// resolves it on every call, so 1 layer serves every rank that holds the axis. A layer that
-    /// held a resolved index would reverse the wrong axis as soon as the rank changed
+    /// resolves it on every call. This lets 1 layer serve every rank that holds the axis. A
+    /// layer that held a resolved index would reverse the wrong axis as soon as the rank changed
     ///
     /// # Parameters
     ///
@@ -96,7 +96,7 @@ impl Reverse {
     ///
     /// # Returns
     ///
-    /// - `Self` - The layer
+    /// - `Self` - New `Reverse` layer instance
     pub fn new(axis: i32) -> Self {
         Self {
             axis,
@@ -117,9 +117,9 @@ impl Reverse {
     ///
     /// # Errors
     ///
-    /// - [`Error::InvalidInput`] - If the rank is below 3
-    /// - [`Error::InvalidInput`] - If the axis does not name an axis of that rank
-    /// - [`Error::InvalidInput`] - If the axis resolves to the batch axis
+    /// - `Error::InvalidInput` - If the rank is below 3
+    /// - `Error::InvalidInput` - If the axis does not name an axis of that rank
+    /// - `Error::InvalidInput` - If the axis resolves to the batch axis
     fn resolve(&self, rank: usize) -> Result<usize, Error> {
         if rank < 3 {
             return Err(Error::invalid_input(format!(
@@ -161,11 +161,11 @@ impl Reverse {
         ))
     }
 
-    /// Reverses `input` along the resolved axis, in the standard memory order
+    /// Reverses `input` along the resolved axis, into a tensor that is in C order
     ///
-    /// A reversed view carries a negative stride, so it is not the standard order. The output
-    /// is a fresh array that the view is assigned into, because every layer of this crate emits
-    /// the standard order and the next layer may read the output as 1 slice
+    /// A reversed view carries a negative stride, so it is not in C order. Every layer of
+    /// this crate emits C order, so a consumer can read any layer output as 1 contiguous
+    /// slice. This layer copies the view into a fresh array to meet that contract
     fn flip(&self, input: &Tensor) -> Result<Tensor, Error> {
         let axis = self.resolve(input.ndim())?;
         let mut output = Tensor::zeros(input.raw_dim());
@@ -198,8 +198,8 @@ impl UnaryLayer for Reverse {
     /// The reversal needs nothing from the forward pass, so no cache is parked
     ///
     /// The backward pass reverses the same axis of the upstream gradient. The reversal is its
-    /// own inverse, and it moves each value without changing it, so the gradient of position
-    /// `n - 1 - k` of the output belongs to position `k` of the input
+    /// own inverse, and it moves each value without changing it. The gradient of position
+    /// `n - 1 - k` of the output therefore belongs to position `k` of the input
     fn forward(&self, input: &Tensor, _ctx: &mut Ctx) -> Result<Tensor, Error> {
         self.flip(input)
     }

@@ -12,14 +12,14 @@ use crate::neural_network::Shape;
 ///
 /// # Parameters
 ///
-/// - `name` - Name of the parameter being set, used in the error message, e.g. "kernel" or
+/// - `name` - Name of the parameter being set, used in the error message, such as "kernel" or
 ///   "bias"
 /// - `expected` - Shape the layer currently has for this parameter
 /// - `found` - Shape of the array being assigned
 ///
 /// # Errors
 ///
-/// - `Error::NeuralNetwork(NnError::WeightShape)` if the shapes differ
+/// - `Error::NeuralNetwork(NnError::WeightShape)` - If the shapes differ
 pub(super) fn validate_weight_shape(
     name: &str,
     expected: &[usize],
@@ -183,11 +183,11 @@ pub(super) fn start_build_many(
 ///
 /// The rank must match, and every axis after the batch axis that the build shape fixes must
 /// match as well. The batch axis is never checked, because 1 layer serves every batch size. An
-/// axis that the build shape leaves free is not checked either, and such an axis is exactly an
-/// axis that no array of the layer depends on
+/// axis that the build shape leaves free is not checked either. No array of the layer depends
+/// on such an axis
 ///
-/// This is the whole input check of a built layer. What the layer prints as its output shape
-/// is what this enforces, so a summary can no longer name an extent that a forward pass would
+/// This is the whole input check of a built layer. It enforces exactly what the layer reports
+/// as its output shape. A summary therefore never names an extent that a forward pass would
 /// accept a different value for
 ///
 /// # Parameters

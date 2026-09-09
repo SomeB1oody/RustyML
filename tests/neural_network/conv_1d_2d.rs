@@ -100,7 +100,6 @@ fn conv1d_asymmetric_kernel_values() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// Bias adds a constant to every output element
 #[test]
 fn conv1d_bias_offset_adds_to_every_output() {
     let mut layer = Conv1D::new(1, 2, 1, Linear::new()).unwrap();
@@ -252,7 +251,6 @@ fn conv1d_batch_forward_independent_samples() {
     }
 }
 
-/// input_length == kernel_size produces exactly 1 output element
 #[test]
 fn conv1d_input_equals_kernel_produces_single_output() {
     let mut layer = Conv1D::new(1, 3, 1, Linear::new()).unwrap();
@@ -271,7 +269,6 @@ fn conv1d_input_equals_kernel_produces_single_output() {
     assert_abs_diff_eq!(output[[0, 0, 0]], 60.0f32, epsilon = 1e-6f32);
 }
 
-/// 2 input channels: the filter sums contributions across both channels
 #[test]
 fn conv1d_two_input_channels_cross_channel_sum() {
     let mut layer = Conv1D::new(1, 2, 1, Linear::new()).unwrap();
@@ -481,7 +478,6 @@ fn conv1d_predict_equals_forward() {
     assert_allclose(&predict_output, &forward_output, 1e-7f32);
 }
 
-/// predict() returns the same result across repeated calls
 #[test]
 fn conv1d_predict_deterministic() {
     let mut layer = Conv1D::new(1, 3, 1, Linear::new()).unwrap();
@@ -540,7 +536,6 @@ fn conv2d_all_ones_kernel_windowed_sums() {
     }
 }
 
-/// 1x1 kernel acts as a per-element scalar multiply
 #[test]
 fn conv2d_1x1_kernel_scalar_multiply() {
     let mut layer = Conv2D::new(1, (1, 1), (1, 1), Linear::new()).unwrap();
@@ -565,7 +560,6 @@ fn conv2d_1x1_kernel_scalar_multiply() {
     }
 }
 
-/// Bias adds a constant to every output element
 #[test]
 fn conv2d_bias_shifts_all_outputs() {
     let mut layer = Conv2D::new(1, (1, 1), (1, 1), Linear::new()).unwrap();
@@ -941,7 +935,6 @@ fn conv2d_predict_equals_forward() {
     assert_allclose(&predict_output, &forward_output, 1e-7f32);
 }
 
-/// predict() returns the same result across repeated calls
 #[test]
 fn conv2d_predict_deterministic() {
     let mut layer = Conv2D::new(1, (2, 2), (1, 1), Linear::new()).unwrap();
@@ -1055,9 +1048,7 @@ fn conv2d_valid_output_shape_cases() {
 // Conv2D - convolution_engine parallel forward / weight-grad backward branches
 
 // The engine runs in parallel once the estimated GEMM FLOPs clear the gate in
-// `crate::tuning::conv`. Each test below sizes its tensors to clear that gate. Each test also
-// checks the crossing against the live gate value first. A retuned threshold then fails the
-// assertion instead of silently demoting the test to the serial path.
+// `crate::tuning::conv`. Each test checks the live gate value before asserting.
 
 /// Parallel forward branch: windowed sums on a tensor whose estimated FLOPs clear the gate
 #[test]
@@ -1155,7 +1146,7 @@ fn conv2d_parallel_weight_grad_constant_count() {
 
 /// A dilated kernel skips input positions between its taps
 ///
-/// 3 taps spaced 2 apart span 5 cells, so a length of 9 holds 5 windows and output `o` sums
+/// 3 taps spaced 2 apart span 5 cells, so a length of 9 holds 5 windows. Output `o` sums
 /// `x[o]`, `x[o + 2]`, and `x[o + 4]`. An undilated kernel would sum 3 adjacent cells instead.
 #[test]
 fn conv1d_dilation_spaces_the_taps_out() {
@@ -1300,8 +1291,8 @@ fn conv_rejects_a_stride_and_a_dilation_above_one_together() {
 
 /// Each spatial axis carries its own dilation
 ///
-/// A `(1, 3)` dilation leaves the height taps adjacent and spreads the width taps 3 apart, so
-/// output `(oh, ow)` sums the 4 cells `(oh, ow)`, `(oh, ow + 3)`, `(oh + 1, ow)`, and
+/// A `(1, 3)` dilation leaves the height taps adjacent and spreads the width taps 3 apart.
+/// Output `(oh, ow)` sums the 4 cells `(oh, ow)`, `(oh, ow + 3)`, `(oh + 1, ow)`, and
 /// `(oh + 1, ow + 3)`. Each input cell holds `h * 10 + w`, so a swapped axis is visible at once.
 #[test]
 fn conv2d_dilation_is_per_axis() {
@@ -1340,9 +1331,9 @@ fn conv2d_dilation_is_per_axis() {
 ///
 /// Output `o` of a depthwise pass reads `o * stride + tap * dilation`. The wrong form
 /// `(o * stride + tap) * dilation` agrees only when the stride equals the dilation, which the
-/// depthwise layers do not forbid. A stride of 2 with a dilation of 3 tells the 2 apart: the
-/// windows here read `(0, 3)`, `(2, 5)`, and `(4, 7)`, and the wrong form would read `(0, 3)`,
-/// `(6, 9)`, and `(12, 15)`.
+/// depthwise layers do not forbid. A stride of 2 with a dilation of 3 tells the 2 apart.
+/// The windows here read `(0, 3)`, `(2, 5)`, and `(4, 7)`, and the wrong form would read
+/// `(0, 3)`, `(6, 9)`, and `(12, 15)`.
 #[test]
 fn depthwise_conv1d_keeps_the_stride_and_the_dilation_independent() {
     let mut layer = DepthwiseConv1D::new(2, 2, Linear::new())
@@ -1408,10 +1399,10 @@ fn separable_conv1d_dilates_the_depthwise_stage() {
 
 /// Causal padding puts all `(k - 1) * dilation` pad cells on the leading edge
 ///
-/// The kernel is `[10, 1]` at dilation 3, so the leading pad is 3 cells and output `o` is
+/// The kernel is `[10, 1]` at dilation 3, so the leading pad is 3 cells. Output `o` is
 /// `10 * xpad[o] + 1 * xpad[o + 3]`. The first 3 outputs therefore hold only the second tap,
 /// which reads the current position. A leading pad of `k - 1` (1 cell) or of `keff` (4 cells)
-/// gives different values, and a split pad leaks a later input position into an earlier output.
+/// gives different values. A split pad leaks a later input position into an earlier output.
 #[test]
 fn conv1d_causal_padding_is_all_on_the_leading_edge() {
     let mut layer = Conv1D::new(1, 2, 1, Linear::new())
@@ -1628,18 +1619,12 @@ fn conv1d_causal_dilated_gradients_match_a_finite_difference() {
     assert_abs_diff_eq!(bias_grad[0], numeric, epsilon = 1e-3f32);
 }
 
-// ---------------------------------------------------------------------------------------
 // Effective kernels longer than the input, and dilated gradients, pinned to Keras 3.15.1
-// ---------------------------------------------------------------------------------------
-//
-// Keras 3.15.1 on the jax backend produced every expected value in this section. Each case
-// gives the layer the weights, the input, and the upstream gradient that the ramps below
-// build. A rerun of the probe therefore reproduces the numbers. Every ramp value is exact in
-// f32, so no rounding enters the comparison.
-//
-// A kernel whose effective extent is longer than the input axis is legal under `Same` and
-// `Causal` padding, and Keras accepts it. Only `Valid` rejects it, because no complete window
-// fits there.
+
+// Keras 3.15.1 on the jax backend produced every expected value below. Rerunning the probe
+// reproduces the numbers, and every ramp value is exact in f32, so no rounding enters the
+// comparison. A kernel whose effective extent is longer than the input axis is legal under
+// `Same` and `Causal` padding. Only `Valid` rejects it, because no complete window fits.
 
 /// Kernel ramp: element `i` holds `((i % 7) - 3) * 0.25`
 fn ramp_kernel(count: usize) -> Vec<f32> {
@@ -2141,7 +2126,7 @@ fn conv2d_dilated_gradients_match_keras_under_same() {
 
 /// DepthwiseConv1D gradients at a stride of 2 and a dilation of 3 match Keras 3.15.1
 ///
-/// The stride and the dilation differ, and the depth multiplier is 2, so a backward pass that
+/// The stride and the dilation differ, and the depth multiplier is 2. A backward pass that
 /// confuses the 2 rates or the output channel order fails here.
 #[test]
 fn depthwise_conv1d_stride_and_dilation_gradients_match_keras() {

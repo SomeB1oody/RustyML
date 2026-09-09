@@ -24,7 +24,7 @@ use ndarray::{Array2, ArrayView2, Axis, Ix2, concatenate, s};
 /// # Notes
 ///
 /// The record of 1 step holds 5 arrays, in this order: the activated cell state, then the input,
-/// forget, candidate and output gate activations. The cell state that ENTERS a step is not a
+/// forget, candidate and output gate activations. The cell state that enters a step is not a
 /// record, because [`Rnn`] already carries it as state slot 1.
 #[derive(Debug)]
 pub(crate) struct LstmCell {
@@ -72,8 +72,7 @@ impl RnnCell for LstmCell {
             .as_slice()
             .expect("fused bias must be contiguous");
 
-        // All 4 gate pre-activations in 1 fused recurrent product, accumulated on top of the
-        // projected `x_t @ kernel` slice
+        // Recurrent product accumulates onto the `x_t @ kernel` slice already in z_all
         let mut z_all = xw_t.to_owned();
         gemmkit_ndarray::gemm_fused(
             1.0,
@@ -102,7 +101,6 @@ impl RnnCell for LstmCell {
             .into_dimensionality::<Ix2>()
             .unwrap();
 
-        // Update hidden state
         let h_t = &o_t * &c_t_activated;
 
         if let Some(record) = record {
@@ -171,7 +169,7 @@ impl RnnCell for LstmCell {
         dz_t.slice_mut(s![.., 2 * u..3 * u]).assign(&grad_g_raw);
         dz_t.slice_mut(s![.., 3 * u..4 * u]).assign(&grad_o_raw);
 
-        // Gradient with respect to the previous hidden state: 1 fused product instead of 4
+        // Gradient with respect to the previous hidden state
         grad_state[0] = dot(&dz_t, &gates.recurrent_kernel.t());
         // Gradient with respect to the previous cell state
         grad_state[1] = grad_c_prev;
@@ -186,8 +184,7 @@ impl RnnCell for LstmCell {
 /// output gates to control memory flow and reduce vanishing gradients.
 ///
 /// All 4 gates are stored fused. The kernels are packed side by side into single matrices.
-/// Column blocks follow the order `[input | forget | cell | output]` (`[i | f | g | o]`),
-/// matching Keras. Each projection runs as 1 GEMM instead of 4.
+/// Column blocks follow the order `[input | forget | cell | output]` (`[i | f | g | o]`).
 ///
 /// [`LSTM::with_return_sequences`] makes the layer return every timestep's hidden state, with
 /// shape (batch_size, timesteps, units). [`LSTM::with_go_backwards`] processes the input
@@ -229,7 +226,7 @@ impl LSTM {
     ///
     /// # Parameters
     ///
-    /// - `units` - Number of LSTM units/neurons in the layer (determines output dimensionality)
+    /// - `units` - Number of output units in the layer
     /// - `activation` - Activation from the activation module (any [`Activation`] variant, or
     ///   any standalone activation layer)
     ///
@@ -252,7 +249,7 @@ impl LSTM {
         Ok(Self(Rnn::new(units, activation)?))
     }
 
-    /// Sets the seed used to initialize the gate weights and re-initializes them deterministically.
+    /// Sets the seed used to initialize the gate weights and re-initializes them deterministically
     ///
     /// By default the draw takes the global seed or entropy (see [`crate::random`]). An unbuilt
     /// layer holds no gate weight, so this records the seed and draws nothing. A layer that is
@@ -314,7 +311,7 @@ impl LSTM {
         self
     }
 
-    /// Sets the fused weights for this LSTM layer (Keras-style layout)
+    /// Sets the fused weights for this LSTM layer
     ///
     /// # Parameters
     ///
@@ -344,7 +341,7 @@ impl LSTM {
 
     /// Sets the weights gate by gate, packing them into the fused `[i | f | g | o]` layout
     ///
-    /// Convenience wrapper over [`LSTM::set_weights`] for callers that hold per-gate matrices
+    /// Convenience wrapper over [`LSTM::set_weights`] for callers that hold per-gate matrices.
     ///
     /// # Parameters
     ///
@@ -360,6 +357,10 @@ impl LSTM {
     /// - `output_kernel` - Input kernel for the output gate with shape (input_dim, units)
     /// - `output_recurrent_kernel` - Recurrent kernel for the output gate with shape (units, units)
     /// - `output_bias` - Bias for the output gate with shape (1, units)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - `Ok(())` when every per-gate weight matches the expected shape
     ///
     /// # Errors
     ///

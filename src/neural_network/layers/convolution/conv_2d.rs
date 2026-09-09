@@ -92,8 +92,8 @@ pub struct Conv2D {
     /// 1D array of bias values with shape \[filters\]
     ///
     /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
-    /// The forward pass adds nothing, `weights` hides the array, and `parameters` never yields
-    /// it, so a bias-free layer holds it and no more
+    /// The forward pass adds nothing: it reads `weights` alone, and `parameters` never yields
+    /// the bias array, so a bias-free layer holds it and no more
     bias: Array1<f32>,
     /// Activation applied to the convolution output
     activation: Activation,
@@ -129,9 +129,13 @@ impl Conv2D {
     ///
     /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
     /// [`Conv2D::with_padding`]. The kernel is solid by default. Space its taps out with
-    /// [`Conv2D::with_dilation_rate`]. By default, the draw of [`UnaryLayer::build`] takes the
-    /// global seed or entropy. For reproducible initialization, set a seed with
+    /// [`Conv2D::with_dilation_rate`]. By default, the layer seeds weights from the global seed
+    /// or entropy. For reproducible initialization, set a seed with
     /// [`Conv2D::with_random_state`].
+    ///
+    /// The kernel is not bounded by the input axis here. Only [`PaddingType::Valid`] needs the
+    /// effective kernel to fit. The padding mode is not final until the build, so the build
+    /// applies that rule.
     ///
     /// # Errors
     ///
@@ -185,7 +189,7 @@ impl Conv2D {
     ///
     /// A dilation of `d` on an axis spaces the kernel taps `d` cells apart, so `k` taps span
     /// `(k - 1) * d + 1` input cells of that axis. The window still advances by the stride. A
-    /// dilation of 1 on both axes gives a solid kernel and the same result as before
+    /// dilation of 1 on both axes gives a solid kernel
     ///
     /// # Parameters
     ///
@@ -292,10 +296,10 @@ impl Conv2D {
 
     /// Sets whether the layer adds a bias to the convolution output (defaults to `true`)
     ///
-    /// With `use_bias` set to false the layer holds the kernel alone: `param_count` counts the
-    /// kernel alone, `parameters` yields the kernel alone, and a checkpoint of the layer holds
-    /// 1 array under the path `<position>.kernel`. A checkpoint written by a layer that has a
-    /// bias therefore fails to load into a layer that has none, and the refusal names the path
+    /// With `use_bias` set to false, the layer holds the kernel alone. `param_count` counts
+    /// the kernel alone, `parameters` yields the kernel alone, and a checkpoint holds 1 array
+    /// under the path `<position>.kernel`. A checkpoint written by a layer that has a bias
+    /// fails to load into a layer that has none, and the refusal names the path
     ///
     /// # Parameters
     ///
@@ -318,10 +322,17 @@ impl Conv2D {
     /// - `bias` - 1D array of bias values with shape \[filters\], or `None` for a layer
     ///   built with [`with_use_bias(false)`](Self::with_use_bias)
     ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - Ok when `weights` and `bias` match the layer's configured shape
+    ///
     /// # Errors
     ///
+    /// - `Error::NeuralNetwork(NnError::NotBuilt)` - If the layer holds no array yet
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` does not match the
     ///   layer's expected shape
+    /// - `Error::InvalidParameter` - If a bias is given to a layer that holds none, or none is
+    ///   given to a layer that holds 1
     pub fn set_weights(
         &mut self,
         weights: Array4<f32>,
@@ -416,7 +427,6 @@ impl UnaryLayer for Conv2D {
     fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         validate_built_input(&self.built, "Conv2D", input.shape())?;
 
-        // Convolution (dimension-generic engine), then activation
         let output = conv_forward(
             input,
             self.weights.as_slice().expect("weights must be contiguous"),
@@ -445,7 +455,6 @@ impl UnaryLayer for Conv2D {
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let cache: Conv2DCache = ctx.pop_cache("Conv2D")?;
 
-        // Activation backward pass first
         let grad_upstream = self.activation.backward(&cache.output, grad_output)?;
 
         let grads = conv_backward(
@@ -481,7 +490,8 @@ impl UnaryLayer for Conv2D {
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         input.check_rank("Conv2D", 4)?;
         let (batch, tail) = input.split_batch("Conv2D")?;
-        // `calculate_output_shape` reads the batch axis, so the list it takes starts with one
+        // `calculate_output_shape` expects the batch axis at index 0. This gives it a
+        // placeholder there and drops it from the result
         let mut dims = vec![0];
         dims.extend(tail);
         Ok(Shape::from_batch(

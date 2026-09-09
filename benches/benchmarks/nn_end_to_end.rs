@@ -23,9 +23,8 @@ use std::hint::black_box;
 
 /// Dense inference on a batch large enough to engage the block-parallel GEMM
 ///
-/// This runs an inference-mode pass, not a training-mode one. A training-mode pass writes an
-/// input cache and an output cache (`dense.rs`), so a timed loop over it holds 2 extra tensors
-/// live per iteration and measures the allocator as much as the kernel
+/// This runs an inference-mode pass. A training-mode pass also allocates an input cache and an
+/// output cache, which would add allocation cost outside the kernel itself
 fn dense_forward(c: &mut Criterion) {
     let mut layer = Dense::new(512, Activation::ReLU)
         .unwrap()
@@ -50,12 +49,8 @@ fn conv2d_forward_batch1(c: &mut Criterion) {
 }
 
 /// Conv2D forward and backward across 2 batch sizes, where `fwd_bwd - forward` approximates the
-/// backward cost. The backward pass parallelizes over the batch and runs a per-item im2col plus
-/// 2 GEMMs. At this scale, each per-item GEMM is large enough to fork rayon on its own. The 2
-/// batch sizes probe how batch parallelism and GEMM parallelism interact:
-/// - batch 16: too few tasks to fill the thread pool from the batch axis alone
-/// - batch 32: the engine forces the per-item GEMMs serial once `batch >= threads`, so this rung
-///   shows that rule on a pool of 32 threads or fewer
+/// backward cost. The backward pass runs a per-item im2col plus 2 GEMMs, parallel over the
+/// batch. The 2 batch sizes probe how batch parallelism and GEMM parallelism interact
 fn conv2d_backward(c: &mut Criterion) {
     let mut group = c.benchmark_group("conv2d_backward");
     group.sample_size(10);
@@ -309,7 +304,7 @@ fn spatial_dropout_3d_backward(c: &mut Criterion) {
     });
 }
 
-/// DepthwiseConv2D and SeparableConv2D at MobileNet-ish scale (64 channels over a 56x56 map).
+/// DepthwiseConv2D and SeparableConv2D at a MobileNet-style scale (64 channels over a 56x56 map).
 /// `forward` is the training-mode forward cost alone. `fwd_bwd` re-runs the forward then
 /// backward each iteration, so `fwd_bwd - forward` approximates the backward cost
 fn depthwise_separable_conv(c: &mut Criterion) {

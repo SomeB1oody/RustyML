@@ -32,14 +32,14 @@ impl AdaGrad {
     ///
     /// # Parameters
     ///
-    /// - `learning_rate` - Initial step size for parameter updates (typically 0.01)
-    /// - `epsilon` - Small constant for numerical stability (typically 1e-8)
-    /// - `weight_decay` - Decoupled (AdamW-style) weight-decay coefficient applied directly to the
+    /// - `learning_rate` - initial step size for parameter updates (typically 0.01)
+    /// - `epsilon` - small constant for numerical stability (typically 1e-8)
+    /// - `weight_decay` - decoupled (AdamW-style) weight-decay coefficient applied directly to the
     ///   parameters. `0.0` disables it
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A new AdaGrad optimizer instance or an error
+    /// - `Result<Self, Error>` - a new AdaGrad optimizer instance or an error
     ///
     /// # Notes
     ///
@@ -47,7 +47,7 @@ impl AdaGrad {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `learning_rate` or `epsilon` is not positive and finite,
+    /// - `Error::InvalidParameter` - if `learning_rate` or `epsilon` is not positive and finite,
     ///   or `weight_decay` is negative or not finite
     pub fn new(learning_rate: f32, epsilon: f32, weight_decay: f32) -> Result<Self, Error> {
         validate_positive_finite(learning_rate, "learning_rate")?;
@@ -70,11 +70,11 @@ impl AdaGrad {
     ///
     /// # Parameters
     ///
-    /// - `global_clipnorm` - Clip-by-global-norm threshold. Must be positive and finite
+    /// - `global_clipnorm` - clip-by-global-norm threshold. Must be positive and finite
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - The updated optimizer, or an error if `global_clipnorm` is not
+    /// - `Result<Self, Error>` - the updated optimizer, or an error if `global_clipnorm` is not
     ///   positive and finite
     pub fn with_global_clipnorm(mut self, global_clipnorm: f32) -> Result<Self, Error> {
         validate_global_clipnorm(Some(global_clipnorm))?;

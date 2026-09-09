@@ -1,4 +1,5 @@
-//! Sigmoid activation layer for neural networks
+//! Sigmoid activation layer that applies `1 / (1 + e^(-x))` elementwise and parks the output
+//! for backpropagation
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -12,10 +13,11 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Sigmoid activation layer
 ///
-/// Applies `1 / (1 + e^(-x))` elementwise to the input tensor, squashing values to (0, 1)
-/// while preserving the input shape
+/// Applies `1 / (1 + e^(-x))` elementwise to the input tensor, squashing values to (0, 1) and
+/// keeping the original shape. Common inputs include 2D tensors for dense layers and 4D tensors
+/// for convolutional layers
 ///
-/// [`Activation::Sigmoid`] provides the activation math. This layer adds boundary
+/// [`Activation::Sigmoid`] provides the activation math. This layer only adds boundary
 /// validation and the caching needed for backpropagation
 ///
 /// # Examples
@@ -98,6 +100,7 @@ impl UnaryLayer for Sigmoid {
         // Large-magnitude inputs saturate to 0/1 by construction
         let output = Activation::Sigmoid.forward(input)?;
 
+        // Cache activated output for backpropagation
         if ctx.is_training() {
             ctx.push_cache("Sigmoid", output.clone());
         }
@@ -108,11 +111,12 @@ impl UnaryLayer for Sigmoid {
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let output: Tensor = ctx.pop_cache("Sigmoid")?;
 
+        // Sigmoid preserves shape, so gradient must match the cached output
         if grad_output.shape() != output.shape() {
             return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
         }
 
-        // Sigmoid derivative: f'(x) = f(x) * (1 - f(x))
+        // Sigmoid derivative is f(x) * (1 - f(x))
         Activation::Sigmoid.backward(&output, grad_output)
     }
 }

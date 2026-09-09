@@ -1,4 +1,5 @@
-//! Spatial dropout layer for 2D feature maps. Drops whole channels at once.
+//! 2D spatial dropout layer that drops whole channels of `(batch_size, height, width,
+//! channels)` inputs
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -19,7 +20,7 @@ use ndarray::IxDyn;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-/// Spatial Dropout layer for 2D data
+/// Spatial dropout layer for 2D data
 ///
 /// Drops entire channels instead of individual elements, which is effective for
 /// convolutional layers where adjacent pixels are correlated. Input shape is
@@ -138,7 +139,7 @@ impl UnaryLayer for SpatialDropout2D {
     /// An inference pass draws nothing and passes the input through unchanged, which is what
     /// inverted dropout needs
     fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        // `rate` is already validated in `new()`
+        // `rate` was validated in `new()`
         validate_built_input(&self.built, "SpatialDropout2D", input.shape())?;
         validate_input_ndim(
             input.ndim(),
@@ -147,7 +148,6 @@ impl UnaryLayer for SpatialDropout2D {
         )?;
 
         if !ctx.is_training() {
-            // During inference, pass input through unchanged
             return Ok(input.clone());
         }
 
@@ -156,7 +156,6 @@ impl UnaryLayer for SpatialDropout2D {
         }
 
         if self.rate == 1.0 {
-            // Dropping every channel yields all zeros
             return Ok(Tensor::zeros(input.raw_dim()));
         }
 
@@ -178,8 +177,6 @@ impl UnaryLayer for SpatialDropout2D {
         );
         ctx.set_state("rng", rng);
 
-        // Threshold the samples into a binary keep/drop mask. The mask holds 1 value per
-        // (batch, channel), so it stays far too small for rayon to pay
         let rate = self.rate;
         mask_2d.mapv_inplace(|x| if x >= rate { 1.0 } else { 0.0 });
 
@@ -198,9 +195,7 @@ impl UnaryLayer for SpatialDropout2D {
     }
 
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        // A pass that drew no mask parked none, and the helper reads the mode and the rate
-        // before it reads the mask. It reports the missing mask with the same error that
-        // `pop_cache` gives, so a backward pass with no forward pass behind it still refuses
+        // A missing mask (no forward pass run) only errors when training with 0 < rate < 1
         let mask = ctx.pop_cache::<Tensor>("SpatialDropout2D").ok();
         spatial_dropout_backward(
             grad_output,

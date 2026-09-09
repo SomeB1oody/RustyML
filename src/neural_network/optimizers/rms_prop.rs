@@ -35,15 +35,15 @@ impl RMSprop {
     ///
     /// # Parameters
     ///
-    /// - `learning_rate` - Step size for parameter updates
-    /// - `rho` - Decay rate for moving average of squared gradients (typically 0.9)
-    /// - `epsilon` - Small constant for numerical stability (typically 1e-8)
-    /// - `weight_decay` - Decoupled (AdamW-style) weight-decay coefficient applied directly to the
+    /// - `learning_rate` - step size for parameter updates
+    /// - `rho` - decay rate for moving average of squared gradients (typically 0.9)
+    /// - `epsilon` - small constant for numerical stability (typically 1e-8)
+    /// - `weight_decay` - decoupled (AdamW-style) weight-decay coefficient applied directly to the
     ///   parameters. `0.0` disables it
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A new RMSprop optimizer instance or an error
+    /// - `Result<Self, Error>` - a new RMSprop optimizer instance or an error
     ///
     /// # Notes
     ///
@@ -51,7 +51,7 @@ impl RMSprop {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `learning_rate` or `epsilon` is not positive and finite,
+    /// - `Error::InvalidParameter` - if `learning_rate` or `epsilon` is not positive and finite,
     ///   `rho` is outside [0, 1), or `weight_decay` is negative or not finite
     pub fn new(
         learning_rate: f32,
@@ -81,11 +81,11 @@ impl RMSprop {
     ///
     /// # Parameters
     ///
-    /// - `global_clipnorm` - Clip-by-global-norm threshold. Must be positive and finite
+    /// - `global_clipnorm` - clip-by-global-norm threshold. Must be positive and finite
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - The updated optimizer, or an error if `global_clipnorm` is not
+    /// - `Result<Self, Error>` - the updated optimizer, or an error if `global_clipnorm` is not
     ///   positive and finite
     pub fn with_global_clipnorm(mut self, global_clipnorm: f32) -> Result<Self, Error> {
         validate_global_clipnorm(Some(global_clipnorm))?;

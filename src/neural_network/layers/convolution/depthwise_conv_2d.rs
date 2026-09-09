@@ -30,7 +30,7 @@ use ndarray::{Array1, Array4};
 ///
 /// `depth_multiplier` (default 1, set with [`DepthwiseConv2D::with_depth_multiplier`]) is how many
 /// kernels each input channel gets. The output channel for input channel `c` and multiplier index
-/// `m` is `c * depth_multiplier + m`, which matches Keras
+/// `m` is `c * depth_multiplier + m`
 ///
 /// # Examples
 ///
@@ -193,7 +193,7 @@ impl DepthwiseConv2D {
     ///
     /// A dilation of `d` on an axis spaces the kernel taps `d` cells apart, so `k` taps span
     /// `(k - 1) * d + 1` input cells of that axis. The window still advances by the stride. A
-    /// dilation of 1 on both axes gives a solid kernel and the same result as before
+    /// dilation of 1 on both axes gives a solid kernel
     ///
     /// # Parameters
     ///
@@ -349,7 +349,7 @@ impl DepthwiseConv2D {
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` does not match
     ///   the existing shape
     /// - `Error::InvalidParameter` - If a bias is given to a layer that holds none, or none
-    ///   is given to a layer that holds one
+    ///   is given to a layer that holds 1
     pub fn set_weights(
         &mut self,
         weights: Array4<f32>,
@@ -499,13 +499,12 @@ impl UnaryLayer for DepthwiseConv2D {
         };
         built.check_rank("DepthwiseConv2D", 4)?;
         let (batch, tail) = built.split_batch("DepthwiseConv2D")?;
-        // The family validators read a full extent list, and the batch extent is not part of
-        // what they check
+        // The family validators check a full extent list. The batch extent is not part of it
         let mut dims = vec![batch.unwrap_or(1)];
         dims.extend(tail);
         validate_input_shape_2d(&dims)?;
-        // The shape algebra holds every rule the geometry has, so a stack that cannot run is
-        // refused here, before the layer draws a single weight
+        // The shape algebra holds every geometry rule, so a bad stack is refused before any
+        // weight is drawn
         self.compute_output_shape(&built)?;
         self.channels = dims[3];
         self.built = Some(built);
@@ -595,7 +594,6 @@ impl UnaryLayer for DepthwiseConv2D {
                 width.div_ceil(self.strides.1),
             ),
         };
-        // A depthwise convolution emits `channels * depth_multiplier` channels
         Ok(Shape::from_batch(
             batch,
             &[out_height, out_width, channels * self.depth_multiplier],
@@ -647,7 +645,7 @@ mod tests {
     }
 
     /// With `depth_multiplier`, input channel `c`'s multiplier `m` lands at output channel
-    /// `c * depth_multiplier + m`, the Keras ordering
+    /// `c * depth_multiplier + m`
     #[test]
     fn depthwise_depth_multiplier_output_channel_order() {
         let mut layer = DepthwiseConv2D::new((1, 1), (1, 1), Linear::new())

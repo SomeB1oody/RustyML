@@ -28,8 +28,8 @@ use ndarray::IxDyn;
 /// caution about ordering.
 ///
 /// Unlike `Flatten`, this layer derives the output shape from the tensor it receives. A target
-/// that names every extent therefore fixes the element count an input must carry, and the layer
-/// reports its own output shape before the build
+/// that names every extent therefore fixes the element count an input must carry. The layer
+/// then reports its own output shape before the build
 ///
 /// # Examples
 ///
@@ -255,9 +255,9 @@ impl UnaryLayer for Reshape {
     /// The batch axis passes through, and the target rewrites every later axis
     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
         let (batch, tail) = input.split_batch("Reshape")?;
-        // `resolve` reads the batch axis, so the list it takes starts with one. A free batch
-        // takes 1, because `resolve` names the whole list in the message it gives for a count
-        // that does not agree, and a 0 there would read as a real extent
+        // `resolve` expects a list whose first entry is the batch size. A free batch uses a
+        // placeholder of 1 there, instead of 0. A 0 would read as a real extent of 0, since
+        // `resolve` reports any mismatch using the entry as given
         let mut dims = vec![batch.unwrap_or(1)];
         dims.extend(tail);
         Ok(Shape::from_batch(batch, &self.resolve(&dims)?[1..]))

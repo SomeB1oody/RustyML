@@ -2,11 +2,9 @@
 //!
 //! [`Initializer`] is a closed enum, in the same shape as the
 //! [`Activation`](crate::neural_network::layers::Activation) enum. It is `Copy`, it compares by
-//! value, and it serializes, so a layer holds it by value and a checkpoint can record it. A
-//! boxed trait object would give none of those 3 properties, and it would put a
-//! `Send + Sync` bound on every layer that holds one.
+//! value, and it serializes, so a layer holds it by value and a checkpoint can record it.
 //!
-//! 14 functions of the module draw a weight array, and all 14 draw through this type. 15 of
+//! 13 functions of the module draw a weight array, and all 13 draw through this type. 14 of
 //! their draws are Glorot uniform, 1 is a fixed uniform range, and the 3 recurrent layers draw
 //! their recurrent kernels as square orthogonal matrices. The dropout and noise masks of a
 //! forward pass are not weights, and they do not come from here.
@@ -15,37 +13,23 @@
 //!
 //! [`Initializer::GlorotUniform`] scales its range by a fan pair. The pair reaches the draw as a
 //! [`Fans`] value that the layer builds from its own configuration. No function of this module
-//! reads the shape of the array to derive a fan.
-//!
-//! The transposed convolution is the reason. A plain convolution holds its kernel as
-//! `(spatial axes, channels, filters)`, and a transposed convolution holds the same kernel as
-//! `(spatial axes, filters, channels)`. The last 2 axes carry opposite roles in the 2 layouts. A
-//! rule that reads the last 2 axes therefore gives a transposed layer a `fan_in` of
-//! `filters * receptive_field` and a `fan_out` of `channels * receptive_field`. That is the swap
-//! of the correct pair.
-//!
-//! Glorot hides the swap. Its range reads the sum of the 2 fans, and the sum is symmetric, so no
-//! drawn value moves. The defect stays invisible until an initializer that reads 1 fan alone
-//! arrives. A layer that names its 2 counts cannot make the mistake at all.
+//! reads the shape of the array to derive a fan. A transposed convolution kernel stores its last
+//! 2 axes in the reverse order of a plain kernel, so a rule that read axis position would swap
+//! the pair.
 //!
 //! # The draw order is part of the contract
 //!
-//! 5 layers thread 1 generator through more than 1 draw, through 2 paths:
+//! 5 layers thread 1 generator through more than 1 draw.
+//! [`SeparableConv1D`](crate::neural_network::layers::SeparableConv1D) and
+//! [`SeparableConv2D`](crate::neural_network::layers::SeparableConv2D) draw the depthwise kernel
+//! first and the pointwise kernel second.
+//! [`FusedGates`](crate::neural_network::layers::recurrent::gate::FusedGates) draws the fused
+//! input kernel first and then 1 orthogonal block per gate, in gate order, for the 3 recurrent
+//! layers.
 //!
-//! - [`SeparableConv1D`](crate::neural_network::layers::SeparableConv1D) and
-//!   [`SeparableConv2D`](crate::neural_network::layers::SeparableConv2D) draw the depthwise
-//!   kernel first and the pointwise kernel second.
-//! - [`FusedGates`](crate::neural_network::layers::recurrent::gate::FusedGates), which serves
-//!   [`SimpleRNN`](crate::neural_network::layers::SimpleRNN),
-//!   [`LSTM`](crate::neural_network::layers::LSTM) and
-//!   [`GRU`](crate::neural_network::layers::GRU), draws the fused input kernel first and then 1
-//!   orthogonal block per gate, in gate order. A SimpleRNN holds 1 gate, so it draws the input
-//!   kernel and then 1 orthogonal block.
-//!
-//! 1 generator gives 1 stream, and each draw takes the next values of that stream. A second
-//! generator, or a different order, therefore changes every value from the second draw onward.
-//! The order is part of the contract of those 5 layers. Keep the draws of 1 layer in 1 function,
-//! against 1 generator.
+//! 1 generator gives 1 stream, and each draw takes the next values of that stream. A different
+//! order changes every value from the second draw onward. Keep the draws of 1 layer in 1
+//! function, against 1 generator.
 
 use crate::{Deserialize, Serialize};
 use ndarray::{Array, Array2, Dimension, ShapeBuilder};
@@ -125,8 +109,8 @@ impl Fans {
     ///
     /// A depthwise kernel passes its depth multiplier as `filters`. The `fan_in` then counts
     /// every input channel, although a depthwise unit reads only 1 of them. This follows the
-    /// convolution rule rather than a depthwise rule, which is what Keras does, and it makes the
-    /// range narrower by about the square root of the channel count
+    /// convolution rule rather than a depthwise rule, and it makes the range narrower by about
+    /// the square root of the channel count
     ///
     /// # Parameters
     ///
@@ -302,6 +286,7 @@ impl Initializer {
     }
 }
 
+/// Tests for the fan pair and every initializer draw
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,11 +338,8 @@ mod tests {
         assert_eq!(weight_of(layer, name), expected.into_dyn());
     }
 
-    // The fan of each distinct kernel layout
-    //
-    // The layouts come from the 14 weight-drawing functions of the crate. Each test states the
-    // shape the layer stores and the 2 counts the layer reports. Every case gives the 2 counts
-    // different values, so a swap of the pair changes the asserted numbers
+    // Each test gives fan_in and fan_out different values, so a swap of the pair would change
+    // the asserted numbers
 
     /// Layout 1, the dense kernel `(input_dim, units)`, has the 2 dimensions as its 2 fans
     #[test]

@@ -17,14 +17,14 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///
 /// The input shape is `[batch_size, steps, features]`. The output shape is
 /// `[batch_size, steps + before + after, features]`. The batch axis and the feature axis pass
-/// through unchanged
+/// through unchanged.
 ///
 /// The layer holds no parameter. It writes zeros in the new steps, so a later layer sees a
 /// longer sequence whose ends carry no signal. A convolution over the padded sequence then
-/// keeps its output length, without the layer itself choosing a padding mode
+/// keeps its output length, without the layer itself choosing a padding mode.
 ///
 /// [`Cropping1D`](crate::neural_network::layers::border::Cropping1D) is the inverse layer, and
-/// it is also this layer's backward pass
+/// it is also this layer's backward pass.
 ///
 /// # Examples
 ///
@@ -57,7 +57,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 pub struct ZeroPadding1D {
     /// Zero steps to add at each end of the step axis
     padding: Border1D,
-    /// Shape the layer was built for, batch axis first. `None` before the build
+    /// Shape the layer was built for, batch axis first. `None` before the build.
     built: Option<Shape>,
 }
 
@@ -92,7 +92,7 @@ impl LayerBase for ZeroPadding1D {
 
 impl UnaryLayer for ZeroPadding1D {
     /// Records the shape the pad runs over. The layer holds no array, so nothing is
-    /// allocated. The shape algebra checks the rank
+    /// allocated. The shape algebra checks the rank.
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "ZeroPadding1D", input)? else {
             return Ok(());

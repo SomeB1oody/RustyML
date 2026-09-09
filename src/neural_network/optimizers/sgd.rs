@@ -36,15 +36,15 @@ impl SGD {
     ///
     /// # Parameters
     ///
-    /// - `learning_rate` - Step size for parameter updates
-    /// - `momentum` - Momentum coefficient (typically 0.9). `0.0` is plain SGD
-    /// - `nesterov` - Use Nesterov-accelerated momentum (only meaningful when `momentum > 0`)
-    /// - `weight_decay` - Decoupled (SGDW-style) weight-decay coefficient applied directly to the
+    /// - `learning_rate` - step size for parameter updates
+    /// - `momentum` - momentum coefficient (typically 0.9). `0.0` is plain SGD
+    /// - `nesterov` - use Nesterov-accelerated momentum (only meaningful when `momentum > 0`)
+    /// - `weight_decay` - decoupled (SGDW-style) weight-decay coefficient applied directly to the
     ///   parameters. `0.0` disables it
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A new SGD optimizer instance or an error
+    /// - `Result<Self, Error>` - a new SGD optimizer instance or an error
     ///
     /// # Notes
     ///
@@ -52,7 +52,7 @@ impl SGD {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `learning_rate` is not positive and finite, or
+    /// - `Error::InvalidParameter` - if `learning_rate` is not positive and finite, or
     ///   `momentum`/`weight_decay` is negative or not finite
     pub fn new(
         learning_rate: f32,
@@ -81,11 +81,11 @@ impl SGD {
     ///
     /// # Parameters
     ///
-    /// - `global_clipnorm` - Clip-by-global-norm threshold. Must be positive and finite
+    /// - `global_clipnorm` - clip-by-global-norm threshold. Must be positive and finite
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - The updated optimizer, or an error if `global_clipnorm` is not
+    /// - `Result<Self, Error>` - the updated optimizer, or an error if `global_clipnorm` is not
     ///   positive and finite
     pub fn with_global_clipnorm(mut self, global_clipnorm: f32) -> Result<Self, Error> {
         validate_global_clipnorm(Some(global_clipnorm))?;

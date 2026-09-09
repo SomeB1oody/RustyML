@@ -1,14 +1,14 @@
 //! Dimension-generic convolution engine shared by `Conv1D`, `Conv2D`, and `Conv3D`
 //!
 //! A plain convolution is the same operation at every rank. Only the number of spatial axes
-//! changes. One implementation, driven by the spatial rank computed at runtime as `ndim - 2`,
+//! changes. 1 implementation, driven by the spatial rank computed at runtime as `ndim - 2`,
 //! serves all 3 layers. The layer wrappers keep their public API, weight storage, activation, and
 //! caches. They delegate only the numeric forward and backward passes to [`conv_forward`] and
-//! [`conv_backward`]. `SeparableConv2D` also calls these same 2 functions for its pointwise (1x1)
-//! stage
+//! [`conv_backward`]. `SeparableConv1D` and `SeparableConv2D` also call these same 2 functions for
+//! their pointwise (1x1) stage
 //!
 //! The geometry and im2col helpers below are `pub(super)`, because
-//! [`conv_transpose_engine`](super::conv_transpose_engine) reuses every one of them. A transposed
+//! [`conv_transpose_engine`](super::conv_transpose_engine) reuses each of them. A transposed
 //! convolution is the adjoint of a plain one. It needs the same padding rule, the same offset
 //! table, and the same block copy. Only the direction of the 2 GEMMs changes
 //!
@@ -34,10 +34,9 @@
 //! # Layout
 //!
 //! Tensors are channels-last, `[batch, spatial..., channels]`. Weights are flat row-major
-//! `[k..., Cin, F]` (Keras' kernel shape). The channel axis is innermost. This turns im2col into
-//! a copy instead of a gather. One kernel tap at one output position is `Cin` contiguous floats,
-//! so the pass moves runs instead of scalars. The flat weight matrix `[k*Cin, F]` needs no
-//! permutation to align with it
+//! `[k..., Cin, F]`. The channel axis is innermost. This turns im2col into a copy instead of a
+//! gather. 1 kernel tap at 1 output position is `Cin` contiguous floats, so the pass moves runs
+//! instead of scalars. The flat weight matrix `[k*Cin, F]` needs no permutation to align with it
 //!
 //! The forward pass parallelizes over `(batch item, output-position block)` tasks. Splitting the
 //! output positions lets a single large image use every core, even when `batch == 1`. Each task
@@ -76,8 +75,6 @@ tunable_gate! {
 }
 
 /// Minimum output positions per forward task
-///
-/// Each task's GEMM re-packs the weight matrix, so blocks need enough positions to amortize that
 const CONV_MIN_CHUNK_POSITIONS: usize = 64;
 
 tunable_gate! {
@@ -88,19 +85,12 @@ tunable_gate! {
     /// fewer positions than that minimum, so the forward pass builds 1 task per batch item and
     /// leaves the position split unread. A cap of 1 or more splits it
     ///
-    /// # This pass is NOT invariant to the row block today
+    /// # Determinism
     ///
-    /// Each task runs 1 serial GEMM into its own disjoint row block of the output. A row of that
-    /// product is 1 dot product per filter over the whole `k*Cin` axis, and the row block
-    /// selects no part of that axis, so the block should decide no value. That is not what the
-    /// pass does. The backend picks its accumulation order from the row count of the block, so
-    /// the same rows give different result bits in a short block than in a long one. The
-    /// trailing partial block is where the difference appears most.
-    ///
-    /// The gate above therefore already changes result bits on its own, for any input whose
-    /// output plane passes [`CONV_MIN_CHUNK_POSITIONS`], with no cap installed at all. That
-    /// contradicts what [`crate::tuning`] states about a gate. A caller must leave this cap at
-    /// 0 until the pass is invariant.
+    /// The backend picks its accumulation order from the row count of a block, so 2 runs at
+    /// different row-block lengths can differ in the low bits of the result, even at the
+    /// production value 0 once the output plane passes [`CONV_MIN_CHUNK_POSITIONS`]. A caller
+    /// must leave this cap at 0
     ///
     /// Reachable outside the crate only through `bench_internals`
     pub(crate) CONV_FORCED_CHUNK_POSITIONS
@@ -145,6 +135,15 @@ impl From<PaddingType> for ConvPadding {
 /// Dilated extent of 1 kernel axis: the input span of `k` taps spaced `dilation` apart
 ///
 /// A dilation of 1 returns the kernel size unchanged
+///
+/// # Parameters
+///
+/// - `k` - Kernel size of the axis
+/// - `dilation` - Tap spacing of the axis
+///
+/// # Returns
+///
+/// - `usize` - Effective (dilated) kernel extent
 pub(super) fn effective_kernel(k: usize, dilation: usize) -> usize {
     (k - 1) * dilation + 1
 }
@@ -156,17 +155,26 @@ pub(super) struct ConvGradients {
     /// weight array). That is `[k..., Cin, F]` for a plain convolution, and `[k..., F, Cin]` for
     /// a transposed one
     pub weight_grad: Vec<f32>,
-    /// Bias gradient, one value per filter `[F]`
+    /// Bias gradient, 1 value per filter `[F]`
     pub bias_grad: Vec<f32>,
     /// Input gradient, shape `[batch, spatial..., Cin]`
     pub input_grad: Tensor,
 }
 
-/// Element strides of the spatial axes of one row-major `[spatial..., cin]` item
+/// Element strides of the spatial axes of 1 row-major `[spatial..., cin]` item
 ///
 /// The channel axis is innermost with stride 1, so the innermost spatial step spans `cin` elements
 /// and each outer axis multiplies up from there. Every offset the engine computes is in these
 /// units, which is why a padded-buffer index lands directly on a position's first channel
+///
+/// # Parameters
+///
+/// - `sp` - Size of each spatial axis
+/// - `cin` - Channel count
+///
+/// # Returns
+///
+/// - `Vec<usize>` - Element stride of each spatial axis
 pub(super) fn spatial_strides(sp: &[usize], cin: usize) -> Vec<usize> {
     let mut strides = vec![cin; sp.len()];
     for d in (0..sp.len().saturating_sub(1)).rev() {
@@ -190,6 +198,21 @@ fn increment_index(idx: &mut [usize], dims: &[usize]) -> bool {
 }
 
 /// Runs `f` over `0..n`, in parallel when `parallel`, preserving index order
+///
+/// # Parameters
+///
+/// - `n` - Number of indices to run over
+/// - `parallel` - Runs in parallel when true, in order when false
+/// - `f` - Function to run at each index
+///
+/// # Type Parameters
+///
+/// - `R` - Result type of `f`
+/// - `F` - Type of `f`
+///
+/// # Returns
+///
+/// - `Vec<R>` - Result of `f` at each index of `0..n`, in index order
 pub(super) fn map_indexed<R, F>(n: usize, parallel: bool, f: F) -> Vec<R>
 where
     R: Send,
@@ -206,6 +229,25 @@ where
 /// spatial sizes, as `(out_sp, pad_before, padded_sp)`
 pub(super) type ConvGeometry = (Vec<usize>, Vec<usize>, Vec<usize>);
 
+/// Derives the geometry of a plain convolution from its input spatial sizes
+///
+/// # Parameters
+///
+/// - `sp` - Input size of each spatial axis
+/// - `k_dims` - Kernel size of each spatial axis
+/// - `strides` - Stride of each spatial axis
+/// - `dilation` - Tap spacing of each spatial axis
+/// - `padding` - Padding mode
+///
+/// # Returns
+///
+/// - `Result<ConvGeometry, Error>` - Output spatial sizes, per-axis leading padding, and padded
+///   spatial sizes
+///
+/// # Errors
+///
+/// - `Error::InvalidInput` - If the padding is `Valid` and an effective kernel is longer than the
+///   input axis it runs on
 pub(super) fn conv_geometry(
     sp: &[usize],
     k_dims: &[usize],
@@ -238,10 +280,8 @@ pub(super) fn conv_geometry(
             Ok((out_sp, pad_before, padded_sp))
         }
         ConvPadding::Causal => {
-            // A pad of `keff - 1` cells on the leading edge, then a Valid convolution. The output
-            // is then `((sp + keff - 1) - keff) / stride + 1`, which is `ceil(sp / stride)`, the
-            // same length `Same` gives. The last window ends at `(out - 1) * stride + keff - 1`,
-            // which is at most `sp + keff - 2`, so the padded buffer needs no trailing cell
+            // Pads `keff - 1` cells on the leading edge only. The last window never reads past
+            // `sp + keff - 2`, so the padded buffer needs no trailing cell
             let out_sp: Vec<usize> = (0..r).map(|d| sp[d].div_ceil(strides[d])).collect();
             let pad_before: Vec<usize> = (0..r).map(|d| keff[d] - 1).collect();
             let padded_sp: Vec<usize> = (0..r).map(|d| sp[d] + pad_before[d]).collect();
@@ -254,6 +294,19 @@ pub(super) fn conv_geometry(
 ///
 /// The copy pads only the spatial axes. The `cin` channels of a position stay contiguous and
 /// travel together, so each step of the walk moves a run rather than a single float
+///
+/// # Parameters
+///
+/// - `in_flat` - Flat unpadded source, `[items, sp..., cin]`
+/// - `items` - Number of items, for example the batch count
+/// - `sp` - Input size of each spatial axis
+/// - `padded_sp` - Padded size of each spatial axis
+/// - `pad_before` - Leading padding of each spatial axis
+/// - `cin` - Channel count
+///
+/// # Returns
+///
+/// - `Vec<f32>` - Flat zero-padded data, `[items, padded_sp..., cin]`
 pub(super) fn build_padded(
     in_flat: &[f32],
     items: usize,
@@ -293,6 +346,19 @@ pub(super) fn build_padded(
 /// buffer
 ///
 /// Crops the input gradient back to its original spatial size after col2im
+///
+/// # Parameters
+///
+/// - `padded` - Flat padded source, `[items, padded_sp..., cin]`
+/// - `items` - Number of items, for example the batch count
+/// - `sp` - Unpadded size of each spatial axis
+/// - `padded_sp` - Padded size of each spatial axis
+/// - `pad_before` - Leading padding of each spatial axis
+/// - `cin` - Channel count
+///
+/// # Returns
+///
+/// - `Vec<f32>` - Flat unpadded data, `[items, sp..., cin]`
 pub(super) fn crop_padded(
     padded: &[f32],
     items: usize,
@@ -330,7 +396,7 @@ pub(super) fn crop_padded(
 
 /// Flat padded-item offsets for im2col/col2im, laid out `[k_plane, out_plane]`
 ///
-/// `offsets[kk * out_plane + o]` is the element index, within one padded `[spatial..., cin]`
+/// `offsets[kk * out_plane + o]` is the element index, within 1 padded `[spatial..., cin]`
 /// item, of the first channel that output position `o` reads for kernel tap `kk`. The remaining
 /// `cin - 1` channels follow it contiguously. `padded_strides` carries the `cin` scaling (see
 /// [`spatial_strides`]), so the table does not depend on batch. The engine computes it once and
@@ -338,6 +404,18 @@ pub(super) fn crop_padded(
 ///
 /// The position map is `o * stride + kk * dilation` per axis. The window advances by the stride
 /// and the taps sit `dilation` apart, so the 2 factors stay independent
+///
+/// # Parameters
+///
+/// - `out_sp` - Output size of each spatial axis
+/// - `k_dims` - Kernel size of each spatial axis
+/// - `strides` - Stride of each spatial axis
+/// - `dilation` - Tap spacing of each spatial axis
+/// - `padded_strides` - Element stride of each spatial axis in the padded buffer
+///
+/// # Returns
+///
+/// - `Vec<usize>` - `[k_plane, out_plane]` copy offsets
 pub(super) fn im2col_offsets(
     out_sp: &[usize],
     k_dims: &[usize],
@@ -393,23 +471,29 @@ pub(super) struct ColContext<'a> {
     pub(super) offsets: &'a [usize],
 }
 
-/// im2col for one batch item, restricted to the output positions `[c0, c1)`
+/// im2col for 1 batch item, restricted to the output positions `[c0, c1)`
 ///
-/// Builds a `[c1-c0, k_plane*Cin]` row-major matrix, one row per output position, whose columns
+/// Builds a `[c1-c0, k_plane*Cin]` row-major matrix, 1 row per output position, whose columns
 /// align with the flat weight matrix `[k_plane*Cin, F]`. Within a row the kernel taps run
 /// slowest and the channels fastest. This is exactly the order the padded buffer already holds
 /// them in, so each tap is 1 `copy_from_slice` of `Cin` floats. Pass the full `[0, out_plane)`
-/// range for the whole item. A sub-range builds one forward task's row block
+/// range for the whole item. A sub-range builds 1 forward task's row block
+///
+/// # Parameters
+///
+/// - `ctx` - Padded data and copy geometry shared by every task
+/// - `b` - Batch item index
+/// - `c0` - First output position of the range
+/// - `c1` - Position past the last output position of the range
+///
+/// # Returns
+///
+/// - `Vec<f32>` - `[c1-c0, k_plane*Cin]` row-major im2col matrix
 pub(super) fn build_col_range(ctx: &ColContext, b: usize, c0: usize, c1: usize) -> Vec<f32> {
     let rows = c1 - c0;
     let k_total = ctx.k_plane * ctx.cin;
     let mut col = vec![0.0f32; rows * k_total];
     let b_base = b * ctx.padded_item;
-    // The loop nests tap outer, position inner. At a fixed tap, consecutive output positions
-    // read consecutive runs (adjacent runs at unit stride), so the source side stays a single
-    // streaming read. The transposed nest would make the write sequential instead, at the cost
-    // of `k_plane` live read streams at once. `col` stays cache-resident either way, so the read
-    // side is the one worth keeping linear
     for kk in 0..ctx.k_plane {
         let off = kk * ctx.out_plane;
         let kbase = kk * ctx.cin;
@@ -422,8 +506,26 @@ pub(super) fn build_col_range(ctx: &ColContext, b: usize, c0: usize, c1: usize) 
     col
 }
 
-/// Runs the forward convolution. `weight_shape` is `[k..., Cin, F]`, `bias` is `[F]` or `None`
-/// for a layer built without one, and `strides` and `dilation` have one entry per spatial axis
+/// Runs the forward convolution
+///
+/// # Parameters
+///
+/// - `input` - Input tensor, `[batch, spatial..., Cin]`
+/// - `weights` - Flat kernel weights, `[k..., Cin, F]`
+/// - `weight_shape` - Shape of the kernel, `[k..., Cin, F]`
+/// - `bias` - Per-filter bias `[F]`, or `None` for a layer built without one
+/// - `strides` - Stride of each spatial axis
+/// - `dilation` - Tap spacing of each spatial axis
+/// - `padding` - Padding mode
+///
+/// # Returns
+///
+/// - `Result<Tensor, Error>` - Convolution output, `[batch, out_spatial..., F]`
+///
+/// # Errors
+///
+/// - `Error::InvalidInput` - If the padding is `Valid` and an effective kernel is longer than the
+///   input axis it runs on
 pub(super) fn conv_forward(
     input: &Tensor,
     weights: &[f32],
@@ -449,6 +551,26 @@ pub(super) fn conv_forward(
 /// decision, so a bench can measure both paths on either side of the gate
 ///
 /// Reachable outside the crate only through `bench_internals`
+///
+/// # Parameters
+///
+/// - `input` - Input tensor, `[batch, spatial..., Cin]`
+/// - `weights` - Flat kernel weights, `[k..., Cin, F]`
+/// - `weight_shape` - Shape of the kernel, `[k..., Cin, F]`
+/// - `bias` - Per-filter bias `[F]`, or `None` for a layer built without one
+/// - `strides` - Stride of each spatial axis
+/// - `padding` - Padding mode
+/// - `force_parallel` - Override of the parallel-or-serial gate decision, or `None` to use the
+///   gate
+///
+/// # Returns
+///
+/// - `Result<Tensor, Error>` - Convolution output, `[batch, out_spatial..., F]`
+///
+/// # Errors
+///
+/// - `Error::InvalidInput` - If the padding is `Valid` and the kernel is longer than the input
+///   axis it runs on
 pub fn conv_forward_impl(
     input: &Tensor,
     weights: &[f32],
@@ -520,7 +642,7 @@ fn conv_forward_gated(
     let w_mat = ArrayView2::from_shape((k_total, filters), weights)
         .expect("weights length matches [k*Cin, F]");
 
-    // One task per (batch item, output-position block)
+    // 1 task per (batch item, output-position block)
     let ctx = ColContext {
         padded,
         cin,
@@ -534,14 +656,9 @@ fn conv_forward_gated(
         let col = build_col_range(&ctx, b, c0, c0 + rows);
         let col_mat = ArrayView2::from_shape((rows, k_total), &col)
             .expect("col block length matches [positions, k*Cin]");
-        // `C <- col_mat @ w_mat + bias`, in 1 fused pass. `beta == 0` overwrites the block
-        // without reading it. `blk` is written in place, so the product needs no temporary and
-        // no separate bias sweep. The per-filter bias is 1 value per column of the
-        // `[positions, F]` product, so it is a `Bias::PerCol` epilogue applied after the
-        // accumulation. That gives the same "bias added last" order as the elementwise pass it
-        // replaces, bit for bit. A layer without a bias passes no epilogue, so the block holds
-        // exactly the product. `blk` is a contiguous row block of `out3`, so the product lands
-        // in its final place with no scatter and no copy
+        // The per-filter bias is a `Bias::PerCol` epilogue applied after the accumulation, so
+        // this matches a plain product followed by a separate bias add, bit for bit. A layer
+        // without a bias passes no epilogue, so the block holds exactly the product
         gemmkit_ndarray::gemm_fused(
             1.0,
             &col_mat,
@@ -598,8 +715,27 @@ fn conv_forward_gated(
         .expect("conv output length matches shape"))
 }
 
-/// Runs the backward convolution. `input` is the original, unpadded forward input.
-/// `grad_output` is the gradient of the convolution output, taken after the activation backward
+/// Runs the backward convolution
+///
+/// # Parameters
+///
+/// - `grad_output` - Gradient of the convolution output, taken after the activation's backward
+///   pass
+/// - `input` - Original, unpadded forward input
+/// - `weights` - Flat kernel weights, `[k..., Cin, F]`
+/// - `weight_shape` - Shape of the kernel, `[k..., Cin, F]`
+/// - `strides` - Stride of each spatial axis
+/// - `dilation` - Tap spacing of each spatial axis
+/// - `padding` - Padding mode
+///
+/// # Returns
+///
+/// - `Result<ConvGradients, Error>` - Weight, bias, and input gradients
+///
+/// # Errors
+///
+/// - `Error::InvalidInput` - If the padding is `Valid` and an effective kernel is longer than the
+///   input axis it runs on
 pub(super) fn conv_backward(
     grad_output: &Tensor,
     input: &Tensor,
@@ -680,8 +816,6 @@ pub(super) fn conv_backward(
 
         let dcol = dcol.as_slice().expect("matmul result is standard layout");
         let mut pad_grad = vec![0.0f32; padded_item];
-        // Same tap-outer nest as `build_col_range`, for the same reason: a fixed tap walks the
-        // padded buffer linearly, so the read-modify-write side stays 1 stream
         for kk in 0..k_plane {
             let off = kk * out_plane;
             let kbase = kk * cin;
@@ -701,8 +835,8 @@ pub(super) fn conv_backward(
         (wg, bias_p, input_grad_b)
     };
 
-    // Each item runs 2 GEMMs (weight grad and input grad), about 4 * F * out_plane * k_total
-    // FLOPs apiece
+    // Each item runs 2 GEMMs, weight gradient and input gradient, about
+    // `4 * F * out_plane * k_total` FLOPs total
     let gemm_flops = 4usize
         .saturating_mul(batch)
         .saturating_mul(filters)
@@ -746,6 +880,8 @@ pub(super) fn conv_backward(
     })
 }
 
+/// Tests the geometry math, the padding buffers, the offset table, and the forward pass against
+/// hand-derived values
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1116,12 +1252,8 @@ mod tests {
     }
 
     // conv_forward: hand-derived values
-    //
-    // The helper tests above check the geometry math. These tests check the whole pass against
-    // numbers worked out by hand from the cross-correlation definition. That distinction matters
-    // here. A gradient check compares a layer against a finite difference of itself. It still
-    // agrees even when the forward pass has a consistent axis-transposition error. Only an
-    // independently derived expected value catches a moved axis.
+    // Checked against numbers worked out by hand from the cross-correlation definition, which
+    // catches an axis-transposition error that a gradient check would miss
 
     /// 2-D, 1 batch item, 3x3 input at 2 channels, a 2x2 all-ones kernel and 1 filter
     ///

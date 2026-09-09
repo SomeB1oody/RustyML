@@ -2,11 +2,11 @@
 //!
 //! A zero-padding layer and a cropping layer move no data. One grows the spatial axes and
 //! writes zeros in the new positions. The other returns the interior and drops the rest. Each
-//! one is the backward pass of the other, so 1 pair of kernels serves all 6 layers
+//! one is the backward pass of the other, so 1 pair of kernels serves all 6 layers.
 //!
 //! Every function here indexes `borders` by spatial axis. Entry `i` of `borders` describes
 //! axis `i + 1` of the tensor. The batch axis and the channel axis have no entry, because a
-//! border layer never changes them
+//! border layer never changes them.
 
 use crate::error::Error;
 use crate::neural_network::{Shape, Tensor};
@@ -23,7 +23,7 @@ fn padded_shape(input_shape: &[usize], borders: &[(usize, usize)]) -> Vec<usize>
 
 /// Shape a cropped output takes, given the shape that enters the layer
 ///
-/// The caller must check the borders against the input first. See [`validate_crop_fits`]
+/// The caller must check the borders against the input first. See [`validate_crop_fits`].
 fn cropped_shape(input_shape: &[usize], borders: &[(usize, usize)]) -> Vec<usize> {
     let mut shape = input_shape.to_vec();
     for (spatial, &(before, after)) in borders.iter().enumerate() {
@@ -62,8 +62,8 @@ fn crop_out(input: &Tensor, borders: &[(usize, usize)]) -> Tensor {
         }
     });
 
-    // `ArrayBase::to_owned` copies a strided view 1 element at a time. `assign` instead runs
-    // through `Zip`, which copies the widest run that is contiguous on both sides
+    // The output must be in C order. Assigning into a zero tensor keeps that order, and
+    // `to_owned` on this view does not always.
     let mut output = Tensor::zeros(interior.raw_dim());
     output.assign(&interior);
     output
@@ -146,7 +146,7 @@ pub(super) fn pad_forward(
 /// Runs the backward pass of a zero-padding layer
 ///
 /// The gradient of a padded position goes nowhere, so the pass returns the interior of the
-/// incoming gradient
+/// incoming gradient.
 ///
 /// # Parameters
 ///
@@ -242,7 +242,7 @@ pub(super) fn crop_forward(
 /// Runs the backward pass of a cropping layer
 ///
 /// A removed position takes no part in the output, so its gradient is 0. The pass writes the
-/// incoming gradient into the interior of a zero tensor of the input shape
+/// incoming gradient into the interior of a zero tensor of the input shape.
 ///
 /// # Parameters
 ///

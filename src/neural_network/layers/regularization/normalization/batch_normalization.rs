@@ -126,7 +126,7 @@ impl BatchNormalization {
 
     /// Sets whether the layer adds the shift `beta` (defaults to `true`)
     ///
-    /// With `center` set to false the layer holds no `beta`: `param_count` counts none for it,
+    /// With `center` set to false, the layer holds no `beta`. `param_count` counts none for it,
     /// `parameters_mut` yields none for it, and a checkpoint of the layer holds no
     /// `<position>.beta` path. The moving mean and the moving variance stay, because they are
     /// state that the layer keeps and not parameters that an optimizer updates
@@ -141,8 +141,8 @@ impl BatchNormalization {
     pub fn with_center(mut self, center: bool) -> Self {
         self.center = center;
         if !center {
-            // Put the array back at the identity shift, so nothing the layer no longer holds
-            // can reach a result
+            // Put the array back at the identity shift, so an array the layer does not hold
+            // reaches no result
             self.beta = Tensor::zeros(self.beta.shape());
         }
         self
@@ -150,10 +150,10 @@ impl BatchNormalization {
 
     /// Sets whether the layer applies the scale `gamma` (defaults to `true`)
     ///
-    /// With `scale` set to false the layer holds no `gamma`: `param_count` counts none for it,
+    /// With `scale` set to false, the layer holds no `gamma`. `param_count` counts none for it,
     /// `parameters_mut` yields none for it, and a checkpoint of the layer holds no
     /// `<position>.gamma` path. `beta` keeps its own name and its own optimizer state, because
-    /// a checkpoint and an optimizer both address an array by name and never by position
+    /// a checkpoint and an optimizer both address an array by name, never by position
     ///
     /// # Parameters
     ///
@@ -165,8 +165,8 @@ impl BatchNormalization {
     pub fn with_scale(mut self, scale: bool) -> Self {
         self.scale = scale;
         if !scale {
-            // Put the array back at the identity scale, so nothing the layer no longer holds
-            // can reach a result
+            // Put the array back at the identity scale, so an array the layer does not hold
+            // reaches no result
             self.gamma = Tensor::ones(self.gamma.shape());
         }
         self
@@ -239,10 +239,9 @@ impl LayerBase for BatchNormalization {
     }
 
     fn param_count(&self) -> ParamCounts {
-        // The running statistics are parameters of the layer, and no optimizer updates them.
-        // They move only in the training forward pass, so they are non-trainable
-        // Read the arrays the layer holds rather than the configuration, so dropping
-        // `gamma` or `beta` corrects the count with no second formula to keep in step
+        // Running statistics are non-trainable: they move in the forward pass, not through the
+        // optimizer. Read the arrays the layer holds, not the configuration, so dropping `gamma`
+        // or `beta` corrects the count with no second formula to keep in step
         let gamma = if self.scale { self.gamma.len() } else { 0 };
         let beta = if self.center { self.beta.len() } else { 0 };
         ParamCounts::new(
@@ -260,7 +259,7 @@ impl LayerBase for BatchNormalization {
             ..
         } = self;
         let mut params = Vec::new();
-        // Each tensor is pushed on its own, so an array the layer drops holds back no other
+        // Each array is pushed on its own, so an array the layer drops holds back no other
         if *scale {
             params.push(ParamRef::no_decay(
                 "gamma",
@@ -331,15 +330,13 @@ impl UnaryLayer for BatchNormalization {
     /// statistics during inference
     ///
     /// A training pass proposes a new running mean and a new running variance through the state
-    /// channel of the context, and the layer takes them back in
+    /// channel of the context. The layer takes them back in
     /// [`apply_state`](LayerBase::apply_state). An inference pass proposes nothing at all
     fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         validate_built_input(&self.built, "BatchNormalization", input.shape())?;
 
-        // The parallel passes below need a contiguous slice. A standard-layout input is
-        // already contiguous, so only a non-contiguous view pays for a copy.
-        // `as_standard_layout().into_owned()` would copy unconditionally, which on a
-        // conv-scale tensor costs more than the pass itself
+        // The parallel passes below need a contiguous slice, so only a non-contiguous input
+        // pays for a copy
         let owned;
         let input = if input.is_standard_layout() {
             input
@@ -350,16 +347,8 @@ impl UnaryLayer for BatchNormalization {
 
         if ctx.is_training() {
             let total_elements = input.len();
-            // Under the channels-last layout, the channel axis is innermost. A
-            // `[batch, spatial..., channels]` buffer already *is* the `[M, C]` matrix the
-            // per-channel folds want, with `M = batch * spatial`. This needs no reshape and no
-            // transpose, so 1 path serves every rank >= 2. The statistics of a rank > 2 input
-            // reduce over batch and every spatial position, exactly as spatial batch norm
-            // requires. A 1-D input has no channel axis (see `new`) and keeps the serial
-            // ndarray path, with its 0-d statistics shapes
-            // `input` was put in standard layout above, and every buffer derived from it below
-            // is either a fresh `Tensor::zeros` or an owned ndarray result, so all of them are
-            // contiguous. The rank >= 2 arms therefore take the slice directly
+            // Every buffer derived from `input` below is either a fresh `Tensor::zeros` or an
+            // owned ndarray result, so the rank >= 2 arms below can take the slice directly
             let use_col_fold = input.ndim() >= 2;
             let channels = if use_col_fold {
                 input.shape()[input.ndim() - 1]
@@ -384,13 +373,6 @@ impl UnaryLayer for BatchNormalization {
                 input.mean_axis(Axis(0)).unwrap()
             };
 
-            // Center the data
-            //
-            // The per-channel table is bound to a slice outside the loop. Calling
-            // `as_slice().unwrap()` inside the loop would re-read the array's heap-allocated shape
-            // and re-run its standard-layout check on every element. The loop body also stores
-            // through a `&mut f32`, so the compiler cannot prove the call is loop-invariant and
-            // will not hoist it
             let x_centered = if total_elements >= batch_norm_parallel_threshold() {
                 let mut x_centered = Tensor::zeros(input.raw_dim());
                 let mean_s = batch_mean.as_slice().unwrap();
@@ -427,13 +409,8 @@ impl UnaryLayer for BatchNormalization {
                 (&x_centered * &x_centered).mean_axis(Axis(0)).unwrap()
             };
 
-            // Normalize, then scale and shift, in 1 sweep
-            //
-            // Both outputs are needed. `x_normalized` is cached for the backward pass, but the 2
-            // outputs are the same walk over the same array. Writing them together saves a whole
-            // extra read and write of a conv-scale tensor. Centering cannot join this sweep: the
-            // variance is folded from `x_centered`, so that pass has to finish first. Element for
-            // element, this is the same arithmetic in the same order as the 2 passes it replaces
+            // Centering has to finish before this sweep starts, because the variance is folded
+            // from `x_centered`
             let std_dev = (&batch_var + self.epsilon).mapv(|x| x.sqrt());
             let (x_normalized, output) = if total_elements >= batch_norm_parallel_threshold() {
                 let mut x_normalized = Tensor::zeros(x_centered.raw_dim());
@@ -465,17 +442,13 @@ impl UnaryLayer for BatchNormalization {
                 }
                 (x_normalized, output)
             } else {
-                // Sequential normalize, scale and shift
                 let x_normalized = &x_centered / &std_dev;
                 let output = &x_normalized * &self.gamma + &self.beta;
                 (x_normalized, output)
             };
 
-            // Update running statistics
-            //
-            // The pass reads `&self`, so the new values go into the state channel. A layer that
-            // runs twice in 1 pass reads back what its first call proposed, which is what the
-            // field held after the first call before the statistics moved to the context
+            // The pass reads `&self`, so the new values go through the state channel. A second
+            // call in the same pass reads back what the first call proposed, not the stale field
             let updated_mean = {
                 let current = ctx
                     .state::<Tensor>("moving_mean")
@@ -503,11 +476,8 @@ impl UnaryLayer for BatchNormalization {
 
             Ok(output)
         } else {
-            // Inference mode: use running statistics
-            //
-            // The per-channel statistics are `[C]` and the channel axis is innermost. This lets
-            // ndarray's trailing-axis broadcast line them up against an input of any rank on its
-            // own
+            // The per-channel statistics are `[C]`, and the channel axis is innermost, so
+            // ndarray's trailing-axis broadcast lines them up against an input of any rank
             let std_dev = (&self.moving_variance + self.epsilon).mapv(|x| x.sqrt());
             let x_normalized = (input - &self.moving_mean) / &std_dev;
             let output = &x_normalized * &self.gamma + &self.beta;
@@ -540,13 +510,9 @@ impl UnaryLayer for BatchNormalization {
         let total_elements = grad_output.len();
 
         let channels = self.gamma.len();
-        // As in `forward`: any rank >= 2 gradient is already the `[M, C]` matrix the folds want.
-        // `batch_size` is that `M` (batch times spatial), which is exactly the sample count the
-        // per-channel statistics were taken over. 1-D (scalar-parameter) inputs keep the serial
-        // ndarray path and its 0-d statistics shapes
-        // `grad_output` was put in standard layout above. `x_normalized` and `x_centered` come
-        // from the forward cache, and `grad_x_normalized` is built here, so all of them are
-        // contiguous. The rank >= 2 arms therefore take the slice directly
+        // `grad_output` is standard layout from above, and `x_normalized`, `x_centered`, and
+        // `grad_x_normalized` are all owned arrays, so the rank >= 2 arms can take the slice
+        // directly
         let use_col_fold = grad_output.ndim() >= 2;
         let batch_size = if use_col_fold {
             (total_elements / channels.max(1)) as f32
@@ -555,8 +521,8 @@ impl UnaryLayer for BatchNormalization {
         };
         let col_stats_parallel = total_elements >= col_fold_parallel_min_elems();
 
-        // Compute gradients for gamma and beta: fused row-block folds (no [M, C] product
-        // temp), on rayon above the column-stats gate
+        // Fused row-block folds for gamma and beta (no [M, C] product temp), on rayon above
+        // the column-stats gate
         let (grad_gamma, grad_beta) = if use_col_fold {
             let g = grad_output
                 .as_slice()
@@ -584,9 +550,7 @@ impl UnaryLayer for BatchNormalization {
             ctx.add_grad("beta", grad_beta.into_dyn())?;
         }
 
-        // Compute gradient with respect to normalized input
         let grad_x_normalized = if total_elements >= batch_norm_parallel_threshold() {
-            // Parallel computation
             let mut grad_x_norm = Tensor::zeros(grad_output.raw_dim());
             let gamma_s = self.gamma.as_slice().unwrap();
             let feature_size = gamma_s.len();
@@ -609,11 +573,9 @@ impl UnaryLayer for BatchNormalization {
                 });
             grad_x_norm
         } else {
-            // Sequential computation
             grad_output * &self.gamma
         };
 
-        // Compute gradient with respect to variance
         let std_dev = (&batch_var + self.epsilon).mapv(|x| x.sqrt());
         let inv_std = std_dev.mapv(|x| 1.0 / x);
 
@@ -632,7 +594,6 @@ impl UnaryLayer for BatchNormalization {
         };
         let grad_var = grad_var_sum * &inv_std * &inv_std * &inv_std;
 
-        // Compute gradient with respect to mean
         let grad_mean_1_sum = if use_col_fold {
             let g = grad_x_normalized
                 .as_slice()
@@ -653,11 +614,8 @@ impl UnaryLayer for BatchNormalization {
         let grad_mean_2 = &grad_var * (x_centered_col_sum * -2.0 / batch_size);
         let grad_mean = grad_mean_1 + grad_mean_2;
 
-        // Compute gradient with respect to input
         let grad_input = if total_elements >= batch_norm_parallel_threshold() {
-            // Parallel computation
             let mut grad_inp = Tensor::zeros(grad_output.raw_dim());
-            // 3 per-channel tables, so this pass pays the re-read 3 times per element
             let inv_std_s = inv_std.as_slice().unwrap();
             let grad_var_s = grad_var.as_slice().unwrap();
             let grad_mean_s = grad_mean.as_slice().unwrap();
@@ -687,7 +645,6 @@ impl UnaryLayer for BatchNormalization {
                 });
             grad_inp
         } else {
-            // Sequential computation
             &grad_x_normalized * &inv_std
                 + &grad_var * (&x_centered * 2.0 / batch_size)
                 + &grad_mean / batch_size
@@ -844,9 +801,9 @@ mod tests {
     /// A rank-4 pass and the equivalent rank-2 pass agree bit for bit
     ///
     /// Under the channels-last layout `[B, H, W, C]` already *is* the `[B*H*W, C]` matrix the
-    /// per-channel folds read, so collapsing the leading axes must change nothing at all. This
-    /// pins that the collapse is a reinterpretation and not a reduction that lost or reordered
-    /// anything on the way
+    /// per-channel folds read. Collapsing the leading axes must therefore change nothing at all.
+    /// This pins that the collapse is a reinterpretation and not a reduction that lost or
+    /// reordered anything on the way
     #[test]
     fn spatial_pass_matches_the_equivalent_two_d_pass_bitwise() {
         let (b, h, w, c) = (2usize, 3usize, 4usize, 5usize);

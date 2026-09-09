@@ -1,18 +1,16 @@
 //! Integration tests for the optional parameters of a layer: `use_bias` on Dense and on the
 //! convolution family, and `center` and `scale` on the normalization layers.
 //!
-//! A name-addressed checkpoint can express an array that a layer does not hold, which the
-//! closed weight enum could not. These tests pin the 3 defects that an optional parameter
-//! makes possible:
+//! A name-addressed checkpoint can express an array that a layer does not hold. These tests pin
+//! 3 properties that an optional parameter depends on:
 //!
-//! 1. **A layer that yields nothing.** The parameter walk used to gate every push behind 1
-//!    all-or-nothing match on every gradient. A bias that is never present then held back the
-//!    kernel of the same layer, and the layer trained nothing with no error anywhere.
-//! 2. **A dropped array that renumbers the arrays after it.** On the normalization layers the
-//!    optional array is the first one, so `scale = false` used to move `beta` into the slot of
-//!    `gamma`. A positional key then gave `beta` the optimizer state of `gamma`.
-//! 3. **A parameter count read from the configuration.** A count derived from `input_dim` and
-//!    `units` counts a bias that the layer does not hold.
+//! 1. **A layer with an absent parameter still trains every other parameter.** A bias gradient
+//!    that is never present must not hold back the kernel gradient of the same layer.
+//! 2. **A dropped array moves no other array's checkpoint path or optimizer state.** On the
+//!    normalization layers the optional array is the first one, so dropping it must not shift
+//!    `beta` into the slot `gamma` held.
+//! 3. **The parameter count reads the arrays a layer holds, not its configuration.** A count
+//!    derived from `input_dim` and `units` must not count a bias the layer does not hold.
 //!
 //! The tests also pin both directions of the checkpoint refusal, and the Keras 3 reference
 //! values for a bias-free Dense and a scale-free LayerNormalization.
@@ -45,9 +43,7 @@ use rustyml::neural_network::traits::{
 };
 use rustyml::neural_network::{Ctx, Shape, Tensor};
 
-// ---------------------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------------------
 
 /// Temporary file that deletes itself when dropped
 struct TempFile(std::path::PathBuf);
@@ -122,14 +118,12 @@ fn array_of(layer: &dyn Layer, name: &str) -> Vec<f32> {
         .collect()
 }
 
-// ---------------------------------------------------------------------------------------
 // Trap 1: a layer without a bias must still train its kernel
-// ---------------------------------------------------------------------------------------
 
-/// The former all-or-nothing gate returned the empty parameter list whenever any 1 gradient of
-/// a layer was absent. Without a bias the bias gradient is absent forever, so the kernel never
-/// reached the optimizer and the layer trained nothing. This trains a bias-free Dense and
-/// checks that the kernel really moves
+/// A gate that discards the whole parameter list whenever any 1 gradient is absent would leave
+/// a bias-free layer's kernel gradient stuck behind its permanently absent bias gradient, so the
+/// kernel would never reach the optimizer. This trains a bias-free Dense and checks that the
+/// kernel really moves
 #[test]
 fn a_bias_free_dense_trains_its_kernel() {
     let mut layer = Dense::new(2, Activation::Linear)
@@ -167,7 +161,7 @@ fn a_bias_free_dense_trains_its_kernel() {
     );
 }
 
-/// The same defect on the convolution side, where the bias is also the last array
+/// The same check on the convolution side, where the bias is also the last array
 #[test]
 fn a_bias_free_conv2d_trains_its_kernel() {
     let mut layer = Conv2D::new(2, (2, 2), (1, 1), Activation::Linear)
@@ -217,7 +211,7 @@ struct BiasFreeCase {
 }
 
 /// Every layer that takes `use_bias` must still yield its kernel with the bias left out. This
-/// is the same defect as the 2 tests above, over the whole family in 1 pass
+/// is the same check as the 2 tests above, over the whole family in 1 pass
 #[test]
 fn every_bias_free_layer_yields_its_kernels() {
     let x3 = tensor(&[1, 6, 2], 0);
@@ -373,9 +367,7 @@ fn every_bias_free_layer_yields_its_kernels() {
     }
 }
 
-// ---------------------------------------------------------------------------------------
 // Trap 2: on a normalization layer the optional array is the first one
-// ---------------------------------------------------------------------------------------
 
 /// `scale = false` drops `gamma`, which is the array at index 0. A positional key would then
 /// give `beta` the optimizer state of `gamma`.
@@ -540,9 +532,7 @@ fn every_normalization_layer_drops_the_array_its_flag_names() {
     }
 }
 
-// ---------------------------------------------------------------------------------------
 // Trap 3: the parameter count must read the arrays, not the configuration
-// ---------------------------------------------------------------------------------------
 
 /// A count derived from `input_dim` and `units` counts a bias that the layer does not hold.
 /// This compares every count against the arrays that the same layer exposes, so a formula that
@@ -702,9 +692,7 @@ fn param_count_agrees_with_keras_for_the_optional_configurations() {
     assert_eq!(batch.param_count().total(), 12);
 }
 
-// ---------------------------------------------------------------------------------------
 // The Keras 3 reference values for the optional-parameter path
-// ---------------------------------------------------------------------------------------
 
 /// A bias-free Dense against Keras 3.15.1 on the jax backend, forward and backward. The kernel,
 /// the input, and the upstream gradient come from the same deterministic sequence on both sides
@@ -822,9 +810,7 @@ fn a_scale_free_layer_normalization_matches_keras() {
     }
 }
 
-// ---------------------------------------------------------------------------------------
 // A checkpoint of a layer with an optional array, in both directions
-// ---------------------------------------------------------------------------------------
 
 /// The message of a structural refusal
 fn refusal(result: Result<(), Error>) -> String {
@@ -965,9 +951,7 @@ fn a_partial_load_reports_the_array_the_model_dropped() {
     assert_eq!(report.unused, vec!["0.beta"]);
 }
 
-// ---------------------------------------------------------------------------------------
 // The setters refuse a value that reaches nothing
-// ---------------------------------------------------------------------------------------
 
 /// A bias given to a layer that holds none reaches nothing, so the setter refuses it by name
 #[test]
@@ -1077,9 +1061,7 @@ fn the_conv_setters_refuse_a_bias_that_the_layer_does_not_hold() {
     );
 }
 
-// ---------------------------------------------------------------------------------------
 // The defaults move nothing
-// ---------------------------------------------------------------------------------------
 
 /// Every default keeps the roster that the layers had before the flags existed
 #[test]
@@ -1103,9 +1085,7 @@ fn the_defaults_keep_every_array() {
     );
 }
 
-// ---------------------------------------------------------------------------------------
 // The roster of the parameter walk, over every layer that takes an optional array
-// ---------------------------------------------------------------------------------------
 
 /// The 4 settings of `center` and `scale`, in a fixed order
 const CENTER_AND_SCALE: [(bool, bool); 4] =

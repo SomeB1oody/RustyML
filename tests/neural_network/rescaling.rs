@@ -2,7 +2,7 @@
 //!
 //! Covers the affine map at every rank, the gradient, the memory layout, the error paths, and
 //! the use of the layer inside a model. Every recorded expectation comes from Keras 3.15.1 on
-//! the jax backend, and every one of them is bit-exact against this implementation.
+//! the jax backend, and every value is bit-exact against this implementation.
 
 use ndarray::{Array2, IxDyn};
 use rustyml::neural_network::Ctx;

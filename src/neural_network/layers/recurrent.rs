@@ -1,13 +1,13 @@
 //! Recurrent layers (SimpleRNN, GRU, LSTM) and their shared helpers
 //!
-//! All 3 layers are the same layer over a different cell. An internal `Rnn` type holds the
-//! scaffolding that does not depend on the cell: the build, the batched input projection, the
-//! walk along the time axis, the cache, the backpropagation through time, and the reduction of
-//! the per-step gate gradients. An internal `RnnCell` protocol holds the arithmetic of 1
+//! All 3 layers are the same layer over a different cell. An `Rnn` type holds the scaffolding
+//! that does not depend on the cell: the build, batched input projection, and the walk along
+//! the time axis. It also holds the cache, the backpropagation through time, and the reduction
+//! of the per-step gate gradients. An internal `RnnCell` protocol holds the arithmetic of 1
 //! timestep, and the 3 cells of this module are its only implementations. Neither name is
 //! public, so the shape of the protocol can change with no effect on any public name.
 //!
-//! `SimpleRNN`, `LSTM` and `GRU` are each a newtype over 1 of those layers, so each one keeps
+//! `SimpleRNN`, `LSTM` and `GRU` are each a newtype over 1 of those layers. Each one keeps
 //! its own documentation page, its own name in a compiler message, and its own `Debug` output.
 //!
 //! This module also provides 2 shared helpers. A numerically stable sigmoid serves the GRU and

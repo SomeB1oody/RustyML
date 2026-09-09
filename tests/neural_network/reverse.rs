@@ -1,10 +1,9 @@
 //! The Reverse layer, and the bidirectional graph it makes correct
 //!
-//! A recurrent layer with `go_backwards` returns its states in PROCESSING order, so slot 0
-//! holds the state that came from the LAST input timestep. Keras puts that branch back into
-//! input order before it merges. This crate had no layer that could reverse the order inside an
-//! axis, so a hand-wired bidirectional model paired mismatched timesteps. These tests pin the
-//! layer, its 3 refusals, and the invariant that ties it to the recurrent family.
+//! A recurrent layer with `go_backwards` returns its states in processing order, so slot 0
+//! holds the state that came from the last input timestep. Keras puts that branch back into
+//! input order before it merges. These tests pin the layer, its 3 refusals, and the invariant
+//! that ties it to the recurrent family.
 
 use ndarray::{Array, Axis, IxDyn};
 use rustyml::neural_network::graph::GraphBuilder;
@@ -159,7 +158,7 @@ fn a_checkpoint_refuses_a_different_reverse_axis() {
 ///
 /// This is the invariant that ties the layer to the recurrent family, and it is what Keras
 /// defines. Processing step k of a `go_backwards` layer consumes input timestep `t - 1 - k`, so
-/// its LAST processing state consumed input timestep 0. After the reversal that state sits at
+/// its last processing state consumed input timestep 0. After the reversal that state sits at
 /// slot 0, which is where a forward branch holds the state of input timestep 0. The 2 branches
 /// therefore agree timestep for timestep, which is what a merge layer needs.
 #[test]

@@ -204,7 +204,6 @@ fn test_predict_is_deterministic() {
 
 // summary smoke-test
 
-/// summary() runs without panicking
 #[test]
 fn test_summary_does_not_panic() {
     let model = SequentialBuilder::new()
@@ -217,7 +216,6 @@ fn test_summary_does_not_panic() {
 
 // error paths
 
-/// fit() before compile() returns NotCompiled
 #[test]
 fn test_fit_before_compile_returns_not_compiled() {
     let mut model = SequentialBuilder::new()
@@ -249,7 +247,7 @@ fn a_builder_that_holds_no_layer_is_refused() {
     );
 }
 
-/// The same refusal is the only way a caller reaches `EmptyModel` now
+/// The same refusal is the only way a caller reaches `EmptyModel`
 #[test]
 fn a_builder_that_holds_no_layer_is_refused_for_every_shape() {
     let refused = SequentialBuilder::new().build(&Shape::known(&[1, 2, 3, 4]));
@@ -263,7 +261,6 @@ fn a_builder_that_holds_no_layer_is_refused_for_every_shape() {
     );
 }
 
-/// fit() with an empty input tensor returns EmptyInput
 #[test]
 fn test_fit_empty_x_returns_empty_input_error() {
     let mut model = SequentialBuilder::new()
@@ -283,7 +280,6 @@ fn test_fit_empty_x_returns_empty_input_error() {
     );
 }
 
-/// fit() with mismatched x/y batch sizes returns DimensionMismatch
 #[test]
 fn test_fit_batch_size_mismatch_returns_dimension_mismatch() {
     let mut model = SequentialBuilder::new()
@@ -303,7 +299,6 @@ fn test_fit_batch_size_mismatch_returns_dimension_mismatch() {
     );
 }
 
-/// predict() with an empty input tensor returns EmptyInput
 #[test]
 fn test_predict_empty_x_returns_empty_input_error() {
     let model = SequentialBuilder::new()
@@ -319,7 +314,6 @@ fn test_predict_empty_x_returns_empty_input_error() {
     );
 }
 
-/// fit_with_batches with batch_size=0 returns InvalidParameter
 #[test]
 fn test_fit_with_batches_zero_batch_size_returns_invalid_parameter() {
     let mut model = SequentialBuilder::new()
@@ -343,7 +337,6 @@ fn test_fit_with_batches_zero_batch_size_returns_invalid_parameter() {
     );
 }
 
-/// fit_with_batches with batch_size > n_samples returns InvalidParameter
 #[test]
 fn test_fit_with_batches_batch_size_exceeds_samples_returns_invalid_parameter() {
     let mut model = SequentialBuilder::new()
@@ -370,7 +363,6 @@ fn test_fit_with_batches_batch_size_exceeds_samples_returns_invalid_parameter() 
 
 // epochs=0 leaves the model unchanged
 
-/// Training for 0 epochs leaves the weights identical to before the call
 #[test]
 fn test_fit_zero_epochs_unchanged_weights() {
     let mut dense = Dense::new(1, Activation::Linear).unwrap();
@@ -638,12 +630,9 @@ fn test_fit_history_records_the_pre_update_loss() {
 /// dataset-wide mean per-sample loss, matching Keras and identical across shuffles.
 #[test]
 fn test_fit_with_batches_weights_batches_by_sample_count() {
-    // 5 samples in batches of 2 leaves 1 sample alone in the trailing batch. Call the
-    // per-sample losses l_0 through l_4, with total S. For whichever sample s lands alone,
-    // a plain mean over the 3 batches is ((S - l_s) / 2 + l_s) / 3. This reduces to
-    // (S + l_s) / 6, for any pairing of the other 4 samples. Weighting by sample count instead
-    // gives S/5. The 2 rules agree only when l_s equals S/5, which the assertion below rules
-    // out for every sample.
+    // Batches of 2 leave 1 sample alone in the trailing batch. A plain mean over the 3 batches
+    // equals the weighted mean S/5 only when that lone sample's loss also equals S/5, which the
+    // assertion below rules out for every sample.
     let x = t2(5, 1, vec![1.0, 1.0, 1.0, 1.0, 1.0]);
     let y = t2(5, 1, vec![0.0, 1.0, 4.0, 9.0, 100.0]);
 
@@ -980,10 +969,10 @@ fn test_batch_losses_and_epoch_mean_match_keras() {
     let x = t2(5, 1, vec![0.0, 1.0, 2.0, 3.0, 4.0]);
     let y = t2(5, 1, vec![0.0, 2.0, 4.0, 6.0, 8.0]);
 
-    // keras: model.evaluate(x, y) == 13.5
+    // Keras: model.evaluate(x, y) == 13.5
     assert_abs_diff_eq!(model.evaluate(&x, &y).unwrap(), 13.5_f32, epsilon = 1e-5);
 
-    // keras: 3 successive train_on_batch calls, in this order
+    // Keras: 3 successive train_on_batch calls, in this order
     let batches = [
         (
             t2(2, 1, vec![0.0, 1.0]),
@@ -1007,7 +996,7 @@ fn test_batch_losses_and_epoch_mean_match_keras() {
         samples += batch_x.shape()[0];
     }
 
-    // keras: history.history['loss'][0] == 5.687146186828613 for the same epoch. Weighting each
+    // Keras: history.history['loss'][0] == 5.687146186828613 for the same epoch. Weighting each
     // batch by its sample count reproduces it. A plain mean over the 3 batches gives
     // 5.4848262, which is not what Keras reports.
     assert_abs_diff_eq!(
@@ -1016,7 +1005,7 @@ fn test_batch_losses_and_epoch_mean_match_keras() {
         epsilon = 1e-4
     );
 
-    // keras: model.evaluate(x, y) after the epoch == 9.241999626159668. This value is above the
+    // Keras: model.evaluate(x, y) after the epoch == 9.241999626159668. This value is above the
     // epoch figure because this learning rate overshoots. That is why the recorded loss cannot
     // be read as the trained model's loss.
     assert_abs_diff_eq!(model.evaluate(&x, &y).unwrap(), 9.242_0_f32, epsilon = 1e-4);
@@ -1027,9 +1016,8 @@ fn test_batch_losses_and_epoch_mean_match_keras() {
 /// A stack whose shapes do not agree is refused, and the refusal names the position of the
 /// layer and its type
 ///
-/// A shape error used to reach a caller in the middle of a forward pass, deep inside a model,
-/// with no layer named. The build walks the stack once, threads the output shape of each layer
-/// into the next, and stops at the first layer that cannot take what reaches it
+/// The build walks the stack once, threads the output shape of each layer into the next, and
+/// stops at the first layer that cannot take what reaches it
 #[test]
 fn the_build_refuses_a_stack_whose_shapes_do_not_agree_and_names_the_layer() {
     // Layer 0 gives a rank-2 output, and layer 1 needs rank 4

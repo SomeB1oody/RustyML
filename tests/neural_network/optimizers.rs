@@ -273,15 +273,13 @@ fn identity_dense_initial_mse_is_1_875() {
 
 // End-to-end convergence: each optimizer drives loss down over 20 epochs
 
-/// SGD: loss after 20 epochs is strictly below the initial loss (1.875)
 #[test]
 fn sgd_single_layer_loss_decreases_over_20_epochs() {
     let (x, y) = regression_data();
     let initial_mse = 1.875_f32;
 
-    // Plain SGD needs lr < 2 / lambda_max(Hessian) to converge here, about 2 / 5.5, or about
-    // 0.36. A rate of 0.5 overshoots and diverges. This test uses 0.1, which reduces the loss
-    // steadily.
+    // Plain SGD converges only below lr = 2 / lambda_max(Hessian), about 2 / 5.5, or about 0.36
+    // here. A rate of 0.5 diverges. This test uses 0.1, which lowers the loss steadily.
     let mut model = SequentialBuilder::new()
         .add(identity_dense())
         .build(&Shape::known(x.shape()))
@@ -303,7 +301,6 @@ fn sgd_single_layer_loss_decreases_over_20_epochs() {
     );
 }
 
-/// Adam: loss after 20 epochs is strictly below the initial loss (1.875)
 #[test]
 fn adam_single_layer_loss_decreases_over_20_epochs() {
     let (x, y) = regression_data();
@@ -330,7 +327,6 @@ fn adam_single_layer_loss_decreases_over_20_epochs() {
     );
 }
 
-/// RMSprop: loss after 20 epochs is strictly below the initial loss (1.875)
 #[test]
 fn rmsprop_single_layer_loss_decreases_over_20_epochs() {
     let (x, y) = regression_data();
@@ -357,7 +353,6 @@ fn rmsprop_single_layer_loss_decreases_over_20_epochs() {
     );
 }
 
-/// AdaGrad: loss after 20 epochs is strictly below the initial loss (1.875)
 #[test]
 fn adagrad_single_layer_loss_decreases_over_20_epochs() {
     let (x, y) = regression_data();
@@ -437,7 +432,7 @@ fn adam_two_layer_loss_decreases_and_buffers_allocated_correctly() {
     );
 }
 
-// Multi-layer convergence: one test per remaining optimizer
+// Multi-layer convergence: 1 test per remaining optimizer
 
 /// SGD on a 2-layer net (1->4->1): loss falls and converges below 0.1 over 50 epochs
 #[test]
@@ -574,7 +569,6 @@ fn sgd_one_step_weight_update_matches_hand_calculation() {
         MeanSquaredError::new(),
     );
 
-    // initial prediction: y_hat = 2.0
     let pred_before = model.predict(&x).unwrap();
     let val_before = *pred_before.iter().next().unwrap();
     assert_abs_diff_eq!(val_before, 2.0_f32, epsilon = 1e-6);
@@ -772,9 +766,6 @@ fn sgd_decoupled_weight_decay_shrinks_param() {
 }
 
 // Weight decay applies to weights only, not to biases or to normalization gamma and beta.
-// These run 2 layers through an identical forward and backward pass and differ only in
-// `weight_decay`, so decay explains any divergence. The gradient values cancel out of the
-// comparison: weight_decay shrinks `value` by `(1 - lr*wd)` before the same gradient step.
 
 /// Runs a Dense(2->2, Linear) with fixed weights and bias through 1 forward and backward pass
 /// and 1 SGD step at the given `weight_decay`. The upstream gradient is fixed and nonzero.
@@ -948,7 +939,6 @@ fn adam_l2_and_adamw_decoupled_differ_with_weight_decay() {
     let (w_adamw, b_adamw) =
         dense_weights_after_one_step(AdamW::new(0.1, 0.9, 0.999, 1e-8, wd).unwrap(), &w0, &b0);
 
-    // Weights differ between the 2 decay schemes
     assert!(
         w_adam
             .iter()
@@ -962,8 +952,6 @@ fn adam_l2_and_adamw_decoupled_differ_with_weight_decay() {
     }
 }
 
-/// AdamW drives MSE strictly down on the seeded regression problem (with a non-zero decoupled
-/// weight_decay active)
 #[test]
 fn adamw_single_layer_loss_decreases_over_20_epochs() {
     let (x, y) = regression_data();
@@ -1007,7 +995,6 @@ fn adamw_validates_hyperparameters() {
     );
 }
 
-/// SGD with momentum still drives MSE strictly down on the seeded regression problem
 #[test]
 fn sgd_momentum_loss_decreases() {
     let (x, y) = regression_data();
@@ -1028,7 +1015,6 @@ fn sgd_momentum_loss_decreases() {
     );
 }
 
-/// Negative momentum or weight_decay values are rejected
 #[test]
 fn new_rejects_negative_momentum_and_weight_decay() {
     assert!(matches!(
@@ -1045,7 +1031,7 @@ fn new_rejects_negative_momentum_and_weight_decay() {
     ));
 }
 
-// learning rate: readable as well as writable
+// Learning rate: readable as well as writable
 
 /// Every optimizer round-trips learning_rate(): it reports the value it was built with, and the
 /// value it was last set to. This lets a schedule read the current rate instead of a stale copy
@@ -1217,13 +1203,6 @@ fn pass_through_dense_no_bias() -> Dense {
 /// therefore 0, and a bias-free layer has no other tensor to move. The kernel gradient of the
 /// first layer is `x^T (pred - y)`, and the bias shift keeps that 1 away from 0, so a shared
 /// momentum buffer would carry a real value from the first layer into the second one
-///
-/// A model used to be able to grow a layer between 2 batches, and the test that stood here
-/// added the second layer after batch 1 and compared batch 2. That setup needed no such
-/// construction: the added layer had never taken a step, so it entered batch 2 holding the
-/// identity map by itself. [`SequentialBuilder::build`] is now the only way to reach a model,
-/// so both layers take every batch, and an ordinary second layer trains away from the
-/// identity in batch 1
 #[test]
 fn a_second_layer_moves_no_state_of_the_first() {
     // The first layer adds `[1, 0]`, so it gives the second layer `h = [[1, 2], [2, 4]]`, whose
@@ -1267,10 +1246,9 @@ fn a_second_layer_moves_no_state_of_the_first() {
             .to_owned()
     };
 
-    // The construction holds for the 2 backward passes that the comparison reads. Batch 1
-    // gives the second layer a gradient of 0, so batch 2 meets the identity map again. The
-    // batch-2 step of the second layer lands after every backward pass of that batch, so no
-    // gradient of the first layer ever passes through anything but the identity
+    // The comparison holds because batch 1 gives the second layer a gradient of 0, and its
+    // batch-2 step lands after every backward pass of that batch, so the first layer's
+    // gradient always passes through the second layer as the identity.
     let mut probe = SequentialBuilder::new()
         .add(shifted_dense())
         .add(pass_through_dense_no_bias())
@@ -1299,8 +1277,8 @@ fn a_second_layer_moves_no_state_of_the_first() {
 /// A stand-in for a layer whose gradient roster changes between steps
 ///
 /// It holds 2 tensors of equal length, and the store of a pass can carry the gradient of the
-/// second one alone. No layer of the crate produced that shape when this test was written, and
-/// the optimizer contract must hold for it all the same
+/// second one alone. No layer in the crate has that shape, but the optimizer contract must
+/// hold for it too
 struct RosterLayer {
     /// The tensor whose gradient the store can leave out
     gamma: Vec<f32>,

@@ -25,29 +25,30 @@ pub enum NnError {
     WeightShape {
         /// The parameter being set (e.g. `"kernel"`, `"bias"`)
         name: String,
-        /// The shape the layer requires
+        /// The shape the layer needs
         expected: Vec<usize>,
         /// The shape that was supplied
         found: Vec<usize>,
     },
 
-    /// The model was used for training/inference before a required component was configured
+    /// The model was used for training/inference before a needed component was configured
     ///
     /// The payload names the missing component (e.g. `"optimizer"`, `"loss function"`)
     #[error("model has not been compiled: `{0}` is not specified")]
     NotCompiled(&'static str),
 
-    /// An operation was attempted on a model that contains no layers
+    /// An operation was tried on a model that contains no layers
     #[error("model has no layers")]
     EmptyModel,
 
     /// A layer was used before `build` gave it the arrays it holds
     ///
     /// A layer allocates every array it owns in
-    /// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build), from the shape of the
-    /// input. Until then it holds no kernel, no bias, and no shape to check an input against.
-    /// [`UnaryLayer::forward`](crate::neural_network::traits::UnaryLayer::forward) builds the layer from
-    /// the tensor it receives, so only the paths that take `&self` can report this
+    /// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build), from the shape
+    /// of the input. Until then it holds no kernel, no bias, and no shape to check an input
+    /// against.
+    /// [`UnaryLayer::forward_mut`](crate::neural_network::traits::UnaryLayer::forward_mut) builds
+    /// the layer from the tensor it receives, so only the paths that take `&self` can report this
     ///
     /// The payload is the layer's name (e.g. `"Dense"`, `"Conv2D"`)
     #[error(
@@ -78,18 +79,18 @@ mod tests {
     use crate::error::Error;
 
     /// `#[error(transparent)]` on `Error::NeuralNetwork` forwards the inner `NnError`'s
-    /// own Display: `EmptyModel` => `#[error("model has no layers")]`
+    /// own Display: `EmptyModel` renders as `#[error("model has no layers")]`
     #[test]
     fn display_neural_network_transparent_forwards_inner() {
         let inner = NnError::EmptyModel;
         assert_eq!(inner.to_string(), "model has no layers");
-        // The transparent outer variant must render identically to the inner enum
         let outer: Error = Error::from(NnError::EmptyModel);
         assert_eq!(outer.to_string(), inner.to_string());
     }
 
     /// Transparent forwarding also holds for a parameterized `NnError` variant:
-    /// `NotCompiled("optimizer")` => `"model has not been compiled: `optimizer` is not specified"`
+    /// `NotCompiled("optimizer")` renders as
+    /// `"model has not been compiled: `optimizer` is not specified"`
     #[test]
     fn display_neural_network_transparent_forwards_parameterized_inner() {
         let outer: Error = Error::from(NnError::NotCompiled("optimizer"));

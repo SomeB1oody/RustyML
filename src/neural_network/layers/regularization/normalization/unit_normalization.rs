@@ -103,9 +103,8 @@ pub enum UnitNormalizationAxis {
 /// The layer takes a fused row path when the normalized axes are the trailing block of the
 /// shape, which the default axis always is. Each group is then 1 contiguous run. The pass costs
 /// 2 linear walks of the input, 1 for the norm and 1 for the scale. Any other axis choice leaves
-/// the groups as strided lanes. That path reduces the groups in place instead of paying for a
-/// transpose in and a transpose back out. It holds 1 more tensor of the input size while it
-/// folds the squares
+/// the groups as strided lanes. That path reduces the groups in place, with no transpose in and
+/// no transpose back out. It holds 1 more tensor of the input size while it folds the squares
 ///
 /// A training pass also keeps a copy of its output, which the backward pass reads. An inference
 /// pass keeps nothing
@@ -391,8 +390,7 @@ fn reduce_to_groups(full: Tensor, axes: &[usize], group_shape: &[usize]) -> Tens
 /// Runs the forward pass for axes that are not the trailing block of the shape
 ///
 /// Such groups are strided lanes rather than contiguous rows. The pass reduces them in place
-/// through ndarray, because a transpose to the row layout would cost 2 more copies of the whole
-/// input
+/// through ndarray, with no transpose to the row layout
 fn strided_forward(
     input: &Tensor,
     axes: &[usize],

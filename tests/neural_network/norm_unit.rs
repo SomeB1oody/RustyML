@@ -1,4 +1,4 @@
-//! Integration tests for the UnitNormalization layer.
+//! Integration tests for the UnitNormalization layer
 //!
 //! Covers the forward values, the axis forms, the row and strided paths, the near-zero cap,
 //! memory layout, and the error paths. `gradient_check.rs` covers the gradient against finite
@@ -72,7 +72,6 @@ fn unit_normalization_forward_hand_derived() {
     assert_allclose(&out, &want, 1e-6);
 }
 
-/// Every group leaves the layer with a length of 1
 #[test]
 fn unit_normalization_gives_every_group_a_length_of_1() {
     let x = ramp(&[4, 5], 7.0);

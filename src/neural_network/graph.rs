@@ -60,9 +60,9 @@ use std::io::{BufWriter, Write};
 
 /// The position of 1 node in the graph that holds it
 ///
-/// A node is 1 CALL of 1 layer. A layer that several nodes call keeps 1
-/// [`LayerId`] and holds 1 set of arrays, and each of its
-/// nodes keeps its own `NodeId` and therefore its own cache
+/// A node is 1 call of 1 layer, or 1 inlet of the model. A layer that several nodes call
+/// keeps 1 [`LayerId`] and holds 1 set of arrays. Each of its nodes keeps its own `NodeId`
+/// and therefore its own cache
 pub type NodeId = usize;
 
 /// 1 position of the graph
@@ -234,8 +234,8 @@ impl GraphBuilder {
 
     /// Builds every layer against the shapes that reach it, and gives back the model
     ///
-    /// The method walks the graph from its inlets, refuses a topology that cannot run, threads
-    /// the shape of each node into the nodes that read it, and builds each layer once
+    /// The method walks the graph from its inlets, and refuses a topology that cannot run. It
+    /// threads the shape of each node into the nodes that read it, and it builds each layer once
     ///
     /// # Parameters
     ///
@@ -247,11 +247,12 @@ impl GraphBuilder {
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork(NnError::EmptyModel)` - If the graph holds no node, or if
-    ///   `outputs` is empty
-    /// - `Error::InvalidInput` - If an id names no node, if the input count of a node does not
-    ///   match the arity of its layer, if a node or an inlet reaches no output, or if a layer
-    ///   refuses the shapes that reach it
+    /// - `Error::NeuralNetwork(NnError::EmptyModel)` - If the graph holds no node
+    /// - `Error::InvalidInput` - If `outputs` is empty, if an id names no node, if a node reads
+    ///   a node at or after its own position, if the graph holds no input node, if the input
+    ///   count of a node does not match the arity of its layer, if a node or an inlet reaches
+    ///   no output, if a layer refuses the shapes that reach it, or if a layer gives 2 of its
+    ///   arrays the same name
     pub fn build(mut self, outputs: &[NodeId]) -> Result<Graph, Error> {
         if self.nodes.is_empty() {
             return Err(Error::NeuralNetwork(NnError::EmptyModel));
@@ -382,7 +383,7 @@ fn node_refusal(node: NodeId, layer: LayerId, layer_type: &str, source: Error) -
     ))
 }
 
-/// A trained model whose layers form a directed graph
+/// A model whose layers form a directed graph
 ///
 /// [`GraphBuilder::build`] is the only way to reach one. See the
 /// [module documentation](self)
@@ -404,7 +405,7 @@ pub struct Graph {
     /// computes it. A pass reads an inlet from the tensor the caller holds, so it copies no
     /// input batch
     inlet_of: Vec<Option<NodeId>>,
-    /// Optimizer used for updating parameters during training
+    /// The optimizer that updates every parameter during training
     optimizer: Option<Box<dyn Optimizer>>,
     /// 1 loss per output
     losses: Vec<Box<dyn Loss>>,
@@ -424,6 +425,10 @@ impl Graph {
     ///
     /// - `optimizer` - The optimizer that updates every parameter
     /// - `losses` - 1 loss per output, in the order the build received the outputs
+    ///
+    /// # Type Parameters
+    ///
+    /// - `O` - The concrete optimizer type
     ///
     /// # Returns
     ///
@@ -499,8 +504,8 @@ impl Graph {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If the weight count does not match the output count, or if a
-    ///   weight is not finite
+    /// - `Error::InvalidInput` - If the weight count does not match the output count
+    /// - `Error::InvalidParameter` - If a weight is not finite
     pub fn with_loss_weights(&mut self, weights: &[f32]) -> Result<&mut Self, Error> {
         if weights.len() != self.outputs.len() {
             return Err(Error::invalid_input(format!(
@@ -627,8 +632,11 @@ impl Graph {
     ///
     /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the model holds no optimizer or no
     ///   loss
-    /// - `Error::InvalidInput` - If the tensor counts do not match the model
+    /// - `Error::InvalidInput` - If the tensor counts do not match the model, or if a tensor
+    ///   has no batch axis
     /// - `Error::EmptyInput` - If a tensor is empty
+    /// - `Error::DimensionMismatch` - If 2 tensors disagree on the sample count
+    /// - `Error` - Whatever a layer reports from its forward or backward pass
     pub fn train_batch(&mut self, xs: &[&Tensor], ys: &[&Tensor]) -> Result<f32, Error> {
         self.check_compiled(true)?;
         self.check_targets(ys)?;
@@ -655,10 +663,8 @@ impl Graph {
             optimizer.step();
         }
 
-        // The walk is the position order reversed. A node reads only earlier nodes, so every
-        // consumer of a node runs before that node, and the fan-in sum of a node is complete
-        // when the walk reaches it. The consumers of 1 node therefore contribute in DESCENDING
-        // node position, which pins the order of a sum that `f32` addition does not commute
+        // The walk is the position order reversed, so every consumer of a node runs before
+        // that node. The fan-in sum of a node is complete when the walk reaches it
         for &id in self.order.iter().rev() {
             let Node::Call { layer, inputs } = &self.nodes[id] else {
                 continue;
@@ -683,9 +689,9 @@ impl Graph {
             }
         }
 
-        // Every gradient of the pass must reach a parameter. The optimizer walk below skips
-        // an address that holds no gradient, so a gradient at an address no parameter reads
-        // would otherwise be dropped without a word
+        // Every gradient of the pass must reach a parameter. The optimizer walk below skips an
+        // address that holds no gradient. A gradient at an address no parameter reads would
+        // otherwise vanish without a word
         check_every_gradient_is_claimed(&mut self.layers, ctx.grads())?;
 
         let global_clipnorm = self
@@ -705,8 +711,8 @@ impl Graph {
         };
 
         // The walk is the arena order, and the arena position is the layer half of every
-        // parameter address. A layer that several nodes call holds 1 arena entry, so its
-        // gradient is the sum of the gradients of those nodes and it updates once
+        // parameter address. A layer that several nodes call holds 1 arena entry. Its
+        // gradient is the sum of the gradients of those nodes, and it updates once
         if let Some(ref mut optimizer) = self.optimizer {
             for (scope, layer) in self.layers.iter_mut().enumerate() {
                 optimizer.update(scope, &mut **layer, ctx.grads(), grad_scale);
@@ -814,6 +820,7 @@ impl Graph {
     ///
     /// - `Error::InvalidInput` - If the tensor count does not match the inlet count
     /// - `Error::EmptyInput` - If a tensor is empty
+    /// - `Error` - Whatever a layer reports from its forward pass
     pub fn predict(&self, xs: &[&Tensor]) -> Result<Vec<Tensor>, Error> {
         let mut ctx = Ctx::inference();
         let values = self.forward_values(xs, &mut ctx)?;
@@ -901,7 +908,7 @@ impl Graph {
     ///
     /// # Errors
     ///
-    /// - `Error::Io` - If the file cannot be written
+    /// - `Error::Io` - If the model cannot be serialized, or the file cannot be written
     pub fn save_to_path(&self, path: impl AsRef<std::path::Path>) -> Result<(), Error> {
         // `capture` borrows the live arrays, so nothing is copied before postcard reads them
         let bytes = postcard::to_allocvec(&capture(&self.layers))?;
@@ -924,8 +931,8 @@ impl Graph {
     ///
     /// # Errors
     ///
-    /// - `Error::Io` - If the file cannot be read or decoded
-    /// - `Error::InvalidInput` - If the file disagrees with the model in any way
+    /// - `Error::Io` - If the file cannot be read or decoded, or if the file disagrees with
+    ///   the model in any way
     pub fn load_from_path(&mut self, path: impl AsRef<std::path::Path>) -> Result<(), Error> {
         let file = read_checkpoint(path)?;
         apply(&mut self.layers, &file)
@@ -1087,7 +1094,7 @@ fn gather(tensor: &Tensor, rows: &[usize]) -> Tensor {
 /// The global L2 norm of every gradient of the model
 ///
 /// The walk is the arena order, and the parameter order of each layer. The gradient store
-/// sorts by address instead, and a sum of `f32` squares is not associative, so reducing in
+/// sorts by address instead. A sum of `f64` squares is not associative, so reducing in
 /// store order would move the last bit of the norm
 fn global_grad_norm(layers: &mut [Box<dyn Layer>], grads: &Grads) -> f32 {
     let mut sum_sq = 0.0_f64;
@@ -1130,11 +1137,11 @@ mod tests {
         Array::from_shape_vec(IxDyn(shape), values).expect("the formula fills the shape")
     }
 
-    /// A graph that holds 1 chain must agree with the sequential model of that chain, bit for
-    /// bit, on the loss of every epoch and on every trained array
+    /// A graph that holds 1 chain must agree with the sequential model of that chain
     ///
-    /// The 2 models take the same weights, because a fixed seed draws the same values in the
-    /// same order. A difference here is a difference in the driver and nowhere else
+    /// The agreement must hold bit for bit, on the loss of every epoch and on every trained
+    /// array. The 2 models take the same weights, because a fixed seed draws the same values in
+    /// the same order. A difference here is a difference in the driver and nowhere else
     #[test]
     fn a_chain_graph_agrees_with_the_sequential_model() {
         let x = data(&[6, 4]);
@@ -1207,7 +1214,7 @@ mod tests {
     }
 
     /// A node that no output reaches is refused, because it would leave a cache behind on
-    /// every pass and update weights that the loss never saw
+    /// every pass with nothing to ever read it
     #[test]
     fn a_node_that_reaches_no_output_is_refused() {
         let mut builder = GraphBuilder::new();
@@ -1231,7 +1238,7 @@ mod tests {
     }
 
     /// A built graph serves inference through a shared reference, for the same reason a
-    /// sequential model does: a forward pass takes `&self`, and every part of the model is
+    /// sequential model does. A forward pass takes `&self`, and every part of the model is
     /// `Send` and `Sync`
     #[test]
     fn a_built_graph_is_send_and_sync() {

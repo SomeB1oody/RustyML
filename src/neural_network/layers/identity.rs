@@ -52,9 +52,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///
 /// # Performance
 ///
-/// The layer copies. It cannot borrow, because a layer returns an owned tensor. The copy is 1
-/// linear pass, so it runs at memory speed. When you finish a model, remove the layer instead
-/// of keeping it
+/// The layer always copies its input, because a layer implementation returns an owned tensor
 #[derive(Debug, Default)]
 pub struct Identity {
     /// Shape the layer was built for, batch axis first. `None` before the build

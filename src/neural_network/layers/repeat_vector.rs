@@ -14,16 +14,13 @@ use ndarray::{Axis, IxDyn};
 /// Repeats each feature vector `n` times along a new step axis
 ///
 /// The input shape is `[batch_size, features]` and the output shape is
-/// `[batch_size, n, features]`. Every one of the `n` steps holds the same vector. The batch axis
-/// passes through unchanged, so 1 layer instance serves every batch size
+/// `[batch_size, n, features]`. Every step holds the same vector. The batch axis passes through
+/// unchanged, so 1 layer instance serves every batch size
 ///
 /// The layer holds no parameter. Its use is the decoder side of an encoder-decoder model. A
 /// recurrent layer in this crate returns only its last hidden state, a rank-2 tensor, and a
 /// recurrent layer needs a rank-3 input. This layer bridges the 2, so an `LSTM` can feed another
 /// `LSTM`
-///
-/// This layer emits the same vector at every step, which is the standard way to seed a decoder
-/// with a fixed context
 ///
 /// # Examples
 ///

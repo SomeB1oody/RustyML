@@ -13,16 +13,16 @@ use ndarray::{ArrayViewD, ArrayViewMutD};
 /// The stable address of 1 parameter tensor inside a model
 ///
 /// A parameter is identified by the layer that holds it and by the name that the layer gives
-/// it. Neither half moves while the model trains, so an optimizer can key its per-parameter
-/// state on the pair and reach the same buffer on every step
+/// it. Neither half moves while the model trains. An optimizer can therefore key its
+/// per-parameter state on the pair and reach the same buffer on every step
 ///
 /// The scope is the position of the layer in the model that drives the update.
 /// [`Sequential`](crate::neural_network::sequential::Sequential) passes the index of the layer,
-/// counted from the input. A caller that drives 1 layer directly passes any value it likes,
-/// as long as it passes the same value on every step for that layer
+/// counted from the input. A caller that drives 1 layer directly passes any value it likes. It
+/// must pass the same value on every step for that layer
 ///
 /// The name is the `&'static str` that [`LayerBase::parameters_mut`] puts in the
-/// [`ParamRef`]. It follows the layer, so a layer that stops yielding 1 of its
+/// [`ParamRef`]. It follows the layer. A layer that stops yielding 1 of its
 /// tensors, or that starts yielding a new one, moves no other tensor's address
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ParamId {
@@ -53,13 +53,12 @@ impl ParamId {
 ///
 /// The name of an array is its address inside the layer. The gradient store, the per-parameter
 /// state of the optimizer, and the path of the checkpoint all key on it. 2 arrays under 1 name
-/// therefore share 1 gradient, 1 momentum buffer, and 1 checkpoint path, and every one of those
-/// is a wrong number that no later check reports.
+/// therefore share 1 gradient, 1 momentum buffer, and 1 checkpoint path. Each of those is a
+/// wrong number that no later check reports.
 ///
 /// [`LayerBase::parameters_mut`] and [`LayerBase::weights`] both state this rule in their own
-/// documentation, and nothing used to hold a layer to it. A model build calls this once per
-/// layer, before the model computes anything, so a layer that breaks the rule never reaches a
-/// training step.
+/// documentation. A model build calls this once per layer, before the model computes anything,
+/// so a layer that breaks the rule never reaches a training step.
 ///
 /// The 2 rosters are separate hand-written lists, and nothing binds them together, so the check
 /// reads both.
@@ -99,8 +98,6 @@ pub(crate) fn check_addresses(scope: usize, layer: &mut dyn LayerBase) -> Result
 }
 
 /// The first name that the list holds twice, or `None` when every name is its own
-///
-/// A roster holds a handful of entries, so the pairwise walk costs less than a set
 fn first_repeat(names: &[&'static str]) -> Option<&'static str> {
     names
         .iter()
@@ -125,7 +122,7 @@ fn duplicate_address(scope: usize, layer_type: &str, name: &str, roster: &str) -
 /// The optimizer walk is a pull: it enumerates the parameters and looks each address up, and it
 /// skips an address that holds no gradient. A gradient parked at any other address is therefore
 /// dropped in silence. That is what turns a layer that misspells 1 of its own names into a
-/// parameter that never trains, and it reports no error of its own.
+/// parameter that never trains. It reports no error of its own.
 ///
 /// The walk below is the same walk that the optimizer makes, so the count it reaches is the
 /// number of addresses the optimizer will read. A store that holds more than that holds an
@@ -159,8 +156,6 @@ pub(crate) fn check_every_gradient_is_claimed(
         return Ok(());
     }
 
-    // The store is small and this arm runs once, on the way to an error, so the second walk
-    // costs nothing that matters
     let mut reachable = Vec::new();
     for (scope, layer) in layers.iter_mut().enumerate() {
         for param in layer.parameters_mut() {
@@ -190,7 +185,7 @@ pub(crate) fn check_every_gradient_is_claimed(
 /// instead of every layer/optimizer pair re-implementing the update
 ///
 /// The entry holds no gradient. A backward pass puts every gradient in the
-/// [`Grads`] store of the context, and the optimizer reads
+/// [`Grads`] store of the context. The optimizer reads
 /// it back with the [`ParamId`] that this name and the layer position build
 ///
 /// Construct one with [`ParamRef::weight`] for a tensor that decoupled weight decay applies to
@@ -198,10 +193,10 @@ pub(crate) fn check_every_gradient_is_claimed(
 /// (biases and normalization scale/shift `gamma`/`beta`). The `decays` flag tells the optimizer
 /// which rule applies, so it never has to guess
 ///
-/// The `name` is the half of the parameter address that the layer owns. It uses the Keras 3
-/// name of the tensor, such as `kernel`, `recurrent_kernel`, `depthwise_kernel`, `bias`,
-/// `embeddings`, `alpha`, `gamma`, or `beta`. A layer must give the same name to the same
-/// storage on every call, and must give 2 different tensors 2 different names
+/// The `name` is the half of the parameter address that the layer owns: `kernel`,
+/// `recurrent_kernel`, `depthwise_kernel`, `bias`, `embeddings`, `alpha`, `gamma`, or `beta`. A
+/// layer must give the same name to the same storage on every call, and must give 2 different
+/// tensors 2 different names
 pub struct ParamRef<'a> {
     /// Name the layer gives this tensor. See [`ParamId`]
     pub name: &'static str,
@@ -256,8 +251,8 @@ impl<'a> ParamRef<'a> {
 /// Whether training updates a named array of a layer
 ///
 /// The 2 kinds are what [`ParamCounts`] counts, seen 1 array at a time.
-/// A checkpoint holds the kind next to every array, so a load can refuse a file that offers a
-/// trainable array where the layer keeps state, and the other way round
+/// A checkpoint holds the kind next to every array. A load can therefore refuse a file that
+/// offers a trainable array where the layer keeps state, and the other way round
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WeightKind {
     /// An optimizer updates this array. It is a kernel, a bias, or a normalization
@@ -382,9 +377,9 @@ impl<'a> WeightMut<'a> {
 
 /// How many inputs a layer takes
 ///
-/// Almost every layer takes 1. A merge layer takes 2 or more, and gives 1 output. A model
-/// reads this before it wires a layer, so a node with the wrong fan-in is refused at build
-/// time and not in the middle of a pass
+/// Almost every layer takes 1. A merge layer takes 1 or more, and gives 1 output. A model
+/// reads this before it wires a layer. A node with the wrong fan-in is therefore refused at
+/// build time and not in the middle of a pass
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Arity {
     /// The layer takes exactly this many inputs
@@ -441,9 +436,9 @@ impl Arity {
 
 /// What every layer holds, whatever number of inputs it takes
 ///
-/// The trait covers the 3 things that do not depend on the arity of a layer: what the layer
-/// is, what arrays it owns, and what shape it was built for. The computation itself lives in
-/// [`UnaryLayer`] for a layer with 1 input and in [`Layer`] for a layer with several
+/// The trait covers the 3 things that do not depend on the arity of a layer. It covers what the
+/// layer is, what arrays it owns, and what shape it was built for. The computation itself lives
+/// in [`UnaryLayer`] for a layer with 1 input and in [`Layer`] for a layer with several
 ///
 /// A layer holds no gradient and no cache. See [`Ctx`]
 pub trait LayerBase: std::any::Any + Send + Sync {
@@ -493,13 +488,13 @@ pub trait LayerBase: std::any::Any + Send + Sync {
     /// [`BatchNormalization`](crate::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization)
     /// adds its running statistics here
     ///
-    /// The name of an array is its address inside the layer, and it follows Keras 3:
-    /// `kernel`, `recurrent_kernel`, `depthwise_kernel`, `pointwise_kernel`, `bias`,
-    /// `embeddings`, `alpha`, `gamma`, `beta`, `moving_mean`, `moving_variance`. A layer must
-    /// give 1 array the same name on every call, and must never give 2 arrays the same name.
+    /// The name of an array is its address inside the layer: `kernel`, `recurrent_kernel`,
+    /// `depthwise_kernel`, `pointwise_kernel`, `bias`, `embeddings`, `alpha`, `gamma`, `beta`,
+    /// `moving_mean`, `moving_variance`. A layer must give 1 array the same name on every call,
+    /// and must never give 2 arrays the same name.
     /// A model build refuses a layer that gives 2 arrays 1 name, over this roster and over
-    /// [`parameters_mut`](LayerBase::parameters_mut) alike, because the 2 lists are separate
-    /// and nothing else binds them. A name that `parameters_mut` also uses must reach the same
+    /// [`parameters_mut`](LayerBase::parameters_mut) alike. The 2 lists are separate, and
+    /// nothing else binds them. A name that `parameters_mut` also uses must reach the same
     /// storage
     ///
     /// The order is free, and it is the order a checkpoint records. Layers without any array
@@ -513,7 +508,7 @@ pub trait LayerBase: std::any::Any + Send + Sync {
     /// Every array the layer holds, by name, borrowed for writing
     ///
     /// The roster, the names, the kinds, and the order repeat [`weights`](LayerBase::weights)
-    /// exactly. A checkpoint load looks a name up here and writes into the view, so the values
+    /// exactly. A checkpoint load looks a name up here and writes into the view. The values then
     /// reach the storage of the layer and take the memory order that the storage already has
     ///
     /// # Returns
@@ -541,8 +536,8 @@ pub trait LayerBase: std::any::Any + Send + Sync {
     ///
     /// A layer that [`build`](UnaryLayer::build) has run on reports the shapes it was built
     /// for, with the batch axis freed. The batch axis is freed because 1 layer serves every
-    /// batch size, so a layer built from a tensor of 2 samples still describes itself for
-    /// every batch. A layer that needs no build at all, such as
+    /// batch size. A layer built from a tensor of 2 samples therefore still describes itself
+    /// for every batch. A layer that needs no build at all, such as
     /// [`Rescaling`](crate::neural_network::layers::rescaling::Rescaling), always reports
     /// `None`. The vector holds 1 shape per input of the layer, so a merge layer reports
     /// several
@@ -648,7 +643,7 @@ pub trait UnaryLayer: LayerBase {
 
     /// Runs the backward pass through the layer
     ///
-    /// The method takes back what the matching forward pass parked in `ctx`, and it adds the
+    /// The method takes back what the matching forward pass parked in `ctx`. It adds the
     /// gradient of every parameter it owns to the gradient store of `ctx`
     ///
     /// # Parameters
@@ -664,10 +659,10 @@ pub trait UnaryLayer: LayerBase {
     ///
     /// Backward is pure math: it does **not** sanitize NaN/Inf (no zeroing, no element-wise
     /// clamping). The backward pass propagates such values instead of masking them. The forward
-    /// pass masks nothing either: it validates the rank, the shape, and the layer parameters,
-    /// and it never reads the input values to reject them. A NaN or an infinity therefore stays
-    /// in the tensor, moves on through every later layer, and shows itself in the output and in
-    /// a non-finite loss. [`Embedding`](crate::neural_network::layers::Embedding) is the 1
+    /// pass masks nothing either: it validates the rank, the shape, and the layer parameters. It
+    /// never reads the input values to reject them. A NaN or an infinity therefore stays in the
+    /// tensor and moves on through every later layer. It shows itself in the output and in a
+    /// non-finite loss. [`Embedding`](crate::neural_network::layers::Embedding) is the 1
     /// exception, because it reads its input as a table of row indices and rejects a non-finite
     /// index with `Error::InvalidInput`. To tame large-but-finite gradients, enable
     /// clip-by-global-norm on the optimizer
@@ -722,15 +717,15 @@ pub trait UnaryLayer: LayerBase {
     /// The output shape the layer gives for an input of the given shape
     ///
     /// The answer is a pure function of the layer configuration and of `input`. The method
-    /// reads no cache that a forward pass wrote, so it gives the same answer before any tensor
-    /// reaches the layer and after any number of passes. A free axis of the input stays free
-    /// in the output wherever the layer passes it through, which is how 1 layer describes
+    /// reads no cache that a forward pass wrote. It therefore gives the same answer before any
+    /// tensor reaches the layer and after any number of passes. A free axis of the input stays
+    /// free in the output wherever the layer passes it through. That is how 1 layer describes
     /// itself for every batch size
     ///
     /// The method refuses an input the layer cannot accept, and the message names the layer
-    /// and the axis at fault. A pure shape function is what lets a model walk its layers at
-    /// build time, thread each output shape into the next layer, and reject a bad stack before
-    /// any data arrives, naming the position of the layer and its type
+    /// and the axis at fault. A pure shape function lets a model walk its layers at build time
+    /// and thread each output shape into the next layer. It also lets the model reject a bad
+    /// stack before any data arrives, naming the position and the type of the layer at fault
     ///
     /// The default passes the input through unchanged, which is right for every layer that
     /// changes values and not extents
@@ -782,9 +777,7 @@ pub trait UnaryLayer: LayerBase {
             self.build(&Shape::known(input.shape()))?;
         }
         let output = self.forward(input, ctx)?;
-        // A forward pass takes `&self`, so a layer that changes non-trainable state can only
-        // propose the new value. A model applies it after the call. A caller that drives 1
-        // layer by hand has nowhere else to do that, so this entry point completes the pass
+        // A forward pass cannot write state itself, so this entry point applies it here
         let owner = ctx.owner();
         if ctx.has_state(owner) {
             self.apply_state(&mut ctx.state_slot(owner));
@@ -976,7 +969,7 @@ impl<T: UnaryLayer> Layer for T {
 ///   `[batch, classes]` predictions, so its divisor is always the batch
 ///
 /// The 2 categorical losses also renormalize `y_pred` along the class axis before
-/// clipping when `from_logits` is off, as Keras does. That leaves the loss value alone for an
+/// clipping when `from_logits` is off. That leaves the loss value alone for an
 /// already-normalized head but contributes a row-constant term to the gradient, which a softmax
 /// backward annihilates
 pub trait Loss: Send + Sync {
@@ -1021,15 +1014,14 @@ pub trait Optimizer: Send + Sync {
     /// Advances the optimizer's global training step
     ///
     /// Called exactly once per batch, before the per-layer [`update`](Optimizer::update) calls.
-    /// The method now carries 1 duty only: a step-dependent optimizer advances the counter that
-    /// its own math reads. [`Adam`](crate::neural_network::optimizers::Adam) and
+    /// A step-dependent optimizer advances the counter that its own math reads.
+    /// [`Adam`](crate::neural_network::optimizers::Adam) and
     /// [`AdamW`](crate::neural_network::optimizers::AdamW) advance the bias-correction timestep
     /// here, so the correction moves once per batch rather than once per layer. SGD, RMSprop,
     /// and AdaGrad hold no such counter and keep the no-op default
     ///
-    /// The method no longer rewinds anything. Per-parameter state is keyed by
-    /// [`ParamId`], which is the position of the layer plus the name the layer gives the
-    /// tensor, so nothing walks a cursor that a rewind could leave in the wrong place
+    /// Per-parameter state is keyed by [`ParamId`], the position of the layer plus the name the
+    /// layer gives the tensor. No cursor or call order matters to that address
     fn step(&mut self) {}
 
     /// The global gradient-norm clip threshold, or `None` (the default) to disable clipping
@@ -1041,11 +1033,14 @@ pub trait Optimizer: Send + Sync {
     /// non-finite, the clip leaves gradients unscaled, so divergence still surfaces instead of
     /// being masked
     ///
-    /// The name is Keras' `global_clipnorm`, and it is deliberate. Keras also has a `clipnorm`,
-    /// which renormalizes each variable's gradient *independently* against the threshold. The 2
-    /// give different directions whenever more than 1 tensor is over the limit. A
-    /// threshold tuned for one is therefore not a threshold for the other. Only the global form
-    /// exists here
+    /// Only the global form of clipping exists here. A clip that renormalized each parameter's
+    /// gradient independently against the threshold would give a different direction whenever
+    /// more than 1 tensor is over it. A threshold tuned for 1 form would therefore not suit
+    /// the other
+    ///
+    /// # Returns
+    ///
+    /// - `Option<f32>` - The clip threshold, or `None` when clipping is off
     fn global_clipnorm(&self) -> Option<f32> {
         None
     }
@@ -1075,6 +1070,10 @@ pub trait Optimizer: Send + Sync {
     /// drift the moment anything else retunes the optimizer. Reports whatever was last set.
     /// Unlike the constructors, [`set_learning_rate`](Optimizer::set_learning_rate) does not
     /// validate, so a rate set to 0 or to a negative value comes back unchanged
+    ///
+    /// # Returns
+    ///
+    /// - `f32` - The current learning rate
     fn learning_rate(&self) -> f32;
 
     /// Sets the learning rate, the hook for external learning-rate scheduling

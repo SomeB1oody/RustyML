@@ -30,17 +30,17 @@ impl Adam {
     ///
     /// # Parameters
     ///
-    /// - `learning_rate` - Step size for parameter updates
-    /// - `beta1` - Decay rate for the first moment estimates (typically 0.9)
-    /// - `beta2` - Decay rate for the second moment estimates (typically 0.999)
-    /// - `epsilon` - Small constant for numerical stability (typically 1e-8)
-    /// - `weight_decay` - Classic coupled L2 weight-decay coefficient folded into the gradient.
+    /// - `learning_rate` - step size for parameter updates
+    /// - `beta1` - decay rate for the first moment estimates (typically 0.9)
+    /// - `beta2` - decay rate for the second moment estimates (typically 0.999)
+    /// - `epsilon` - small constant for numerical stability (typically 1e-8)
+    /// - `weight_decay` - classic coupled L2 weight-decay coefficient folded into the gradient.
     ///   `0.0` disables it. For decoupled decay use
     ///   [`AdamW`](crate::neural_network::optimizers::AdamW)
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A new Adam optimizer instance or an error
+    /// - `Result<Self, Error>` - a new Adam optimizer instance or an error
     ///
     /// # Notes
     ///
@@ -48,7 +48,7 @@ impl Adam {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If any hyperparameter is out of range or `weight_decay` is
+    /// - `Error::InvalidParameter` - if any hyperparameter is out of range or `weight_decay` is
     ///   negative or not finite
     pub fn new(
         learning_rate: f32,
@@ -69,11 +69,11 @@ impl Adam {
     ///
     /// # Parameters
     ///
-    /// - `global_clipnorm` - Clip-by-global-norm threshold. Must be positive and finite
+    /// - `global_clipnorm` - clip-by-global-norm threshold. Must be positive and finite
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - The updated optimizer, or an error if `global_clipnorm` is not
+    /// - `Result<Self, Error>` - the updated optimizer, or an error if `global_clipnorm` is not
     ///   positive and finite
     pub fn with_global_clipnorm(self, global_clipnorm: f32) -> Result<Self, Error> {
         Ok(Self {

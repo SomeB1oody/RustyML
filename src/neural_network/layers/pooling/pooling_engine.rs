@@ -11,17 +11,15 @@
 //! position. A window reduction reads `channels` contiguous floats per tap and folds them into a
 //! `channels`-wide accumulator. This reduces every channel of a position together
 //!
-//! This layout pays off because of the window geometry: the bounds checks, the index arithmetic,
-//! and the in-bounds element count. The engine computes this geometry once per output position
-//! and reuses it for every channel, instead of once per `(channel, position)` pair
+//! The engine computes the window geometry, the bounds checks, the index arithmetic, and the
+//! in-bounds element count, once per output position, and reuses it for every channel
 //!
 //! Forward work splits over `(batch item, output-position block)`, each with a disjoint output
 //! slab
 //!
 //! Backward work splits over `(batch item, channel slab)` instead. A slab that owns channels
 //! `[j0, j1)` writes only input addresses congruent to that range modulo `channels`. The scatter
-//! is therefore conflict-free without a halo, a merge, or atomics. This split still fills the
-//! machine when `batch == 1`, unlike a split on batch alone
+//! is therefore conflict-free without a halo, a merge, or atomics
 
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::convolution::PaddingType;
@@ -46,7 +44,7 @@ tunable_gate! {
 /// `ceil(in / stride)`. It splits the padding evenly, with the extra cell on the trailing edge
 /// (`pad_before = pad_total / 2`), matching the convolution engine. Padding cells are virtual:
 /// the forward/backward passes skip out-of-bounds positions, so average pooling divides by the
-/// count of real (in-bounds) elements, matching Keras `count_include_pad=False` behavior
+/// count of real (in-bounds) elements
 fn pool_geometry(
     sp: &[usize],
     pool: &[usize],
@@ -72,7 +70,7 @@ fn pool_geometry(
 /// The reduction performed over each pooling window
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PoolKind {
-    /// Take the maximum element (records the arg-max for backprop)
+    /// Take the maximum element (records the arg-max for the backward pass)
     Max,
     /// Take the mean of the elements in the window
     Average,
@@ -117,11 +115,11 @@ fn decode_index(mut flat: usize, dims: &[usize]) -> Vec<usize> {
     idx
 }
 
-/// Minimum output positions per forward task: small enough that a single-image batch still splits
-/// across threads, large enough to amortize the rayon task overhead
+/// Minimum output positions per forward task, so a single-image batch still splits across
+/// threads
 const POOL_MIN_CHUNK_OUT: usize = 256;
 
-/// Minimum channels per backward task, so a slab is at least a few vector registers wide
+/// Minimum channels per backward task
 const POOL_MIN_CHUNK_CHANNELS: usize = 16;
 
 tunable_gate! {
@@ -164,7 +162,7 @@ fn rows_per_block(channels: usize) -> usize {
     (16_384 / channels.max(1)).max(1)
 }
 
-/// Folds one window's element into a running max, matching the serial scan's NaN rule
+/// Folds a window element into a running max, matching the serial scan's NaN rule
 ///
 /// Once a NaN appears, it wins and stays. A later NaN does not replace it, so the index of the
 /// first NaN is kept. No finite value can displace it either, because `v > NaN` is false. A bare
@@ -189,12 +187,18 @@ fn fold_max(max_val: &mut f32, max_idx: &mut usize, v: f32, idx: usize) {
 
 /// Forward pass for windowed pooling (`MaxPooling{1,2,3}D` / `AveragePooling{1,2,3}D`)
 ///
-/// `pool` and `strides` are the per-spatial-axis window sizes and steps (length = spatial rank)
+/// # Parameters
+///
+/// - `input` - the layer input, shaped `[batch, spatial..., channels]`
+/// - `pool` - the per-spatial-axis window sizes, length equal to the spatial rank
+/// - `strides` - the per-spatial-axis steps, length equal to the spatial rank
+/// - `kind` - the reduction to apply over each window
+/// - `padding` - the padding mode that sets the output size and the leading pad
 ///
 /// # Returns
 ///
 /// - `Tensor` - the pooled output
-/// - `Option<Vec<usize>>` - for [`PoolKind::Max`], one arg-max per output element as a flat
+/// - `Option<Vec<usize>>` - for [`PoolKind::Max`], 1 arg-max per output element as a flat
 ///   element offset into the batch item. It already carries the channel, so
 ///   [`windowed_pool_backward`] needs no further arithmetic. The offset is always a position
 ///   that the window covers, on the channel of the output element. `None` for averaging
@@ -210,8 +214,24 @@ pub(super) fn windowed_pool_forward(
 
 /// `windowed_pool_forward` with an optional override of the parallel/serial gate decision
 ///
-/// `force_parallel` selects the parallel or serial path regardless of the work estimate.
-/// Production code passes `None`. Reachable outside the crate only through `bench_internals`
+/// # Parameters
+///
+/// - `input` - the layer input, shaped `[batch, spatial..., channels]`
+/// - `pool` - the per-spatial-axis window sizes, length equal to the spatial rank
+/// - `strides` - the per-spatial-axis steps, length equal to the spatial rank
+/// - `kind` - the reduction to apply over each window
+/// - `padding` - the padding mode that sets the output size and the leading pad
+/// - `force_parallel` - selects the parallel or serial path regardless of the work estimate.
+///   Production code passes `None`
+///
+/// # Returns
+///
+/// - `Tensor` - the pooled output
+/// - `Option<Vec<usize>>` - the arg-max, as in `windowed_pool_forward`
+///
+/// # Notes
+///
+/// Reachable outside the crate only through `bench_internals`
 pub fn windowed_pool_forward_impl(
     input: &Tensor,
     pool: &[usize],
@@ -266,7 +286,7 @@ pub fn windowed_pool_forward_impl(
             }
 
             // The loop evaluates the window geometry below once for the whole position, and
-            // every channel reuses it. That reuse is what pays for this layout
+            // every channel reuses it
             w.iter_mut().for_each(|x| *x = 0);
             let mut count = 0usize;
             // Whether the first in-bounds element of this window has seeded the arg-max
@@ -288,11 +308,9 @@ pub fn windowed_pool_forward_impl(
                     let x = &in_flat[off..off + channels];
                     match kind {
                         PoolKind::Max => {
-                            // The first in-bounds element of the window seeds the arg-max, on
-                            // the channel of each output element. A window whose every element
-                            // loses to the negative-infinity start value keeps that seed, so
-                            // the gradient reaches a position that the window covers.
-                            // `fold_max` replaces the seed as soon as an element wins
+                            // A window whose every element loses to the negative-infinity start
+                            // value keeps this seed, so the gradient still reaches a position
+                            // that the window covers
                             if !seeded {
                                 for (c, slot) in arg.iter_mut().enumerate() {
                                     *slot = off - item_base + c;
@@ -331,8 +349,7 @@ pub fn windowed_pool_forward_impl(
         .saturating_mul(pool.iter().product::<usize>());
     let parallel = force_parallel.unwrap_or(total_ops >= pool_parallel_min_ops());
 
-    // Enough blocks to feed every thread once the batch alone cannot, but never so small that the
-    // task overhead dominates
+    // Enough blocks to feed every thread once the batch alone cannot
     let chunk_len = if parallel && batch > 0 && plane_out > 0 {
         let chunks_per_item = rayon::current_num_threads().div_ceil(batch);
         split_cap(
@@ -388,9 +405,20 @@ pub fn windowed_pool_forward_impl(
 
 /// Backward pass for windowed pooling
 ///
-/// `input_shape` is the full forward input shape `[batch, spatial..., channels]`. For
-/// [`PoolKind::Max`], `argmax` must be the offsets that [`windowed_pool_forward`] returns.
-/// Averaging redistributes each output gradient evenly over its window and ignores `argmax`
+/// # Parameters
+///
+/// - `grad_output` - the gradient with respect to the pooled output
+/// - `input_shape` - the full forward input shape `[batch, spatial..., channels]`
+/// - `pool` - the per-spatial-axis window sizes, length equal to the spatial rank
+/// - `strides` - the per-spatial-axis steps, length equal to the spatial rank
+/// - `kind` - the reduction the forward pass used
+/// - `argmax` - for [`PoolKind::Max`], the offsets that [`windowed_pool_forward`] returns.
+///   Averaging ignores this and redistributes each output gradient evenly over its window
+/// - `padding` - the padding mode the forward pass used
+///
+/// # Returns
+///
+/// - `Tensor` - the gradient with respect to the input, shaped `input_shape`
 pub(super) fn windowed_pool_backward(
     grad_output: &Tensor,
     input_shape: &[usize],
@@ -492,13 +520,9 @@ pub(super) fn windowed_pool_backward(
         }
     };
 
-    // One task per (batch item, channel slab)
-    //
-    // The gate is calibrated on the forward pass, which splits the output positions. This pass
-    // splits the channels instead, and the slab has a floor, so a narrow-channel input reaches
-    // 1 task however much work it holds. The task count therefore gets its own check: the gate
-    // decides whether the work is worth spreading, and the count decides whether it can be
-    // spread at all
+    // One task per (batch item, channel slab). The channel floor can leave 1 slab regardless of
+    // total work, so `parallel` needs a second check beyond the gate: whether the split yields
+    // more than 1 task
     let total_ops = batch
         .saturating_mul(plane_out)
         .saturating_mul(channels)
@@ -551,13 +575,18 @@ pub(super) fn windowed_pool_backward(
 
 /// Forward pass for global pooling (`GlobalMaxPooling{1,2,3}D` / `GlobalAveragePooling{1,2,3}D`)
 ///
-/// Reduces every spatial dimension to one value per channel, producing a `[batch, channels]`
+/// Reduces every spatial dimension to 1 value per channel, producing a `[batch, channels]`
 /// tensor
+///
+/// # Parameters
+///
+/// - `input` - the layer input, shaped `[batch, spatial..., channels]`
+/// - `kind` - the reduction to apply over each channel
 ///
 /// # Returns
 ///
 /// - `Tensor` - the pooled output, with shape `[batch, channels]`
-/// - `Option<Vec<usize>>` - for [`PoolKind::Max`], one arg-max per output element as a flat
+/// - `Option<Vec<usize>>` - for [`PoolKind::Max`], 1 arg-max per output element as a flat
 ///   element offset into the batch item. The offset always lies on the channel of the output
 ///   element. `None` for averaging
 pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Option<Vec<usize>>) {
@@ -671,8 +700,17 @@ pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Op
 
 /// Backward pass for global pooling
 ///
-/// `grad_output` has shape `[batch, channels]`. Averaging spreads each gradient evenly over every
-/// position of its channel. [`PoolKind::Max`] routes it to the stored arg-max element
+/// # Parameters
+///
+/// - `grad_output` - the gradient with respect to the pooled output, shaped `[batch, channels]`
+/// - `input_shape` - the full forward input shape `[batch, spatial..., channels]`
+/// - `kind` - the reduction the forward pass used. Averaging spreads each gradient evenly over
+///   every position of its channel. [`PoolKind::Max`] routes it to the stored arg-max element
+/// - `argmax` - for [`PoolKind::Max`], the offsets that [`global_pool_forward`] returns
+///
+/// # Returns
+///
+/// - `Tensor` - the gradient with respect to the input, shaped `input_shape`
 pub(super) fn global_pool_backward(
     grad_output: &Tensor,
     input_shape: &[usize],
@@ -703,10 +741,9 @@ pub(super) fn global_pool_backward(
                 }
             }
             PoolKind::Average => {
-                // Every position of the item gets the same `[channels]` vector. This pass builds
-                // a tile that repeats the vector, then copies it into the item in tile-sized
-                // strides. Writing the item row by row would call `memcpy` once per position.
-                // That access pattern is the wrong shape when `channels` is small
+                // Builds a tile that repeats the `[channels]` gradient vector `reps` times, then
+                // copies tile-sized chunks into the item. A shorter final chunk is still a whole
+                // number of channels, so the same tile slice is valid there
                 let scale = 1.0 / positions as f32;
                 let reps = (1024 / channels.max(1)).clamp(1, positions.max(1));
                 let mut tile = Vec::with_capacity(reps * channels);
