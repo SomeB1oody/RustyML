@@ -18,9 +18,9 @@
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::traits::ParamId;
+use ahash::AHashMap;
 use std::any::Any;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 
 /// The position of 1 layer in the model that drives it
 ///
@@ -176,7 +176,7 @@ fn standard(grad: Tensor) -> Tensor {
 /// forward pass, and the layer moves each value it recognizes into its own storage
 pub struct StateSlot<'a> {
     /// The state channel of the whole context
-    states: &'a mut HashMap<(LayerId, &'static str), Slot>,
+    states: &'a mut AHashMap<(LayerId, &'static str), Slot>,
     /// The layer whose state this view reaches
     owner: LayerId,
 }
@@ -249,9 +249,9 @@ pub struct Ctx {
     /// The key is the call and not the layer. A branch of a model that never reaches the loss
     /// leaves its cache behind. A stack shared with another call of the same layer would then
     /// hand that stale cache to the wrong backward pass
-    caches: HashMap<CallId, Vec<CacheSlot>>,
+    caches: AHashMap<CallId, Vec<CacheSlot>>,
     /// The non-trainable values that the forward pass proposed to change
-    states: HashMap<(LayerId, &'static str), Slot>,
+    states: AHashMap<(LayerId, &'static str), Slot>,
     /// Every parameter gradient of the pass
     grads: Grads,
 }

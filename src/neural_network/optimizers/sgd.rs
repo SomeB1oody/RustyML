@@ -7,7 +7,7 @@ use crate::neural_network::optimizers::validation::{
     validate_global_clipnorm, validate_learning_rate, validate_non_negative_finite,
 };
 use crate::neural_network::traits::{LayerBase, Optimizer, ParamId};
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 /// SGD (Stochastic Gradient Descent) optimizer
 ///
@@ -28,7 +28,7 @@ pub struct SGD {
     /// Per-parameter momentum buffers, allocated lazily when `momentum > 0` and keyed by the
     /// address of the parameter. A buffer therefore follows its own tensor, whatever else the
     /// model does
-    velocities: HashMap<ParamId, Vec<f32>>,
+    velocities: AHashMap<ParamId, Vec<f32>>,
 }
 
 impl SGD {
@@ -70,7 +70,7 @@ impl SGD {
             nesterov,
             weight_decay,
             global_clipnorm: None,
-            velocities: HashMap::new(),
+            velocities: AHashMap::new(),
         })
     }
 

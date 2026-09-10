@@ -29,9 +29,9 @@ use crate::neural_network::layers::checkpoint::{
     weight_path,
 };
 use crate::parallel_gates::sq_sum_f32_parallel_min_elems;
+use ahash::AHashMap;
 use ndarray::{ArrayViewD, Axis};
 use ndarray_rand::rand::seq::SliceRandom;
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
@@ -951,7 +951,7 @@ impl Sequential {
         let mut non_trainable_param_count: usize = 0;
 
         // Per-type counter for names such as "dense", "dense_1", "conv2d", ...
-        let mut type_counts: HashMap<&str, usize> = HashMap::new();
+        let mut type_counts: AHashMap<&str, usize> = AHashMap::new();
 
         for (index, layer) in self.layers.iter().enumerate() {
             let layer_type = layer.layer_type();

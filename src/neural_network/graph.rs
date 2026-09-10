@@ -52,9 +52,9 @@ use crate::neural_network::traits::{
     Layer, Loss, Optimizer, ParamId, check_addresses, check_every_gradient_is_claimed,
 };
 use crate::parallel_gates::sq_sum_f32_parallel_min_elems;
+use ahash::AHashMap;
 use ndarray::{ArrayViewD, Axis};
 use ndarray_rand::rand::seq::SliceRandom;
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
@@ -972,7 +972,7 @@ impl Graph {
         let mut counted: Vec<bool> = vec![false; self.layers.len()];
         let mut total = 0_usize;
         let mut trainable = 0_usize;
-        let mut names: HashMap<&str, usize> = HashMap::new();
+        let mut names: AHashMap<&str, usize> = AHashMap::new();
 
         for &id in &self.order {
             let (label, params, reads) = match &self.nodes[id] {

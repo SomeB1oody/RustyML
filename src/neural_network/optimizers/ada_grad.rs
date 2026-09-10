@@ -7,7 +7,7 @@ use crate::neural_network::optimizers::validation::{
     validate_global_clipnorm, validate_non_negative_finite, validate_positive_finite,
 };
 use crate::neural_network::traits::{LayerBase, Optimizer, ParamId};
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 /// AdaGrad (Adaptive Gradient Algorithm) optimizer
 ///
@@ -20,7 +20,7 @@ pub struct AdaGrad {
     epsilon: f32,
     /// Per-parameter accumulated squared gradients, keyed by the address of the parameter. An
     /// accumulator therefore follows its own tensor, whatever else the model does
-    accumulators: HashMap<ParamId, Vec<f32>>,
+    accumulators: AHashMap<ParamId, Vec<f32>>,
     /// Optional clip-by-global-norm threshold. `None` disables gradient clipping
     global_clipnorm: Option<f32>,
     /// Decoupled (AdamW-style) weight decay coefficient. `0.0` disables it
@@ -57,7 +57,7 @@ impl AdaGrad {
         Ok(Self {
             learning_rate,
             epsilon,
-            accumulators: HashMap::new(),
+            accumulators: AHashMap::new(),
             global_clipnorm: None,
             weight_decay,
         })

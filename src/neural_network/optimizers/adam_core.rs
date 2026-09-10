@@ -15,7 +15,7 @@ use crate::neural_network::optimizers::validation::{
     validate_non_negative_finite,
 };
 use crate::neural_network::traits::{LayerBase, ParamId};
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 /// Adam's per-parameter first/second moment buffers, sized lazily on first use
 #[derive(Debug, Clone, Default)]
@@ -45,7 +45,7 @@ pub(super) struct AdamCore {
     t: u64,
     /// Per-parameter moment buffers, keyed by the address of the parameter. A buffer therefore
     /// follows its own tensor, whatever else the model does
-    states: HashMap<ParamId, AdamParamState>,
+    states: AHashMap<ParamId, AdamParamState>,
     /// Optional clip-by-global-norm threshold. `None` disables gradient clipping
     global_clipnorm: Option<f32>,
     /// Weight decay coefficient. `0.0` disables it
@@ -90,7 +90,7 @@ impl AdamCore {
             beta2,
             epsilon,
             t: 0,
-            states: HashMap::new(),
+            states: AHashMap::new(),
             global_clipnorm: None,
             weight_decay,
             decoupled,

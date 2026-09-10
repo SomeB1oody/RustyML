@@ -8,7 +8,7 @@ use crate::neural_network::optimizers::validation::{
     validate_non_negative_finite,
 };
 use crate::neural_network::traits::{LayerBase, Optimizer, ParamId};
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 /// RMSprop (Root Mean Square Propagation) optimizer
 ///
@@ -23,7 +23,7 @@ pub struct RMSprop {
     epsilon: f32,
     /// Per-parameter squared-gradient running averages, keyed by the address of the parameter.
     /// A cache therefore follows its own tensor, whatever else the model does
-    caches: HashMap<ParamId, Vec<f32>>,
+    caches: AHashMap<ParamId, Vec<f32>>,
     /// Optional clip-by-global-norm threshold. `None` disables gradient clipping
     global_clipnorm: Option<f32>,
     /// Decoupled (AdamW-style) weight decay coefficient. `0.0` disables it
@@ -68,7 +68,7 @@ impl RMSprop {
             learning_rate,
             rho,
             epsilon,
-            caches: HashMap::new(),
+            caches: AHashMap::new(),
             global_clipnorm: None,
             weight_decay,
         })
