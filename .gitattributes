@@ -1,0 +1,50 @@
+# Stored as LF, checked out with LF
+* text=auto eol=lf
+
+# Source and configuration files are text
+*.rs      text eol=lf
+*.toml    text eol=lf
+*.lock    text eol=lf
+*.md      text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.json    text eol=lf
+*.html    text eol=lf
+*.css     text eol=lf
+*.js      text eol=lf
+*.sh      text eol=lf
+*.txt     text eol=lf
+
+# no line-ending handling and no text diff for binary files
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ico     binary
+*.webp    binary
+*.bmp     binary
+*.pdf     binary
+*.woff    binary
+*.woff2   binary
+*.ttf     binary
+*.otf     binary
+*.eot     binary
+*.zip     binary
+*.gz      binary
+*.tgz     binary
+*.bz2     binary
+*.xz      binary
+*.7z      binary
+*.rlib    binary
+*.rmeta   binary
+*.so      binary
+*.dylib   binary
+*.dll     binary
+*.a       binary
+*.lib     binary
+*.exe     binary
+*.pdb     binary
+*.npy     binary
+*.npz     binary
+*.bin     binary
+*.safetensors binary
