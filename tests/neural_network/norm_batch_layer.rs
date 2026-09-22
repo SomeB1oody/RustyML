@@ -416,7 +416,7 @@ fn ln_constructor_rejects_multiple_out_of_bounds_axis() {
     );
 }
 
-/// LayerNormalization::new with Multiple(axes) rejects a duplicate axis (e.g. [0, 0])
+/// LayerNormalization::new with Multiple(axes) rejects a duplicate axis, for example [0, 0]
 #[test]
 fn ln_constructor_rejects_multiple_duplicate_axes() {
     let result = LayerNormalization::new(1e-5)
@@ -644,7 +644,7 @@ fn ln_default_constant_row_is_finite_and_zero() {
 
 // An inference pass == a training pass, for LN
 
-/// An inference pass matches a training pass, since LN always computes stats from the current input
+/// An inference pass matches a training pass, since LN always computes stats from the input
 #[test]
 fn ln_predict_equals_forward() {
     let data = vec![1.0f32, 3.0, 5.0, 7.0, 2.0, -2.0, 0.0, 4.0];
@@ -769,6 +769,7 @@ fn ln_multiple_valid_axes_forward_succeeds() {
 
 // backward() before forward() must error
 
+/// BatchNormalization::backward before any forward pass returns Err(ForwardPassNotRun)
 #[test]
 fn bn_backward_before_forward_errors() {
     let bn = BatchNormalization::new(0.9, 1e-5).unwrap();
@@ -784,6 +785,7 @@ fn bn_backward_before_forward_errors() {
     );
 }
 
+/// LayerNormalization::backward before any forward pass returns Err(ForwardPassNotRun)
 #[test]
 fn ln_backward_before_forward_errors() {
     let ln = LayerNormalization::new(1e-5).unwrap();

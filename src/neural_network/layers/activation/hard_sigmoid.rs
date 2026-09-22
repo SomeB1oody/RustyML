@@ -1,5 +1,8 @@
-//! Hard sigmoid activation layer that applies `clip(x/6 + 0.5, 0, 1)` elementwise and parks
-//! the output for backpropagation
+//! Hard sigmoid activation layer
+//!
+//! The `HardSigmoid` struct holds only the shape recorded at build time, because the layer
+//! takes no parameter. `UnaryLayer::forward` computes `Activation::HardSigmoid` and caches the
+//! output during training. `UnaryLayer::backward` reads that cache to compute the gradient
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

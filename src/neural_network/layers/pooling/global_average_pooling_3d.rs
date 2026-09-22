@@ -1,4 +1,9 @@
 //! Global average pooling layer for 3D inputs
+//!
+//! [`GlobalAveragePooling3D`] reduces the whole depth, height, and width axes of a
+//! `[batch, depth, height, width, channels]` tensor to a single mean per channel. Output shape
+//! is `[batch, channels]`. The backward pass spreads each output gradient evenly over every
+//! position of its channel, using only the cached input shape.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

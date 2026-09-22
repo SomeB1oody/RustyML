@@ -1221,8 +1221,8 @@ fn all_layers_backward_wrong_shape_is_shape_mismatch() {
     }
 }
 
-/// Non-finite grad_output (correct shape) is not rejected: backward is pure math, so it returns Ok.
-/// The result carries the non-finite value forward, instead of masking it or raising an error
+/// Non-finite grad_output (correct shape) is not rejected. Backward is pure math, so it
+/// returns Ok and carries the non-finite value forward, instead of masking it or raising an error
 #[test]
 fn all_layers_backward_propagates_non_finite_grad() {
     let input = tensor2(1, 3, vec![1.0, 2.0, 3.0]);

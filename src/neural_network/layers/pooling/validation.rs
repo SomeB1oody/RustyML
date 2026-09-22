@@ -1,4 +1,10 @@
 //! Shape and parameter validation helpers shared by the pooling layers
+//!
+//! A stride is invalid on its own, so each layer checks it in its constructor, through
+//! `validate_stride_1d` or the 2D/3D equivalents. A pool size is invalid only relative to the
+//! input it runs over, so a layer checks it later, once `compute_output_shape` in the parent
+//! `pooling` module knows the input extent. Every check here returns
+//! [`Error::InvalidParameter`] on failure
 
 use crate::error::Error;
 

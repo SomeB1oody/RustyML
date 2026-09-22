@@ -150,6 +150,8 @@ fn embedding_forward_truncates_an_index_toward_zero() {
     assert_allclose(&out, &t2(5, 3, expected), 1e-6_f32);
 }
 
+/// Inference and training read the same table, so a forward pass gives the same output in
+/// either context
 #[test]
 fn embedding_predict_equals_forward() {
     let layer = embedding_with_table(4, 3, reference_table());
@@ -231,6 +233,7 @@ fn embedding_backward_matches_the_keras_scatter_add_reference() {
     assert_allclose(&grad, &expected, 1e-6_f32);
 }
 
+/// A row that no index selects gets a zero gradient
 #[test]
 fn embedding_backward_leaves_an_unused_row_at_zero() {
     let table = vec![
@@ -389,6 +392,7 @@ fn embedding_rejects_an_index_outside_the_table() {
     }
 }
 
+/// NaN and infinity are not valid indices
 #[test]
 fn embedding_rejects_a_non_finite_index() {
     let mut layer = Embedding::new(3, 2).unwrap();
@@ -572,6 +576,7 @@ fn embedding_trains_inside_a_sequential_model() {
     );
 }
 
+/// Plain SGD moves only the rows a training batch selects
 #[test]
 fn embedding_training_leaves_an_unselected_row_untouched() {
     let x = t2(2, 2, vec![0.0, 1.0, 1.0, 0.0]);

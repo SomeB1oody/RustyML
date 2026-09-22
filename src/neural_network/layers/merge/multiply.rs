@@ -1,4 +1,9 @@
-//! Multiply layer: the product of every input, element by element
+//! The merge layer that multiplies its inputs element by element
+//!
+//! [`Multiply`] lifts every input to the merged shape and multiplies the lifted tensors.
+//! `MultiplyCache` holds those lifted tensors, because the backward pass needs the values
+//! themselves to leave 1 input out of the product at a time. The `tests` module checks the
+//! product, the leave-1-out gradient, the broadcast, and the refusals of the layer.
 
 use super::{
     broadcast_input, elementwise_merge_layer_functions, merge_layer_base_functions, merged_dims,
@@ -19,14 +24,12 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// The layer holds no trainable array and no state. The build records the shape of every input,
 /// so the layer reports those shapes and refuses a second set
 ///
-/// # The gradient of a product
+/// # Notes
 ///
 /// Input `i` takes the gradient of the output, multiplied by the product of every OTHER input,
 /// and reduced to the shape of input `i`. The backward pass multiplies the other inputs
 /// together, and it never divides the whole product by input `i`. A quotient gives `0 / 0`
 /// wherever an input holds a 0, and the product of the others gives the correct value there
-///
-/// # Notes
 ///
 /// A training forward pass parks every input at the extents of the output, because the backward
 /// pass reads those values. An inference pass parks nothing at all
@@ -111,6 +114,12 @@ impl Layer for Multiply {
     ///
     /// The lifted tensors are exactly what the backward pass reads, so a training pass parks
     /// them together with the extents of each input
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the layer received no input, or if the shape rule of the
+    ///   family refuses the shapes of the tensors
+    /// - `Error::Computation` - If an input cannot take the rank of the output
     fn forward_many(&self, inputs: &[&Tensor], ctx: &mut Ctx) -> Result<Tensor, Error> {
         self.arity().check("Multiply", inputs.len())?;
         let dims = merged_dims("Multiply", inputs)?;
@@ -145,6 +154,13 @@ impl Layer for Multiply {
     ///
     /// The product of the others never divides the whole product by input `i`. An input that
     /// holds a 0 therefore gives a correct gradient, where a quotient would give `0 / 0`
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::ForwardPassNotRun)` - If `ctx` holds no cache of this
+    ///   layer
+    /// - `Error::ShapeMismatch` - If `grad_output` does not carry the shape of the output that
+    ///   the forward pass gave
     fn backward_many(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Vec<Tensor>, Error> {
         let cache: MultiplyCache = ctx.pop_cache("Multiply")?;
 

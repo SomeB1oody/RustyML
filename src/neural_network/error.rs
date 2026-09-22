@@ -2,8 +2,8 @@
 //!
 //! [`NnError`] enumerates the failures specific to the neural-network framework (layer state,
 //! weight shapes, model compilation). Callers receive it through the crate-wide
-//! [`Error::NeuralNetwork`](crate::error::Error::NeuralNetwork) variant, into which it converts via
-//! `?` (a `#[from]` bridge). See [`crate::error`] for the unified
+//! [`Error::NeuralNetwork`](crate::error::Error::NeuralNetwork) variant, into which it
+//! converts via `?` (a `#[from]` bridge). See [`crate::error`] for the unified
 //! [`Error`](crate::error::Error) that aggregates the per-domain error enums
 
 use crate::error::Error;
@@ -14,7 +14,7 @@ use crate::error::Error;
 pub enum NnError {
     /// An output or gradient was requested from a layer before its forward pass had run
     ///
-    /// The payload is the layer's name (e.g. `"Dense"`, `"LSTM"`)
+    /// The payload is the layer's name, such as `"Dense"` or `"LSTM"`
     #[error(
         "forward pass has not been run on layer `{0}`; run `forward` before accessing outputs or `backward`"
     )]
@@ -23,7 +23,7 @@ pub enum NnError {
     /// A weight array assigned to a layer did not match the shape the layer expects
     #[error("weight shape mismatch for `{name}`: layer expects {expected:?}, got {found:?}")]
     WeightShape {
-        /// The parameter being set (e.g. `"kernel"`, `"bias"`)
+        /// The parameter being set, such as `"kernel"` or `"bias"`
         name: String,
         /// The shape the layer needs
         expected: Vec<usize>,
@@ -33,7 +33,7 @@ pub enum NnError {
 
     /// The model was used for training/inference before a needed component was configured
     ///
-    /// The payload names the missing component (e.g. `"optimizer"`, `"loss function"`)
+    /// The payload names the missing component, such as `"optimizer"` or `"loss function"`
     #[error("model has not been compiled: `{0}` is not specified")]
     NotCompiled(&'static str),
 
@@ -50,7 +50,7 @@ pub enum NnError {
     /// [`UnaryLayer::forward_mut`](crate::neural_network::traits::UnaryLayer::forward_mut) builds
     /// the layer from the tensor it receives, so only the paths that take `&self` can report this
     ///
-    /// The payload is the layer's name (e.g. `"Dense"`, `"Conv2D"`)
+    /// The payload is the layer's name, such as `"Dense"` or `"Conv2D"`
     #[error(
         "layer `{0}` is not built; build it with `UnaryLayer::build`, or add it to a \
          `SequentialBuilder` and build the model"

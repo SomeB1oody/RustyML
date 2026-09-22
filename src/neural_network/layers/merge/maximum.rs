@@ -1,4 +1,9 @@
 //! The merge layer that takes the larger value of its inputs, element by element
+//!
+//! [`Maximum`] folds its inputs pairwise and keeps the larger value at each position.
+//! `MaximumCache` records which input won each position, so the backward pass can route the
+//! gradient there. The `tests` module checks the fold, the tie rule, the NaN rule, the
+//! broadcast, and the refusals of the layer.
 
 use super::{
     broadcast_input, elementwise_merge_layer_functions, merge_layer_base_functions, merged_dims,
@@ -27,15 +32,13 @@ use ndarray::IxDyn;
 /// 0 there. An input that broadcast in the forward pass then sums its gradient back to its own
 /// shape
 ///
-/// # The tie rule
+/// # Notes
 ///
 /// A tie routes the whole gradient to the first input that holds the winning value. Every
 /// other input that ties there takes 0.
 /// [`MaxPooling2D`](crate::neural_network::layers::pooling::max_pooling_2d::MaxPooling2D)
 /// resolves a tied window position by the same rule. The test
 /// `tie_routes_the_gradient_to_the_first_input` pins the rule
-///
-/// # Notes
 ///
 /// A NaN wins its position and keeps it. The first input that holds a NaN at a position takes
 /// the whole gradient there, and no later value displaces it. The max pooling layers of this
@@ -81,11 +84,11 @@ pub struct Maximum {
 }
 
 impl Maximum {
-    /// Creates a new Maximum layer
+    /// Creates a layer that takes the larger value of its inputs, element by element
     ///
     /// # Returns
     ///
-    /// - `Self` - New `Maximum` layer instance, before its build
+    /// - `Self` - A new `Maximum` layer, which holds no build
     pub fn new() -> Self {
         Self::default()
     }

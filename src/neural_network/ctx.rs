@@ -187,9 +187,6 @@ impl StateSlot<'_> {
     /// # Parameters
     ///
     /// - `name` - The name the layer gives the value, such as `"moving_mean"`
-    ///
-    /// # Type Parameters
-    ///
     /// - `T` - The type the layer stores the value as
     ///
     /// # Returns
@@ -361,9 +358,6 @@ impl Ctx {
     ///
     /// - `layer` - The type name of the layer that parks the value
     /// - `cache` - The value to park
-    ///
-    /// # Type Parameters
-    ///
     /// - `T` - The type the layer parks and takes back
     pub fn push_cache<T: Any + Send + Sync>(&mut self, layer: &'static str, cache: T) {
         debug_assert!(
@@ -381,9 +375,6 @@ impl Ctx {
     /// # Parameters
     ///
     /// - `layer` - The type name of the layer, which must match the name of the push
-    ///
-    /// # Type Parameters
-    ///
     /// - `T` - The type the layer parked
     ///
     /// # Returns
@@ -444,9 +435,6 @@ impl Ctx {
     /// # Parameters
     ///
     /// - `name` - The name the layer gives the value
-    ///
-    /// # Type Parameters
-    ///
     /// - `T` - The type the layer stores the value as
     ///
     /// # Returns
@@ -464,9 +452,6 @@ impl Ctx {
     /// # Parameters
     ///
     /// - `name` - The name the layer gives the value
-    ///
-    /// # Type Parameters
-    ///
     /// - `T` - The type the layer stores the value as
     ///
     /// # Returns
@@ -489,9 +474,6 @@ impl Ctx {
     ///
     /// - `name` - The name the layer gives the value
     /// - `value` - The new value
-    ///
-    /// # Type Parameters
-    ///
     /// - `T` - The type the layer stores the value as
     pub fn set_state<T: Any + Send + Sync>(&mut self, name: &'static str, value: T) {
         debug_assert!(

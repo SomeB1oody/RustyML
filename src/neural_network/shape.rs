@@ -108,8 +108,8 @@ impl Shape {
     /// The same shape with axis 0 made free
     ///
     /// A layer serves every batch size, so the batch extent is not part of what a layer was
-    /// built for. A checkpoint records this form, and a load compares this form, so a model
-    /// built for 32 samples and a model built for 1 sample carry the same build shape
+    /// built for. A checkpoint records this form, and a load compares this form. A model built
+    /// for 32 samples and a model built for 1 sample therefore carry the same build shape
     ///
     /// # Returns
     ///

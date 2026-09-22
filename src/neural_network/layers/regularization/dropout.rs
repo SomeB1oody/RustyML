@@ -242,6 +242,7 @@ pub use spatial_dropout_1d::SpatialDropout1D;
 pub use spatial_dropout_2d::SpatialDropout2D;
 pub use spatial_dropout_3d::SpatialDropout3D;
 
+/// Unit tests for `spatial_dropout_scale`
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -7,7 +7,7 @@
 //! 1. **A layer with an absent parameter still trains every other parameter.** A bias gradient
 //!    that is never present must not hold back the kernel gradient of the same layer.
 //! 2. **A dropped array moves no other array's checkpoint path or optimizer state.** On the
-//!    normalization layers the optional array is the first one, so dropping it must not shift
+//!    normalization layers the optional array sits at index 0, so dropping it must not shift
 //!    `beta` into the slot `gamma` held.
 //! 3. **The parameter count reads the arrays a layer holds, not its configuration.** A count
 //!    derived from `input_dim` and `units` must not count a bias the layer does not hold.
@@ -49,9 +49,12 @@ use rustyml::neural_network::{Ctx, Shape, Tensor};
 struct TempFile(std::path::PathBuf);
 
 impl TempFile {
+    /// Builds a path under the OS temp directory, derived from `name`
     fn new(name: &str) -> Self {
         TempFile(std::env::temp_dir().join(format!("rustyml_optional_param_{name}.bin")))
     }
+
+    /// The path of this temporary file
     fn path(&self) -> &std::path::Path {
         &self.0
     }
@@ -120,10 +123,9 @@ fn array_of(layer: &dyn Layer, name: &str) -> Vec<f32> {
 
 // Trap 1: a layer without a bias must still train its kernel
 
-/// A gate that discards the whole parameter list whenever any 1 gradient is absent would leave
-/// a bias-free layer's kernel gradient stuck behind its permanently absent bias gradient, so the
-/// kernel would never reach the optimizer. This trains a bias-free Dense and checks that the
-/// kernel really moves
+/// A gate that discards every parameter when 1 gradient is absent would strand a bias-free
+/// layer's kernel gradient behind its missing bias gradient. The kernel would then never reach
+/// the optimizer. This trains a bias-free Dense and checks that the kernel really moves
 #[test]
 fn a_bias_free_dense_trains_its_kernel() {
     let mut layer = Dense::new(2, Activation::Linear)
@@ -367,7 +369,7 @@ fn every_bias_free_layer_yields_its_kernels() {
     }
 }
 
-// Trap 2: on a normalization layer the optional array is the first one
+// Trap 2: on a normalization layer the optional array sits at index 0
 
 /// `scale = false` drops `gamma`, which is the array at index 0. A positional key would then
 /// give `beta` the optimizer state of `gamma`.
@@ -375,8 +377,9 @@ fn every_bias_free_layer_yields_its_kernels() {
 /// The check needs no formula. The input and the upstream gradient are built so that the
 /// gradient of `beta` is exactly 0 and the gradient of `gamma` is not. 1 SGD step with
 /// momentum on a full layer therefore fills the momentum buffer of `gamma` and leaves the
-/// buffer of `beta` at 0. A second step on a scale-free layer must then leave `beta` exactly
-/// where it was. With a positional key it would move by the momentum of `gamma`
+/// buffer of `beta` at 0. Step 2 runs a scale-free layer through the same optimizer, and it
+/// must then leave `beta` exactly where it was. With a positional key it would move by the
+/// momentum of `gamma`
 #[test]
 fn dropping_gamma_does_not_give_beta_the_optimizer_state_of_gamma() {
     // Row 1 is row 0 reversed, so the 2 normalized rows differ elementwise
@@ -431,7 +434,7 @@ fn dropping_gamma_does_not_give_beta_the_optimizer_state_of_gamma() {
     );
 }
 
-/// Dropping the first array of a layer moves no path of the arrays after it. The running
+/// Dropping the array at index 0 of a layer moves no path of the arrays after it. The running
 /// statistics of BatchNormalization are the case that matters, because they follow `gamma` and
 /// `beta` and a positional key would renumber them
 #[test]
@@ -535,7 +538,7 @@ fn every_normalization_layer_drops_the_array_its_flag_names() {
 // Trap 3: the parameter count must read the arrays, not the configuration
 
 /// A count derived from `input_dim` and `units` counts a bias that the layer does not hold.
-/// This compares every count against the arrays that the same layer exposes, so a formula that
+/// This compares every count against the arrays that the same layer exposes. A formula that
 /// reads the configuration fails here as soon as an array disappears
 #[test]
 fn param_count_matches_the_arrays_a_layer_holds() {
@@ -821,7 +824,7 @@ fn refusal(result: Result<(), Error>) -> String {
 }
 
 /// A checkpoint written by a Dense that holds a bias must not load into a Dense that holds
-/// none, and the refusal must name both rosters
+/// none. The refusal must name both rosters
 #[test]
 fn a_checkpoint_with_a_bias_fails_to_load_into_a_bias_free_layer() {
     let file = TempFile::new("dense_bias_into_bias_free");
@@ -850,7 +853,7 @@ fn a_checkpoint_with_a_bias_fails_to_load_into_a_bias_free_layer() {
 }
 
 /// The other direction: a checkpoint written without a bias must not load into a layer that
-/// holds one, because the bias would keep whatever it already held
+/// holds one. The bias would otherwise keep whatever it already held
 #[test]
 fn a_bias_free_checkpoint_fails_to_load_into_a_layer_with_a_bias() {
     let file = TempFile::new("bias_free_into_dense_bias");
@@ -875,8 +878,8 @@ fn a_bias_free_checkpoint_fails_to_load_into_a_layer_with_a_bias() {
 }
 
 /// 2 layers can hold the same number of arrays and still disagree. A scale-free
-/// LayerNormalization holds `beta` alone and a center-free one holds `gamma` alone, so the
-/// refusal comes from the name and it must name the checkpoint path
+/// LayerNormalization holds `beta` alone, and a center-free one holds `gamma` alone. The
+/// refusal therefore comes from the name, and it must name the checkpoint path
 #[test]
 fn a_checkpoint_of_the_other_optional_array_fails_by_path() {
     let file = TempFile::new("layer_norm_beta_into_gamma");
@@ -1107,14 +1110,14 @@ fn normalization_roster(center: bool, scale: bool) -> Vec<&'static str> {
 
 /// Every normalization layer yields exactly the parameters that its 2 flags leave it
 ///
-/// The gate that drops an array lives in 2 places: `weights` is the checkpoint roster, and
+/// The gate that drops an array lives in 2 places. `weights` is the checkpoint roster, and
 /// `parameters` is the optimizer roster that a backward pass fills. The 2 must name the same
-/// trainable arrays. A layer that keeps the gradient of a dropped array hands the optimizer an
-/// array that the layer does not own, and the optimizer then writes a buffer that no
-/// checkpoint path reaches. A layer that drops the gradient of an array it keeps stops
-/// training that array, and nothing reports it
+/// trainable arrays. A layer that keeps the gradient of a dropped array hands the optimizer
+/// an array it does not own. The optimizer then writes a buffer that no checkpoint path
+/// reaches. A layer that drops the gradient of an array it keeps stops training that array,
+/// and nothing reports it
 ///
-/// This walks the 4 normalization layers times the 4 settings of `center` and `scale`, and it
+/// This walks the 4 normalization layers across the 4 settings of `center` and `scale`. It
 /// reads both rosters after a real forward pass and a real backward pass
 #[test]
 fn every_normalization_layer_yields_exactly_the_parameters_it_owns() {
@@ -1208,9 +1211,9 @@ fn every_normalization_layer_yields_exactly_the_parameters_it_owns() {
 
 /// Dense and Conv2D yield exactly the parameters that `use_bias` leaves them
 ///
-/// The same roster assertion as above, on the family where the optional array is the last one
-/// rather than the first. Both settings of the flag are read, so a gate that is lost in either
-/// direction fails here
+/// The same roster assertion as above, on the family where the optional array sits last
+/// instead of at index 0. Both settings of the flag are read, so a gate that is lost in
+/// either direction fails here
 #[test]
 fn the_use_bias_layers_yield_exactly_the_parameters_they_own() {
     for use_bias in [true, false] {
@@ -1261,10 +1264,10 @@ type MakeModel = fn() -> Sequential;
 
 /// A normalization layer that drops 1 array must still train the array it keeps
 ///
-/// The mirror of the bias-free Dense above, on the side where the optional array comes first.
-/// A silent stop is the worst outcome of a lost gate: the layer yields nothing, the optimizer
-/// writes nothing, the loss stands still, and no error says so. This trains each layer for
-/// several steps and reads the array back
+/// The mirror of the bias-free Dense above, on the side where the optional array sits at
+/// index 0. A silent stop is the worst outcome of a lost gate. The layer yields nothing, the
+/// optimizer writes nothing, the loss stands still, and no error says so. This trains each
+/// layer for several steps and reads the array back
 #[test]
 fn a_normalization_layer_that_drops_1_array_trains_the_array_it_keeps() {
     let cases: [(&str, MakeModel, &str); 2] = [

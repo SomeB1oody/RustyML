@@ -143,6 +143,7 @@ fn permute_forward_rotates_three_axes_by_value() {
     assert_allclose(&out, &want, 1e-6_f32);
 }
 
+/// The identity permutation reorders no axis, so the output equals the input
 #[test]
 fn permute_forward_identity_copies_input() {
     let mut p = Permute::new(vec![1, 2, 3]).unwrap();
@@ -229,6 +230,7 @@ fn permute_predict_matches_forward() {
 
 // Permute: backward
 
+/// The backward pass undoes the forward permutation, restoring the original axis order
 #[test]
 fn permute_backward_applies_the_inverse_order() {
     let mut p = Permute::new(vec![2, 1]).unwrap();
@@ -244,6 +246,7 @@ fn permute_backward_applies_the_inverse_order() {
     assert_allclose(&grad_input, &want, 1e-6_f32);
 }
 
+/// A rotation and its inverse permutation compose to the identity, restoring the input
 #[test]
 fn permute_rotation_round_trips_through_its_inverse() {
     let x = ramp_of(&[2, 3, 4, 5]);
@@ -341,6 +344,7 @@ fn permute_output_shape_before_and_after_forward() {
     assert_eq!(p.output_shape(), "(None, 4, 3)");
 }
 
+/// 1 layer instance serves every batch size, since the batch axis stays untouched
 #[test]
 fn permute_one_instance_serves_every_batch_size() {
     let mut p = Permute::new(vec![2, 1]).unwrap();
@@ -515,6 +519,7 @@ fn repeat_vector_output_shape_before_and_after_forward() {
     assert_eq!(r.output_shape(), "(None, 3, 5)");
 }
 
+/// 1 layer instance serves every batch size, since the batch axis stays untouched
 #[test]
 fn repeat_vector_one_instance_serves_every_batch_size() {
     let mut r = RepeatVector::new(4).unwrap();

@@ -1,5 +1,22 @@
-//! Layer Normalization layer and its axis configuration, with support for
-//! single-axis and multi-axis (merged) normalization
+//! Layer Normalization layer, its axis configuration, and the row-fused kernels it runs on
+//!
+//! [`LayerNormalizationAxis`] selects what the layer normalizes over. The default is the last
+//! dimension. `Custom` picks 1 other axis. `Multiple` merges several axes into 1 statistic.
+//!
+//! `LayoutPlan` maps that selection and the input shape onto 1 of 3 execution paths:
+//!
+//! - `Rows`: the normalized elements already form a contiguous trailing block. The fused
+//!   per-row kernels (`row_forward`, `row_predict`, `row_backward`) run on the `[R, N]`
+//!   view directly, with no extra data movement.
+//! - `MergedRows`: a `Multiple` axis list that is not already trailing and in order.
+//!   `merge_normalized_axes` permutes and reshapes the input into that same `[R, N]` view.
+//!   The row path runs on it, and `unmerge_normalized_axes` restores the original layout.
+//! - `Strided`: a non-trailing `Custom` axis. Broadcast `ndarray` operations reduce over the
+//!   axis in place, with no transpose copy.
+//!
+//! [`LayerNormalization`] holds `gamma`, `beta`, the axis configuration, and the shape it was
+//! built for. Its forward pass parks the values the matching backward pass needs in
+//! `LayerNormalizationCache`.
 
 use super::folds::{
     par_col_dot, par_col_sum, rows_per_block, segment_dot, segment_dot3, segment_sq_dev,
@@ -399,8 +416,9 @@ impl LayerNormalization {
     ///
     /// # Errors
     ///
-    /// - `Error::invalid_parameter` - If a `Multiple` axis list is empty, contains a duplicate, or
-    ///   has an out-of-bounds axis
+    /// - `Error::invalid_parameter` - If a `Multiple` axis list is empty or contains a
+    ///   duplicate. For a layer that is already built, this also fires when an axis is out of
+    ///   bounds for the built shape
     pub fn with_normalized_axis(
         mut self,
         normalized_axis: LayerNormalizationAxis,
@@ -559,9 +577,18 @@ impl LayerNormalization {
     /// - `beta` - Shift parameter (trainable), or `None` for a layer built with
     ///   [`with_center(false)`](Self::with_center)
     ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - Ok when `gamma` and `beta` match the layer's parameter shape
+    ///
     /// # Errors
     ///
-    /// - Returns an error if `gamma` or `beta` does not match the expected parameter shape
+    /// - `Error::not_built` - If the layer has not been built yet
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `gamma` or `beta` does not match
+    ///   the layer's built parameter shape
+    /// - `Error::invalid_parameter` - If `gamma` is given to a layer built with
+    ///   [`with_scale(false)`](Self::with_scale), or omitted for a layer that holds one. The
+    ///   same check applies to `beta` and [`with_center`](Self::with_center)
     pub fn set_weights(
         &mut self,
         gamma: impl Into<Option<Tensor>>,

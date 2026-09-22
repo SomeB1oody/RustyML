@@ -1,4 +1,10 @@
 //! Gated Recurrent Unit (GRU) recurrent layer with update, reset, and candidate gates
+//!
+//! `GruCell` implements `RnnCell` with the arithmetic of 1 GRU timestep. The record-slot
+//! constants below it name, in order, the 4 values that `step` parks for `step_backward` to read
+//! back. [`GRU`] is the public layer. It holds an `Rnn` over `GruCell` and forwards every
+//! trait method to it, adding only the constructors and the weight setters that a caller uses
+//! directly.
 
 use crate::error::Error;
 use crate::neural_network::layers::activation::Activation;
@@ -257,8 +263,8 @@ impl GRU {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `units` is 0
-    /// - `Error::InvalidParameter` - If the activation carries an unusable parameter (see
+    /// - [`Error::InvalidParameter`] - If `units` is 0
+    /// - [`Error::InvalidParameter`] - If the activation carries an unusable parameter (see
     ///   [`Activation::validate`])
     pub fn new(units: usize, activation: impl Into<Activation>) -> Result<Self, Error> {
         Ok(Self(Rnn::new(units, activation)?))
@@ -342,9 +348,9 @@ impl GRU {
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork(NnError::NotBuilt)` - If the layer is not built
-    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any provided weight does not match the
-    ///   expected fused shape
+    /// - [`Error::NeuralNetwork`] - If the layer is not built
+    /// - [`Error::NeuralNetwork`] - If any provided weight does not match the expected fused
+    ///   shape
     pub fn set_weights(
         &mut self,
         kernel: Array2<f32>,
@@ -383,8 +389,8 @@ impl GRU {
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any provided weight does not match the
-    ///   expected per-gate shape
+    /// - [`Error::NeuralNetwork`] - If any provided weight does not match the expected per-gate
+    ///   shape
     #[allow(clippy::too_many_arguments)] // 3 gates * (kernel, recurrent_kernel, bias)
     pub fn set_gate_weights(
         &mut self,

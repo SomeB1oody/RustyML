@@ -43,8 +43,9 @@ fn max_abs_diff(a: &Tensor, b: &Tensor) -> f32 {
 }
 
 /// Build a tiny, built `Dense(4 -> 3, ReLU)`, applying `seed` via `with_random_state` when
-/// `Some`. `with_random_state` only records the seed. `build` is what draws the weights, so
-/// every caller of this helper gets a layer `predict` can already run
+/// `Some`. `with_random_state` runs before `build` here, on a layer that is not built yet, so
+/// it only records the seed. `build` is what draws the weights, so every caller of this helper
+/// gets a layer `predict` can already run
 fn dense_4_3(seed: Option<u64>) -> Dense {
     let dense = Dense::new(3, Activation::ReLU).expect("Dense::new(3) must succeed");
     let mut dense = match seed {

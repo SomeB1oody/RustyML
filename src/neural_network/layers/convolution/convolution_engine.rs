@@ -99,9 +99,11 @@ tunable_gate! {
 
 /// Padding rule of a plain convolution
 ///
-/// [`PaddingType`] holds the 2 rules every convolutional and pooling layer shares. This enum adds
-/// the causal rule, which only `Conv1D` accepts. Layers that must not take a causal input keep a
-/// [`PaddingType`] field and convert at the engine boundary, so a causal pass cannot reach them
+/// [`PaddingType`](crate::neural_network::layers::convolution::PaddingType) holds the 2 rules every
+/// convolutional and pooling layer shares. This enum adds the causal rule, which only `Conv1D`
+/// accepts. Layers that must not take a causal input keep a
+/// [`PaddingType`](crate::neural_network::layers::convolution::PaddingType) field and convert at
+/// the engine boundary, so a causal pass cannot reach them
 ///
 /// # Notes
 ///
@@ -204,11 +206,6 @@ fn increment_index(idx: &mut [usize], dims: &[usize]) -> bool {
 /// - `n` - Number of indices to run over
 /// - `parallel` - Runs in parallel when true, in order when false
 /// - `f` - Function to run at each index
-///
-/// # Type Parameters
-///
-/// - `R` - Result type of `f`
-/// - `F` - Type of `f`
 ///
 /// # Returns
 ///

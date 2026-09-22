@@ -1,4 +1,9 @@
 //! Adam (Adaptive Moment Estimation) optimizer with classic coupled L2 weight decay
+//!
+//! Holds the [`Adam`] struct, its constructor, its [`Adam::with_global_clipnorm`] builder method,
+//! and its [`Optimizer`](crate::neural_network::traits::Optimizer) implementation. The moment math
+//! and the update loop live in the private `AdamCore` type, shared with
+//! [`AdamW`](crate::neural_network::optimizers::AdamW)
 
 use crate::error::Error;
 use crate::neural_network::ctx::Grads;

@@ -11,8 +11,8 @@
 //! the `-1` noise marker are accepted.
 //!
 //! The `-1` marker is then scored as an ordinary cluster of its own, which is rarely what you want.
-//! Filter the noise points out of both arrays first if the score should describe only the clustered
-//! samples
+//! If the score should describe only the clustered samples, filter the noise points out of both
+//! arrays first
 
 use ahash::AHashMap;
 use ndarray::{Array2, ArrayBase, Axis, Data, Ix1, Ix2};
@@ -229,7 +229,7 @@ where
 ///
 /// AMI corrects the mutual information for the agreement expected by chance. It scores `1.0` for
 /// identical clusterings and about `0.0` for independent ones, and it can go slightly negative.
-/// When the normalizer is degenerate (for example, both clusterings put every sample in one
+/// When the normalizer is degenerate (for example, both clusterings put every sample in 1
 /// cluster), the score is defined as `1.0`
 ///
 /// # Parameters
@@ -352,7 +352,7 @@ where
     let comb_n = comb2(n);
 
     if comb_n == 0.0 {
-        return 1.0; // fewer than two samples: no pairs to disagree on
+        return 1.0; // fewer than 2 samples: no pairs to disagree on
     }
 
     let expected = sum_comb_true * sum_comb_pred / comb_n;
@@ -466,7 +466,7 @@ where
 ///
 /// # Parameters
 ///
-/// - `x` - Feature matrix with one sample per row (`n_samples x n_features`)
+/// - `x` - Feature matrix with 1 sample per row (`n_samples x n_features`)
 /// - `labels` - Cluster assignment for each sample
 /// - `metric` - Distance metric used for every pairwise distance
 ///
@@ -492,7 +492,7 @@ where
 /// - Panics if the number of rows in `x` differs from the length of `labels`
 /// - Panics if the inputs are empty
 /// - Panics if the number of distinct clusters is not in `2..=n_samples - 1`
-/// - Panics if `metric` is `Minkowski(p)` with `p < 1`
+/// - Panics if `metric` is `Minkowski(p)` with `p < 1.0` or `p` is `NaN`
 pub fn silhouette_score<S1, S2>(
     x: &ArrayBase<S1, Ix2>,
     labels: &ArrayBase<S2, Ix1>,
@@ -826,7 +826,7 @@ where
 ///
 /// # Parameters
 ///
-/// - `x` - Feature matrix with one sample per row (`n_samples x n_features`)
+/// - `x` - Feature matrix with 1 sample per row (`n_samples x n_features`)
 /// - `labels` - Cluster assignment of each sample
 ///
 /// # Returns
@@ -895,7 +895,7 @@ where
 ///
 /// # Parameters
 ///
-/// - `x` - Feature matrix with one sample per row (`n_samples x n_features`)
+/// - `x` - Feature matrix with 1 sample per row (`n_samples x n_features`)
 /// - `labels` - Cluster assignment of each sample
 ///
 /// # Returns
@@ -1062,7 +1062,7 @@ mod tests {
     // homogeneity_completeness
 
     /// Pure clusters (more clusters than classes) give homogeneity 1.0, completeness 0.5, and pin
-    /// the tuple ordering (homogeneity first)
+    /// the tuple order as (homogeneity, completeness)
     #[test]
     fn test_homogeneity_completeness_pure_clusters() {
         let labels_true = [0isize, 0, 1, 1];

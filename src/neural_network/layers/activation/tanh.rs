@@ -1,5 +1,8 @@
-//! Tanh (hyperbolic tangent) activation layer that applies `tanh(x)` elementwise and parks the
-//! output for backpropagation
+//! Tanh (hyperbolic tangent) activation layer
+//!
+//! The `Tanh` struct holds only the shape recorded at build time, because the layer takes no
+//! parameter. `UnaryLayer::forward` computes `Activation::Tanh` and caches the output during
+//! training. `UnaryLayer::backward` reads that cache to compute the gradient
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -49,7 +52,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// ```
 #[derive(Debug)]
 pub struct Tanh {
-    /// Shape the layer was built for. `None` before the build
+    /// Shape the layer was built for, batch axis first. `None` before the build
     built: Option<Shape>,
 }
 
@@ -100,7 +103,6 @@ impl UnaryLayer for Tanh {
         // Large-magnitude inputs saturate toward -1/+1 by construction
         let output = Activation::Tanh.forward(input)?;
 
-        // Cache activated output for backpropagation
         if ctx.is_training() {
             ctx.push_cache("Tanh", output.clone());
         }

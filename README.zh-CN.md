@@ -27,7 +27,7 @@ RustyML 是一个机器学习与深度学习库，完全用 Rust 端到端实现
 - **默认并行**：计算密集的内核使用 [Rayon](https://github.com/rayon-rs/rayon) 进行多线程计算。
 - **算法覆盖**：经典的监督与无监督学习、异常检测，以及一个同时提供顺序模型和图模型的神经网络框架。
 - **可复现**：一次 `set_global_seed` 调用即可让调用线程上所有随机化组件变得确定。按组件设置的 `random_state` 覆盖其余情形。
-- **模型持久化**：通过 [Serde](https://serde.rs/) 和 [postcard](https://docs.rs/postcard/) 将训练好的模型和网络权重保存为紧凑的二进制格式。
+- **模型持久化**：通过 [Serde](https://serde.rs/) 和 [postcard](https://docs.rs/postcard/)，将训练好的模型和网络权重保存并重新加载为紧凑的二进制格式。
 - **评估指标**：回归、分类（二分类与多分类）、聚类，遵循 scikit-learn 的约定。
 
 ## 安装

@@ -43,7 +43,9 @@ fn params_of(layer: &dyn Layer) -> usize {
 #[test]
 fn depthwise_conv1d_new_rejects_invalid_args() {
     enum Want {
+        /// Expect `Error::InvalidParameter`.
         Param,
+        /// Expect `Error::InvalidInput`.
         Input,
     }
     // (label, kernel_size, input_shape, stride, expected error)
@@ -236,7 +238,7 @@ fn depthwise_conv1d_same_padding_splits_with_the_extra_cell_at_the_end() {
     let out = conv.forward(&x, &mut Ctx::inference()).unwrap();
     assert_eq!(out.shape(), &[1, 4, 1]);
 
-    // pad_total = (4-1)*1 + 4 - 4 = 3, so 1 zero leads and 2 trail. The windows over
+    // pad_total = (4-1)*1 = 3, so 1 zero leads and 2 trail. The windows over
     // [0, 1, 2, 3, 4, 0, 0] are 0+1+2+3, 1+2+3+4, 2+3+4+0, and 3+4+0+0
     assert_eq!(
         out.iter().copied().collect::<Vec<f32>>(),
@@ -281,7 +283,7 @@ fn depthwise_conv1d_predict_equals_forward() {
     let forwarded = conv.forward(&x, &mut Ctx::training()).unwrap();
     assert_allclose(&predicted, &forwarded, 0.0_f32);
 
-    // `predict` left no cache, so a second `predict` cannot enable `backward`
+    // `predict` left no cache, so a 2nd `predict` cannot enable `backward`
     let mut fresh = DepthwiseConv1D::new(3, 2, Linear::new()).unwrap();
     fresh.build(&Shape::known(&[2, 9, 2])).unwrap();
     let mut fresh_ctx = Ctx::inference();
@@ -297,6 +299,8 @@ fn depthwise_conv1d_backward_before_forward_errors() {
     assert!(conv.backward(&grad, &mut Ctx::training()).is_err());
 }
 
+/// A forward call that returns an error leaves the cache empty, so a later backward call still
+/// errors instead of reading a stale cache
 #[test]
 fn depthwise_conv1d_rejected_forward_leaves_no_cache() {
     let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
@@ -312,6 +316,7 @@ fn depthwise_conv1d_rejected_forward_leaves_no_cache() {
     );
 }
 
+/// `set_weights` rejects either array when its shape does not match the layer
 #[test]
 fn depthwise_conv1d_set_weights_shape_mismatch_errors() {
     let mut conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
@@ -455,10 +460,15 @@ fn depthwise_conv1d_parallel_path_matches_the_serial_path() {
 
 // SeparableConv1D - constructor validation
 
+/// Each invalid constructor argument returns the matching error: InvalidParameter for a zero
+/// filter count, kernel size, stride, or depth multiplier, and InvalidInput for a bad
+/// input_shape
 #[test]
 fn separable_conv1d_new_rejects_invalid_args() {
     enum Want {
+        /// Expect `Error::InvalidParameter`.
         Param,
+        /// Expect `Error::InvalidInput`.
         Input,
     }
     // (label, filters, kernel_size, input_shape, stride, depth_multiplier, expected error)
@@ -597,6 +607,8 @@ fn separable_conv1d_known_weight_forward_values() {
     );
 }
 
+/// `Same` padding zero-pads only the depthwise stage, and the pointwise stage adds no padding
+/// of its own
 #[test]
 fn separable_conv1d_same_padding_zero_pads_depthwise() {
     let mut conv = SeparableConv1D::new(1, 3, 1, 1, Linear::new())
@@ -714,6 +726,7 @@ fn separable_conv1d_matches_a_depthwise_then_pointwise_stack() {
 
 // SeparableConv1D - the remaining contract
 
+/// `predict` in eval mode returns the same values as `forward`
 #[test]
 fn separable_conv1d_predict_equals_forward() {
     let mut conv = SeparableConv1D::new(3, 3, 2, 2, Linear::new()).unwrap();

@@ -1,13 +1,13 @@
 //! Integration tests for [`Shape`] and for the pure output-shape method of a layer
 //!
 //! 2 properties matter here. The first is purity: the answer is a function of the layer
-//! configuration and of the shape the caller passes, and of nothing a forward pass wrote. The
+//! configuration and of the shape the caller passes. It reads nothing a forward pass wrote. The
 //! second is refusal: an input the layer cannot accept comes back as an error that names the
 //! layer and the problem.
 //!
-//! Purity is what lets a later change walk a whole model at build time, thread each output
-//! shape into the next layer, and reject a bad stack before any data arrives. The last test of
-//! this file threads such a stack by hand, with no tensor anywhere.
+//! Purity is what lets a later change walk a whole model at build time and thread each output
+//! shape into the next layer. It also lets that change reject a bad stack before any data
+//! arrives. The last test of this file threads such a stack by hand, with no tensor anywhere.
 
 use ndarray::{Array, ArrayD, IxDyn};
 use rustyml::neural_network::layers::*;
@@ -190,9 +190,11 @@ fn a_pooling_layer_refuses_a_window_that_does_not_fit() {
     );
 }
 
-/// A global pooling layer refuses a spatial axis whose extent nothing fixes
+/// A global pooling layer refuses an input whose channel axis carries no fixed extent
 ///
-/// The answer would need the channel extent, and a free axis carries none
+/// Axis 2 holds the channel count that the answer reports. The shape algebra needs a fixed
+/// extent on every axis after the batch axis. A free channel axis is therefore refused before
+/// the layer computes anything
 #[test]
 fn a_global_pooling_layer_refuses_a_free_spatial_axis() {
     let layer = GlobalMaxPooling1D::new();
@@ -237,6 +239,7 @@ fn repeat_vector_refuses_a_rank_it_cannot_repeat() {
     assert!(message.contains("rank 2"), "{message}");
 }
 
+/// Reshape refuses an input whose element count does not match its target
 #[test]
 fn reshape_refuses_an_element_count_it_cannot_match() {
     let layer = Reshape::new(vec![2, 2]).unwrap();
@@ -271,7 +274,7 @@ fn a_cropping_layer_refuses_a_border_that_removes_everything() {
 /// 1 unbuilt convolution of every type that bounds its input, with a shape too small for it
 ///
 /// Every entry carries a kernel of 3 taps on each spatial axis and an input of 2 positions on
-/// each spatial axis, so no complete window fits under `Valid` padding
+/// each spatial axis. No complete window therefore fits under `Valid` padding
 fn valid_convolutions_that_cannot_fit() -> Vec<(Box<dyn Layer>, Shape, &'static str)> {
     vec![
         (
@@ -482,7 +485,7 @@ fn a_model_build_refuses_an_oversized_valid_kernel() {
 /// A stack of 4 layers reports its final shape before any tensor exists
 ///
 /// This is what the pure method buys. The caller threads the output shape of each layer into
-/// the next one and learns the shape of the model output, with no forward pass anywhere
+/// the next one. It learns the shape of the model output, with no forward pass anywhere
 #[test]
 fn a_whole_stack_answers_before_any_tensor_exists() {
     let layers: Vec<Box<dyn Layer>> = vec![
@@ -535,8 +538,8 @@ fn a_bad_stack_names_the_layer_that_refuses() {
 
 /// `output_shape` runs the pure method against the shape the layer holds
 ///
-/// The 3 layers below cover the 3 sources of that shape: a build the caller ran, a build that
-/// `forward_mut` ran from the tensor, and nothing at all
+/// The 3 layers below cover the 3 sources of that shape. The sources are a build the caller
+/// ran, a build that `forward_mut` ran from the tensor, and nothing at all
 #[test]
 fn output_shape_reads_the_shape_the_layer_holds() {
     // Taken from the build, and reported with the batch extent the build named
@@ -596,7 +599,7 @@ fn a_built_layer_refuses_the_extents_its_summary_does_not_name() {
 ///
 /// This table is the only roster of the layer types that the 2 tests below cover. No item of
 /// the crate lists its layer types, so no other file can supply that roster. Add a case here
-/// for each new layer type, and raise the count in the test below in the same change.
+/// for each new layer type. Raise the count in the test below in the same change.
 fn unbuilt_layers() -> Vec<(Shape, Box<dyn Layer>, &'static str)> {
     let flat = Shape::with_free_batch(&[1, 4]);
     let sequence = Shape::with_free_batch(&[1, 5, 2]);
@@ -965,10 +968,10 @@ fn a_build_changes_no_answer() {
 
 /// A model input with an empty feature axis is refused, and the refusal names the axis
 ///
-/// An axis of 0 elements carries no data. Many layers pass an extent through unchanged, so
-/// without this rule a whole stack builds and then produces empty tensors, and the emptiness
-/// only shows itself in the output. The batch axis is exempt, because a batch of 0 is an empty
-/// dataset that `fit` and `predict` already refuse when the data arrives
+/// An axis of 0 elements carries no data. Many layers pass an extent through unchanged. Without
+/// this rule a whole stack builds and then produces empty tensors, and the emptiness only shows
+/// itself in the output. The batch axis is exempt, because a batch of 0 is an empty dataset that
+/// `fit` and `predict` already refuse when the data arrives
 #[test]
 fn a_model_refuses_an_input_shape_with_an_empty_feature_axis() {
     let error = SequentialBuilder::new()

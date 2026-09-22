@@ -176,6 +176,7 @@ fn dropout_rate_zero_backward_passes_gradient_through() {
 
 #[test]
 fn dropout_eval_backward_passes_gradient_through() {
+    // An inference forward writes no mask, so backward passes the gradient through unchanged
     let mut layer = Dropout::new(0.5).unwrap();
     let mut ctx = Ctx::inference();
 
@@ -863,8 +864,9 @@ fn spatial_dropout_3d_backward_channel_consistency() {
 
 #[test]
 fn dropout_predict_does_not_overwrite_mask_from_forward() {
-    // Sequence training forward -> inference forward -> backward: the inference pass must not
-    // touch the cache of the training pass, so backward still uses the training mask
+    // The sequence is training forward, then inference forward, then backward. The inference
+    // pass does not touch the cache of the training pass, so backward still uses the training
+    // mask
     let mut layer = Dropout::new(0.5).unwrap();
     let mut ctx = Ctx::training();
 
@@ -890,11 +892,11 @@ fn dropout_predict_does_not_overwrite_mask_from_forward() {
 // Dropout noise_shape
 //
 // `noise_shape` sets the shape of the random mask, which then broadcasts up to the input. An
-// entry of 1 gives that axis 1 shared draw, so the same units drop at every position of the
-// axis: a correlated draw, not an average of independent draws.
+// entry of 1 gives that axis 1 shared draw. The same units drop at every position of the axis,
+// so the draw is correlated, not an average of independent draws.
 //
 // Every expectation below comes from a Keras 3.15.1 probe on the jax backend, over 40 seeds
-// per case, reading the resolved mask shape from the axes that stay constant in every seed:
+// per case. It reads the resolved mask shape from the axes that stay constant in every seed:
 //
 //   input (2,3,4)  noise_shape None        -> mask (2,3,4)
 //   input (2,3,4)  noise_shape (2,1,4)     -> mask (2,1,4)
@@ -942,7 +944,7 @@ fn masked_ones(shape: &[usize], noise_shape: Option<Vec<Option<usize>>>, seed: u
 
 /// An all-None noise_shape reproduces the default per-element draw exactly
 ///
-/// This is the base case of the resolution rule: with no entry of 1, the mask shape equals the
+/// This is the base case of the resolution rule. With no entry of 1, the mask shape equals the
 /// input shape, and the sampler consumes the same values in the same order
 #[test]
 fn dropout_noise_shape_of_all_none_matches_the_default() {
@@ -995,7 +997,7 @@ fn dropout_noise_shape_draws_only_at_the_resolved_small_shape() {
 /// With a `[4, 1, 3]` noise_shape over a `[4, 200, 3]` input, the mask holds 12 draws. The mean
 /// keep rate over many seeds therefore varies with the spread of 12 coin flips, about
 /// `0.25 / 12 = 0.0208`. A sampler that drew 2400 independent values and then zeroed axis 1
-/// would still average 0.5, but its spread would be about `0.25 / 2400 = 0.000104`, which is
+/// would still average 0.5. Its spread would be about `0.25 / 2400 = 0.000104`, which is
 /// 200 times smaller. Keras measures 0.0209 here
 #[test]
 fn dropout_noise_shape_gives_a_correlated_draw_not_an_average() {
@@ -1304,8 +1306,8 @@ fn dropout_noise_shape_rejects_an_entry_that_is_not_the_input_extent() {
         "expected InvalidParameter, got {err:?}"
     );
 
-    // The right-aligned reading applies to the rejection as well: 3 is the extent of axis 1,
-    // but the short form lines it up against axis 2, whose extent is 4
+    // The right-aligned reading applies to the rejection as well. The short form lines up 3
+    // against axis 2, whose extent is 4, not against axis 1, whose extent is 3
     let mut layer = Dropout::new(NS_RATE)
         .unwrap()
         .with_noise_shape(vec![Some(1), Some(3)])
@@ -1385,7 +1387,7 @@ fn dropout_noise_shape_shares_two_axes_of_a_rank_four_input() {
 
 /// The layer keeps its mask at the small shape, not at the full input shape
 ///
-/// The check reads the mask through the observable behavior: a `[1, 1, 4]` mask over a large
+/// The check reads the mask through the observable behavior. A `[1, 1, 4]` mask over a large
 /// input has exactly 4 distinct draws, whatever the input size
 #[test]
 fn dropout_noise_shape_keeps_the_mask_at_its_own_shape() {

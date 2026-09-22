@@ -1,4 +1,15 @@
 //! Dropout layer that randomly zeroes input units during training to reduce overfitting
+//!
+//! [`Dropout`] holds the drop rate, the shape recorded by
+//! [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build), an optional
+//! `noise_shape` that makes the sampled mask coarser than the input, and the random number
+//! generator that draws it. By default the layer draws 1 independent value per input element.
+//! [`Dropout::with_noise_shape`] shares 1 draw across a chosen axis instead, and
+//! [`Dropout::with_random_state`] reseeds the generator for reproducible masks.
+//!
+//! The forward pass samples a keep/drop mask at the resolved noise shape, scales the kept elements
+//! by `1 / (1 - rate)`, and parks the mask in the [`Ctx`](crate::neural_network::Ctx) cache for
+//! `dropout_backward` to reuse on the backward pass.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

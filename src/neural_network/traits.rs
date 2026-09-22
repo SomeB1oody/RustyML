@@ -1,5 +1,26 @@
-//! Core traits for the neural network module: layers, losses, optimizers, and the named
-//! parameter and weight views shared between them
+//! Core traits for the neural network module: layers, losses, and optimizers, plus the
+//! address and view types that connect them.
+//!
+//! [`LayerBase`](crate::neural_network::traits::LayerBase) holds what every layer has regardless of
+//! its input count: its type name, its arrays, and its build state.
+//! [`UnaryLayer`](crate::neural_network::traits::UnaryLayer) adds the forward and backward pass for
+//! a layer with 1 input, and a blanket implementation gives it the general
+//! [`Layer`](crate::neural_network::traits::Layer) interface that a model holds every layer
+//! through. Implement [`Layer`](crate::neural_network::traits::Layer) directly only for a layer
+//! with several inputs, such as a merge layer.
+//!
+//! [`ParamId`](crate::neural_network::traits::ParamId) names the address of 1 parameter tensor: the
+//! layer position plus the name the layer gives the tensor.
+//! [`ParamRef`](crate::neural_network::traits::ParamRef),
+//! [`WeightRef`](crate::neural_network::traits::WeightRef), and
+//! [`WeightMut`](crate::neural_network::traits::WeightMut) are the borrowed views that a layer
+//! exposes under that name, for an optimizer to update or a checkpoint to read and write.
+//! `check_addresses` and `check_every_gradient_is_claimed` are the build-time and pass-time
+//! checks that keep every address unique and every gradient reachable.
+//!
+//! [`Loss`](crate::neural_network::traits::Loss) computes a scalar loss and its gradient.
+//! [`Optimizer`](crate::neural_network::traits::Optimizer) reads the gradient store and updates the
+//! parameters of a layer, keyed on [`ParamId`](crate::neural_network::traits::ParamId).
 
 use crate::error::Error;
 use crate::neural_network::Shape;
@@ -259,7 +280,7 @@ pub enum WeightKind {
     /// scale/shift
     Trainable,
     /// The layer keeps this array and no optimizer writes it. The running statistics of
-    /// [`BatchNormalization`](crate::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization)
+    /// [`BatchNormalization`](crate::neural_network::layers::BatchNormalization)
     /// are the 1 example today
     NonTrainable,
 }
@@ -485,7 +506,7 @@ pub trait LayerBase: std::any::Any + Send + Sync {
     /// The set covers the trainable arrays and the non-trainable state alike, which is exactly
     /// what a checkpoint holds. It is therefore a superset of what
     /// [`parameters_mut`](LayerBase::parameters_mut) yields:
-    /// [`BatchNormalization`](crate::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization)
+    /// [`BatchNormalization`](crate::neural_network::layers::BatchNormalization)
     /// adds its running statistics here
     ///
     /// The name of an array is its address inside the layer: `kernel`, `recurrent_kernel`,
@@ -589,7 +610,7 @@ pub trait LayerBase: std::any::Any + Send + Sync {
     /// A forward pass takes `&self`, so a layer that changes non-trainable state writes the
     /// new value into the state channel of the context instead. The model calls this after the
     /// forward pass, and the layer takes back every value it recognizes.
-    /// [`BatchNormalization`](crate::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization)
+    /// [`BatchNormalization`](crate::neural_network::layers::BatchNormalization)
     /// takes its running statistics here, and a dropout layer takes its random stream
     ///
     /// The default does nothing, which is right for every layer whose forward pass changes
@@ -655,7 +676,7 @@ pub trait UnaryLayer: LayerBase {
     ///
     /// - `Tensor` - The gradient to pass to the previous layer, in the standard memory order
     ///
-    /// # Numerical policy
+    /// # Notes
     ///
     /// Backward is pure math: it does **not** sanitize NaN/Inf (no zeroing, no element-wise
     /// clamping). The backward pass propagates such values instead of masking them. The forward
@@ -949,7 +970,7 @@ impl<T: UnaryLayer> Layer for T {
 /// An implementation computes both the loss value and its gradient with respect to
 /// the predicted values
 ///
-/// # Averaging convention
+/// # Notes
 ///
 /// Each loss normalizes by what is natural for its family, so the conventions differ on
 /// purpose. `compute_grad` is always exactly the gradient of `compute_loss`. Switching loss
@@ -964,14 +985,15 @@ impl<T: UnaryLayer> Layer for T {
 ///   of all leading axes). For a `[batch, classes]` target, that divisor is the batch. For the
 ///   `[batch, height, width, classes]` output of a channels-last softmax conv head, the divisor
 ///   is `batch * height * width`, 1 site per pixel
-/// - [`SparseCategoricalCrossEntropy`](crate::neural_network::losses::SparseCategoricalCrossEntropy)
-///   is the same per-sample categorical cross-entropy, but accepts only rank-2
-///   `[batch, classes]` predictions, so its divisor is always the batch
+/// - [`SparseCategoricalCrossEntropy`][scce] is the same per-sample categorical cross-entropy,
+///   but accepts only rank-2 `[batch, classes]` predictions, so its divisor is always the batch
 ///
 /// The 2 categorical losses also renormalize `y_pred` along the class axis before
 /// clipping when `from_logits` is off. That leaves the loss value alone for an
 /// already-normalized head but contributes a row-constant term to the gradient, which a softmax
 /// backward annihilates
+///
+/// [scce]: crate::neural_network::losses::SparseCategoricalCrossEntropy
 pub trait Loss: Send + Sync {
     /// Computes the loss between true and predicted values
     ///

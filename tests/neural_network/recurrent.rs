@@ -1,10 +1,24 @@
-//! Integration tests for the recurrent layers: SimpleRNN, LSTM, GRU
+//! Integration tests for the recurrent layers: SimpleRNN, LSTM, GRU.
 //!
-//! Expected values are hand-computed from the mathematical definitions. Backward/gradient values
-//! are covered by tests/neural_network/gradient_check.rs and are not duplicated here, except for
-//! the `return_sequences` and `go_backwards` gradients at the end of this file. Those 2 flags
-//! change the backward pass itself. The finite-difference harness of `gradient_check.rs` drives
-//! every layer with a constant upstream gradient, which hides 2 of their failure modes
+//! Most forward-pass expected values are hand-computed from the mathematical definitions.
+//! General backward and gradient coverage lives in `tests/neural_network/gradient_check.rs` and
+//! is not duplicated here. This file adds gradient tests only for the `return_sequences` and
+//! `go_backwards` flags, because those 2 flags change the backward pass itself.
+//! `gradient_check.rs` drives every layer with a constant upstream gradient. That gradient cannot
+//! expose a backward pass that reads the time axis in the wrong direction. It also cannot expose
+//! a step that overwrites its carried gradient instead of adding to it.
+//!
+//! The tests fall into these groups:
+//!
+//! - Forward, shape, and error-path checks for each of SimpleRNN, LSTM, and GRU.
+//! - Cross-layer checks that a layer accepts an `Activation` enum value, not only a concrete
+//!   activation struct.
+//! - Determinism checks: 2 forward passes with the same weights and input give the same output.
+//! - `param_count` checks for the trainable-parameter formula of each layer.
+//! - `return_sequences` and `go_backwards` checks, including finite-difference gradient tests
+//!   and fixed output and gradient values from Keras 3.15.1 runs.
+//! - Guards shared by all 3 layers: accepting a weight matrix in a non-standard memory order,
+//!   and rejecting an input that is not rank 3.
 
 use crate::common::assert_allclose;
 use approx::assert_abs_diff_eq;
@@ -55,6 +69,7 @@ fn simple_rnn_forward_1step_1unit_tanh() {
     assert_allclose(&out, &expected, 1e-6);
 }
 
+/// SimpleRNN over 2 timesteps threads the hidden state from t=0 into t=1
 #[test]
 fn simple_rnn_forward_2step_tanh_state_threading() {
     let mut rnn = SimpleRNN::new(1, Tanh::new()).unwrap();
@@ -152,7 +167,7 @@ fn simple_rnn_predict_equals_forward() {
     assert_allclose(&out_training, &out_inference, 1e-6);
 }
 
-/// SimpleRNN constructor rejects a zero dimension, whichever argument carries it
+/// SimpleRNN constructor rejects a dimension of 0, whichever argument carries it
 #[test]
 fn simple_rnn_new_rejects_zero_dimension() {
     let err = SimpleRNN::new(0, Tanh::new()).unwrap_err();
@@ -162,6 +177,7 @@ fn simple_rnn_new_rejects_zero_dimension() {
     );
 }
 
+/// SimpleRNN build rejects a dimension of 0 for `input_dim`
 #[test]
 fn simple_rnn_build_rejects_zero_input_dim() {
     let mut rnn = SimpleRNN::new(3, Tanh::new()).unwrap();
@@ -184,6 +200,7 @@ fn simple_rnn_forward_rejects_2d_input() {
     );
 }
 
+/// SimpleRNN forward rejects a non-3D input (1D tensor)
 #[test]
 fn simple_rnn_forward_rejects_1d_input() {
     let mut rnn = SimpleRNN::new(1, Tanh::new()).unwrap();
@@ -224,11 +241,12 @@ fn simple_rnn_backward_units_one_multi_feature_reshapes() {
     assert_eq!(grad_x.shape(), &[1, 2, 2]);
 }
 
+/// SimpleRNN set_weights with wrong kernel shape returns NnError::WeightShape
 #[test]
 fn simple_rnn_set_weights_wrong_kernel_shape_errors() {
     let mut rnn = SimpleRNN::new(3, Tanh::new()).unwrap();
     rnn.build(&Shape::known(&[1, 1, 3])).unwrap();
-    // kernel should be (2,3). (3,2) is passed instead.
+    // The kernel should have shape (3, 3). This test passes (3, 2) instead.
     let bad_kernel = Array2::zeros((3, 2));
     let rk = Array2::zeros((3, 3));
     let bias = Array2::zeros((1, 3));
@@ -375,6 +393,7 @@ fn lstm_forward_2step_cell_state_threads_through() {
     assert_allclose(&out, &expected, 1e-5);
 }
 
+/// LSTM output shape is (batch, units) regardless of timestep count
 #[test]
 fn lstm_output_shape_batch2_units3() {
     let mut lstm = LSTM::new(3, Tanh::new()).unwrap();
@@ -427,7 +446,7 @@ fn lstm_predict_equals_forward() {
     assert_allclose(&out_training, &out_inference, 1e-6);
 }
 
-/// LSTM constructor rejects a zero dimension, whichever argument carries it
+/// LSTM constructor rejects a dimension of 0, whichever argument carries it
 #[test]
 fn lstm_new_rejects_zero_dimension() {
     let err = LSTM::new(0, Tanh::new()).unwrap_err();
@@ -437,6 +456,7 @@ fn lstm_new_rejects_zero_dimension() {
     );
 }
 
+/// LSTM build rejects a dimension of 0 for `input_dim`
 #[test]
 fn lstm_build_rejects_zero_input_dim() {
     let mut lstm = LSTM::new(3, Tanh::new()).unwrap();
@@ -483,7 +503,7 @@ fn lstm_set_weights_wrong_shape_errors() {
     let good_rk = Array2::zeros((3, 3));
     let good_b = Array2::zeros((1, 3));
 
-    // Wrong shape for cell_kernel: should be (2,3), given (3,2)
+    // bad_k has shape (3, 2), which matches no gate's expected kernel shape
     let bad_k = Array2::zeros((3, 2));
     let err = lstm
         .set_gate_weights(
@@ -581,8 +601,10 @@ fn gru_forward_2step_hidden_state_blending() {
     assert_allclose(&out, &expected, 1e-5);
 }
 
-/// GRU update gate z~=0 hands the candidate straight through, since Keras' `z` weights the
-/// previous state. An open update gate takes the candidate, whose kernel here gives tanh(0).
+/// GRU update gate near 0 hands the candidate hidden state through unchanged
+///
+/// `h_t = z_t * h_prev + (1 - z_t) * candidate` reduces to the candidate term when `z_t` is
+/// near 0. The candidate kernel here gives tanh(0).
 #[test]
 fn gru_update_gate_zero_takes_the_candidate() {
     let mut gru = GRU::new(1, Tanh::new()).unwrap();
@@ -618,8 +640,10 @@ fn gru_update_gate_zero_takes_the_candidate() {
     );
 }
 
-/// GRU update gate z~=1 keeps the previous hidden state, whatever the candidate says. The
-/// candidate here is a clearly non-zero tanh(1), so a flipped `z` would show 0.76, not 0
+/// GRU update gate near 1 keeps the previous hidden state, regardless of the candidate value
+///
+/// The candidate here is tanh(1), a clearly non-zero value, so a flipped `z_t` would show 0.76
+/// instead of 0.
 #[test]
 fn gru_update_gate_one_keeps_previous_hidden() {
     let mut gru = GRU::new(1, Tanh::new()).unwrap();
@@ -634,7 +658,7 @@ fn gru_update_gate_one_keeps_previous_hidden() {
     gru.set_gate_weights(
         k_zero.clone(),
         rk.clone(),
-        bias.clone(), // reset (r~=0.5, irrelevant since h_prev=0)
+        bias.clone(), // reset (r_t about 0.5, but h_prev = 0 makes it irrelevant)
         k_large.clone(),
         rk.clone(),
         bias.clone(), // update (z~=1)
@@ -656,7 +680,8 @@ fn gru_update_gate_one_keeps_previous_hidden() {
     );
 }
 
-/// The fused kernel's column blocks are ordered [z | r | h] (Keras' update, reset, candidate).
+/// The fused kernel's column blocks are ordered [z | r | h] (update, reset, candidate)
+///
 /// This test writes the fused tensors directly instead of through `set_gate_weights`.
 #[test]
 fn gru_fused_kernel_first_block_is_the_update_gate() {
@@ -681,6 +706,7 @@ fn gru_fused_kernel_first_block_is_the_update_gate() {
     );
 }
 
+/// GRU output shape is (batch, units) regardless of timestep count
 #[test]
 fn gru_output_shape_batch2_units4() {
     let mut gru = GRU::new(4, Tanh::new()).unwrap();
@@ -729,7 +755,7 @@ fn gru_predict_equals_forward() {
     assert_allclose(&out_training, &out_inference, 1e-6);
 }
 
-/// GRU constructor rejects a zero dimension, whichever argument carries it
+/// GRU constructor rejects a dimension of 0, whichever argument carries it
 #[test]
 fn gru_new_rejects_zero_dimension() {
     let err = GRU::new(0, Tanh::new()).unwrap_err();
@@ -739,6 +765,7 @@ fn gru_new_rejects_zero_dimension() {
     );
 }
 
+/// GRU build rejects a dimension of 0 for `input_dim`
 #[test]
 fn gru_build_rejects_zero_input_dim() {
     let mut gru = GRU::new(3, Tanh::new()).unwrap();
@@ -761,6 +788,7 @@ fn gru_forward_rejects_2d_input() {
     );
 }
 
+/// GRU forward rejects a non-3D input (4D tensor)
 #[test]
 fn gru_forward_rejects_4d_input() {
     let mut gru = GRU::new(1, Tanh::new()).unwrap();
@@ -793,7 +821,7 @@ fn gru_set_weights_wrong_shape_errors() {
     let good_rk = Array2::zeros((3, 3));
     let good_b = Array2::zeros((1, 3));
 
-    // Wrong shape for update_recurrent_kernel: (2,3) instead of (3,3)
+    // bad_rk has shape (2, 3), which matches no gate's expected recurrent kernel shape
     let bad_rk = Array2::zeros((2, 3));
     let err = gru
         .set_gate_weights(
@@ -835,6 +863,7 @@ fn simple_rnn_accepts_activation_enum_tanh() {
     assert_allclose(&out, &expected, 1e-6);
 }
 
+/// LSTM accepts Activation enum values, not just concrete activation structs
 #[test]
 fn lstm_accepts_activation_enum_tanh() {
     let mut lstm = LSTM::new(1, Activation::Tanh).unwrap();
@@ -868,6 +897,7 @@ fn lstm_accepts_activation_enum_tanh() {
     assert_allclose(&out, &expected, 1e-5);
 }
 
+/// GRU accepts Activation enum values, not just concrete activation structs
 #[test]
 fn gru_accepts_activation_enum_tanh() {
     let mut gru = GRU::new(1, Activation::Tanh).unwrap();
@@ -987,8 +1017,9 @@ fn lstm_param_count_formula() {
 }
 
 // return_sequences and go_backwards
-// The 3 layers share 1 set of fixed weights and 1 input. The values are exact multiples of 1/8,
-// which f32 holds without rounding, so the same numbers pin all 4 flag combinations.
+// The 3 layers share the same fixed input and a weight-generating formula (see `flag_input` and
+// `flag_weights`), each sized to that layer's own gate count. Every value is an exact multiple
+// of 1/8, which f32 holds without rounding, so the same numbers pin all 4 flag combinations.
 
 /// The fixed rank-3 input of the flag tests, with shape (batch 2, timesteps 3, features 2)
 ///
@@ -1304,7 +1335,7 @@ fn simple_rnn_go_backwards_emits_states_in_processing_order() {
 }
 
 /// The last slot of a returned sequence is bit-identical to the output of the same layer with
-/// return_sequences off, which is also the final state that the recurrence carries out
+/// return_sequences off. That output is also the final state that the recurrence carries out
 ///
 /// This holds for both settings of go_backwards, because the last processing step ends the
 /// recurrence in both directions.
@@ -1376,8 +1407,8 @@ fn return_sequences_last_slot_equals_the_final_state() {
 /// go_backwards on the given input equals the same layer without the flag on the time-reversed
 /// input, for all 3 layers
 ///
-/// This pins the forward index map on its own: only the order in which the timesteps enter the
-/// recurrence changes.
+/// This isolates the effect of the flag: only the order in which timesteps enter the recurrence
+/// changes.
 #[test]
 fn go_backwards_equals_the_forward_layer_on_reversed_input() {
     let x = flag_input();

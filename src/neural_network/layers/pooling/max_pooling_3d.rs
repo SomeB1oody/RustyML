@@ -1,5 +1,12 @@
-//! 3D max pooling layer that selects the maximum value within each pooling window across depth,
-//! height, and width.
+//! 3D max pooling layer
+//!
+//! [`MaxPooling3D`] slides a window across the depth, height, and width axes of a `[batch, depth,
+//! height, width, channels]` tensor. The layer keeps the largest element of each window.
+//! [`MaxPooling3D::new`] sets the strides to `pool_size` and the padding to
+//! [`PaddingType::Valid`](crate::neural_network::layers::convolution::PaddingType).
+//! [`MaxPooling3D::with_strides`] and [`MaxPooling3D::with_padding`] override those defaults. The
+//! forward pass records the arg-max of every window. The backward pass then routes each output
+//! gradient back to the input element that produced it.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -44,11 +51,10 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::{Array5, ArrayD};
 ///
-/// // Create a Sequential model for 3D data processing
-/// // Create sample 3D input data, for example 3D medical images or volumetric data
+/// // Example 3D input data, such as a medical scan volume
 /// // Input: [1 batch, 32x32x32 3D volume, 16 channels]
 /// let input_data = Array5::from_shape_fn((1, 32, 32, 32, 16), |(b, d, h, w, c)| {
-///     // Generate sample data with spatial patterns
+///     // Example data with spatial patterns
 ///     ((d + h + w) as f32 * 0.1) + (c as f32 * 0.01)
 /// }).into_dyn();
 ///
@@ -62,19 +68,16 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///     .build(&Shape::known(input_data.shape()))
 ///     .unwrap();
 ///
-/// // Compile the model with optimizer and loss function
+/// // Compile the model with an optimizer and a loss function
 /// model.compile(
-///     RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(),    // RMSprop optimizer
-///     MeanSquaredError::new()              // Mean Squared Error loss
+///     RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(),
+///     MeanSquaredError::new()
 /// );
 ///
-/// // Display model architecture
 /// model.summary();
 ///
-/// // Train the model
 /// model.fit(&input_data, &target_data, 5).unwrap();
 ///
-/// // Make predictions on new data
 /// let predictions = model.predict(&input_data).unwrap();
 /// println!("Output shape after max pooling: {:?}", predictions.shape());
 /// // Expected output: [1, 16, 16, 16, 16], spatial dimensions reduced by a factor of 2
@@ -110,8 +113,9 @@ impl MaxPooling3D {
     ///
     /// # Notes
     ///
-    /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
-    /// with [`MaxPooling3D::with_strides`] and [`MaxPooling3D::with_padding`].
+    /// Strides default to `pool_size` and padding defaults to
+    /// [`PaddingType::Valid`]. Override
+    /// them with [`MaxPooling3D::with_strides`] and [`MaxPooling3D::with_padding`].
     ///
     pub fn new(pool_size: (usize, usize, usize)) -> Self {
         MaxPooling3D {
@@ -130,14 +134,19 @@ impl MaxPooling3D {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - The updated layer, or an error if any stride is zero
+    /// - `Self` - The updated layer
+    ///
+    /// # Errors
+    ///
+    /// - Returns [`Error::InvalidParameter`] if any stride is 0
     pub fn with_strides(mut self, strides: (usize, usize, usize)) -> Result<Self, Error> {
         validate_strides_3d(strides)?;
         self.strides = strides;
         Ok(self)
     }
 
-    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    /// Sets the padding mode (defaults to
+    /// [`PaddingType::Valid`])
     ///
     /// # Parameters
     ///

@@ -50,7 +50,7 @@ mod norm_unit;
 mod optimizers;
 /// Tests for the optional parameters: `use_bias`, `center`, and `scale`
 mod optional_parameters;
-/// Tests for the PReLU layer: the shared-axes rule, both gradients, and the branch at 0
+/// Tests for the PReLU layer: the shared-axes rule, the 2 gradients, and the branch at 0
 mod p_relu;
 /// Tests for the Permute and RepeatVector layers: axis order, layout, and error paths
 mod permute_repeat;

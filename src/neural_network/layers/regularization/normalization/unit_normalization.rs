@@ -1,5 +1,12 @@
 //! Unit normalization layer and its axis configuration, with support for single-axis and
 //! multi-axis normalization
+//!
+//! [`UnitNormalization`] scales each group of elements to an L2 norm of 1, where a group is 1
+//! set of elements picked by [`UnitNormalizationAxis`]. The forward and backward passes take a
+//! fused row path when the normalized axes form the trailing block of the shape, and fall back
+//! to a strided path over ndarray views for any other axis choice. The free functions below
+//! implement both paths. The forward method caches the values they return, and the backward
+//! method reads them back to compute the gradient
 
 use super::folds::{rows_per_block, segment_dot};
 use crate::error::Error;

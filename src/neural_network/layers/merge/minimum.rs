@@ -1,4 +1,9 @@
 //! The merge layer that takes the smaller value of its inputs, element by element
+//!
+//! [`Minimum`] folds its inputs pairwise and keeps the smaller value at each position.
+//! `MinimumCache` records which input won each position, so the backward pass can route the
+//! gradient there. The `tests` module checks the fold, the tie rule, the NaN rule, the
+//! broadcast, and the refusals of the layer.
 
 use super::{
     broadcast_input, elementwise_merge_layer_functions, merge_layer_base_functions, merged_dims,
@@ -24,13 +29,11 @@ use ndarray::IxDyn;
 /// The layer holds no trainable array and no configuration. [`Maximum`](super::Maximum) is the
 /// same layer with the other comparison
 ///
-/// # The tie rule
+/// # Notes
 ///
 /// A tie routes the whole gradient to the first input that holds the winning value. Every
 /// other input that ties there takes 0. [`Maximum`](super::Maximum) resolves a tie by the same
 /// rule. The test `backward_gives_a_tie_to_the_first_input` pins the rule
-///
-/// # Notes
 ///
 /// A NaN wins its position and keeps it. The first input that holds a NaN at a position takes
 /// the whole gradient there, and no later value displaces it
@@ -64,11 +67,11 @@ pub struct Minimum {
 }
 
 impl Minimum {
-    /// Creates a new Minimum layer
+    /// Creates a layer that takes the smaller value of its inputs, element by element
     ///
     /// # Returns
     ///
-    /// - `Self` - New `Minimum` layer instance, before its build
+    /// - `Self` - A new `Minimum` layer, which holds no build
     pub fn new() -> Self {
         Minimum::default()
     }

@@ -3,10 +3,20 @@
 //! Declares every layer submodule and glob-re-exports the public layer types. It also defines
 //! the infrastructure shared across the subsystem. The
 //! [`ParamCounts`](crate::neural_network::layers::ParamCounts) report says how many parameter
-//! elements a layer holds, split into trainable and non-trainable. 2 macros give a layer its
-//! weight methods. `no_trainable_parameters_layer_functions` emits the stubs of a parameter-free
-//! layer. `named_weight_layer_functions` builds the named array list of a layer that holds
-//! arrays.
+//! elements a layer holds, split into trainable and non-trainable.
+//!
+//! 5 macros remove the boilerplate that a layer would otherwise repeat by hand.
+//!
+//! 2 macros give a layer its weight methods. `no_trainable_parameters_layer_functions` emits
+//! the stubs of a parameter-free layer. `named_weight_layer_functions` builds the named array
+//! list of a layer that holds arrays, from a compact `kind "name" => field` roster.
+//! `optional_named_weight` is the helper that the second macro expands into, and it is not
+//! meant to be called on its own.
+//!
+//! The other 2 macros cover the build-shape report of a layer that holds a `built: Option<Shape>`
+//! field. `built_layer_shape_functions` emits `known_input_shapes`, `is_built`, and
+//! `build_config` together. `build_config_function` emits `is_built` and `build_config` alone,
+//! for a layer that writes its own `known_input_shapes`.
 //!
 //! The submodules fall into a few categories:
 //!

@@ -1,5 +1,14 @@
 //! 3D spatial dropout layer that drops whole channels of `(batch_size, depth, height,
 //! width, channels)` inputs
+//!
+//! [`SpatialDropout3D`] holds the drop rate, the shape recorded by
+//! [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build), and the random number
+//! generator that draws the per-channel mask. [`SpatialDropout3D::with_random_state`] reseeds that
+//! generator for reproducible masks.
+//!
+//! The forward pass samples 1 keep/drop value per `(batch, channel)` pair, scales the kept
+//! channels by `1 / (1 - rate)` with `spatial_dropout_scale`, and parks the small mask for
+//! `spatial_dropout_backward` to reuse on the backward pass.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

@@ -9,8 +9,9 @@
 //! data (IoError::Serialization), and a wrong magic tag or format version
 //! (IoError::UnsupportedModelFormat).
 //!
-//! The last 2 tests pin the atomicity of a refusal. A load validates the whole file before it
-//! writes any array, so a refusal leaves every array of the model bit for bit as it was.
+//! The 2 tests under "The atomic refusal" pin the atomicity of a refusal. A load validates the
+//! whole file before it writes any array. A refusal therefore leaves every array of the model
+//! bit for bit as it was.
 
 use crate::common::assert_allclose;
 use ndarray::Array;
@@ -57,19 +58,25 @@ use std::env;
 // Helpers
 
 /// Temporary file that deletes itself when dropped
+///
+/// The single field is the path of the file, inside the system temporary directory.
 struct TempFile(std::path::PathBuf);
 
 impl TempFile {
+    /// Builds a path for a new temporary file, under a name unique to the calling test
     fn new(name: &str) -> Self {
         let path = env::temp_dir().join(format!("rustyml_serialize_test_{}.bin", name));
         TempFile(path)
     }
+
+    /// The path of the temporary file
     fn path(&self) -> &std::path::Path {
         &self.0
     }
 }
 
 impl Drop for TempFile {
+    /// Removes the temporary file, ignoring an error if it is already gone
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
     }
@@ -215,6 +222,7 @@ fn dense_zero_weights_bias_only_value_check_and_round_trip() {
     assert_allclose(&after, &expected, 1e-6_f32);
 }
 
+// A 2-layer trained Dense stack round-trips its weights
 #[test]
 fn dense_two_layer_trained_round_trip() {
     let tmp = TempFile::new("dense2");
@@ -248,6 +256,7 @@ fn dense_two_layer_trained_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
+// Conv1D round-trips through save and load
 #[test]
 fn conv1d_round_trip() {
     let tmp = TempFile::new("conv1d");
@@ -271,6 +280,7 @@ fn conv1d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
+// Conv2D round-trips through save and load
 #[test]
 fn conv2d_round_trip() {
     let tmp = TempFile::new("conv2d");
@@ -297,6 +307,7 @@ fn conv2d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
+// Conv3D round-trips through save and load
 #[test]
 fn conv3d_round_trip() {
     let tmp = TempFile::new("conv3d");
@@ -323,6 +334,7 @@ fn conv3d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
+// DepthwiseConv2D round-trips through save and load
 #[test]
 fn depthwise_conv2d_round_trip() {
     let tmp = TempFile::new("depthwise_conv2d");
@@ -415,6 +427,7 @@ fn separable_conv1d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
+// Conv1DTranspose round-trips through save and load
 #[test]
 fn conv1d_transpose_round_trip() {
     let tmp = TempFile::new("conv1d_transpose");
@@ -441,6 +454,7 @@ fn conv1d_transpose_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
+// Conv2DTranspose round-trips through save and load
 #[test]
 fn conv2d_transpose_round_trip() {
     let tmp = TempFile::new("conv2d_transpose");
@@ -467,6 +481,7 @@ fn conv2d_transpose_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
+// Conv3DTranspose round-trips through save and load
 #[test]
 fn conv3d_transpose_round_trip() {
     let tmp = TempFile::new("conv3d_transpose");
@@ -493,6 +508,7 @@ fn conv3d_transpose_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
+// SeparableConv2D round-trips through save and load
 #[test]
 fn separable_conv2d_round_trip() {
     let tmp = TempFile::new("separable_conv2d");
@@ -519,6 +535,7 @@ fn separable_conv2d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
+// SimpleRNN round-trips through save and load
 #[test]
 fn simple_rnn_round_trip() {
     let tmp = TempFile::new("simple_rnn");
@@ -542,6 +559,7 @@ fn simple_rnn_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
+// LSTM round-trips through save and load
 #[test]
 fn lstm_round_trip() {
     let tmp = TempFile::new("lstm");
@@ -565,6 +583,7 @@ fn lstm_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
+// GRU round-trips through save and load
 #[test]
 fn gru_round_trip() {
     let tmp = TempFile::new("gru");
@@ -624,7 +643,7 @@ fn embedding_trained_round_trip_preserves_the_lookup_table() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// PReLU round-trip: the trained slopes must survive, including the shared-axes shape
+// PReLU round-trip: the trained slopes must survive
 #[test]
 fn p_relu_trained_round_trip_preserves_the_slopes() {
     let tmp = TempFile::new("p_relu");
@@ -807,6 +826,7 @@ fn batch_normalization_predict_is_deterministic_after_round_trip() {
     assert_allclose(&p2, &p1, 1e-7_f32);
 }
 
+// LayerNormalization round-trips through save and load
 #[test]
 fn layer_normalization_round_trip() {
     let tmp = TempFile::new("layer_norm");
@@ -833,6 +853,7 @@ fn layer_normalization_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
+// GroupNormalization round-trips through save and load
 #[test]
 fn group_normalization_round_trip() {
     let tmp = TempFile::new("group_norm");
@@ -859,6 +880,7 @@ fn group_normalization_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
+// InstanceNormalization round-trips through save and load
 #[test]
 fn instance_normalization_round_trip() {
     let tmp = TempFile::new("instance_norm");
@@ -886,7 +908,8 @@ fn instance_normalization_round_trip() {
 }
 
 // Dense -> Dropout -> Dense round-trips a parameterless layer (Dropout is transparent in eval
-// mode). An empty input_shape skips shape validation, so batch size is not fixed.
+// mode). Dropout never checks a later input against the shape it built for, so batch size is
+// not fixed.
 #[test]
 fn mixed_model_with_dropout_round_trip() {
     let tmp = TempFile::new("mixed_dropout");
@@ -894,7 +917,7 @@ fn mixed_model_with_dropout_round_trip() {
     let make_arch = || {
         SequentialBuilder::new()
             .add(Dense::new(4, Linear::new()).unwrap())
-            // An empty input_shape means Dropout skips its shape validator at runtime
+            // Dropout records the build shape but never checks a later input against it
             .add(Dropout::new(0.3).unwrap())
             .add(Dense::new(2, Linear::new()).unwrap())
             .build(&Shape::known(&[1, 3]))
@@ -934,7 +957,7 @@ fn mixed_model_trained_round_trip() {
         MeanSquaredError::new(),
     );
 
-    // Consistent batch size. Dropout shape validation is off (empty vec).
+    // Consistent batch size. Dropout does not check the input shape at runtime.
     let x: Tensor = Array::from_shape_vec((2, 3), vec![0.5f32, -1.0, 1.5, -0.5, 1.0, -1.5])
         .unwrap()
         .into_dyn();
@@ -1159,7 +1182,8 @@ fn load_wrong_format_version_gives_unsupported_format_error() {
 
 /// A file of the format version before this one is refused, and the refusal names both numbers
 ///
-/// A version 1 file matches nothing this build reads. The number in the header is what says so
+/// A file whose format version is 1 less than `MODEL_FORMAT_VERSION` matches nothing this build
+/// reads. The number in the header is what says so
 #[test]
 fn load_older_format_version_names_the_version_it_found_and_the_one_it_wants() {
     let tmp = TempFile::new("older_version");
@@ -1260,8 +1284,8 @@ fn repeated_layer_type_round_trips_by_position() {
 
 /// The lenient load applies what matches, and reports the missing and the unused paths
 ///
-/// The file holds 4 layers and the model holds 3. Layer 0 agrees, layer 1 disagrees on every
-/// extent, layer 2 holds another layer type, and layer 3 of the file reaches no layer at all
+/// The file holds 4 layers and the model holds 3. Layer 0 agrees, layer 1 disagrees on shape,
+/// layer 2 holds another layer type, and layer 3 of the file reaches no layer at all
 #[test]
 fn load_partial_reports_applied_missing_and_unused() {
     let tmp = TempFile::new("partial");

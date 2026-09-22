@@ -5,7 +5,7 @@
 //! with 2 towers, a shared encoder, and any model with several inlets or several outlets need
 //! more than a chain. [`Graph`](crate::neural_network::graph::Graph) is that model
 //!
-//! A graph holds a layer ARENA and a node list. A node is a call of 1 layer on the outputs of
+//! A graph holds a layer arena and a node list. A node is a call of 1 layer on the outputs of
 //! other nodes, so several nodes can call 1 layer. That is what weight sharing is: 1 set of
 //! arrays, read at several positions, and updated by the sum of the gradients of those
 //! positions
@@ -183,10 +183,6 @@ impl GraphBuilder {
     ///
     /// - `layer` - The layer to hold
     ///
-    /// # Type Parameters
-    ///
-    /// - `L` - The concrete layer type
-    ///
     /// # Returns
     ///
     /// - `LayerId` - The address of the layer in the arena
@@ -219,10 +215,6 @@ impl GraphBuilder {
     ///
     /// - `layer` - The layer to hold and call
     /// - `inputs` - The nodes whose outputs enter the call
-    ///
-    /// # Type Parameters
-    ///
-    /// - `L` - The concrete layer type
     ///
     /// # Returns
     ///
@@ -426,10 +418,6 @@ impl Graph {
     /// - `optimizer` - The optimizer that updates every parameter
     /// - `losses` - 1 loss per output, in the order the build received the outputs
     ///
-    /// # Type Parameters
-    ///
-    /// - `O` - The concrete optimizer type
-    ///
     /// # Returns
     ///
     /// - `Result<&mut Self, Error>` - The compiled model
@@ -466,11 +454,6 @@ impl Graph {
     ///
     /// - `optimizer` - The optimizer that updates every parameter
     /// - `loss` - The loss that every output takes
-    ///
-    /// # Type Parameters
-    ///
-    /// - `O` - The concrete optimizer type
-    /// - `L` - The concrete loss type
     ///
     /// # Returns
     ///
@@ -845,6 +828,10 @@ impl Graph {
     /// # Errors
     ///
     /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the model holds no loss
+    /// - `Error::InvalidInput` - If the tensor counts do not match the model, or if a tensor
+    ///   has no batch axis
+    /// - `Error::EmptyInput` - If a tensor is empty
+    /// - `Error::DimensionMismatch` - If 2 tensors disagree on the sample count
     /// - `Error` - Whatever the forward pass reports
     pub fn evaluate(&self, xs: &[&Tensor], ys: &[&Tensor]) -> Result<f32, Error> {
         self.check_compiled(false)?;
@@ -1091,11 +1078,16 @@ fn gather(tensor: &Tensor, rows: &[usize]) -> Tensor {
     tensor.select(Axis(0), rows)
 }
 
-/// The global L2 norm of every gradient of the model
+/// The global L2 norm of every gradient of the model, for a global-norm clip
 ///
 /// The walk is the arena order, and the parameter order of each layer. The gradient store
-/// sorts by address instead. A sum of `f64` squares is not associative, so reducing in
-/// store order would move the last bit of the norm
+/// sorts by address instead, and a sum of `f64` squares is not associative, so reducing in
+/// store order would move the last bit of the norm. A tensor folds in deterministic blocks,
+/// and the rayon path above the square-sum gate gives the same result as the serial path. A
+/// layer with no gradient contributes nothing, and a pass with no gradient at all gives a norm
+/// of 0.0
+///
+/// This is the same walk order that the parameter-update loop in [`Graph::train_batch`] uses
 fn global_grad_norm(layers: &mut [Box<dyn Layer>], grads: &Grads) -> f32 {
     let mut sum_sq = 0.0_f64;
     for (scope, layer) in layers.iter_mut().enumerate() {

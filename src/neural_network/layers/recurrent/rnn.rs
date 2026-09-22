@@ -26,7 +26,7 @@ use std::marker::PhantomData;
 
 /// A recurrent layer over 1 cell
 ///
-/// The layer takes an input of shape `[batch, timesteps, features]`. It returns the last
+/// The layer takes an input of shape `[batch, timesteps, input_dim]`. It returns the last
 /// hidden state, with shape `[batch, units]`, or every hidden state in processing order,
 /// with shape `[batch, timesteps, units]`.
 ///
@@ -331,6 +331,8 @@ impl<C: RnnCell> UnaryLayer for Rnn<C> {
         })
     }
 
+    /// Backpropagates through time, then reduces the per-step gate gradients into 1 gradient
+    /// per array
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let RnnCache::<C> {
             input: x3,
@@ -490,7 +492,8 @@ fn groups_partition_the_gates<C: RnnCell>() -> bool {
 /// The macro also gives the layer a `Debug` that prints what the base prints, so the layer
 /// reports its own name
 ///
-/// The file that calls this macro must have [`LayerBase`] and [`UnaryLayer`] in scope
+/// The file that calls this macro must have [`LayerBase`](crate::neural_network::traits::LayerBase)
+/// and [`UnaryLayer`](crate::neural_network::traits::UnaryLayer) in scope
 macro_rules! recurrent_layer_traits {
     ($layer:ident) => {
         impl std::fmt::Debug for $layer {

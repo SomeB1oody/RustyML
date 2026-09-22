@@ -1,4 +1,9 @@
 //! AdamW optimizer: Adam with decoupled weight decay
+//!
+//! Holds the [`AdamW`] struct, its constructor, its [`AdamW::with_global_clipnorm`] builder method,
+//! and its [`Optimizer`](crate::neural_network::traits::Optimizer) implementation. The moment math
+//! and the update loop live in the private `AdamCore` type, shared with
+//! [`Adam`](crate::neural_network::optimizers::Adam)
 
 use crate::error::Error;
 use crate::neural_network::ctx::Grads;
@@ -11,8 +16,8 @@ use crate::neural_network::traits::{LayerBase, Optimizer};
 /// `weight_decay` is decoupled. AdamW shrinks the parameter directly by the factor
 /// `(1 - learning_rate * weight_decay)` before the gradient step, instead of folding an L2 term
 /// into the gradient. The decay therefore does not flow through the moment estimates, and
-/// the adaptive denominator does not rescale it. This is the Loshchilov and Hutter formulation, and
-/// the better-behaved choice with adaptive optimizers. With `weight_decay == 0.0` it matches
+/// the adaptive denominator does not rescale it. This is the Loshchilov and Hutter formulation,
+/// and the better-behaved choice with adaptive optimizers. With `weight_decay == 0.0` it matches
 /// `Adam`. Weight decay applies to weight tensors only, never to biases or normalization
 /// scale/shift parameters
 #[derive(Debug)]

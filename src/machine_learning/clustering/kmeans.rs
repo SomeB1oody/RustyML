@@ -1,7 +1,18 @@
-//! K-Means clustering
+//! K-means clustering
 //!
-//! Provides the [`KMeans`] estimator, which partitions samples into k clusters
-//! using k-means++ initialization and Lloyd's iteration
+//! Provides the [`KMeans`] estimator, which partitions samples into k clusters using
+//! k-means++ initialization and Lloyd's iteration. Each call to [`KMeans::fit`] restarts
+//! the whole process `n_init` times from a fresh k-means++ seeding. It keeps the
+//! lowest-inertia run, so a single unlucky seeding does not decide the result.
+//!
+//! A seeded model ([`KMeans::with_random_state`]) is reproducible. Each restart derives
+//! its own seed from the base seed with a fixed mixing step. The set of restarts
+//! therefore stays the same across runs on the same input.
+//!
+//! The heavy per-iteration work (centroid projection, arg-min assignment, and the
+//! centroid update) goes through the crate's shared GEMM and parallel-gate helpers.
+//! Large inputs switch to a parallel path while small inputs stay serial. See
+//! [`KMeans::fit`] for the performance contract.
 
 use crate::error::Error;
 use crate::machine_learning::validation::{
@@ -25,10 +36,10 @@ use std::ops::AddAssign;
 /// Number of k-means++ restarts a fit performs unless [`KMeans::with_n_init`] says otherwise
 const DEFAULT_N_INIT: usize = 10;
 
-/// Derives a distinct, deterministic seed for one restart from the model's `random_state`
+/// Derives a distinct, deterministic seed for 1 restart from the model's `random_state`
 ///
 /// Uses SplitMix64's mixing step, so consecutive restarts get well-separated streams. Deriving
-/// each seed directly, instead of advancing one shared RNG, keeps a restart's seeding independent
+/// each seed directly, instead of advancing 1 shared RNG, keeps a restart's seeding independent
 /// of how much randomness earlier restarts consumed
 #[inline]
 fn restart_seed(base: u64, restart: usize) -> u64 {
@@ -53,19 +64,19 @@ fn restart_seed(base: u64, restart: usize) -> u64 {
 /// // Sample dataset with 100 points in 2D space, in 3 distinct clusters
 /// let mut data = vec![];
 ///
-/// // First cluster around (2.0, 2.0)
+/// // 1st cluster around (2.0, 2.0)
 /// for _ in 0..30 {
 ///     data.push(2.0 + random::<f64>() * 0.5);
 ///     data.push(2.0 + random::<f64>() * 0.5);
 /// }
 ///
-/// // Second cluster around (8.0, 8.0)
+/// // 2nd cluster around (8.0, 8.0)
 /// for _ in 0..40 {
 ///     data.push(8.0 + random::<f64>() * 0.5);
 ///     data.push(8.0 + random::<f64>() * 0.5);
 /// }
 ///
-/// // Third cluster around (2.0, 8.0)
+/// // 3rd cluster around (2.0, 8.0)
 /// for _ in 0..30 {
 ///     data.push(2.0 + random::<f64>() * 0.5);
 ///     data.push(8.0 + random::<f64>() * 0.5);
@@ -103,15 +114,15 @@ fn restart_seed(base: u64, restart: usize) -> u64 {
 ///
 /// // Predict clusters for new data points
 /// let new_data = Array2::<f64>::from_shape_vec((3, 2),
-///     vec![2.1, 2.2,  // Close to first cluster
-///          7.9, 8.1,  // Close to second cluster
-///          2.2, 7.8]) // Close to third cluster
+///     vec![2.1, 2.2,  // Close to the 1st cluster
+///          7.9, 8.1,  // Close to the 2nd cluster
+///          2.2, 7.8]) // Close to the 3rd cluster
 ///     .unwrap();
 ///
 /// let predicted_labels = kmeans.predict(&new_data).unwrap();
 /// println!("Predicted labels for new data: {:?}", predicted_labels);
 ///
-/// // Fit and predict in one step
+/// // Fit and predict in 1 step
 /// let mut kmeans2 = KMeans::default(); // Uses default parameters
 /// let labels = kmeans2.fit_predict(&data).unwrap();
 /// println!("Labels from fit_predict: {:?}", labels);
@@ -220,11 +231,11 @@ impl KMeans {
     ///
     /// - `Result<Self, Error>` - the updated instance, for method chaining
     ///
-    /// # scikit-learn parity
+    /// # Notes
     ///
     /// scikit-learn's `n_init='auto'` is `1` for `init='k-means++'`. Its greedy k-means++ draws
     /// `2 + ln(k)` candidates per center and keeps the best, so a single run already has low
-    /// variance. RustyML uses plain k-means++, one D^2 draw per center, which needs the restarts
+    /// variance. RustyML uses plain k-means++, 1 D^2 draw per center, which needs the restarts
     /// that greedy seeding would otherwise replace. Pass `1` for literal scikit-learn parity
     ///
     /// # Errors
@@ -264,11 +275,12 @@ impl KMeans {
     get_field!(get_inertia, inertia, Option<f64>);
     get_field_as_ref!(get_centroids, centroids, Option<&Array2<f64>>);
 
-    /// Index of the closest centroid given a sample's projection row (`proj[j] = x . c_j`)
+    /// Finds the index of the closest centroid given a sample's projection row
+    /// (`proj[j] = x . c_j`)
     ///
     /// Ranks centroids by `||c_j||^2 - 2 x.c_j`, which orders the same as the squared distance
     /// (the `||x||^2` term is constant per sample). The projections for every sample come from
-    /// one GEMM call, so the per-sample work here is a plain scan
+    /// 1 GEMM call, so the per-sample work here is a plain scan
     fn argmin_centroid(proj_row: ArrayView1<f64>, centroid_sq_norms: &Array1<f64>) -> usize {
         let mut min_cluster = 0;
         let mut min_val = f64::MAX;
@@ -308,7 +320,7 @@ impl KMeans {
 
         let mut rng = crate::random::make_rng(seed);
 
-        // Randomly select the first center
+        // Randomly select the 1st center
         let first_center_idx = rng.random_range(0..n_samples);
         centroids.row_mut(0).assign(&data.row(first_center_idx));
 
@@ -403,7 +415,7 @@ impl KMeans {
     ///
     /// # Performance
     ///
-    /// The per-iteration assignment runs as one GEMM call. The arg-min scan runs in parallel
+    /// The per-iteration assignment runs as 1 GEMM call. The arg-min scan runs in parallel
     /// above the calibrated scan-class gate. The centroid accumulation runs as a deterministic
     /// blocked fold above the sum gate (see `crate::parallel_gates`). The parallel path matches
     /// the serial result, so rerunning on the same machine gives the same result, though not
@@ -420,7 +432,7 @@ impl KMeans {
         }
 
         // Restarts the whole fit `n_init` times and keeps the lowest-inertia run. Plain k-means++
-        // draws only one D^2 sample per center. A single seeding can therefore land in a poor
+        // draws only 1 D^2 sample per center. A single seeding can therefore land in a poor
         // local optimum that Lloyd's iteration cannot escape. The best-of-n rule is what makes a
         // fit reproducible in quality, not only in seed
         let mut best: Option<(Array2<f64>, Array1<isize>, f64, usize)> = None;
@@ -452,7 +464,7 @@ impl KMeans {
         Ok(self)
     }
 
-    /// Runs one k-means++ seeding plus Lloyd iteration, recording the result on `self`
+    /// Runs 1 k-means++ seeding plus Lloyd iteration, recording the result on `self`
     ///
     /// `seed` overrides [`random_state`](Self::get_random_state) for this run alone, so the
     /// restarts driven by [`fit`](Self::fit) explore different seedings while staying
@@ -705,7 +717,7 @@ impl KMeans {
 
         // On the max_iter exit path, the last iteration installs fresh centroids after labeling.
         // So `labels` and `inertia` still describe the previous centroids, and `predict(x)` would
-        // not equal `get_labels()`. One more assignment pass against the final centroids fixes
+        // not equal `get_labels()`. 1 more assignment pass against the final centroids fixes
         // this, matching how scikit-learn re-runs the same final E-step for the same reason
         if converged {
             self.labels = Some(labels);

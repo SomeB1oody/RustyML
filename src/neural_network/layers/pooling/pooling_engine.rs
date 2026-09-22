@@ -469,8 +469,8 @@ pub(super) fn windowed_pool_backward(
                 let mut w = vec![0usize; r];
                 let mut o_flat = 0usize;
                 loop {
-                    // Count the in-bounds elements of this window, then spread the gradient evenly.
-                    // Every channel of the position shares the count
+                    // Count the in-bounds elements of this window, then spread the gradient
+                    // evenly. Every channel of the position shares the count
                     w.iter_mut().for_each(|x| *x = 0);
                     let mut count = 0usize;
                     loop {

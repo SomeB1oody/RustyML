@@ -32,7 +32,7 @@
 //! # What the family shares
 //!
 //! The private items of this module are the shared half, and every layer file reaches them
-//! through `use super::..`:
+//! through a `use super::{...}` import that names each one it needs:
 //!
 //! - `elementwise_output_shape` applies the 2 clauses above and gives the output shape.
 //! - `merged_dims` runs the same rule over the live tensors of a forward pass, and
@@ -293,7 +293,8 @@ fn broadcast_input(layer: &str, input: &Tensor, output: &[usize]) -> Result<Tens
 ///
 /// # Panics
 ///
-/// - If `grad` holds fewer axes than `target`, which no forward pass of the family produces
+/// - If `grad` holds fewer axes than `target`, in a debug build. No forward pass of the
+///   family produces that input
 fn reduce_to(grad: &Tensor, target: &[usize]) -> Tensor {
     debug_assert!(
         grad.ndim() >= target.len(),
@@ -412,12 +413,13 @@ pub(in crate::neural_network::layers::merge) use merge_layer_base_functions;
 /// # Parameters
 ///
 /// - `layer` - Layer name, which every message names
-/// - `arity` - The [`Arity`] of the layer, which is `Arity::AtLeast(1)` everywhere except
-///   [`Subtract`]
+/// - `arity` - The [`Arity`] of the layer, which is `Arity::AtLeast(1)` everywhere
+///   except [`Subtract`]
 ///
 /// [`Layer::arity`]: crate::neural_network::traits::Layer::arity
 /// [`Layer::build_many`]: crate::neural_network::traits::Layer::build_many
-/// [`Layer::compute_output_shape_many`]: crate::neural_network::traits::Layer::compute_output_shape_many
+/// [`Layer::compute_output_shape_many`]:
+///     crate::neural_network::traits::Layer::compute_output_shape_many
 macro_rules! elementwise_merge_layer_functions {
     ($layer:literal, $arity:expr) => {
         fn arity(&self) -> $crate::neural_network::traits::Arity {

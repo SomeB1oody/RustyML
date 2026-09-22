@@ -1,4 +1,25 @@
-//! Shared helpers for the `neural_network` integration tests
+//! Shared helpers for the `neural_network` integration tests.
+//!
+//! # Reproducibility
+//!
+//! [`seeded_rng`] builds a seeded RNG for a test that drives one directly. [`GlobalSeedGuard`]
+//! installs the crate-wide global seed for a test that goes through it instead, and clears the
+//! seed when the guard drops.
+//!
+//! # Tuning gates and task-size caps
+//!
+//! [`NEURAL_NETWORK_GATES`] and [`NEURAL_NETWORK_SPLIT_CAPS`] list every process-global switch a
+//! neural-network layer reads. [`GateGuard`] takes the exclusive side of a shared lock and moves
+//! any of them for the life of a test. It restores every saved value when it drops.
+//! [`GateGuard::acquire`] leaves every value as found, and [`GateGuard::set_all`] and
+//! [`GateGuard::with_split_cap`] move every gate or every cap to 1 value. [`read_gates`] takes
+//! the shared side of the same lock, for a test that only reads the gates as the crate
+//! configured them.
+//!
+//! # Assertions and lookups
+//!
+//! [`assert_allclose`] compares 2 arrays or tensors element-wise within a tolerance.
+//! [`named`] fetches a layer's weight by name, or panics with the names the layer actually holds.
 
 #![allow(dead_code)]
 
@@ -127,9 +148,9 @@ pub const NEURAL_NETWORK_GATES: &[(&str, GateGetter, GateSetter)] = &[
 /// documents what each cap counts, and lists the drivers that must never take one.
 ///
 /// A gate picks the parallel branch of a kernel. A cap decides how many tasks that branch then
-/// builds. The 2 are separate: a small test tensor clears no calibrated task-size rule, so the
-/// parallel branch of such a kernel runs with exactly 1 task until a cap splits it. Neither a
-/// gate nor a cap changes a result.
+/// builds. The 2 are separate. A small test tensor clears no calibrated task-size rule. The
+/// parallel branch of such a kernel then runs with exactly 1 task until a cap splits it. Neither
+/// a gate nor a cap changes a result.
 pub const NEURAL_NETWORK_SPLIT_CAPS: &[(&str, GateGetter, GateSetter)] =
     rustyml::bench_internals::SPLIT_CAPS;
 
@@ -145,7 +166,7 @@ static GATE_LOCK: RwLock<()> = RwLock::new(());
 ///
 /// [`read_gates`] builds it. Bind it for as long as the test reads a gate or runs a kernel
 /// whose path a gate selects. It holds the shared side of the lock, so any number of such tests
-/// run together, and none of them runs while a [`GateGuard`] holds the exclusive side.
+/// run together. None of them runs while a [`GateGuard`] holds the exclusive side.
 #[must_use = "bind the guard to a variable; an unbound guard releases the lock immediately"]
 pub struct GateReadGuard(RwLockReadGuard<'static, ()>);
 
@@ -219,11 +240,12 @@ impl GateGuard {
     /// Puts `value` in every task-size cap of [`NEURAL_NETWORK_SPLIT_CAPS`], and gives the guard
     /// back
     ///
-    /// A `value` of 1 or more holds each task of a capped driver at that many units or fewer,
-    /// so a small input builds more than 1 task. The unit is the driver's own: output positions
-    /// for the convolution and the windowed pooling forward passes, channels for the pooling
-    /// backward pass, and destination rows for the resize and the embedding gather. A `value`
-    /// of 0 is the production value, and it restores the calibrated task size.
+    /// A `value` of 1 or more holds each task of a capped driver at that many units or fewer.
+    /// A small input then builds more than 1 task. The unit is the driver's own. It counts
+    /// output positions for the convolution and the windowed pooling forward passes, and
+    /// channels for the pooling backward pass. It also counts destination rows for the resize
+    /// and the embedding gather. A `value` of 0 is the production value, and it restores the
+    /// calibrated task size.
     pub fn with_split_cap(self, value: usize) -> Self {
         for (_, _, set) in NEURAL_NETWORK_SPLIT_CAPS {
             set(value);

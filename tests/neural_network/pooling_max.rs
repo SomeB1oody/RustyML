@@ -937,8 +937,8 @@ fn max_pooling_2d_forward_non_square_spatial() {
 // MaxPooling2D - parallel assembly
 
 // The pooling engine runs in parallel once batch * out_positions * channels * window taps
-// clears the gate in `crate::tuning::pool`. Forward splits by output-position block, and
-// backward splits by channel slab, needing more than 1 slab to leave the serial path.
+// clears the gate in `crate::tuning::pool`. Forward work splits by output-position block.
+// Backward work splits by channel slab, and it needs more than 1 slab to leave the serial path.
 
 /// Parallel forward keeps every output position and channel in place across position blocks
 #[test]
@@ -1040,7 +1040,8 @@ fn max_pool_2d_same_padding_3x3() {
 // The max fold starts each window at `f32::NEG_INFINITY`, and `-inf > -inf` is false, so no
 // element of an all-negative-infinity window ever wins the fold. The recorded arg-max is
 // therefore the seed alone: the first element of the window, on the channel of the output
-// element. Keras 3 on the JAX backend follows the same rule for the windowed layers.
+// element. The reference layer, version 3 on the jax backend, follows the same rule for the
+// windowed layers.
 
 /// MaxPooling1D routes the gradient of an all-negative-infinity window to the first position of
 /// that window, on the channel of the output element

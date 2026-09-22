@@ -1,4 +1,10 @@
-//! 1D depthwise separable convolution layer (depthwise stage followed by a pointwise 1-tap stage)
+//! 1D depthwise separable convolution layer
+//!
+//! [`SeparableConv1D`] runs a depthwise stage that convolves each input channel on its own,
+//! followed by a pointwise stage that mixes the depthwise outputs with a 1-tap convolution.
+//! This factoring uses fewer parameters and less computation than a standard convolution with
+//! the same channel counts. `SeparableConv1DCache` holds the tensors the layer parks between
+//! its forward and backward passes.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -40,7 +46,7 @@ use ndarray::{Array1, Array3};
 /// 2. Pointwise convolution: a 1-tap convolution that combines the depthwise outputs
 ///
 /// This is the 1D form of
-/// [`SeparableConv2D`](crate::neural_network::layers::convolution::separable_conv_2d::SeparableConv2D)
+/// [`SeparableConv2D`](crate::neural_network::layers::convolution::SeparableConv2D)
 ///
 /// # Examples
 ///
@@ -77,7 +83,9 @@ use ndarray::{Array1, Array3};
 pub struct SeparableConv1D {
     /// Number of output channels from the pointwise convolution
     filters: usize,
-    /// Number of input channels, which [`UnaryLayer::build`] reads from the input shape
+    /// Number of input channels, which
+    /// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build) reads from the input
+    /// shape
     channels: usize,
     /// Depthwise convolution kernel size along the length axis
     kernel_size: usize,
@@ -129,9 +137,11 @@ impl SeparableConv1D {
     ///
     /// # Notes
     ///
-    /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
-    /// [`SeparableConv1D::with_padding`]. The depthwise kernel is solid by default. Space its
-    /// taps out with [`SeparableConv1D::with_dilation_rate`].
+    /// Padding defaults to
+    /// [`PaddingType::Valid`]. Choose
+    /// [`PaddingType::Same`] with
+    /// [`SeparableConv1D::with_padding`]. The depthwise kernel is solid by default. Space its taps
+    /// out with [`SeparableConv1D::with_dilation_rate`].
     ///
     /// The layer seeds weights from the global seed or entropy by default. For reproducible
     /// initialization, set a seed with [`SeparableConv1D::with_random_state`]
@@ -175,7 +185,8 @@ impl SeparableConv1D {
         })
     }
 
-    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    /// Sets the padding mode (defaults to
+    /// [`PaddingType::Valid`])
     ///
     /// # Parameters
     ///
@@ -209,8 +220,9 @@ impl SeparableConv1D {
     /// A separable convolution takes a stride above 1 and a dilation above 1 together. Only the
     /// plain and the transposed convolutions reject that pair
     ///
-    /// The effective kernel is not bounded by the input length here. Only [`PaddingType::Valid`]
-    /// needs it to fit, and the build applies that rule
+    /// The effective kernel is not bounded by the input length here. Only
+    /// [`PaddingType::Valid`] needs it to
+    /// fit, and the build applies that rule
     ///
     /// # Errors
     ///

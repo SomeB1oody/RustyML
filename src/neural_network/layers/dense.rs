@@ -82,7 +82,9 @@ use ndarray::{Array, Array2, ArrayView2, Axis, CowArray, Ix2};
 /// ```
 #[derive(Debug)]
 pub struct Dense {
-    /// Feature count of the last axis, which [`UnaryLayer::build`] reads from the input shape
+    /// Feature count of the last axis, which
+    /// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build) reads from the input
+    /// shape
     input_dim: usize,
     /// Shape the kernel depends on, which is `(None, input_dim)`. `None` before the build
     built: Option<Shape>,

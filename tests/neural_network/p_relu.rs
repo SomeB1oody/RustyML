@@ -7,8 +7,8 @@
 //!
 //! Every pinned number here is exact in `f32`, so the test writes it as a plain decimal rather
 //! than as a rounded reference value. The branch rule at exactly 0 is the one place a reasonable
-//! implementation could differ. A comparison with Keras 3.15 on the jax backend confirms this.
-//! The derivative there is 0, and not 1 and not `alpha`.
+//! implementation could differ. A comparison with the reference layer, version 3.15 on the jax
+//! backend, confirms this. The derivative there is 0, and not 1 and not `alpha`.
 
 use ndarray::{Array, Array1, Array2, Array4, ArrayD, IxDyn};
 use rustyml::neural_network::Ctx;

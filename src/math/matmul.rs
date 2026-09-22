@@ -6,8 +6,8 @@
 //! use `gemmkit_ndarray::gemm` or `gemm_fused` where the caller owns the output buffer or fuses
 //! an epilogue. This module holds only what the adapter does not provide.
 //!
-//! - `dot_par`: the allocating product with an explicit [`gemmkit_ndarray::Parallelism`]. `dot` always
-//!   uses the automatic default. Callers inside an already-parallel rayon region pass
+//! - `dot_par`: the allocating product with an explicit [`gemmkit_ndarray::Parallelism`]. `dot`
+//!   always uses the automatic default. Callers inside an already-parallel rayon region pass
 //!   `Parallelism::Serial` so the product does not fork again.
 //! - `matvec`: the matvec with `Array1` operands. The adapter is matrix-shaped, so this wraps
 //!   the vector as a `[k, 1]` column, which the backend reroutes to its bandwidth-bound GEMV

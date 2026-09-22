@@ -1,5 +1,8 @@
-//! SELU activation layer that applies the scaled exponential linear unit elementwise and parks
-//! the output for backpropagation
+//! SELU (Scaled Exponential Linear Unit) activation layer
+//!
+//! The `SELU` struct holds only the shape recorded at build time, because its `alpha` and
+//! `scale` constants are fixed. `UnaryLayer::forward` computes `Activation::SELU` and caches
+//! the output during training. `UnaryLayer::backward` reads that cache to compute the gradient
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

@@ -1,4 +1,13 @@
 //! Shared parameter and shape validation helpers for regularization layers
+//!
+//! Every function checks 1 constructor argument or input shape and returns
+//! [`Error::InvalidParameter`](crate::error::Error::InvalidParameter) or
+//! [`Error::InvalidInput`](crate::error::Error::InvalidInput) on failure. None of them panics.
+//!
+//! The dropout and noise-injection layers use `validate_rate`, `validate_rate_exclusive`,
+//! `validate_stddev`, and `validate_input_ndim`. The normalization layers use
+//! `validate_epsilon`, `validate_momentum`, `validate_num_groups`,
+//! `validate_num_groups_positive`, and `validate_min_input_ndim`.
 
 use crate::error::Error;
 

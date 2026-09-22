@@ -23,7 +23,8 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///
 /// Splits the channel axis into `num_groups` groups. For each sample, it computes 1 mean and
 /// 1 variance per group, over the spatial axes and the channels inside that group. The group
-/// never reaches across the batch axis. Channel divisibility is validated on every forward pass
+/// never reaches across the batch axis. Channel divisibility is validated at build time and on
+/// every forward pass
 ///
 /// # Examples
 ///
@@ -56,13 +57,13 @@ pub struct GroupNormalization {
     ///
     /// The array stays allocated and holds every element at 1 when `scale` is false. A scale of
     /// 1 changes no value, so the forward pass reads it and gives the same result that dropping
-    /// the multiply gives. `weights` hides the array and `parameters` never yields it
+    /// the multiply gives. `weights` hides the array and `parameters_mut` never yields it
     gamma: Tensor,
     /// Shift parameter (trainable)
     ///
     /// The array stays allocated and holds every element at 0 when `center` is false. A shift
     /// of 0 changes every value except a negative zero, which it turns into a positive zero.
-    /// `weights` hides the array and `parameters` never yields it
+    /// `weights` hides the array and `parameters_mut` never yields it
     beta: Tensor,
     /// Whether the layer adds the shift `beta`
     center: bool,
@@ -104,7 +105,7 @@ impl GroupNormalization {
     /// Sets whether the layer adds the shift `beta` (defaults to `true`)
     ///
     /// With `center` set to false, the layer holds no `beta`. `param_count` counts none for it,
-    /// `parameters` yields none for it, and a checkpoint of the layer holds no
+    /// `parameters_mut` yields none for it, and a checkpoint of the layer holds no
     /// `<position>.beta` path. The normalized value passes through unshifted
     ///
     /// # Parameters
@@ -127,7 +128,7 @@ impl GroupNormalization {
     /// Sets whether the layer applies the scale `gamma` (defaults to `true`)
     ///
     /// With `scale` set to false, the layer holds no `gamma`. `param_count` counts none for it,
-    /// `parameters` yields none for it, and a checkpoint of the layer holds no
+    /// `parameters_mut` yields none for it, and a checkpoint of the layer holds no
     /// `<position>.gamma` path. `beta` keeps its own name and its own optimizer state. A
     /// checkpoint and an optimizer both address an array by name and never by position
     ///

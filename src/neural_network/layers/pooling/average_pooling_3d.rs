@@ -1,5 +1,12 @@
-//! 3D average pooling layer that computes the mean value within each pooling window across
-//! depth, height, and width.
+//! 3D average pooling layer
+//!
+//! [`AveragePooling3D`] slides a window across the depth, height, and width axes of a `[batch,
+//! depth, height, width, channels]` tensor. The layer replaces each window with the mean of its
+//! elements. [`AveragePooling3D::new`] sets the strides to `pool_size` and the padding to
+//! [`PaddingType::Valid`](crate::neural_network::layers::convolution::PaddingType).
+//! [`AveragePooling3D::with_strides`] and [`AveragePooling3D::with_padding`] override those
+//! defaults. The backward pass spreads each output gradient evenly over the in-bounds elements of
+//! its window. The forward pass therefore caches only the input shape it must restore.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -39,8 +46,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::{Array5, ArrayD};
 ///
-/// // Create a Sequential model for 3D data processing
-/// // Create example 3D input data, for example 3D medical imaging or volume data
+/// // Example 3D input data, such as a medical scan volume
 /// // Input: [1 batch, 32x32x32 3D volume, 16 channels]
 /// let input_data = Array5::from_shape_fn((1, 32, 32, 32, 16), |(b, d, h, w, c)| {
 ///     // Generate example data with spatial patterns
@@ -57,19 +63,16 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///     .build(&Shape::known(input_data.shape()))
 ///     .unwrap();
 ///
-/// // Compile the model with optimizer and loss function
+/// // Compile the model with an optimizer and a loss function
 /// model.compile(
-///     RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(),    // RMSprop optimizer
-///     MeanSquaredError::new()            // Mean squared error loss
+///     RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(),
+///     MeanSquaredError::new()
 /// );
 ///
-/// // Display the model architecture
 /// model.summary();
 ///
-/// // Train the model
 /// model.fit(&input_data, &target_data, 5).unwrap();
 ///
-/// // Make predictions on new data
 /// let predictions = model.predict(&input_data).unwrap();
 /// println!("Output shape after average pooling: {:?}", predictions.shape());
 /// // Expected output: [1, 16, 16, 16, 16], spatial dimensions halved
@@ -105,8 +108,9 @@ impl AveragePooling3D {
     ///
     /// # Notes
     ///
-    /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
-    /// with [`AveragePooling3D::with_strides`] and [`AveragePooling3D::with_padding`].
+    /// Strides default to `pool_size` and padding defaults to
+    /// [`PaddingType::Valid`]. Override
+    /// them with [`AveragePooling3D::with_strides`] and [`AveragePooling3D::with_padding`].
     ///
     pub fn new(pool_size: (usize, usize, usize)) -> Self {
         Self {
@@ -125,14 +129,19 @@ impl AveragePooling3D {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - The updated layer, or an error if any stride is zero
+    /// - `Self` - The updated layer
+    ///
+    /// # Errors
+    ///
+    /// - Returns [`Error::InvalidParameter`] if any stride is 0
     pub fn with_strides(mut self, strides: (usize, usize, usize)) -> Result<Self, Error> {
         validate_strides_3d(strides)?;
         self.strides = strides;
         Ok(self)
     }
 
-    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    /// Sets the padding mode (defaults to
+    /// [`PaddingType::Valid`])
     ///
     /// # Parameters
     ///

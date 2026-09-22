@@ -1,6 +1,6 @@
 //! Sequential model that stacks layers into a feedforward network
 //!
-//! Supports training, prediction, summary, and binary save/load
+//! The built model supports training, prediction, a summary display, and binary save and load
 //!
 //! # 2 types, and only 1 of them trains
 //!
@@ -14,6 +14,11 @@
 //! `fit`, `train_batch`, `evaluate`, `predict`, `save_to_path`, and `load_from_path` are
 //! methods of the built model alone. Training a model that was never built is therefore a
 //! compile error, and no run-time state says whether a model is ready
+//!
+//! [`History`](crate::neural_network::sequential::History) is what `fit` and
+//! `fit_with_batches` give back: 1 loss value per epoch, in epoch order.
+//! `save_to_path` and `load_from_path` read and write every array of the model, in the
+//! format that [`checkpoint`](crate::neural_network::layers::checkpoint) defines
 
 use super::traits::{
     Layer, Loss, Optimizer, ParamId, check_addresses, check_every_gradient_is_claimed,
@@ -102,7 +107,7 @@ use std::io::{BufWriter, Write};
 /// std::fs::remove_file("model.bin").unwrap();
 /// ```
 pub struct Sequential {
-    /// All layers in the model
+    /// Every layer of the model, in order from the input
     layers: Vec<Box<dyn Layer>>,
     /// The shape that reaches each layer, in layer order
     ///
@@ -111,12 +116,12 @@ pub struct Sequential {
     /// only ever run [`predict`](Sequential::predict) still prints a real output shape for
     /// every position
     input_shapes: Vec<Shape>,
-    /// Optimizer used for updating parameters during training
+    /// The optimizer that updates every parameter during training
     optimizer: Option<Box<dyn Optimizer>>,
-    /// Loss function used to score the model, in training and in `evaluate`
+    /// The loss that scores the model, in training and in `evaluate`
     loss: Option<Box<dyn Loss>>,
     /// Optional seed governing the fit-time batch shuffle. Falls back to the global seed or
-    /// entropy. See crate::random
+    /// entropy. See [`crate::random`]
     seed: Option<u64>,
 }
 
@@ -321,23 +326,19 @@ fn build_refusal(index: usize, layer_type: &str, input: &Shape, source: Error) -
     ))
 }
 
-/// Global L2 norm of every gradient currently stored across `layers`, for clip-by-global-norm
+/// The global L2 norm of every gradient stored across `layers`, for a global-norm clip
 ///
-/// Squared terms accumulate in f64 to limit round-off when summing across many parameters.
-/// Each tensor folds as deterministic blocks. The rayon path at or above the square-sum gate
-/// is a performance switch, and it gives the same result as the serial path. The per-tensor
-/// totals merge in the fixed (layer, parameter) order, so rerunning on the same machine gives
-/// the same result. Layers without gradients contribute nothing. With no gradients at all, the
-/// norm is 0.0
+/// The walk is the layer order of the model, from the input, and the parameter order of each
+/// layer. The gradient store sorts by address instead, and a sum of `f64` squares is not
+/// associative, so reducing in store order would move the last bit of the norm. A tensor folds
+/// in deterministic blocks, and the rayon path above the square-sum gate gives the same result
+/// as the serial path. A layer with no gradient contributes nothing, and a pass with no
+/// gradient at all gives a norm of 0.0
 ///
-/// The walk is forward, from the input. That is the canonical order of the model, and the
-/// parameter-update walk in [`Sequential::train_batch`] uses the same one. A sum of `f32`
-/// squares is not associative, so the order is part of the answer
+/// This is the same walk order that the parameter-update loop in
+/// [`Sequential::train_batch`] uses
 fn global_grad_norm(layers: &mut [Box<dyn Layer>], grads: &Grads) -> f32 {
     let mut sum_sq = 0.0_f64;
-    // The walk is the layer order of the model, and the parameter order of each layer. The
-    // gradient store sorts by address instead, and a sum of `f32` squares is not associative,
-    // so reducing in store order would move the last bit of the norm
     for (scope, layer) in layers.iter_mut().enumerate() {
         for param in layer.parameters_mut() {
             let Some(grad) = grads.get(ParamId::new(scope, param.name)) else {
@@ -365,7 +366,7 @@ fn global_grad_norm(layers: &mut [Box<dyn Layer>], grads: &Grads) -> f32 {
 /// `loss().len()` is the number of epochs that actually ran. Training for 0 epochs yields an
 /// empty slice
 ///
-/// # What the number means
+/// # Notes
 ///
 /// Each entry is the mean per-sample loss **measured during** the epoch, not after it. Every
 /// batch contributes the loss from the forward pass that preceded that batch's own weight
@@ -415,17 +416,17 @@ impl History {
 impl Sequential {
     /// Sets the seed governing the fit-time batch shuffle
     ///
-    /// Controls only the data shuffling order used by `fit_with_batches`. It does not
-    /// reinitialize or otherwise touch the model's layers. A fixed seed makes the per-epoch
-    /// shuffle reproducible
+    /// This controls only the shuffle order that
+    /// [`fit_with_batches`](Self::fit_with_batches) uses. It does not reinitialize the layers,
+    /// and a fixed seed makes the per-epoch shuffle reproducible
     ///
     /// # Parameters
     ///
-    /// - `seed` - Seed for the reproducible fit-time shuffle. See crate::random
+    /// - `seed` - Seed for the reproducible fit-time shuffle. See [`crate::random`]
     ///
     /// # Returns
     ///
-    /// - `&mut Self` - Mutable reference to self for method chaining
+    /// - `&mut Self` - The model, for chaining
     pub fn set_seed(&mut self, seed: u64) -> &mut Self {
         self.seed = Some(seed);
         self
@@ -433,9 +434,10 @@ impl Sequential {
 
     /// Sets the learning rate on the compiled optimizer
     ///
-    /// The entry point for external learning-rate scheduling (step decay, warmup, ...) between
-    /// epochs or batches. Does nothing if the model has not been compiled yet. The optimizer
-    /// keeps all of its accumulated state (momentum buffers, Adam moments, ...) across the change
+    /// Use this for a learning-rate schedule (step decay, warmup, ...) that runs between
+    /// epochs or batches. When the model holds no optimizer yet, this changes nothing. The
+    /// optimizer keeps every value it has accumulated (momentum buffers, Adam moments, ...)
+    /// across the change
     ///
     /// # Parameters
     ///
@@ -443,7 +445,7 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// - `&mut Self` - Mutable reference to self for method chaining
+    /// - `&mut Self` - The model, for chaining
     pub fn set_learning_rate(&mut self, learning_rate: f32) -> &mut Self {
         if let Some(ref mut optimizer) = self.optimizer {
             optimizer.set_learning_rate(learning_rate);
@@ -463,16 +465,16 @@ impl Sequential {
         self.optimizer.as_ref().map(|opt| opt.learning_rate())
     }
 
-    /// Configures the optimizer and loss function for the model
+    /// Sets the optimizer and the loss function for the model
     ///
     /// # Parameters
     ///
-    /// - `optimizer` - The optimizer to use for training
-    /// - `loss` - The loss function to use for training
+    /// - `optimizer` - The optimizer that updates every parameter
+    /// - `loss` - The loss that scores the model
     ///
     /// # Returns
     ///
-    /// - `&mut Self` - Mutable reference to self for method chaining
+    /// - `&mut Self` - The model, for chaining
     pub fn compile<O, LFunc>(&mut self, optimizer: O, loss: LFunc) -> &mut Self
     where
         O: 'static + Optimizer,
@@ -483,16 +485,16 @@ impl Sequential {
         self
     }
 
-    /// Validates the model state and input data for a training step
+    /// Checks that the model holds an optimizer and a loss, and that `x` and `y` agree
     ///
     /// # Parameters
     ///
-    /// - `x` - Input tensor containing training data
-    /// - `y` - Target tensor containing expected outputs
+    /// - `x` - Input tensor for the step
+    /// - `y` - Target tensor for the step
     ///
     /// # Returns
     ///
-    /// - `Result<(), Error>` - Ok if validation passes, or the error that failed it
+    /// - `Result<(), Error>` - `Ok` when the model and the tensors are ready to train on
     fn validate_training_inputs(&self, x: &Tensor, y: &Tensor) -> Result<(), Error> {
         if self.optimizer.is_none() {
             return Err(Error::NeuralNetwork(NnError::NotCompiled("optimizer")));
@@ -501,11 +503,11 @@ impl Sequential {
         self.validate_evaluation_inputs(x, y)
     }
 
-    /// Validates the model state and input data for computing a loss
+    /// Checks that the model holds a loss, and that `x` and `y` agree
     ///
-    /// Everything [`validate_training_inputs`](Self::validate_training_inputs) checks except the
-    /// optimizer, which only a parameter update needs. [`evaluate`](Self::evaluate) runs on a
-    /// model that has a loss, but it never has to step
+    /// This checks everything [`validate_training_inputs`](Self::validate_training_inputs)
+    /// checks except the optimizer, which only a parameter update needs.
+    /// [`evaluate`](Self::evaluate) needs a loss, and it never steps the optimizer
     ///
     /// # Parameters
     ///
@@ -514,7 +516,7 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// - `Result<(), Error>` - Ok if validation passes, or the error that failed it
+    /// - `Result<(), Error>` - `Ok` when the model and the tensors are ready to score
     fn validate_evaluation_inputs(&self, x: &Tensor, y: &Tensor) -> Result<(), Error> {
         if self.loss.is_none() {
             return Err(Error::NeuralNetwork(NnError::NotCompiled("loss function")));
@@ -567,8 +569,8 @@ impl Sequential {
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the optimizer or loss function is
-    ///   not specified
+    /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the model has no optimizer or no
+    ///   loss function
     /// - `Error::NeuralNetwork(NnError::EmptyModel)` - If the model has no layers
     /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::DimensionMismatch` - If the
     ///   tensors are empty, rank-0, or disagree on the batch size
@@ -654,9 +656,7 @@ impl Sequential {
         Ok(loss_value)
     }
 
-    /// Trains the model on the provided data
-    ///
-    /// Executes the forward pass, loss calculation, backward pass, and parameter updates
+    /// Trains the model for `epochs` full-batch steps, over the whole of `x` and `y`
     ///
     /// # Parameters
     ///
@@ -681,8 +681,8 @@ impl Sequential {
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the optimizer or loss function is
-    ///   not specified
+    /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the model has no optimizer or no
+    ///   loss function
     /// - `Error::NeuralNetwork(NnError::EmptyModel)` - If the model has no layers
     /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::DimensionMismatch` - If inputs
     ///   are empty, rank-0, or batch sizes disagree
@@ -742,14 +742,13 @@ impl Sequential {
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the optimizer or loss function is
-    ///   not specified
+    /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the model has no optimizer or no
+    ///   loss function
     /// - `Error::NeuralNetwork(NnError::EmptyModel)` - If the model has no layers
     /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::DimensionMismatch` - If inputs
     ///   are empty, rank-0, or batch sizes disagree
     /// - `Error::InvalidParameter` - If `batch_size` is 0 or larger than the dataset
-    /// - `Error::Computation` - If a layer fails during forward or backward pass, or a batch
-    ///   tensor cannot be built
+    /// - `Error::Computation` - If a layer fails during forward or backward pass
     pub fn fit_with_batches(
         &mut self,
         x: &Tensor,
@@ -918,9 +917,7 @@ impl Sequential {
         output.ok_or(Error::NeuralNetwork(NnError::EmptyModel))
     }
 
-    /// Prints a summary of the model's structure
-    ///
-    /// Displays each layer's information and parameter statistics in a tabular format to stdout
+    /// Prints the layers of the model, their shapes, and their parameter counts
     pub fn summary(&self) {
         let col1_width = 33;
         let col2_width = 24;
@@ -1096,12 +1093,12 @@ impl Sequential {
     ///
     /// # Parameters
     ///
-    /// - `path` - File path where the model will be saved (e.g., "stored_model.bin"). Accepts
+    /// - `path` - File path where the model will be saved, such as "stored_model.bin". Accepts
     ///   anything convertible to a `Path` (`&str`, `String`, `Path`, `PathBuf`, ...)
     ///
     /// # Returns
     ///
-    /// - `crate::error::RustymlResult<()>` - Ok if the model is saved, or an IO/serialization error
+    /// - `crate::error::RustymlResult<()>` - `Ok` when the file holds every array of the model
     ///
     /// # Errors
     ///
@@ -1143,13 +1140,13 @@ impl Sequential {
     ///
     /// # Parameters
     ///
-    /// - `path` - File path from which to load the weights (e.g., "stored_model.bin"). Accepts
+    /// - `path` - File path from which to load the weights, such as "stored_model.bin". Accepts
     ///   anything convertible to a `Path` (`&str`, `String`, `Path`, `PathBuf`, ...)
     ///
     /// # Returns
     ///
-    /// - `crate::error::RustymlResult<()>` - Ok if weights are loaded, or an
-    ///   IO/deserialization error
+    /// - `crate::error::RustymlResult<()>` - `Ok` when every array of the model holds the
+    ///   value of the file
     ///
     /// # Errors
     ///

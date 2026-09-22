@@ -1,4 +1,10 @@
 //! Dimension and shape validators shared by the recurrent layers
+//!
+//! Each function is a narrow guard that a layer calls before it trusts a dimension or a tensor
+//! shape. [`validate_recurrent_dimensions`] composes 2 calls to
+//! [`validate_dimension_greater_than_zero`], 1 per dimension. [`validate_input_3d`] guards the
+//! rank of the forward input. [`split_grad_output`] guards the shape of the backward gradient and
+//! builds the initial running gradient of the backward recurrence.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;

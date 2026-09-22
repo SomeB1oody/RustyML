@@ -1188,7 +1188,7 @@ fn pass_through_dense_no_bias() -> Dense {
 
 /// A second layer in the stack moves no per-parameter optimizer state of the first one
 ///
-/// The optimizer keys its state on [`ParamId`], which is the position of the layer counted
+/// The optimizer keys its state on `ParamId`, which is the position of the layer counted
 /// from the input plus the name the layer gives the tensor. The first layer therefore holds
 /// `{scope 0, "kernel"}` in both models below, and the second layer of the stacked model
 /// reaches a key of its own. A key that dropped the scope would give both layers 1 momentum

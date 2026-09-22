@@ -1,4 +1,9 @@
 //! Global max pooling layer for 1D inputs
+//!
+//! [`GlobalMaxPooling1D`] reduces the whole length axis of a `[batch, length, channels]` tensor
+//! to a single maximum per channel, producing `[batch, channels]`. The forward pass records the
+//! arg-max of every channel. The backward pass then routes each output gradient back to the
+//! input element that produced it.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -15,6 +20,10 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///
 /// Selects the maximum value across the length dimension. Input tensor shape:
 /// `[batch_size, length, channels]`. Output tensor shape: `[batch_size, channels]`.
+///
+/// # Notes
+///
+/// When 2 or more elements in a channel tie for the maximum, the layer keeps the earliest one.
 ///
 /// # Examples
 ///

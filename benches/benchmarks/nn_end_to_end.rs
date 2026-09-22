@@ -1,7 +1,8 @@
 //! End-to-end criterion benchmarks over the public neural-network API
 //!
-//! These track the real, user-visible cost of the hot paths (layer forwards and a small training
-//! loop) so performance regressions show up as criterion deltas. Run with:
+//! These benchmarks time the hot paths a caller of the API reaches: layer forward and
+//! backward passes, and a small training loop. A criterion diff then shows a performance
+//! regression. Run with:
 //!
 //! ```bash
 //! cargo bench --bench nn_end_to_end
@@ -36,7 +37,7 @@ fn dense_forward(c: &mut Criterion) {
     });
 }
 
-/// Conv2D forward at batch == 1 (single-sample inference)
+/// Conv2D forward at batch == 1: a single-sample pass through a training-mode context
 fn conv2d_forward_batch1(c: &mut Criterion) {
     let mut layer = Conv2D::new(64, (3, 3), (1, 1), Activation::ReLU)
         .unwrap()
@@ -166,8 +167,8 @@ fn layernorm_backward_default(c: &mut Criterion) {
     });
 }
 
-/// LayerNorm forward with a Multiple (merged trailing axes) configuration at conv scale: the
-/// merged-axis layout transform is the interesting cost here
+/// LayerNorm forward with a Multiple (merged trailing axes) configuration at conv scale: this
+/// benchmark isolates the cost of the merged-axis layout transform
 fn layernorm_forward_multi(c: &mut Criterion) {
     let mut layer = LayerNormalization::new(1e-5)
         .unwrap()

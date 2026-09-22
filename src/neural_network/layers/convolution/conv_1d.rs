@@ -100,7 +100,9 @@ pub struct Conv1D {
     activation: Activation,
     /// Shape the layer was built for, batch axis first. `None` before the build
     built: Option<Shape>,
-    /// Input channels, which [`UnaryLayer::build`] reads from the input shape
+    /// Input channels, which
+    /// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build) reads from the input
+    /// shape
     channels: usize,
     /// Seed of the weight draw, or `None` to take the global seed or entropy
     random_state: Option<u64>,

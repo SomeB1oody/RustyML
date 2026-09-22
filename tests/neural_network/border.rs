@@ -504,6 +504,7 @@ fn border_layers_backward_wrong_grad_shape_returns_err() {
 
 // Layer metadata
 
+/// layer_type names each concrete type in the family
 #[test]
 fn border_layer_types_are_named() {
     assert_eq!(ZeroPadding1D::new(1).layer_type(), "ZeroPadding1D");

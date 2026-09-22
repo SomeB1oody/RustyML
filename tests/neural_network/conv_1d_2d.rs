@@ -100,6 +100,7 @@ fn conv1d_asymmetric_kernel_values() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
+/// A bias term shifts every output position by the same constant
 #[test]
 fn conv1d_bias_offset_adds_to_every_output() {
     let mut layer = Conv1D::new(1, 2, 1, Linear::new()).unwrap();
@@ -226,7 +227,8 @@ fn conv1d_same_padding_stride2_output_length_and_values() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// Batch size > 1: the layer processes identical samples independently and yields identical outputs
+/// Batch size > 1: the layer processes identical samples independently and yields identical
+/// outputs
 #[test]
 fn conv1d_batch_forward_independent_samples() {
     let mut layer = Conv1D::new(1, 2, 1, Linear::new()).unwrap();
@@ -251,6 +253,7 @@ fn conv1d_batch_forward_independent_samples() {
     }
 }
 
+/// A kernel as long as the input produces exactly 1 output position
 #[test]
 fn conv1d_input_equals_kernel_produces_single_output() {
     let mut layer = Conv1D::new(1, 3, 1, Linear::new()).unwrap();
@@ -269,6 +272,7 @@ fn conv1d_input_equals_kernel_produces_single_output() {
     assert_abs_diff_eq!(output[[0, 0, 0]], 60.0f32, epsilon = 1e-6f32);
 }
 
+/// 2 input channels: the filter sums contributions across the (last) channel axis
 #[test]
 fn conv1d_two_input_channels_cross_channel_sum() {
     let mut layer = Conv1D::new(1, 2, 1, Linear::new()).unwrap();
@@ -478,6 +482,7 @@ fn conv1d_predict_equals_forward() {
     assert_allclose(&predict_output, &forward_output, 1e-7f32);
 }
 
+/// predict() called twice on the same input returns bit-identical output
 #[test]
 fn conv1d_predict_deterministic() {
     let mut layer = Conv1D::new(1, 3, 1, Linear::new()).unwrap();
@@ -527,7 +532,7 @@ fn conv2d_all_ones_kernel_windowed_sums() {
 
     assert_eq!(output.shape(), &[1, 3, 3, 1]);
 
-    // 2x2 sums, e.g. (0,0) = 1+2+5+6 = 14, (1,1) = 6+7+10+11 = 34, (2,2) = 11+12+15+16 = 54
+    // 2x2 sums: (0,0) = 1+2+5+6 = 14, (1,1) = 6+7+10+11 = 34, (2,2) = 11+12+15+16 = 54
     let expected_flat = vec![14.0f32, 18.0, 22.0, 30.0, 34.0, 38.0, 46.0, 50.0, 54.0];
     for (i, &expected_val) in expected_flat.iter().enumerate() {
         let h = i / 3;
@@ -536,6 +541,7 @@ fn conv2d_all_ones_kernel_windowed_sums() {
     }
 }
 
+/// A 1x1 kernel with weight 1 scales every position by the input value itself
 #[test]
 fn conv2d_1x1_kernel_scalar_multiply() {
     let mut layer = Conv2D::new(1, (1, 1), (1, 1), Linear::new()).unwrap();
@@ -560,6 +566,7 @@ fn conv2d_1x1_kernel_scalar_multiply() {
     }
 }
 
+/// A bias term shifts every output position by the same constant
 #[test]
 fn conv2d_bias_shifts_all_outputs() {
     let mut layer = Conv2D::new(1, (1, 1), (1, 1), Linear::new()).unwrap();
@@ -610,7 +617,8 @@ fn conv2d_stride2_valid_output_shape_and_values() {
 fn conv2d_two_filters_independent_outputs() {
     let mut layer = Conv2D::new(2, (2, 2), (1, 1), Linear::new()).unwrap();
     layer.build(&Shape::known(&[1, 3, 3, 1])).unwrap();
-    // weight [kh=2, kw=2, channels=1, filters=2]: filter0 = [[1,1],[1,1]], filter1 = [[1,0],[0,0]].
+    // weight [kh=2, kw=2, channels=1, filters=2]: filter0 = [[1,1],[1,1]],
+    // filter1 = [[1,0],[0,0]].
     // Flat order is (kh,kw)-major with the filter axis last, so each pair is (f0, f1) at 1 tap
     let weights = Array4::from_shape_vec(
         (2, 2, 1, 2),
@@ -935,6 +943,7 @@ fn conv2d_predict_equals_forward() {
     assert_allclose(&predict_output, &forward_output, 1e-7f32);
 }
 
+/// predict() called twice on the same input returns bit-identical output
 #[test]
 fn conv2d_predict_deterministic() {
     let mut layer = Conv2D::new(1, (2, 2), (1, 1), Linear::new()).unwrap();
@@ -1292,8 +1301,9 @@ fn conv_rejects_a_stride_and_a_dilation_above_one_together() {
 /// Each spatial axis carries its own dilation
 ///
 /// A `(1, 3)` dilation leaves the height taps adjacent and spreads the width taps 3 apart.
-/// Output `(oh, ow)` sums the 4 cells `(oh, ow)`, `(oh, ow + 3)`, `(oh + 1, ow)`, and
-/// `(oh + 1, ow + 3)`. Each input cell holds `h * 10 + w`, so a swapped axis is visible at once.
+/// Output `(oh, ow)` sums 4 cells. The cells are `(oh, ow)`, `(oh, ow + 3)`, `(oh + 1, ow)`,
+/// and `(oh + 1, ow + 3)`. Each input cell holds `h * 10 + w`, so a swapped axis is visible
+/// at once.
 #[test]
 fn conv2d_dilation_is_per_axis() {
     let mut layer = Conv2D::new(1, (2, 2), (1, 1), Linear::new())
@@ -1332,8 +1342,8 @@ fn conv2d_dilation_is_per_axis() {
 /// Output `o` of a depthwise pass reads `o * stride + tap * dilation`. The wrong form
 /// `(o * stride + tap) * dilation` agrees only when the stride equals the dilation, which the
 /// depthwise layers do not forbid. A stride of 2 with a dilation of 3 tells the 2 apart.
-/// The windows here read `(0, 3)`, `(2, 5)`, and `(4, 7)`, and the wrong form would read
-/// `(0, 3)`, `(6, 9)`, and `(12, 15)`.
+/// The windows here read `(0, 3)`, `(2, 5)`, and `(4, 7)`. The wrong form would read `(0, 3)`,
+/// `(6, 9)`, and `(12, 15)` instead.
 #[test]
 fn depthwise_conv1d_keeps_the_stride_and_the_dilation_independent() {
     let mut layer = DepthwiseConv1D::new(2, 2, Linear::new())

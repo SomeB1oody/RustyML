@@ -118,7 +118,8 @@ fn transpose_geometry(
         .map(|d| transpose_output_length(in_sp[d], k_dims[d], strides[d], dilation[d], padding))
         .collect();
     // `conv_geometry` cannot fail here. Its `Valid` branch rejects only an output axis smaller
-    // than the kernel, and both output-length rules above keep every axis at least kernel size
+    // than the effective (dilated) kernel, and both output-length rules above keep every axis
+    // at least that size
     let (check_sp, pad_before, padded_sp) =
         conv_geometry(&out_sp, k_dims, strides, dilation, padding.into())?;
     debug_assert_eq!(

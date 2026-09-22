@@ -1,4 +1,9 @@
 //! 1D cropping layer that removes steps at each end of the step axis
+//!
+//! [`Cropping1D`] removes steps from the step axis of a `[batch, steps, features]` tensor. It
+//! holds no parameter. The forward pass and the backward pass both run through
+//! `pad_crop_engine`, which also backs this layer's inverse,
+//! [`ZeroPadding1D`](crate::neural_network::layers::border::ZeroPadding1D).
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

@@ -1,4 +1,10 @@
-//! 2D depthwise separable convolution layer (depthwise stage followed by a pointwise 1x1 stage)
+//! 2D depthwise separable convolution layer
+//!
+//! [`SeparableConv2D`] runs a depthwise stage that convolves each input channel on its own,
+//! followed by a pointwise stage that mixes the depthwise outputs with a 1x1 convolution. This
+//! factoring uses fewer parameters and less computation than a standard convolution with the
+//! same channel counts. `SeparableConv2DCache` holds the tensors the layer parks between its
+//! forward and backward passes.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -99,7 +105,9 @@ pub struct SeparableConv2D {
     bias: Array1<f32>,
     /// Activation applied to the layer output
     activation: Activation,
-    /// Number of input channels, which [`UnaryLayer::build`] reads from the input shape
+    /// Number of input channels, which
+    /// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build) reads from the input
+    /// shape
     channels: usize,
     /// Shape the layer was built for, batch axis first. `None` before the build
     built: Option<Shape>,
@@ -129,9 +137,11 @@ impl SeparableConv2D {
     ///
     /// # Notes
     ///
-    /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
-    /// [`SeparableConv2D::with_padding`]. The depthwise kernel is solid by default. Space its
-    /// taps out with [`SeparableConv2D::with_dilation_rate`].
+    /// Padding defaults to
+    /// [`PaddingType::Valid`]. Choose
+    /// [`PaddingType::Same`] with
+    /// [`SeparableConv2D::with_padding`]. The depthwise kernel is solid by default. Space its taps
+    /// out with [`SeparableConv2D::with_dilation_rate`].
     ///
     /// The layer seeds weights from the global seed or entropy
     /// by default. For reproducible initialization, set a seed with
@@ -176,7 +186,8 @@ impl SeparableConv2D {
         })
     }
 
-    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    /// Sets the padding mode (defaults to
+    /// [`PaddingType::Valid`])
     ///
     /// # Parameters
     ///
@@ -210,8 +221,9 @@ impl SeparableConv2D {
     /// A separable convolution takes a stride above 1 and a dilation above 1 together. Only the
     /// plain and the transposed convolutions reject that pair
     ///
-    /// The effective kernel is not bounded by the input axis here. Only [`PaddingType::Valid`]
-    /// needs it to fit, and the build applies that rule
+    /// The effective kernel is not bounded by the input axis here. Only
+    /// [`PaddingType::Valid`] needs it to
+    /// fit, and the build applies that rule
     ///
     /// # Errors
     ///

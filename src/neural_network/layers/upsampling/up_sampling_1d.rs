@@ -1,4 +1,9 @@
-//! 1D upsampling layer that repeats each step of the step axis
+//! 1D upsampling layer that repeats each step along the length axis
+//!
+//! [`UpSampling1D`] enlarges the step axis of a `[batch, steps, features]` tensor. It holds no
+//! parameter and takes no interpolation mode, because copying a step needs no weight. The forward
+//! and backward passes both run through `resize_engine`, which treats the repeat as a
+//! fixed-weight gather in each direction.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -23,10 +28,9 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// layer takes no interpolation argument
 ///
 /// The layer is the decoder counterpart of
-/// [`MaxPooling1D`](crate::neural_network::layers::pooling::max_pooling_1d::MaxPooling1D) and
-/// [`AveragePooling1D`](crate::neural_network::layers::pooling::average_pooling_1d::AveragePooling1D).
-/// A pooling stage of `pool_size` and an upsampling stage of the same `size` restore the
-/// original length
+/// [`MaxPooling1D`](crate::neural_network::layers::pooling::MaxPooling1D) and
+/// [`AveragePooling1D`](crate::neural_network::layers::pooling::AveragePooling1D). A pooling
+/// stage of `pool_size` and an upsampling stage of the same `size` restore the original length
 ///
 /// # Examples
 ///

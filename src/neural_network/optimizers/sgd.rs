@@ -1,4 +1,8 @@
 //! Stochastic Gradient Descent (SGD) optimizer
+//!
+//! Holds the [`SGD`] struct, its constructor, its [`SGD::with_global_clipnorm`] builder method, and
+//! its [`Optimizer`](crate::neural_network::traits::Optimizer) implementation. Weight decay is
+//! decoupled (SGDW-style), and gradient clipping stays off until a caller opts in
 
 use crate::error::Error;
 use crate::neural_network::ctx::Grads;

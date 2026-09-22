@@ -193,8 +193,8 @@ fn dense_2_to_3_ramp() -> Dense {
 
 /// The rank-3 forward pass gives every leading position the same kernel
 ///
-/// The layer contracts the last axis only, so a Dense(3) over a [2, 3, 2] input keeps the
-/// [2, 3] kernel and returns [2, 3, 3]. A per-timestep kernel would need 3 times the weights
+/// The layer contracts the last axis only. A Dense(3) over a [2, 3, 2] input keeps the [2, 3]
+/// kernel and returns [2, 3, 3]. A per-timestep kernel would need 3 times the weights
 #[test]
 fn dense_forward_rank_3_shares_1_kernel_over_the_leading_axes() {
     let d = dense_2_to_3_ramp();

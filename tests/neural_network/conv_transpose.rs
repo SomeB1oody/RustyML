@@ -162,8 +162,8 @@ fn conv1d_transpose_two_input_channels_cross_channel_sum() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// The filter axis is the fastest-varying output axis, so a second filter lands interleaved with
-/// the first and not in a separate plane
+/// The filter axis is the fastest-varying output axis, so filter 1's output interleaves with
+/// filter 0's instead of sitting in a separate plane
 #[test]
 fn conv1d_transpose_filter_axis_is_innermost() {
     let mut layer = Conv1DTranspose::new(2, 1, 1, Linear::new()).unwrap();
@@ -310,7 +310,7 @@ fn conv2d_transpose_overlapping_windows_add_up() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// A 1x1 input under a 3x3 kernel is a normal first decoder step, and a plain Conv2D refuses
+/// A 1x1 input under a 3x3 kernel is a typical initial decoder step, and a plain Conv2D refuses
 /// exactly this shape
 #[test]
 fn conv2d_transpose_grows_a_single_pixel_into_the_whole_kernel() {
@@ -330,8 +330,8 @@ fn conv2d_transpose_grows_a_single_pixel_into_the_whole_kernel() {
     let expected = t4((1, 3, 3, 1), taps.iter().map(|v| 2.0 * v).collect());
     assert_allclose(&output, &expected, 1e-6f32);
 
-    // A plain Conv2D refuses this input only at build, not at construction, because build is
-    // the first step that sees both the padding mode and the input shape
+    // A plain Conv2D refuses this input only at build, not at construction. Build is the step
+    // that sees both the padding mode and the input shape
     let mut plain = rustyml::neural_network::layers::convolution::conv_2d::Conv2D::new(
         1,
         (3, 3),

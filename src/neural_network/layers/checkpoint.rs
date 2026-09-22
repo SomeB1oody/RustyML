@@ -33,7 +33,7 @@
 //! [`LayerBase::layer_type`]: crate::neural_network::traits::LayerBase::layer_type
 //! [`apply`]: crate::neural_network::layers::checkpoint::apply
 //! [`apply_partial`]: crate::neural_network::layers::checkpoint::apply_partial
-//! [`BatchNormalization`]: crate::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization
+//! [`BatchNormalization`]: crate::neural_network::layers::BatchNormalization
 
 use crate::error::{Error, IoError};
 use crate::neural_network::Shape;
@@ -380,9 +380,10 @@ pub fn apply(layers: &mut [Box<dyn Layer>], file: &ModelCheckpoint<'_>) -> Resul
 
 /// Applies what the file and the model agree on, and reports the rest
 ///
-/// This is the opt-in lenient load. It writes an array in 3 cases. The position holds the
-/// same layer type, the 2 sides agree on the build shape, and the file holds the same name,
-/// kind, and shape. Everything else goes into the report and nothing else fails.
+/// This is the opt-in lenient load. It writes an array only when 3 conditions all hold: the
+/// position holds the same layer type, the 2 sides agree on the build shape, and the file
+/// holds the same name, kind, and shape. Everything else goes into the report and nothing
+/// else fails.
 /// A position whose layer type differs contributes every path of that layer to both lists.
 /// A name and a shape cannot tell 2 normalization layers apart
 ///

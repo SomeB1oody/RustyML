@@ -94,21 +94,23 @@ pub const DEFAULT_SOFTMAX_AXIS: i32 = -1;
 /// the single source of truth for both the forward transform and its derivative. The
 /// algorithm lives here, and not in a layer `impl` block
 ///
-/// # The output-only derivative contract
+/// # Notes
 ///
 /// [`Activation::backward`] receives the *activated output* `a`, never the pre-activation `z`.
 /// Every variant's derivative is therefore expressed through `a` alone, and a host layer caches
-/// 1 tensor rather than 2.
+/// 1 tensor rather than 2. This is the output-only derivative contract that every variant below
+/// follows.
 ///
-/// This admits every activation whose derivative has a closed form in `a`, which covers the
-/// full family below. It excludes GELU, SiLU (Swish), and Mish, whose `a = z * g(z)` shape has
-/// no closed-form inverse. Supporting them needs a wider contract that also hands the backward
-/// pass the pre-activation.
+/// The contract admits every activation whose derivative has a closed form in `a`, which covers
+/// the full family below. It excludes GELU, SiLU (Swish), and Mish, whose `a = z * g(z)` shape
+/// has no closed-form inverse. Supporting them needs a wider contract that also hands the
+/// backward pass the pre-activation.
 ///
-/// The 2 saturating variants pay a small accuracy cost for the contract. `ELU` and `SELU`
-/// recover their negative branch as `a + alpha`, a subtraction of 2 near-equal values far down
-/// the tail. The absolute error stays inside 1 unit in the last place of `alpha`, at inputs
-/// where the derivative is already close to 0.
+/// The 2 saturating variants pay a small accuracy cost for the contract. `ELU` recovers its
+/// negative branch as `a + alpha`, and `SELU` recovers its negative branch as
+/// `a + SELU_SCALE_ALPHA`. Both computations subtract 2 near-equal values far down the tail.
+/// The absolute error stays inside 1 unit in the last place of that constant, at inputs where
+/// the derivative is already close to 0.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Activation {
     /// Identity activation, `f(x) = x`
@@ -508,7 +510,7 @@ impl Activation {
     ///
     /// - `Result<(), Error>` - Ok when the activation is usable
     ///
-    /// # The Softmax axis of an embedded activation
+    /// # Notes
     ///
     /// An embedded [`Activation::Softmax`] accepts the default axis `-1` alone. This
     /// restriction is a deliberate simplification, not a limit of the math

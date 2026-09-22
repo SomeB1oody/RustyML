@@ -1,4 +1,10 @@
 //! Gaussian noise regularization layer that injects zero-mean normal noise during training
+//!
+//! [`GaussianNoise`] holds the standard deviation, the shape recorded by
+//! [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build), and the random number
+//! generator that draws the noise. The forward pass adds `N(0, stddev^2)` noise to the input. The
+//! backward pass passes the gradient through unchanged, because the noise does not depend on the
+//! input value.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -15,8 +21,8 @@ use ndarray_rand::rand_distr::Normal;
 
 /// Gaussian noise layer for neural networks
 ///
-/// Adds random noise sampled from a normal distribution with mean 0 during training
-/// to improve robustness and reduce overfitting
+/// Adds random noise sampled from a normal distribution with mean 0 during training,
+/// which reduces sensitivity to small input changes and reduces overfitting
 ///
 /// # Shape freedom
 ///

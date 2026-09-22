@@ -1,5 +1,8 @@
-//! Leaky ReLU activation layer that scales the negative side by `negative_slope` and parks the
-//! output for backpropagation
+//! Leaky ReLU activation layer
+//!
+//! The `LeakyReLU` struct holds the `negative_slope` applied below 0 and the shape recorded at
+//! build time. `UnaryLayer::forward` computes `Activation::LeakyReLU` and caches the output
+//! during training. `UnaryLayer::backward` reads that cache to compute the gradient
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

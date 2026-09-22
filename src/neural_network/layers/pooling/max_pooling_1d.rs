@@ -1,5 +1,12 @@
-//! 1D max pooling layer that selects the maximum value within each pooling window along the
-//! length dimension.
+//! 1D max pooling layer
+//!
+//! [`MaxPooling1D`] slides a window along the length axis of a `[batch, length, channels]` tensor
+//! and keeps the largest element of each window. [`MaxPooling1D::new`] sets the stride to
+//! `pool_size` and the padding to
+//! [`PaddingType::Valid`](crate::neural_network::layers::convolution::PaddingType).
+//! [`MaxPooling1D::with_stride`] and [`MaxPooling1D::with_padding`] override those defaults. The
+//! forward pass records the arg-max of every window. The backward pass then routes each output
+//! gradient back to the input element that produced it.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -73,13 +80,13 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// // Window size 2 and stride 2: each window keeps its maximum element
 /// for b in 0..2 {
 ///     for c in 0..3 {
-///         // First window (0, 1): max value 1.0
+///         // 1st window (0, 1): max value 1.0
 ///        assert_relative_eq!(output[[b, 0, c]], 1.0);
-///         // Second window (2, 3): max value 3.0
+///         // 2nd window (2, 3): max value 3.0
 ///         assert_relative_eq!(output[[b, 1, c]], 3.0);
-///         // Third window (4, 5): max value 5.0
+///         // 3rd window (4, 5): max value 5.0
 ///         assert_relative_eq!(output[[b, 2, c]], 5.0);
-///         // Fourth window (6, 7): max value 7.0
+///         // 4th window (6, 7): max value 7.0
 ///         assert_relative_eq!(output[[b, 3, c]], 7.0);
 ///     }
 /// }
@@ -115,7 +122,8 @@ impl MaxPooling1D {
     ///
     /// # Notes
     ///
-    /// The stride defaults to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override
+    /// The stride defaults to `pool_size` and padding defaults to
+    /// [`PaddingType::Valid`]. Override
     /// them with [`MaxPooling1D::with_stride`] and [`MaxPooling1D::with_padding`].
     ///
     pub fn new(pool_size: usize) -> Self {
@@ -135,14 +143,19 @@ impl MaxPooling1D {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - The updated layer, or an error if `stride` is zero
+    /// - `Self` - The updated layer
+    ///
+    /// # Errors
+    ///
+    /// - Returns [`Error::InvalidParameter`] if `stride` is 0
     pub fn with_stride(mut self, stride: usize) -> Result<Self, Error> {
         validate_stride_1d(stride)?;
         self.stride = stride;
         Ok(self)
     }
 
-    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    /// Sets the padding mode (defaults to
+    /// [`PaddingType::Valid`])
     ///
     /// # Parameters
     ///

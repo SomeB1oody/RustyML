@@ -40,9 +40,9 @@ pub fn time_per_call_ns<F: FnMut()>(mut f: F) -> f64 {
 /// would otherwise read as a crossover
 const WIN_MARGIN: f64 = 1.05;
 
-/// Losing rungs above the crossover that do not invalidate it. A ladder usually has at most 1:
-/// either a noisy measurement, or a largest shape whose working set overflows the cache, where a
-/// wide machine returns single-thread throughput
+/// Losing rungs above the crossover that do not invalidate it. A ladder usually has at most 1
+/// such rung. It is either a noisy measurement, or the largest shape, whose working set
+/// overflows the cache and drops a wide machine to single-thread throughput
 const MAX_INTERIOR_DIPS: usize = 1;
 
 /// 1 measured ladder rung
@@ -134,8 +134,8 @@ impl Section {
     /// The rungs in work order, with tied work values collapsed to their slowest rung
     ///
     /// Several ladders repeat a work value at different shapes, because a work estimate is 1
-    /// number and a shape is not. A tie collapses to its slowest rung: a crossover claim must
-    /// hold for every shape that reaches that work, and not only for the best of them
+    /// number and a shape is not. A tie collapses to its slowest rung. A crossover claim must
+    /// hold for every shape that reaches that work, not only for the best of them
     fn ladder(&self) -> Vec<(usize, f64)> {
         let mut rungs: Vec<(usize, f64)> =
             self.rows.iter().map(|r| (r.work, r.speedup())).collect();
@@ -148,10 +148,9 @@ impl Section {
     /// back to a loss
     ///
     /// The rule finds the first rung that wins and has no more than [`MAX_INTERIOR_DIPS`] losing
-    /// rungs above it. An earlier rule keyed on the LAST loss instead, which let 1 slow top rung
-    /// erase a whole ladder. That is exactly what a largest shape produces when its working set
-    /// stops fitting in cache, so the rule discarded the ladders that needed it most. The same
-    /// rule also pushed a bracket past a real win whenever 1 interior rung dipped.
+    /// rungs at or above it. One tolerated case is a largest shape whose working set stops
+    /// fitting in cache, where a wide machine falls back to single-thread throughput. The other
+    /// is a lone noisy interior rung.
     fn crossover(&self, ladder: &[(usize, f64)]) -> Option<(Option<usize>, usize, Vec<usize>)> {
         for i in 0..ladder.len() {
             if ladder[i].1 <= WIN_MARGIN {

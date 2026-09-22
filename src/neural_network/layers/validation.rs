@@ -1,4 +1,17 @@
-//! Shared input/weight validation for the layer module
+//! Shared input and weight validation for the layer module
+//!
+//! Every layer checks its own input shapes and its own weight assignments. The checks
+//! themselves repeat across layers, so this module holds the shared logic behind a small set of
+//! functions:
+//!
+//! - [`validate_weight_shape`] and [`validate_optional_weight`] guard the setter that assigns a
+//!   loaded or user-supplied array to a layer, before the array reaches the layer's storage.
+//! - [`start_build`] and [`start_build_many`] guard the start of a layer's build step, and
+//!   refuse a second build for a different input shape.
+//! - [`validate_built_input`] guards a forward pass, and checks a live tensor against the shape
+//!   a layer already built for.
+//!
+//! Every function here returns a [`crate::error::Error`] on failure, and never panics.
 
 use crate::error::Error;
 use crate::neural_network::NnError;
@@ -7,8 +20,8 @@ use crate::neural_network::Shape;
 /// Validates that a weight array assigned to a layer has the shape the layer expects
 ///
 /// Layers initialize their weight arrays with the correct shape in `new()`, so loaded or
-/// user-supplied weights must match that shape. This turns a silent corruption (and a later
-/// opaque panic deep inside `dot`) into a clear, recoverable error
+/// user-supplied weights must match that shape. This turns a silent corruption, or a later
+/// opaque panic deep inside the layer's math, into a clear, recoverable error
 ///
 /// # Parameters
 ///

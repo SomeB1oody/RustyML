@@ -1,4 +1,9 @@
 //! The merge layer that subtracts its second input from its first
+//!
+//! [`Subtract`] is the 1 merge layer with a fixed arity: it takes exactly 2 inputs and gives
+//! `a - b`. `SubtractCache` holds the 2 input shapes and the output shape that the backward
+//! pass needs to route the gradient and its negation back to each input. The `tests` module
+//! checks the subtraction, the 2 gradients, the broadcast, and the refusals of the layer.
 
 use super::{
     broadcast_input, elementwise_merge_layer_functions, merge_layer_base_functions, merged_dims,
@@ -110,6 +115,12 @@ impl Layer for Subtract {
     /// The merged extents come from the live tensors, so every extent is fixed. A training
     /// pass parks the 2 input shapes and the output shape, which is all the backward pass
     /// needs
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the layer received another count of inputs than 2, or if
+    ///   the shape rule of the family refuses the shapes of the tensors
+    /// - `Error::Computation` - If an input cannot take the rank of the output
     fn forward_many(&self, inputs: &[&Tensor], ctx: &mut Ctx) -> Result<Tensor, Error> {
         Arity::Exactly(2).check("Subtract", inputs.len())?;
         let dims = merged_dims("Subtract", inputs)?;
@@ -134,6 +145,13 @@ impl Layer for Subtract {
     ///
     /// The derivative of `a - b` is 1 for `a` and -1 for `b`, at every position. Each gradient
     /// then reduces back to the shape of its own input, which undoes the forward broadcast
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::ForwardPassNotRun)` - If `ctx` holds no cache of this
+    ///   layer
+    /// - `Error::ShapeMismatch` - If `grad_output` does not carry the shape of the output that
+    ///   the forward pass gave
     fn backward_many(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Vec<Tensor>, Error> {
         let cache: SubtractCache = ctx.pop_cache("Subtract")?;
         if grad_output.shape() != cache.output.as_slice() {

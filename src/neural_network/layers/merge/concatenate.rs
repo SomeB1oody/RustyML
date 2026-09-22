@@ -1,4 +1,11 @@
 //! The [`Concatenate`] merge layer, which joins its inputs along 1 axis
+//!
+//! [`Concatenate`] shares none of the [broadcast rule](super) of the other merge layers. It
+//! takes the same rank on every input, agrees every axis but the joined one, and sums the
+//! extents of the joined axis alone. `ConcatenateCache` parks the extent of each input on that
+//! axis, plus the shape of the output, so the backward pass can cut a gradient back into 1
+//! band per input. The `tests` module checks the join, the axis 0 and negative-axis cases, the
+//! gradient split, and the refusals of the layer.
 
 use super::merge_layer_base_functions;
 use crate::error::Error;
@@ -248,6 +255,11 @@ impl Layer for Concatenate {
     ///
     /// A layer that a graph reaches from several nodes builds once, on its first node, and
     /// every later node checks its shapes against that build
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the layer received no input, if it is already built for
+    ///   other shapes, or if the shapes of the inputs cannot join
     fn build_many(&mut self, inputs: &[Shape]) -> Result<(), Error> {
         Arity::AtLeast(1).check("Concatenate", inputs.len())?;
         let Some(shapes) = start_build_many(&self.built, "Concatenate", inputs)? else {
@@ -268,6 +280,12 @@ impl Layer for Concatenate {
     ///
     /// A training pass parks the extent of each band and the extents of the output. An
     /// inference pass parks nothing
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the layer received no input, if the shapes of the tensors
+    ///   cannot join, or if the axis falls outside the rank of the inputs
+    /// - `Error::Computation` - If the joined shape leaves an axis free
     fn forward_many(&self, inputs: &[&Tensor], ctx: &mut Ctx) -> Result<Tensor, Error> {
         Arity::AtLeast(1).check("Concatenate", inputs.len())?;
         let shapes: Vec<Shape> = inputs
@@ -313,6 +331,14 @@ impl Layer for Concatenate {
     ///
     /// Each input reaches 1 band of the output and no other position, so it takes the gradient
     /// of that band alone. The band already carries the shape of its own input
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::ForwardPassNotRun)` - If `ctx` holds no cache of this
+    ///   layer
+    /// - `Error::ShapeMismatch` - If `grad_output` does not carry the shape of the output that
+    ///   the forward pass gave
+    /// - `Error::InvalidInput` - If the axis falls outside the rank of the cached output
     fn backward_many(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Vec<Tensor>, Error> {
         let cache: ConcatenateCache = ctx.pop_cache("Concatenate")?;
         if grad_output.shape() != cache.output.as_slice() {

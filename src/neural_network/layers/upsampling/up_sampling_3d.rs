@@ -1,4 +1,9 @@
 //! 3D upsampling layer that enlarges a volume by a whole-number factor per axis
+//!
+//! [`UpSampling3D`] enlarges the depth axis, the height axis, and the width axis of a
+//! `[batch, dim1, dim2, dim3, channels]` tensor. It holds no parameter and takes no interpolation
+//! mode. Each output position copies its source position through `resize_engine`, which also
+//! runs the matching backward pass.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -23,10 +28,10 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// so the layer takes no interpolation argument
 ///
 /// The layer is the decoder counterpart of
-/// [`MaxPooling3D`](crate::neural_network::layers::pooling::max_pooling_3d::MaxPooling3D) and
-/// [`AveragePooling3D`](crate::neural_network::layers::pooling::average_pooling_3d::AveragePooling3D).
-/// A volume model pairs each pooling stage with 1 upsampling stage of the same factor. Examples
-/// include a model over a medical scan or a video clip
+/// [`MaxPooling3D`](crate::neural_network::layers::pooling::MaxPooling3D) and
+/// [`AveragePooling3D`](crate::neural_network::layers::pooling::AveragePooling3D). A volume model
+/// pairs each pooling stage with 1 upsampling stage of the same factor. Examples include a model
+/// over a medical scan or a video clip
 ///
 /// # Examples
 ///

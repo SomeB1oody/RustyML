@@ -5,7 +5,7 @@
 //! value, and it serializes, so a layer holds it by value and a checkpoint can record it.
 //!
 //! 13 functions of the module draw a weight array, and all 13 draw through this type. 14 of
-//! their draws are Glorot uniform, 1 is a fixed uniform range, and the 3 recurrent layers draw
+//! their draws are Glorot uniform, and 1 is a fixed uniform range. The 3 recurrent layers draw
 //! their recurrent kernels as square orthogonal matrices. The dropout and noise masks of a
 //! forward pass are not weights, and they do not come from here.
 //!
@@ -14,8 +14,8 @@
 //! [`Initializer::GlorotUniform`] scales its range by a fan pair. The pair reaches the draw as a
 //! [`Fans`] value that the layer builds from its own configuration. No function of this module
 //! reads the shape of the array to derive a fan. A transposed convolution kernel stores its last
-//! 2 axes in the reverse order of a plain kernel, so a rule that read axis position would swap
-//! the pair.
+//! 2 axes in the reverse order of a plain kernel. A rule that read axis position would therefore
+//! swap the pair.
 //!
 //! # The draw order is part of the contract
 //!
@@ -199,9 +199,9 @@ impl Initializer {
 
     /// Draws an array of `shape`, 1 element at a time, over the range of this initializer
     ///
-    /// The elements come from `rng` in the row-major order of `shape`. The draw advances `rng` by
-    /// 1 value per element, so a caller that draws twice from 1 generator gets 2 different
-    /// results and gets them in a fixed order. See the module documentation
+    /// The elements come from `rng` in the row-major order of `shape`. The draw advances `rng`
+    /// by 1 value per element. A caller that draws twice from 1 generator therefore gets 2
+    /// different results, in a fixed order. See the module documentation
     ///
     /// # Parameters
     ///

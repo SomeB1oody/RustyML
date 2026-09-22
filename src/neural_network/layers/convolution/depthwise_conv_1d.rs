@@ -1,4 +1,8 @@
-//! 1D depthwise convolution layer that gives each input channel its own kernel or kernels
+//! 1D depthwise convolution layer
+//!
+//! [`DepthwiseConv1D`] gives each input channel of a sequence its own kernel or kernels, with no
+//! mixing between channels. `DepthwiseConv1DCache` holds the tensors the layer parks between
+//! its forward and backward passes.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -69,7 +73,9 @@ use ndarray::{Array1, Array3};
 /// ```
 #[derive(Debug)]
 pub struct DepthwiseConv1D {
-    /// Number of input channels, which [`UnaryLayer::build`] reads from the input shape
+    /// Number of input channels, which
+    /// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build) reads from the input
+    /// shape
     channels: usize,
     /// Kernels per input channel. The output carries `channels * depth_multiplier` of them
     depth_multiplier: usize,
@@ -119,9 +125,11 @@ impl DepthwiseConv1D {
     /// from the input, as `channels * depth_multiplier`. `depth_multiplier` defaults to 1. Set it
     /// with [`DepthwiseConv1D::with_depth_multiplier`].
     ///
-    /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
-    /// [`DepthwiseConv1D::with_padding`]. The kernel is solid by default. Space its taps out
-    /// with [`DepthwiseConv1D::with_dilation_rate`].
+    /// Padding defaults to
+    /// [`PaddingType::Valid`]. Choose
+    /// [`PaddingType::Same`] with
+    /// [`DepthwiseConv1D::with_padding`]. The kernel is solid by default. Space its taps out with
+    /// [`DepthwiseConv1D::with_dilation_rate`].
     ///
     /// The layer seeds weights from the global seed or entropy by default. For reproducible
     /// initialization, set a seed with [`DepthwiseConv1D::with_random_state`]
@@ -157,7 +165,8 @@ impl DepthwiseConv1D {
         })
     }
 
-    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    /// Sets the padding mode (defaults to
+    /// [`PaddingType::Valid`])
     ///
     /// # Parameters
     ///
@@ -190,8 +199,9 @@ impl DepthwiseConv1D {
     /// A depthwise convolution takes a stride above 1 and a dilation above 1 together. Only the
     /// plain and the transposed convolutions reject that pair
     ///
-    /// The effective kernel is not bounded by the input length here. Only [`PaddingType::Valid`]
-    /// needs it to fit, and the build applies that rule
+    /// The effective kernel is not bounded by the input length here. Only
+    /// [`PaddingType::Valid`] needs it to
+    /// fit, and the build applies that rule
     ///
     /// # Errors
     ///

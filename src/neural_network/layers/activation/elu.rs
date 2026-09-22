@@ -1,5 +1,9 @@
-//! ELU activation layer that applies `x` above 0 and `alpha * (e^x - 1)` at 0 and below, and
-//! parks the output for backpropagation
+//! ELU (Exponential Linear Unit) activation layer
+//!
+//! The `ELU` struct holds the `alpha` scale of its negative branch and the shape recorded at
+//! build time. `UnaryLayer::forward` computes `Activation::ELU` and caches the output during
+//! training. `UnaryLayer::backward` reads that cache to compute the gradient. `LayerBase`
+//! reports the layer type, and macros supply its shape-query and empty parameter-list functions
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

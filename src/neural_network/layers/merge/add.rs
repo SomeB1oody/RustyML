@@ -1,4 +1,10 @@
 //! The [`Add`] merge layer, which sums every input element by element
+//!
+//! [`Add`] applies the [shape rule of the merge family](super) and sums the lifted tensors at
+//! the merged shape. `AddCache` holds the extent of each input and of the output, so the
+//! backward pass can reduce the gradient back to the shape of each input without the input
+//! values themselves. The `tests` module checks the sum, the gradient split, the broadcast,
+//! and the refusals of the layer.
 
 use super::{
     broadcast_input, elementwise_merge_layer_functions, merge_layer_base_functions, merged_dims,
@@ -109,6 +115,12 @@ impl Layer for Add {
     ///
     /// A training pass parks the extents of the inputs and of the output. An inference pass
     /// parks nothing
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the layer received no input, or if the shape rule of the
+    ///   family refuses the shapes of the tensors
+    /// - `Error::Computation` - If an input cannot take the rank of the output
     fn forward_many(&self, inputs: &[&Tensor], ctx: &mut Ctx) -> Result<Tensor, Error> {
         Arity::AtLeast(1).check("Add", inputs.len())?;
         let dims = merged_dims("Add", inputs)?;
@@ -140,6 +152,13 @@ impl Layer for Add {
     ///
     /// The derivative of a sum is 1 for every term. An input that broadcast in the forward
     /// pass takes the sum over every position of the output that it reached
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::ForwardPassNotRun)` - If `ctx` holds no cache of this
+    ///   layer
+    /// - `Error::ShapeMismatch` - If `grad_output` does not carry the shape of the output that
+    ///   the forward pass gave
     fn backward_many(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Vec<Tensor>, Error> {
         let cache: AddCache = ctx.pop_cache("Add")?;
         if grad_output.shape() != cache.output.as_slice() {

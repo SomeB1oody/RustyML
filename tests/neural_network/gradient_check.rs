@@ -1,8 +1,19 @@
 //! Numerical (finite-difference) gradient checks for layer backward passes.
 //!
-//! For each layer, L = sum(output), so dL/dx = backward(ones). This compares the analytic input
-//! gradient against a central finite-difference estimate of dL/dx. It catches gradient bugs that
-//! a shape-only check or a "loss decreased" convergence test would miss.
+//! Every check compares an analytic gradient that `backward` computes against a central
+//! finite-difference estimate of the same gradient. This catches a gradient bug that a
+//! shape-only check or a "loss decreased" convergence test would miss.
+//!
+//! Most checks use L = sum(output), so the input gradient is what `backward(ones)` gives. A
+//! layer whose output sum stays constant in the input, such as Softmax or a zero-mean
+//! normalizer, is degenerate under that loss. Those checks use a weighted loss
+//! L = sum(W * output) instead, with a fixed, non-uniform weight tensor.
+//!
+//! `check_input_gradient` and `check_input_gradient_weighted` perturb 1 input value at a time.
+//! `check_weight_gradient` and `check_weight_gradient_weighted` perturb 1 parameter value at a
+//! time instead, and compare against the gradient that the backward pass parks in `ctx.grads()`.
+//! `check_merge_input_gradients` covers a merge layer, which takes several inputs and gives 1
+//! gradient back per input.
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
@@ -79,8 +90,8 @@ use rustyml::neural_network::traits::{Layer, ParamId, UnaryLayer};
 /// d sum(output)/dx.
 ///
 /// Every pass runs in a training context. The backward pass needs the cache that only a
-/// training forward pass writes, and a mode-dependent layer must take the same branch in the
-/// analytic pass and in each finite-difference probe.
+/// training forward pass writes. A mode-dependent layer must also take the same branch in
+/// the analytic pass and in each finite-difference probe.
 fn check_input_gradient(layer: &mut dyn UnaryLayer, x: &Tensor, eps: f32, tol: f32) {
     // With L = sum(output), the analytic input gradient is backward(ones)
     let mut ctx = Ctx::training();
@@ -863,7 +874,7 @@ fn global_average_pooling_3d_input_gradient_matches_finite_difference() {
 }
 
 // Reshape (no trainable parameters, input gradient only). A reshape is a pure index remap, so
-// each input gradient equals exactly 1, and a shape-only check would miss a wrong target or a
+// each input gradient equals exactly 1. A shape-only check would miss a wrong target or a
 // permuted element.
 
 #[test]
@@ -964,13 +975,13 @@ fn repeat_vector_input_gradient_matches_finite_difference() {
 }
 
 // Upsampling layers (no trainable parameters, input gradient only). Each output position is a
-// weighted sum of input positions, so the weighted loss exposes a misplaced tap that the
+// weighted sum of input positions. The weighted loss exposes a misplaced tap that the
 // ones-based helper would hide, since an output position's weights always sum to 1. Every
 // factor below is uneven per axis, since an equal factor would hide the same bug.
 //
-// The step here is 1e-1 rather than the usual 1e-3: these layers are exactly linear, so a
-// central difference has no truncation error, leaving only float32 rounding of the 2 loss
-// values. A wider step divides that rounding by more.
+// The step here is 1e-1 rather than the usual 1e-3. These layers are exactly linear, so a
+// central difference has no truncation error. The only error left is float32 rounding of the
+// 2 loss values. A wider step divides that rounding by more.
 
 #[test]
 fn up_sampling_1d_input_gradient_matches_finite_difference() {
@@ -1379,10 +1390,10 @@ fn batch_normalization_spatial_weight_gradient_matches_finite_difference() {
     check_weight_gradient_weighted(&mut bn, &x, 1e-3, 5e-2);
 }
 
-// A transposed convolution runs a plain one's 2 halves in the other order: its forward pass is
+// A transposed convolution runs a plain one's 2 halves in the other order. Its forward pass is
 // the plain backward's col2im scatter, and its backward pass is the plain forward's im2col
 // gather. This exercises code no plain check reaches: the scatter's crop and the gather's pad.
-// Both need their own case with `Same` padding and a stride above 1, since the crop and the pad
+// Both need their own case with `Same` padding and a stride above 1. The crop and the pad
 // are 0 under `Valid` at stride 1.
 
 #[test]

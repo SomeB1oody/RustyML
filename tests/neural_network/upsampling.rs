@@ -244,7 +244,8 @@ fn up_sampling_2d_only_the_wide_kernels_overshoot() {
 
 // Backward pass
 
-/// The repeat mode sends every output gradient back to the position the forward pass copied it from
+/// The repeat mode sends every output gradient back to the position the forward pass copied it
+/// from
 #[test]
 fn up_sampling_1d_backward_sums_each_repeated_run() {
     let x = ramp_of(&[1, 2, 2]);

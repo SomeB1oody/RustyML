@@ -204,6 +204,7 @@ fn test_predict_is_deterministic() {
 
 // summary smoke-test
 
+/// `summary()` does not panic on a built 2-layer model
 #[test]
 fn test_summary_does_not_panic() {
     let model = SequentialBuilder::new()
@@ -216,6 +217,7 @@ fn test_summary_does_not_panic() {
 
 // error paths
 
+/// `fit` on an uncompiled model returns `NotCompiled`
 #[test]
 fn test_fit_before_compile_returns_not_compiled() {
     let mut model = SequentialBuilder::new()
@@ -261,6 +263,7 @@ fn a_builder_that_holds_no_layer_is_refused_for_every_shape() {
     );
 }
 
+/// `fit` on a 0-row `x` and `y` returns `EmptyInput`
 #[test]
 fn test_fit_empty_x_returns_empty_input_error() {
     let mut model = SequentialBuilder::new()
@@ -280,6 +283,7 @@ fn test_fit_empty_x_returns_empty_input_error() {
     );
 }
 
+/// `fit` with `x` and `y` batch counts that disagree returns `DimensionMismatch`
 #[test]
 fn test_fit_batch_size_mismatch_returns_dimension_mismatch() {
     let mut model = SequentialBuilder::new()
@@ -299,6 +303,7 @@ fn test_fit_batch_size_mismatch_returns_dimension_mismatch() {
     );
 }
 
+/// `predict` on a 0-row `x` returns `EmptyInput`
 #[test]
 fn test_predict_empty_x_returns_empty_input_error() {
     let model = SequentialBuilder::new()
@@ -314,6 +319,7 @@ fn test_predict_empty_x_returns_empty_input_error() {
     );
 }
 
+/// `fit_with_batches` with a batch size of 0 returns `InvalidParameter`
 #[test]
 fn test_fit_with_batches_zero_batch_size_returns_invalid_parameter() {
     let mut model = SequentialBuilder::new()
@@ -337,6 +343,7 @@ fn test_fit_with_batches_zero_batch_size_returns_invalid_parameter() {
     );
 }
 
+/// `fit_with_batches` with a batch size above the sample count returns `InvalidParameter`
 #[test]
 fn test_fit_with_batches_batch_size_exceeds_samples_returns_invalid_parameter() {
     let mut model = SequentialBuilder::new()
@@ -944,7 +951,7 @@ fn test_learning_rate_reads_back_through_the_model() {
     assert_eq!(model.learning_rate(), Some(0.0015));
 }
 
-/// Cross-checked against Keras 3.15 (jax backend): `Dense(1)`, `w = 0.5`, `b = 0`, `SGD(0.1)`,
+/// Cross-checked against Keras 3.15 (jax backend). `Dense(1)`, `w = 0.5`, `b = 0`, `SGD(0.1)`,
 /// `mse`, on `y = 2x` for `x = 0..4`, batched by 2. Every literal below matches Keras' output.
 #[test]
 fn test_batch_losses_and_epoch_mean_match_keras() {

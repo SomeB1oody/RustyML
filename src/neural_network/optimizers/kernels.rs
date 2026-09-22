@@ -166,7 +166,7 @@ pub fn l2_regularized_grad(grad: &[f32], param: &[f32], weight_decay: f32) -> Ve
 /// - `epsilon` - the denominator stabilizer, on the gradient scale (added after the root)
 /// - `t` - the 1-based timestep used for bias correction
 ///
-/// # Epsilon placement
+/// # Notes
 ///
 /// `epsilon` goes outside the square root here, and the denominator uses the bias-corrected `v`,
 /// following Algorithm 1 of Kingma and Ba. Epsilon keeps the same scale at every timestep: it
@@ -232,7 +232,7 @@ pub fn adam_step(
 /// - `lr` - the learning rate
 /// - `epsilon` - the denominator stabilizer, on the squared-gradient scale
 ///
-/// # Epsilon placement
+/// # Notes
 ///
 /// `epsilon` goes inside the square root here. This crate's [`adam_step`] adds epsilon after the
 /// root instead, so the 2 kernels place epsilon on different scales
@@ -281,7 +281,7 @@ pub fn rmsprop_step(
 /// - `lr` - the learning rate
 /// - `epsilon` - the denominator stabilizer, on the squared-gradient scale
 ///
-/// # Epsilon placement
+/// # Notes
 ///
 /// `epsilon` goes inside the square root here, the same placement as [`rmsprop_step`]. See
 /// [`rmsprop_step`] for why the placement changes the scale on which epsilon is measured, and why

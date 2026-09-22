@@ -342,7 +342,7 @@ fn avg_pool_2d_default_stride_equals_pool_size() {
 }
 
 // AveragePooling3D, input [batch, depth, height, width, channels]
-// pooled_d = (d - pd) / sd + 1, similarly for h, w
+// pooled_d = (d - pool_d) / stride_d + 1, and the height and width axes follow the same rule
 
 /// Forward mean value for a single (2,2,2) window covering the whole [1,2,2,2,1] volume
 #[test]
@@ -858,8 +858,9 @@ fn global_avg_pool_3d_output_shape() {
     assert_eq!(layer.output_shape(), "(None, 5)");
 }
 
-/// Same padding excludes padded cells from the average divisor (Keras count_include_pad=False).
-/// For a 3x3 input, pool 2x2, stride 2, the trailing windows divide by their in-bounds count.
+/// Same padding excludes padded cells from the average divisor, matching the reference layer's
+/// `count_include_pad=False`. For a 3x3 input, pool 2x2, stride 2, the trailing windows divide
+/// by their in-bounds count.
 #[test]
 fn avg_pool_2d_same_padding_excludes_padding() {
     let mut layer = AveragePooling2D::new((2, 2))

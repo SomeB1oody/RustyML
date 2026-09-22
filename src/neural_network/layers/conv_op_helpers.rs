@@ -4,7 +4,7 @@
 //! `SeparableConv1D` and `SeparableConv2D`
 //!
 //! A depthwise convolution never mixes channels. Under the crate's channels-last layout, the
-//! channel axis is a pure vector lane. One kernel tap at one output position reads `channels`
+//! channel axis is a pure vector lane. 1 kernel tap at 1 output position reads `channels`
 //! contiguous input floats, and writes `channels * depth_multiplier` contiguous accumulator
 //! floats. These kernels exploit that layout, so they take flat slices instead of per-channel
 //! plane views. A channels-first plane would need a strided gather, which this layout avoids
@@ -111,7 +111,7 @@ pub(super) fn depthwise_forward(
     }
 }
 
-/// Fills one output row of a depthwise convolution
+/// Fills 1 output row of a depthwise convolution
 ///
 /// `src` is the whole `[batch, height, width, channels]` input and `ker` the whole
 /// `[kh, kw, channels, depth_multiplier]` kernel, both flat and row-major. `out_row` is the
@@ -148,7 +148,7 @@ fn depthwise_forward_row(
                     // The general form below is `for m in 0..dm`, whose trip count the compiler
                     // cannot see is 1, so it emits a scalar nested loop. This fast path is
                     // instead a plain element-wise multiply-accumulate over 3 equal-length
-                    // contiguous slices. `depth_multiplier == 1` is Keras' default
+                    // contiguous slices. `depth_multiplier == 1` is the common case
                     for ((a, &xc), &kc) in acc.iter_mut().zip(x).zip(k) {
                         *a += xc * kc;
                     }
@@ -174,7 +174,7 @@ fn depthwise_forward_row(
 pub(super) struct DepthwiseGradients {
     /// Weight gradient, flat `[kh, kw, channels, depth_multiplier]`
     pub weight: Vec<f32>,
-    /// Bias gradient, one value per output channel
+    /// Bias gradient, 1 value per output channel
     pub bias: Vec<f32>,
     /// Input gradient, flat `[height, width, channels]` per batch item
     pub input: Vec<f32>,

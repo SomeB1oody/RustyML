@@ -179,7 +179,7 @@ pub fn calibrate_det_reduce_block() -> Section {
     }
 }
 
-// exp-heavy reduction: EXP_REDUCE_MIN_ELEMS (math::logistic_loss)
+// exp-heavy reduction: EXP_REDUCE_MIN_ELEMS (logistic regression's log-loss term)
 
 /// Per-element work is the numerically stable log-loss term (`exp` + `ln` + a few flops). That
 /// is an order of magnitude heavier than the cheap sum-of-squares class, so its crossover sits
@@ -240,7 +240,7 @@ pub fn calibrate_exp_reduction() -> Section {
 /// The per-iteration k-means pass that folds every sample's row into its cluster's centroid sum
 /// (plus counts and inertia). Serial is the production scatter loop. Parallel is the
 /// deterministic blocked range fold with an (Array2 sums, counts, inertia) accumulator per
-/// block. The work metric is samples x features, but the fold blocks the sample axis alone, so
+/// block. The work metric is samples x features. The fold blocks the sample axis alone, so
 /// the feature count inflates the estimate without adding a task. The d=8 and d=32 rungs
 /// therefore do NOT share a bracket at equal work: every rung tracks the block count, which is
 /// `ceil(n / DET_REDUCE_BLOCK)`. The call site pairs the product with a 2-block floor on the

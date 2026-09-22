@@ -1,11 +1,12 @@
 //! Parallel/serial gate calibration for the crate's kernels
 //!
-//! Every `*_MIN_FLOPS` / `*_MIN_OPS` / `*_PARALLEL_THRESHOLD` constant in the crate decides when
-//! a pass is worth spreading across rayon. This bench times the forced-serial and
-//! forced-parallel implementations of each kernel class across a size ladder. It prints the
-//! tables and writes the measurements to `target/parallel_gates/RESULTS.md`, so the constants
-//! can be set from data instead of estimates. Set `RUSTYML_WRITE_RESULTS=1` to refresh the
-//! tracked copy at `benches/calibrations/RESULTS.md` instead.
+//! Every parallel-gate constant in the crate (`*_MIN_FLOPS`, `*_MIN_OPS`, `*_MIN_ELEMS`,
+//! `*_MIN_VISITS`, or `*_PARALLEL_THRESHOLD`) decides when a pass is worth spreading across
+//! rayon. This bench times the forced-serial and forced-parallel implementations of each
+//! kernel class across a size ladder. It prints the tables and writes the measurements to
+//! `target/parallel_gates/RESULTS.md`, so the constants can be set from data instead of
+//! estimates. Set `RUSTYML_WRITE_RESULTS=1` to refresh the tracked copy at
+//! `benches/calibrations/RESULTS.md` instead.
 //!
 //! Run with:
 //!

@@ -302,8 +302,8 @@ fn gaussian_noise_unbuilt_output_shape_is_unknown() {
 
 // GaussianDropout: constructor validation
 
-/// An out-of-range rate is rejected: the valid interval is [0, 1). rate = 1.0 (the excluded
-/// upper bound), rate > 1.0, and a negative rate all fail
+/// An out-of-range rate is rejected. The valid interval is [0, 1), so a rate of 1.0 (the
+/// excluded upper bound), a rate above 1.0, and a negative rate all fail
 #[test]
 fn gaussian_dropout_invalid_rate_returns_err() {
     for bad in [1.0f32, 1.5, -0.1] {

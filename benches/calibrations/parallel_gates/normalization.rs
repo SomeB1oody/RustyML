@@ -1,8 +1,8 @@
 //! Normalization-layer statistics gates.
 //!
-//! It covers the 2 kernel shapes the 3 normalization layers share: the per-channel column fold
-//! behind `COL_FOLD_PARALLEL_MIN_ELEMS`, measured on the BatchNorm statistics, and the row pass
-//! behind `ROW_PASS_PARALLEL_MIN_ELEMS`, measured on the trailing-axis LayerNorm sweep.
+//! It covers the 2 kernel shapes the 3 normalization layers share. The per-channel column fold
+//! behind `COL_FOLD_PARALLEL_MIN_ELEMS` is measured on the BatchNorm statistics. The row pass
+//! behind `ROW_PASS_PARALLEL_MIN_ELEMS` is measured on the trailing-axis LayerNorm sweep.
 
 use crate::harness::{Row, Section, random_matrix, time_per_call_ns};
 use ndarray::{Array1, Array2, Axis};
@@ -38,7 +38,7 @@ fn bench_par_col_sum_rowblock(x: &Array2<f32>) -> Array1<f32> {
     out
 }
 
-/// The viable BatchNorm stats parallelization (BN_COL_STATS_PARALLEL_MIN_ELEMS): row-block
+/// The viable BatchNorm stats parallelization (COL_FOLD_PARALLEL_MIN_ELEMS): row-block
 /// deterministic fold vs serial mean_axis. Changes the per-channel accumulation grouping
 /// (a versioned behavior change), but is bitwise identical at any thread count
 pub fn calibrate_bn_col_stats_rowblock() -> Section {
@@ -77,7 +77,7 @@ pub fn calibrate_bn_col_stats_rowblock() -> Section {
     }
 }
 
-// LayerNorm fused row pass (trailing axis): LN_ROW_PARALLEL_MIN_ELEMS
+// LayerNorm fused row pass (trailing axis): ROW_PASS_PARALLEL_MIN_ELEMS
 
 /// Mirrors the production LayerNorm row pass. Per row of a `[R, N]` slice, it runs 8-lane mean
 /// and variance folds, plus the fused center/normalize/scale-shift sweep that writes 3 buffers.
@@ -153,9 +153,9 @@ fn bench_ln_row_pass(
 /// knob. Spans transformer-scale shapes plus wide-row and narrow-row extremes
 ///
 /// The last rung is a reference point rather than a candidate for the gate. It holds the input
-/// plus 3 working buffers, which is 4 times its own size, so the working set overflows a typical
-/// shared L3 and both columns fall to memory bandwidth. Its label says so, because a bare speedup
-/// near 1.00x there reads like a scheduling result and is not one
+/// plus 3 working buffers, which is 4 times its own size. The working set then overflows a
+/// typical shared L3, and both columns fall to memory bandwidth. Its label says so, because a
+/// bare speedup near 1.00x there reads like a scheduling result and is not one
 pub fn calibrate_ln_row_pass() -> Section {
     let mut rows = Vec::new();
     for &(r, n) in &[

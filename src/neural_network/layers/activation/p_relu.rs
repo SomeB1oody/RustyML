@@ -1,5 +1,17 @@
-//! PReLU activation layer, whose negative-side slope is a trainable parameter, and the
-//! shared-axes rule that decides how many slopes it holds
+//! PReLU (parametric ReLU) activation layer, whose negative-side slope trains with the model
+//!
+//! Defines the [`PReLU`] struct, which holds 1 negative-side slope per position of its build
+//! shape. [`PReLU::with_shared_axes`] then names axes that share 1 slope across a group of
+//! positions. Every other activation layer in this crate delegates its math to the shared
+//! [`Activation`](crate::neural_network::layers::activation::Activation) enum. `PReLU` holds its
+//! own forward and backward transforms instead, because a trainable array carries state that the
+//! enum's parameter-free variants do not.
+//!
+//! The [`LayerBase`](crate::neural_network::traits::LayerBase) and
+//! [`UnaryLayer`](crate::neural_network::traits::UnaryLayer) trait implementations at the bottom of
+//! the module wire the layer into the rest of a model. They handle shape inference and validation,
+//! parameter registration for the optimizer, and the forward and backward passes a model calls
+//! during training and inference.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

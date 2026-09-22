@@ -124,7 +124,9 @@ pub struct Conv1DTranspose {
     activation: Activation,
     /// Shape the layer was built for, batch axis first. `None` before the build
     built: Option<Shape>,
-    /// Input channels, which [`UnaryLayer::build`] reads from the input shape
+    /// Input channels, which
+    /// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build) reads from the input
+    /// shape
     channels: usize,
     /// Seed of the weight draw, or `None` to take the global seed or entropy
     random_state: Option<u64>,
@@ -152,10 +154,11 @@ impl Conv1DTranspose {
     ///
     /// # Notes
     ///
-    /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
-    /// [`Conv1DTranspose::with_padding`]. The kernel is solid by default. Space its taps out
-    /// with [`Conv1DTranspose::with_dilation_rate`]. By default, the layer seeds weights from the
-    /// global
+    /// Padding defaults to
+    /// [`PaddingType::Valid`]. Choose
+    /// [`PaddingType::Same`] with
+    /// [`Conv1DTranspose::with_padding`]. The kernel is solid by default. Space its taps out with
+    /// [`Conv1DTranspose::with_dilation_rate`]. By default, the layer seeds weights from the global
     /// seed or entropy. For reproducible initialization, set a seed with
     /// [`Conv1DTranspose::with_random_state`].
     ///
@@ -192,7 +195,8 @@ impl Conv1DTranspose {
         })
     }
 
-    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    /// Sets the padding mode (defaults to
+    /// [`PaddingType::Valid`])
     ///
     /// # Parameters
     ///

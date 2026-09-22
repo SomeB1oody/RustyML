@@ -99,7 +99,9 @@ pub struct Conv2D {
     activation: Activation,
     /// Shape the layer was built for, batch axis first. `None` before the build
     built: Option<Shape>,
-    /// Input channels, which [`UnaryLayer::build`] reads from the input shape
+    /// Input channels, which
+    /// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build) reads from the input
+    /// shape
     channels: usize,
     /// Seed of the weight draw, or `None` to take the global seed or entropy
     random_state: Option<u64>,
@@ -127,15 +129,17 @@ impl Conv2D {
     ///
     /// # Notes
     ///
-    /// Padding defaults to [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
+    /// Padding defaults to
+    /// [`PaddingType::Valid`]. Choose
+    /// [`PaddingType::Same`] with
     /// [`Conv2D::with_padding`]. The kernel is solid by default. Space its taps out with
-    /// [`Conv2D::with_dilation_rate`]. By default, the layer seeds weights from the global seed
-    /// or entropy. For reproducible initialization, set a seed with
-    /// [`Conv2D::with_random_state`].
+    /// [`Conv2D::with_dilation_rate`]. By default, the layer seeds weights from the global seed or
+    /// entropy. For reproducible initialization, set a seed with [`Conv2D::with_random_state`].
     ///
-    /// The kernel is not bounded by the input axis here. Only [`PaddingType::Valid`] needs the
-    /// effective kernel to fit. The padding mode is not final until the build, so the build
-    /// applies that rule.
+    /// The kernel is not bounded by the input axis here. Only
+    /// [`PaddingType::Valid`] needs the
+    /// effective kernel to fit. The padding mode is not final until the build, so the build applies
+    /// that rule.
     ///
     /// # Errors
     ///
@@ -171,7 +175,8 @@ impl Conv2D {
         })
     }
 
-    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    /// Sets the padding mode (defaults to
+    /// [`PaddingType::Valid`])
     ///
     /// # Parameters
     ///
@@ -201,8 +206,9 @@ impl Conv2D {
     ///
     /// # Notes
     ///
-    /// The effective kernel is not bounded by the input axis here. Only [`PaddingType::Valid`]
-    /// needs it to fit, and the build applies that rule
+    /// The effective kernel is not bounded by the input axis here. Only
+    /// [`PaddingType::Valid`] needs it to
+    /// fit, and the build applies that rule
     ///
     /// # Errors
     ///

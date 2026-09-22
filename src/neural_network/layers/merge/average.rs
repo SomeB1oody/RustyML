@@ -1,4 +1,9 @@
 //! The merge layer that averages its inputs element by element
+//!
+//! [`Average`] sums its inputs at the merged shape and divides the sum by the input count.
+//! `AverageCache` holds the extents that the backward pass needs to split a gradient back to
+//! each input. The `tests` module checks the average, the gradient split, the broadcast, and
+//! the refusals of the layer.
 
 use super::{
     broadcast_input, elementwise_merge_layer_functions, merge_layer_base_functions, merged_dims,
@@ -111,6 +116,12 @@ impl Layer for Average {
     ///
     /// A training pass parks the shape of every input. The backward pass reduces each gradient
     /// to 1 of those shapes
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - If the layer received no input, or if the shape rule of the
+    ///   family refuses the shapes of the tensors
+    /// - `Error::Computation` - If an input cannot take the rank of the output
     fn forward_many(&self, inputs: &[&Tensor], ctx: &mut Ctx) -> Result<Tensor, Error> {
         Arity::AtLeast(1).check("Average", inputs.len())?;
         let output = merged_dims("Average", inputs)?;

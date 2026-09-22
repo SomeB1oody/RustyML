@@ -1,8 +1,13 @@
 //! Logistic regression for binary classification
 //!
-//! Provides the [`LogisticRegression`] model, trained with gradient descent and
-//! optional L1/L2 regularization, plus the [`generate_polynomial_features`]
-//! helper for building polynomial feature expansions
+//! Provides the [`LogisticRegression`] model, trained by full-batch gradient descent on the
+//! logistic loss, with optional L1 or L2 regularization. Fitting never panics: every precondition
+//! failure and numerical issue during training surfaces as an [`Error`](crate::error::Error) from
+//! [`LogisticRegression::fit`].
+//!
+//! Also provides the [`generate_polynomial_features`] helper, which expands a feature
+//! matrix into its polynomial combinations up to a chosen degree. Use it to fit a
+//! non-linear decision boundary with the same linear model.
 
 use crate::error::Error;
 pub use crate::machine_learning::RegularizationType;
@@ -83,12 +88,12 @@ impl Default for LogisticRegression {
     ///
     /// # Default Values
     ///
-    /// - `fit_intercept` - `true` - include an intercept term (bias)
-    /// - `learning_rate` - `0.01` - a moderate rate that gives stable convergence for most
+    /// - `fit_intercept` - `true`, so training adds an intercept term (bias)
+    /// - `learning_rate` - `0.01`, a moderate rate that gives stable convergence for most
     ///   problems
-    /// - `max_iter` - `100` - maximum number of gradient descent iterations
-    /// - `tol` - `1e-4` - stops training when the loss change between iterations is smaller
-    ///   than this value
+    /// - `max_iter` - `100`, the maximum number of gradient descent iterations
+    /// - `tol` - `1e-4`, the loss-change threshold that stops training
+    /// - `regularization_type` - `None`, so training applies no L1 or L2 penalty
     ///
     /// # Returns
     ///
@@ -214,10 +219,10 @@ impl LogisticRegression {
     ///
     /// # Performance
     ///
-    /// The per-iteration logits and gradient run as parallel GEMVs above their FLOPs gates. The
-    /// sigmoid runs above the exp-map gate. The loss uses a deterministic blocked fold above its
-    /// exp-reduction gate. Re-running on the same machine reproduces the result, though not
-    /// necessarily bit-for-bit
+    /// The per-iteration logits and gradient run as GEMVs under the gemmkit backend's own
+    /// automatic parallel scheduling. The sigmoid runs above the exp-map gate. The loss uses a
+    /// deterministic blocked fold above its exp-reduction gate. Re-running on the same machine
+    /// reproduces the result, though not necessarily bit-for-bit
     pub fn fit<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -229,7 +234,6 @@ impl LogisticRegression {
     {
         preliminary_check(x, Some(y.len()))?;
 
-        // Check target values are binary
         for &val in y.iter() {
             if val != 0.0 && val != 1.0 {
                 return Err(Error::invalid_input(
@@ -290,7 +294,6 @@ impl LogisticRegression {
             let mut gradients =
                 matvec(&x_train_view.t(), &errors, Parallelism::Rayon(0)) / n_samples as f64;
 
-            // Check for numerical issues in gradients
             if gradients.iter().any(|&val| !val.is_finite()) {
                 #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite gradients");
@@ -365,7 +368,6 @@ impl LogisticRegression {
                 }
             }
 
-            // Check for numerical issues in updated weights
             if weights.iter().any(|&val| !val.is_finite()) {
                 #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite weights");
@@ -377,7 +379,6 @@ impl LogisticRegression {
                 final_cost = cost;
             }
 
-            // Check for numerical issues in cost
             if !cost.is_finite() {
                 #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite cost");
@@ -390,7 +391,6 @@ impl LogisticRegression {
                 progress_bar.inc(1);
             }
 
-            // Check convergence condition
             if (prev_cost - cost).abs() < self.tol {
                 break;
             }

@@ -1,5 +1,12 @@
-//! 2D max pooling layer that selects the maximum value within each pooling window across
-//! height and width.
+//! 2D max pooling layer
+//!
+//! [`MaxPooling2D`] slides a window across the height and width axes of a `[batch, height, width,
+//! channels]` tensor and keeps the largest element of each window. [`MaxPooling2D::new`] sets the
+//! strides to `pool_size` and the padding to
+//! [`PaddingType::Valid`](crate::neural_network::layers::convolution::PaddingType).
+//! [`MaxPooling2D::with_strides`] and [`MaxPooling2D::with_padding`] override those defaults. The
+//! forward pass records the arg-max of every window. The backward pass then routes each output
+//! gradient back to the input element that produced it.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -110,8 +117,9 @@ impl MaxPooling2D {
     ///
     /// # Notes
     ///
-    /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
-    /// with [`MaxPooling2D::with_strides`] and [`MaxPooling2D::with_padding`].
+    /// Strides default to `pool_size` and padding defaults to
+    /// [`PaddingType::Valid`]. Override
+    /// them with [`MaxPooling2D::with_strides`] and [`MaxPooling2D::with_padding`].
     ///
     pub fn new(pool_size: (usize, usize)) -> Self {
         MaxPooling2D {
@@ -130,14 +138,19 @@ impl MaxPooling2D {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - The updated layer, or an error if any stride is zero
+    /// - `Self` - The updated layer
+    ///
+    /// # Errors
+    ///
+    /// - Returns [`Error::InvalidParameter`] if any stride is 0
     pub fn with_strides(mut self, strides: (usize, usize)) -> Result<Self, Error> {
         validate_strides_2d(strides)?;
         self.strides = strides;
         Ok(self)
     }
 
-    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    /// Sets the padding mode (defaults to
+    /// [`PaddingType::Valid`])
     ///
     /// # Parameters
     ///

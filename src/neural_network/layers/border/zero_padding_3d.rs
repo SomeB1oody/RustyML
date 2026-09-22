@@ -1,4 +1,9 @@
 //! 3D zero-padding layer that adds zero planes at the 6 faces of a volume
+//!
+//! [`ZeroPadding3D`] adds zero planes to the depth axis, the height axis, and the width axis of
+//! a `[batch, depth, height, width, channels]` tensor. It holds no parameter. The forward pass
+//! and the backward pass both run through `pad_crop_engine`, which also backs this layer's
+//! inverse, [`Cropping3D`](crate::neural_network::layers::border::Cropping3D).
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

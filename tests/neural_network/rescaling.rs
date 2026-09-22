@@ -41,9 +41,10 @@ fn assert_bit_equal(actual: &Tensor, expected: &[f32], label: &str) {
 
 /// The forward pass matches Keras bit for bit, at 3 scale and offset pairs
 ///
-/// The 3 pairs are the 2 common image maps, `1 / 255` into `[0, 1]` and `1 / 127.5` with an
-/// offset of -1 into `[-1, 1]`, plus a negative scale with a positive offset. A scale that a
-/// binary fraction cannot hold exactly pins the rounding of the multiplication as well
+/// The 3 pairs are the 2 common image maps, plus a negative scale with a positive offset. The
+/// image maps are `1 / 255` into `[0, 1]` and `1 / 127.5` with an offset of -1 into `[-1, 1]`. A
+/// scale that a binary fraction cannot hold exactly pins the rounding of the multiplication as
+/// well
 #[test]
 fn rescaling_forward_matches_keras() {
     let x = ramp(&[2, 3]);

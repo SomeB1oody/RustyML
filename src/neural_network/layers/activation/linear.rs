@@ -1,4 +1,9 @@
 //! Linear (identity) activation layer
+//!
+//! The `Linear` struct holds only the shape recorded at build time, because the layer takes no
+//! parameter. `UnaryLayer::forward` returns a clone of the input and caches its shape during
+//! training, since the identity function needs no cached output. `UnaryLayer::backward` checks
+//! that shape and passes the incoming gradient through unchanged
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

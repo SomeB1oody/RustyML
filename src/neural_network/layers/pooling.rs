@@ -1,8 +1,15 @@
 //! Pooling layers and the shared helpers that build them
 //!
-//! Re-exports every pooling layer (average, max, and their global variants in 1D/2D/3D)
-//! and defines the macros that generate the shared `UnaryLayer` and `LayerBase` implementations
-//! for them
+//! Re-exports every pooling layer: average pooling, max pooling, and their global variants, each
+//! at rank 1, 2, and 3. Every layer struct here is a thin wrapper. It stores its window size,
+//! stride, and padding mode, and it forwards the forward and backward math to `pooling_engine`.
+//! `validation` checks its constructor and build-time parameters
+//!
+//! This module also defines the macros that generate the shared `UnaryLayer` and `LayerBase`
+//! trait implementations. A macro exists for each spatial rank (1, 2, or 3) and 1 more for the
+//! global variants, because the window shape and the field types differ by rank. Every generated
+//! `build()` and `compute_output_shape()` pair follows the same pattern: check the input rank,
+//! validate the window against the input extent, then compute the output shape
 
 /// 1D average pooling layer
 pub mod average_pooling_1d;
@@ -58,16 +65,14 @@ pub use max_pooling_3d::MaxPooling3D;
 /// - `layer` - the layer name, used in error messages
 /// - `rank` - the input rank the layer accepts, used in error messages
 ///
-/// # Generated Functions
+/// # Notes
 ///
-/// - `build()` - records the shape the layer serves, and refuses a rank it cannot pool
-/// - `compute_output_shape()` - drops every spatial axis and keeps the batch axis and the
-///   channel axis
+/// Generates `build()`, which records the shape the layer serves and refuses a rank it cannot
+/// pool, and `compute_output_shape()`, which drops every spatial axis and keeps the batch axis
+/// and the channel axis
 ///
-/// # Requirements
-///
-/// The implementing struct must have the field:
-/// - `built: Option<Shape>` - the shape the layer was built for
+/// The struct that invokes this macro needs a `built: Option<Shape>` field, which holds the
+/// shape the layer was built for
 macro_rules! layer_functions_global_pooling {
     ($layer:literal, $rank:literal) => {
         /// Records the shape the layer serves. The layer holds no array, so nothing is
@@ -107,17 +112,15 @@ macro_rules! layer_functions_global_pooling {
 
 /// Generates the `LayerBase` function implementations that every pooling layer shares
 ///
-/// # Generated Functions
+/// # Notes
 ///
-/// - `known_input_shapes()` - the shape the layer was built for
-/// - `is_built()` - whether the layer holds a build
-/// - `build_config()` - the same shape with the batch axis freed, for a checkpoint
-/// - all functions from the `no_trainable_parameters_layer_functions!()` macro
+/// Generates `known_input_shapes()`, which reports the shape the layer was built for,
+/// `is_built()`, which reports whether the layer holds a build, and `build_config()`, which
+/// gives the same shape with the batch axis freed for a checkpoint. Also generates every
+/// function from the `no_trainable_parameters_layer_functions!()` macro
 ///
-/// # Requirements
-///
-/// The implementing struct must have the field:
-/// - `built: Option<Shape>` - the shape the layer was built for
+/// The struct that invokes this macro needs a `built: Option<Shape>` field, which holds the
+/// shape the layer was built for
 macro_rules! layer_base_functions_pooling {
     () => {
         $crate::neural_network::layers::built_layer_shape_functions!();
@@ -137,16 +140,13 @@ pub(in crate::neural_network::layers::pooling) use layer_base_functions_pooling;
 ///
 /// - `layer` - the layer name, used in error messages
 ///
-/// # Generated Functions
+/// # Notes
 ///
-/// - `build()` - records the shape the layer serves, and refuses a shape the window
-///   does not fit
-/// - `compute_output_shape()` - applies the pooling window to every spatial axis, and keeps the
-///   batch axis and the channel axis
+/// Generates `build()`, which records the shape the window runs over and refuses a shape the
+/// window does not fit, and `compute_output_shape()`, which applies the pooling window to the
+/// spatial axis and keeps the batch axis and the channel axis
 ///
-/// # Requirements
-///
-/// The implementing struct must have the fields:
+/// The struct that invokes this macro needs these fields:
 /// - `built: Option<Shape>` - the shape the layer was built for
 /// - `pool_size: usize` - size of the pooling window
 /// - `stride: usize` - step size for the pooling operation
@@ -202,16 +202,13 @@ macro_rules! layer_functions_1d_pooling {
 ///
 /// - `layer` - the layer name, used in error messages
 ///
-/// # Generated Functions
+/// # Notes
 ///
-/// - `build()` - records the shape the layer serves, and refuses a shape the window
-///   does not fit
-/// - `compute_output_shape()` - applies the pooling window to every spatial axis, and keeps the
-///   batch axis and the channel axis
+/// Generates `build()`, which records the shape the window runs over and refuses a shape the
+/// window does not fit, and `compute_output_shape()`, which applies the pooling window to every
+/// spatial axis and keeps the batch axis and the channel axis
 ///
-/// # Requirements
-///
-/// The implementing struct must have the fields:
+/// The struct that invokes this macro needs these fields:
 /// - `built: Option<Shape>` - the shape the layer was built for
 /// - `pool_size: (usize, usize)` - size of the pooling window as (height, width)
 /// - `strides: (usize, usize)` - step size for the pooling operation as (height_step, width_step)
@@ -271,16 +268,13 @@ macro_rules! layer_functions_2d_pooling {
 ///
 /// - `layer` - the layer name, used in error messages
 ///
-/// # Generated Functions
+/// # Notes
 ///
-/// - `build()` - records the shape the layer serves, and refuses a shape the window
-///   does not fit
-/// - `compute_output_shape()` - applies the pooling window to every spatial axis, and keeps the
-///   batch axis and the channel axis
+/// Generates `build()`, which records the shape the window runs over and refuses a shape the
+/// window does not fit, and `compute_output_shape()`, which applies the pooling window to every
+/// spatial axis and keeps the batch axis and the channel axis
 ///
-/// # Requirements
-///
-/// The implementing struct must have the fields:
+/// The struct that invokes this macro needs these fields:
 /// - `built: Option<Shape>` - the shape the layer was built for
 /// - `pool_size: (usize, usize, usize)` - size of the pooling window as (depth, height, width)
 /// - `strides: (usize, usize, usize)` - step size for the pooling operation as

@@ -3,8 +3,9 @@
 //!
 //! The module builds, trains, and runs neural networks.
 //! Layers, optimizers, and losses live in the [`layers`](crate::neural_network::layers),
-//! [`optimizers`](crate::neural_network::optimizers), and [`losses`](crate::neural_network::losses)
-//! submodules. [`Sequential`](crate::neural_network::sequential::Sequential) stacks layers into a
+//! [`optimizers`](crate::neural_network::optimizers), and
+//! [`losses`](crate::neural_network::losses) submodules.
+//! [`Sequential`](crate::neural_network::sequential::Sequential) stacks layers into a
 //! chain, and [`Graph`](crate::neural_network::graph::Graph) wires them into a directed graph.
 //! The shared interfaces live in [`traits`](crate::neural_network::traits).
 //! Every tensor in the framework is a [`Tensor`](crate::neural_network::Tensor), an `f32`

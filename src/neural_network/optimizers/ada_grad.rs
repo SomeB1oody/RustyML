@@ -1,4 +1,9 @@
-//! AdaGrad optimizer that adapts per-parameter learning rates using accumulated squared gradients
+//! AdaGrad optimizer that adapts per-parameter learning rates using accumulated squared
+//! gradients
+//!
+//! Holds the [`AdaGrad`] struct, its constructor, its [`AdaGrad::with_global_clipnorm`] builder
+//! method, and its [`Optimizer`](crate::neural_network::traits::Optimizer) implementation. Weight
+//! decay is decoupled (AdamW-style), and gradient clipping stays off until a caller opts in
 
 use crate::error::Error;
 use crate::neural_network::ctx::Grads;

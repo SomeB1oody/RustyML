@@ -3,16 +3,17 @@
 //! The name of an array is its address inside its layer. The gradient store, the per-parameter
 //! state of the optimizer, and the path of the checkpoint all key on `(layer position, name)`.
 //! [`LayerBase::parameters_mut`] and [`LayerBase::weights`] both state in their own
-//! documentation that 2 arrays of 1 layer must never share a name. These guards are what
-//! enforces that rule.
+//! documentation that 2 arrays of 1 layer must never share a name. These guards enforce that
+//! rule.
 //!
 //! Both guards exist because `Layer` is public and unsealed, so a layer written outside this
 //! crate reaches every path here.
 //!
-//! The wrappers below are the shape that a layer holding other layers takes. A `Bidirectional`
-//! holds 2 recurrent children, and both children name an array `kernel`. Without the build
-//! guard that model trains on the sum of 2 different parameters, updates both from 1 momentum
-//! buffer, and writes 1 checkpoint path where 2 arrays live, and it reports none of it.
+//! The wrappers below are the shape that a layer holding other layers takes. A wrapper around
+//! 2 recurrent children hits this if both children name an array `kernel`. Without the build
+//! guard, that model trains on the sum of 2 different parameters. It updates both from 1
+//! shared momentum buffer, writes 1 checkpoint path where 2 arrays live, and reports none of
+//! it.
 
 use ndarray::{Array, IxDyn};
 use rustyml::error::Error;

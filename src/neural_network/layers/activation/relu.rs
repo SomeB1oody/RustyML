@@ -1,5 +1,8 @@
-//! ReLU activation layer that applies `max(0, x)` elementwise and parks the output for
-//! backpropagation
+//! ReLU activation layer
+//!
+//! The `ReLU` struct holds only the shape recorded at build time, because the layer takes no
+//! parameter. `UnaryLayer::forward` computes `Activation::ReLU` and caches the output during
+//! training. `UnaryLayer::backward` reads that cache to compute the gradient
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

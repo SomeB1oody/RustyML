@@ -1,4 +1,9 @@
-//! Softmax activation layer that converts logits into per-lane probability distributions
+//! Softmax activation layer
+//!
+//! The `Softmax` struct holds the `axis` to normalize and the shape recorded at build time. The
+//! `with_axis` method changes that axis after construction. `UnaryLayer::forward` computes
+//! `Activation::Softmax` and caches the output during training. `UnaryLayer::backward` reads
+//! that cache to compute the gradient
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

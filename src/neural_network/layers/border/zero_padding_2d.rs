@@ -1,4 +1,9 @@
 //! 2D zero-padding layer that adds zero rows and columns at the edges of an image
+//!
+//! [`ZeroPadding2D`] adds zero rows and columns to the height axis and the width axis of a
+//! `[batch, height, width, channels]` tensor. It holds no parameter. The forward pass and the
+//! backward pass both run through `pad_crop_engine`, which also backs this layer's inverse,
+//! [`Cropping2D`](crate::neural_network::layers::border::Cropping2D).
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

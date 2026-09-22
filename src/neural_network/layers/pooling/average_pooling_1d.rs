@@ -1,5 +1,12 @@
-//! 1D average pooling layer that computes the mean value within each pooling window along the
-//! length dimension.
+//! 1D average pooling layer
+//!
+//! [`AveragePooling1D`] slides a window along the length axis of a `[batch, length, channels]`
+//! tensor and replaces each window with the mean of its elements. [`AveragePooling1D::new`] sets
+//! the stride to `pool_size` and the padding to
+//! [`PaddingType::Valid`](crate::neural_network::layers::convolution::PaddingType).
+//! [`AveragePooling1D::with_stride`] and [`AveragePooling1D::with_padding`] override those
+//! defaults. The backward pass spreads each output gradient evenly over the in-bounds elements of
+//! its window. The forward pass therefore caches only the input shape it must restore.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -68,13 +75,13 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// // Window size 2 and stride 2: each window holds the average of its elements
 /// for b in 0..2 {
 ///     for c in 0..3 {
-///         // First window (0, 1): average (0 + 1) / 2 = 0.5
+///         // 1st window (0, 1): average (0 + 1) / 2 = 0.5
 ///         assert_relative_eq!(output[[b, 0, c]], 0.5);
-///         // Second window (2, 3): average (2 + 3) / 2 = 2.5
+///         // 2nd window (2, 3): average (2 + 3) / 2 = 2.5
 ///         assert_relative_eq!(output[[b, 1, c]], 2.5);
-///         // Third window (4, 5): average (4 + 5) / 2 = 4.5
+///         // 3rd window (4, 5): average (4 + 5) / 2 = 4.5
 ///         assert_relative_eq!(output[[b, 2, c]], 4.5);
-///         // Fourth window (6, 7): average (6 + 7) / 2 = 6.5
+///         // 4th window (6, 7): average (6 + 7) / 2 = 6.5
 ///         assert_relative_eq!(output[[b, 3, c]], 6.5);
 ///     }
 /// }
@@ -110,7 +117,8 @@ impl AveragePooling1D {
     ///
     /// # Notes
     ///
-    /// The stride defaults to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override
+    /// The stride defaults to `pool_size` and padding defaults to
+    /// [`PaddingType::Valid`]. Override
     /// them with [`AveragePooling1D::with_stride`] and [`AveragePooling1D::with_padding`].
     ///
     pub fn new(pool_size: usize) -> Self {
@@ -130,14 +138,19 @@ impl AveragePooling1D {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - The updated layer, or an error if `stride` is zero
+    /// - `Self` - The updated layer
+    ///
+    /// # Errors
+    ///
+    /// - Returns [`Error::InvalidParameter`] if `stride` is 0
     pub fn with_stride(mut self, stride: usize) -> Result<Self, Error> {
         validate_stride_1d(stride)?;
         self.stride = stride;
         Ok(self)
     }
 
-    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    /// Sets the padding mode (defaults to
+    /// [`PaddingType::Valid`])
     ///
     /// # Parameters
     ///

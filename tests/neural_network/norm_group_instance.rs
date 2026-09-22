@@ -3,7 +3,7 @@
 //! predict == forward
 //!
 //! Expected values come from the mathematical definition. Gradient correctness lives in
-//! gradient_check.rs.
+//! tests/neural_network/gradient_check.rs.
 //!
 //! Both layers read the crate's channels-last layout: an input is
 //! `[batch, spatial..., channels]`, and the channel axis is always the trailing one.
@@ -315,6 +315,7 @@ fn group_norm_error_channels_not_divisible_by_groups_at_forward() {
     );
 }
 
+/// GroupNormalization::backward before any forward pass returns Err(ForwardPassNotRun)
 #[test]
 fn group_norm_error_backward_before_forward() {
     let gn = GroupNormalization::new(2, 1e-5).unwrap();
@@ -564,6 +565,7 @@ fn group_norm_full_groups_equals_instance_norm_with_affine() {
 
 // InstanceNormalization - an inference pass matches a training pass
 
+/// An inference pass matches a training pass, since IN always computes stats from the input
 #[test]
 fn instance_norm_predict_equals_forward() {
     let mut inn = InstanceNormalization::new(1e-5).unwrap();
@@ -630,6 +632,7 @@ fn instance_norm_error_empty_input_shape() {
     );
 }
 
+/// InstanceNormalization::backward before any forward pass returns Err(ForwardPassNotRun)
 #[test]
 fn instance_norm_error_backward_before_forward() {
     let inn = InstanceNormalization::new(1e-5).unwrap();
@@ -663,6 +666,7 @@ fn instance_norm_set_weights_shape_mismatch() {
 
 // GroupNormalization - output shape is identical to input shape
 
+/// GN output keeps the exact shape of a 3-group input, split from a 6-channel axis
 #[test]
 fn group_norm_output_shape_matches_input() {
     // [batch=2, positions=5, channels=6] split into 3 groups of 2 channels
@@ -674,6 +678,7 @@ fn group_norm_output_shape_matches_input() {
 
 // InstanceNormalization - output shape is identical to input shape
 
+/// IN output keeps the exact shape of the input
 #[test]
 fn instance_norm_output_shape_matches_input() {
     let mut inn = InstanceNormalization::new(1e-5).unwrap();

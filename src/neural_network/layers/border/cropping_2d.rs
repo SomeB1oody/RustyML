@@ -1,4 +1,9 @@
 //! 2D cropping layer that removes rows and columns at the edges of an image
+//!
+//! [`Cropping2D`] removes rows and columns from the height axis and the width axis of a
+//! `[batch, height, width, channels]` tensor. It holds no parameter. The forward pass and the
+//! backward pass both run through `pad_crop_engine`, which also backs this layer's inverse,
+//! [`ZeroPadding2D`](crate::neural_network::layers::border::ZeroPadding2D).
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

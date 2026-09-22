@@ -172,8 +172,8 @@ fn reshape_predict_equals_forward() {
     assert_allclose(&fwd, &pred, 1e-6_f32);
 }
 
-/// A forward pass with an inference context needs no build and no cache, so it works on a
-/// layer that never ran a forward pass before
+/// A forward pass with an inference context needs no build and no cache. It therefore works on
+/// a layer that never ran a forward pass before
 #[test]
 fn reshape_predict_works_without_forward() {
     let r = Reshape::new(vec![2, 2]).unwrap();
@@ -232,6 +232,7 @@ fn reshape_new_rejects_zero_extent() {
     );
 }
 
+/// The constructor rejects a target extent below -1, which no valid axis holds
 #[test]
 fn reshape_new_rejects_extent_below_minus_1() {
     let result = Reshape::new(vec![-2, 2]);
@@ -272,6 +273,7 @@ fn reshape_forward_rejects_rank_0_input() {
     );
 }
 
+/// forward reports EmptyInput for a tensor that holds 0 elements on any axis
 #[test]
 fn reshape_forward_rejects_empty_input() {
     let mut r = Reshape::new(vec![2, 2]).unwrap();
@@ -374,6 +376,7 @@ fn reshape_weights_is_empty() {
     assert!(r.weights().is_empty(), "Reshape must expose no weight");
 }
 
+/// layer_type reports "Reshape" for every instance
 #[test]
 fn reshape_layer_type_is_reshape() {
     let r = Reshape::new(vec![2, 2]).unwrap();

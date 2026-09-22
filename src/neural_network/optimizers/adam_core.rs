@@ -41,7 +41,7 @@ pub(super) struct AdamCore {
     beta2: f32,
     /// Small constant added for numerical stability
     epsilon: f32,
-    /// Current timestep, incremented with each update
+    /// Current timestep for bias correction, incremented once per batch by [`AdamCore::step`]
     t: u64,
     /// Per-parameter moment buffers, keyed by the address of the parameter. A buffer therefore
     /// follows its own tensor, whatever else the model does

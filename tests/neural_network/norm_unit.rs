@@ -72,6 +72,7 @@ fn unit_normalization_forward_hand_derived() {
     assert_allclose(&out, &want, 1e-6);
 }
 
+/// Every normalized row has a Euclidean length of 1
 #[test]
 fn unit_normalization_gives_every_group_a_length_of_1() {
     let x = ramp(&[4, 5], 7.0);

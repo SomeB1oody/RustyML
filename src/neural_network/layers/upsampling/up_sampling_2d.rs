@@ -1,4 +1,9 @@
 //! 2D upsampling layer that enlarges an image by a whole-number factor per axis
+//!
+//! [`UpSampling2D`] enlarges the height axis and the width axis of a
+//! `[batch, height, width, channels]` tensor. [`Interpolation::Nearest`] repeats each pixel. Every
+//! other mode resamples with a separable kernel through `resize_engine`, which also runs the
+//! matching backward pass.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -24,9 +29,9 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// weighted sum of its neighbors along each axis
 ///
 /// The layer is the decoder counterpart of
-/// [`MaxPooling2D`](crate::neural_network::layers::pooling::max_pooling_2d::MaxPooling2D) and
-/// [`AveragePooling2D`](crate::neural_network::layers::pooling::average_pooling_2d::AveragePooling2D).
-/// An upsampling stage followed by a
+/// [`MaxPooling2D`](crate::neural_network::layers::pooling::MaxPooling2D) and
+/// [`AveragePooling2D`](crate::neural_network::layers::pooling::AveragePooling2D). An upsampling
+/// stage followed by a
 /// [`Conv2D`](crate::neural_network::layers::convolution::conv_2d::Conv2D) is the usual way to
 /// build a decoder without a transposed convolution
 ///

@@ -1,4 +1,8 @@
-//! 2D depthwise convolution layer that gives each input channel its own kernel or kernels
+//! 2D depthwise convolution layer
+//!
+//! [`DepthwiseConv2D`] gives each input channel its own kernel or kernels, with no mixing
+//! between channels. `DepthwiseConv2DCache` holds the tensors the layer parks between its
+//! forward and backward passes.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -89,7 +93,9 @@ use ndarray::{Array1, Array4};
 /// ```
 #[derive(Debug)]
 pub struct DepthwiseConv2D {
-    /// Number of input channels, which [`UnaryLayer::build`] reads from the input shape
+    /// Number of input channels, which
+    /// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build) reads from the input
+    /// shape
     channels: usize,
     /// Kernels per input channel. The output carries `channels * depth_multiplier` of them
     depth_multiplier: usize,
@@ -138,10 +144,11 @@ impl DepthwiseConv2D {
     /// There is no `filters` argument. A depthwise convolution derives its output channel count
     /// from the input, as `channels * depth_multiplier`. `depth_multiplier` defaults to 1. Set it
     /// with [`DepthwiseConv2D::with_depth_multiplier`]. Padding defaults to
-    /// [`PaddingType::Valid`]. Choose [`PaddingType::Same`] with
-    /// [`DepthwiseConv2D::with_padding`]. The kernel is solid by default. Space its taps out
-    /// with [`DepthwiseConv2D::with_dilation_rate`]. The layer seeds weights from the global seed
-    /// or entropy by default. For reproducible initialization, set a seed with
+    /// [`PaddingType::Valid`]. Choose
+    /// [`PaddingType::Same`] with
+    /// [`DepthwiseConv2D::with_padding`]. The kernel is solid by default. Space its taps out with
+    /// [`DepthwiseConv2D::with_dilation_rate`]. The layer seeds weights from the global seed or
+    /// entropy by default. For reproducible initialization, set a seed with
     /// [`DepthwiseConv2D::with_random_state`]
     ///
     /// # Errors
@@ -175,7 +182,8 @@ impl DepthwiseConv2D {
         })
     }
 
-    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    /// Sets the padding mode (defaults to
+    /// [`PaddingType::Valid`])
     ///
     /// # Parameters
     ///
@@ -208,8 +216,9 @@ impl DepthwiseConv2D {
     /// A depthwise convolution takes a stride above 1 and a dilation above 1 together. Only the
     /// plain and the transposed convolutions reject that pair
     ///
-    /// The effective kernel is not bounded by the input axis here. Only [`PaddingType::Valid`]
-    /// needs it to fit, and the build applies that rule
+    /// The effective kernel is not bounded by the input axis here. Only
+    /// [`PaddingType::Valid`] needs it to
+    /// fit, and the build applies that rule
     ///
     /// # Errors
     ///

@@ -1,8 +1,12 @@
 //! Integration tests for Conv3D, DepthwiseConv2D, and SeparableConv2D.
 //!
 //! Tensors are channels-last (Keras): Conv3D takes \[batch, depth, height, width, channels\] and
-//! the 2D layers take \[batch, height, width, channels\]. Kernels are \[k..., Cin, F\] and every
-//! bias is a rank-1 \[F\] vector.
+//! the 2D layers take \[batch, height, width, channels\].
+//!
+//! Conv3D's kernel is \[kd, kh, kw, Cin, F\] with an \[F\] bias. DepthwiseConv2D's kernel is
+//! \[kh, kw, channels, depth_multiplier\] with a \[channels * depth_multiplier\] bias.
+//! SeparableConv2D chains a depthwise kernel of that same shape with a pointwise kernel
+//! \[1, 1, channels * depth_multiplier, F\] and an \[F\] bias.
 //!
 //! Expected values come from the mathematical definition or hand calculation, not from
 //! recording layer output. Gradient checks live in tests/neural_network/gradient_check.rs.
@@ -28,7 +32,9 @@ use crate::common::assert_allclose;
 #[test]
 fn conv3d_new_rejects_invalid_args() {
     enum Want {
+        /// Expect `Error::InvalidParameter`.
         Param,
+        /// Expect `Error::InvalidInput`.
         Input,
     }
     // (label, filters, kernel, input_shape, stride, expected error)
@@ -303,7 +309,9 @@ fn conv3d_set_weights_shape_mismatch_errors() {
 #[test]
 fn depthwise_conv2d_new_rejects_invalid_args() {
     enum Want {
+        /// Expect `Error::InvalidParameter`.
         Param,
+        /// Expect `Error::InvalidInput`.
         Input,
     }
     // (label, kernel_size, input_shape, strides, expected error)
@@ -518,7 +526,7 @@ fn depthwise_conv2d_cross_channel_no_bleed() {
 
 // DepthwiseConv2D - known-weight forward values
 
-/// Single-channel 2x2 kernel [[1,2],[3,4]] with bias 0.5 over input 1..=9 matches hand calculation
+/// 1-channel 2x2 kernel [[1,2],[3,4]] with bias 0.5 over input 1..=9 matches hand calculation
 #[test]
 fn depthwise_conv2d_known_weight_single_channel() {
     let mut conv = DepthwiseConv2D::new((2, 2), (1, 1), Linear::new()).unwrap();
@@ -555,6 +563,7 @@ fn depthwise_conv2d_known_weight_single_channel() {
     assert_abs_diff_eq!(out[[0, 1, 1, 0]], 77.5_f32, epsilon = 1e-5);
 }
 
+/// `predict` in eval mode returns the same values as `forward`
 #[test]
 fn depthwise_conv2d_predict_equals_forward() {
     let mut conv = DepthwiseConv2D::new((2, 2), (1, 1), Linear::new()).unwrap();
@@ -611,7 +620,9 @@ fn depthwise_conv2d_set_weights_shape_mismatch_errors() {
 #[test]
 fn separable_conv2d_new_rejects_invalid_args() {
     enum Want {
+        /// Expect `Error::InvalidParameter`.
         Param,
+        /// Expect `Error::InvalidInput`.
         Input,
     }
     // (label, filters, kernel, input_shape, depth_multiplier, expected error)
@@ -816,7 +827,7 @@ fn separable_conv2d_same_padding_zero_pads_depthwise() {
     // `Same` keeps the spatial shape
     assert_eq!(out.shape(), &[1, 3, 3, 1]);
 
-    // pad_total = (3-1)*1 + 3 - 3 = 2, so 1 zero row/column sits on each edge. Each entry is
+    // pad_total = (3-1)*1 = 2, so 1 zero row/column sits on each edge. Each entry is
     // the sum of the in-bounds members of its 3x3 neighborhood over [[1,2,3],[4,5,6],[7,8,9]].
     let expected = [
         [12.0_f32, 21.0, 16.0],
@@ -830,6 +841,7 @@ fn separable_conv2d_same_padding_zero_pads_depthwise() {
     }
 }
 
+/// `predict` in eval mode returns the same values as `forward`
 #[test]
 fn separable_conv2d_predict_equals_forward() {
     let mut conv = SeparableConv2D::new(2, (2, 2), (1, 1), 1, Linear::new()).unwrap();
@@ -1000,7 +1012,7 @@ fn separable_conv2d_large_input_windowed_sums() {
 ///
 /// A `(1, 2, 3)` dilation spans 2 cells of depth, 3 of height, and 4 of width, so a 5x5x5 input
 /// leaves a 4x3x2 output. Each input cell holds `d * 100 + h * 10 + w`, so a swapped axis shows
-/// up in the value at once. The first window sums the 8 cells at depth 0 and 1, height 0 and 2,
+/// up in the value at once. The 1st window sums the 8 cells at depth 0 and 1, height 0 and 2,
 /// and width 0 and 3.
 #[test]
 fn conv3d_dilation_is_per_axis() {
@@ -1098,9 +1110,9 @@ fn depthwise_conv2d_keeps_the_stride_and_the_dilation_independent() {
 /// at the end
 ///
 /// The depthwise stage spans 4 cells of width at dilation 3, so it needs 3 pad cells. 1 goes in
-/// front and 2 go behind. The first output therefore reads only the second tap, and the last 2
-/// outputs read only the first. Swapping the 2 halves gives a different, and detectably wrong,
-/// result.
+/// front and 2 go behind. The 1st output therefore reads only the 2nd tap, and the last 2
+/// outputs read only the 1st tap. Swapping the 2 halves gives a different, and detectably
+/// wrong, result.
 #[test]
 fn separable_conv2d_dilated_same_padding_splits_with_the_extra_cell_at_the_end() {
     let mut layer = SeparableConv2D::new(1, (1, 2), (1, 1), 1, Linear::new())
@@ -1140,11 +1152,10 @@ fn separable_conv2d_dilated_same_padding_splits_with_the_extra_cell_at_the_end()
 //
 // Keras 3.15.1 on the jax backend produced every expected value in this section, from the
 // weights, the input, and the upstream gradient the ramps below build. Every ramp value is
-// exact in f32, so no rounding enters the comparison, and a rerun of the probe reproduces the
-// same numbers.
+// exact in f32, so no rounding enters the comparison.
 //
-// A kernel whose effective extent is longer than the input axis is legal under `Same` and
-// `Causal` padding. Only `Valid` rejects it, because no complete window fits there.
+// A kernel whose effective extent is longer than the input axis is legal under `Same`
+// padding. Only `Valid` rejects it, because no complete window fits there.
 
 /// Kernel ramp: element `i` holds `((i % 7) - 3) * 0.25`
 fn ramp_kernel(count: usize) -> Vec<f32> {
@@ -1178,7 +1189,7 @@ fn flat(tensor: &ndarray::ArrayD<f32>) -> Vec<f32> {
     tensor.iter().copied().collect()
 }
 
-/// Asserts that 2 flat value lists agree to 1e-5, and names the first element that does not
+/// Asserts that 2 flat value lists agree to 1e-5, and names the 1st element that does not
 fn assert_flat_close(actual: &[f32], expected: &[f32], label: &str) {
     assert_eq!(actual.len(), expected.len(), "{label}: length");
     for (index, (got, want)) in actual.iter().zip(expected).enumerate() {
