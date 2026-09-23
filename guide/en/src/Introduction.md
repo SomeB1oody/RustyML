@@ -2,7 +2,7 @@
 
 RustyML is a machine learning and deep learning library written entirely in Rust. It needs no external library to link against, no Python interpreter, and no FFI boundary to move arrays across. This guide is the hands-on companion to the library. It takes you from a fresh `cargo new` to training neural networks.
 
-It also covers tuning the parallel and serial thresholds inside the hot kernels, and shows what lands on disk when you serialize a model. This guide tracks RustyML **0.15**. Every complete example compiles against that version with the `full` and `show_progress` features on, so what you read is what the compiler accepts.
+It also covers tuning the parallel and serial thresholds inside the hot kernels, and shows what lands on disk when you serialize a model. This guide tracks RustyML **0.16**. Every complete example compiles against that version with the `full` and `show_progress` features on, so what you read is what the compiler accepts.
 
 ## What this guide is
 
@@ -64,7 +64,7 @@ Jump straight to [Support Vector Machines](./Chapter-02/2.5._Support_Vector_Mach
 
 ## Versions, feedback, and conventions
 
-This edition tracks the current crate version, **0.15**. RustyML is pre-1.0 and under active development. The API is stabilizing, but breaking changes can still land in minor releases. If a signature in this guide differs from what the compiler accepts, trust [docs.rs for the exact version](https://docs.rs/rustyml) in use. Send bug reports, feature requests, and corrections to this guide to the [GitHub repository](https://github.com/SomeB1oody/RustyML). Issues and pull requests are welcome there.
+This edition tracks the current crate version, **0.16**. RustyML is pre-1.0 and under active development. The API is stabilizing, but breaking changes can still land in minor releases. If a signature in this guide differs from what the compiler accepts, trust [docs.rs for the exact version](https://docs.rs/rustyml) in use. Send bug reports, feature requests, and corrections to this guide to the [GitHub repository](https://github.com/SomeB1oody/RustyML). Issues and pull requests are welcome there.
 
 This guide follows 2 conventions. First, a complete example is a self-contained program with a `main` function, a tiny inline dataset, and few iterations. Paste a complete example into a `full`-feature project and run it as written. This guide marks a fragment or a signature as such.
 
