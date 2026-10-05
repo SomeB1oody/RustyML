@@ -379,6 +379,7 @@ impl DBSCAN {
     /// # Errors
     ///
     /// - `Error::NotFitted` - If the model has not been fitted yet
+    /// - `Error::EmptyInput` - If `new_data` holds no element
     /// - `Error::DimensionMismatch` - If feature dimensions do not match
     /// - `Error::NonFinite` - If the data contains non-finite values
     ///
@@ -398,12 +399,7 @@ impl DBSCAN {
             .as_ref()
             .ok_or_else(|| Error::not_fitted("DBSCAN"))?;
 
-        // Empty input yields an empty result
-        if new_data.nrows() == 0 {
-            return Ok(Array1::from(vec![]));
-        }
-
-        // Validate feature dimensions and finiteness against the fitted model
+        // Validate the row count, the feature dimensions, and finiteness against the fitted model
         validate_predict_input(new_data, core_points.ncols())?;
 
         // Assign each point to the cluster of its nearest core point within `eps`

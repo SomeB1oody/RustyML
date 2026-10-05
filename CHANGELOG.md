@@ -26,6 +26,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - **Behavior change: a training step refuses a sublayer call that reaches another layer than the tree holds at its path.** A training pass records the layer of each `Ctx::sublayer` call. The model compares each record against the tree after the forward pass and after the backward pass. A call of sublayer `b` under the name of sublayer `a` therefore stops the step, also when `a` and `b` have the same type and shape.
 - **Behavior change: the model build checks the whole layer tree.** It refuses 2 arrays or 2 sublayers of 1 layer with 1 name. It also refuses an empty name, a name that holds a `.`, 2 sublayer rosters that disagree, 1 layer at 2 nodes of 1 tree, and a path more than 64 sublayers deep. A roster that lists its own layer therefore gives an error, not a stack overflow. The message names the layer path.
 - **Fix: `Sequential::weight` and `Graph::weight` accept 1 spelling per model position.** A path such as `00.kernel` or `+0.kernel` reaches no array.
+- **Behavior change: `DBSCAN::predict` returns `Error::EmptyInput` for a matrix with 0 rows.** Before, it returned an empty array, and it skipped the feature-count check for that matrix. Every other model already returned `EmptyInput`.
 
 ## [v0.16.0] - 2026-08-23
 ### Added
