@@ -547,6 +547,8 @@ impl Sequential {
     /// - `Error::Computation` - If a layer fails during forward or backward pass
     /// - `Error::Computation` - If a gradient lands at an address that no parameter reads, or
     ///   if a state value stays in the context because no layer takes it back
+    /// - `Error::Computation` - If a layer calls a sublayer under a name that its roster gives
+    ///   to another layer
     pub fn train_batch(&mut self, x: &Tensor, y: &Tensor) -> Result<f32, Error> {
         // The unwraps below rest on this: it rejects a missing optimizer, a missing loss and an
         // empty layer stack before anything is touched
@@ -662,6 +664,8 @@ impl Sequential {
     /// - `Error::Computation` - If a layer fails during forward or backward pass
     /// - `Error::Computation` - If a gradient lands at an address that no parameter reads, or
     ///   if a state value stays in the context because no layer takes it back
+    /// - `Error::Computation` - If a layer calls a sublayer under a name that its roster gives
+    ///   to another layer
     pub fn fit(&mut self, x: &Tensor, y: &Tensor, epochs: u32) -> Result<History, Error> {
         // Validate up front so a broken model or mismatched data fails before any epoch runs.
         // With `epochs == 0`, the per-batch validation inside `train_batch` never happens
@@ -726,6 +730,8 @@ impl Sequential {
     /// - `Error::Computation` - If a layer fails during forward or backward pass
     /// - `Error::Computation` - If a gradient lands at an address that no parameter reads, or
     ///   if a state value stays in the context because no layer takes it back
+    /// - `Error::Computation` - If a layer calls a sublayer under a name that its roster gives
+    ///   to another layer
     pub fn fit_with_batches(
         &mut self,
         x: &Tensor,

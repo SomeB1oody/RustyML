@@ -672,14 +672,15 @@ impl Arity {
 ///
 /// 1. List each sublayer in [`sublayers`](LayerBase::sublayers) and in
 ///    [`sublayers_mut`](LayerBase::sublayers_mut), under 1 fixed name.
-/// 2. Call each sublayer inside [`Ctx::sublayer`], with the name of step 1. Do this in the
-///    forward pass and in the backward pass.
+/// 2. Call each sublayer inside [`Ctx::sublayer`], with the name of step 1 and the sublayer
+///    itself. Do this in the forward pass and in the backward pass.
 /// 3. Build each sublayer in its own build.
 /// 4. Report itself as built only when every sublayer is built.
 ///
-/// A model build refuses a layer whose 2 rosters disagree. A training step refuses a gradient
-/// at a path that no roster gives, and a state value that no node takes back. A mistake in
-/// step 1 or step 2 therefore stops the model and does not train it wrong
+/// A model build refuses a layer whose 2 rosters disagree. A training step refuses a sublayer
+/// call that reaches another layer than the roster gives at its name. It also refuses a
+/// gradient at a path that no roster gives, and a state value that no node takes back. A
+/// mistake in step 1 or step 2 therefore stops the model and does not train it wrong
 ///
 /// # Examples
 ///
@@ -1141,6 +1142,8 @@ pub trait UnaryLayer: LayerBase {
     /// # Errors
     ///
     /// - `Error::InvalidInput` - If the layer cannot accept an input of that shape
+    /// - `Error::Computation` - If a state value of the layer or of a sublayer stays in the
+    ///   context, because no layer took it back
     /// - `Error` - If the forward pass fails
     fn forward_mut(&mut self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if !self.is_built() {
@@ -1282,6 +1285,8 @@ pub trait Layer: LayerBase {
     /// # Errors
     ///
     /// - `Error::InvalidInput` - If the layer cannot accept inputs of those shapes
+    /// - `Error::Computation` - If a state value of the layer or of a sublayer stays in the
+    ///   context, because no layer took it back
     /// - `Error` - If the forward pass fails
     fn forward_many_mut(&mut self, inputs: &[&Tensor], ctx: &mut Ctx) -> Result<Tensor, Error> {
         if !self.is_built() {

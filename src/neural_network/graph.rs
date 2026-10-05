@@ -626,6 +626,8 @@ impl Graph {
     /// - `Error::DimensionMismatch` - If 2 tensors disagree on the sample count
     /// - `Error::Computation` - If a gradient lands at an address that no parameter reads, or
     ///   if a state value stays in the context because no layer takes it back
+    /// - `Error::Computation` - If a layer calls a sublayer under a name that its roster gives
+    ///   to another layer
     /// - `Error` - Whatever a layer reports from its forward or backward pass
     pub fn train_batch(&mut self, xs: &[&Tensor], ys: &[&Tensor]) -> Result<f32, Error> {
         self.check_compiled(true)?;

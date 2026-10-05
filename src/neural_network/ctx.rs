@@ -20,8 +20,8 @@
 //! A layer can hold other layers. See
 //! [`LayerBase`](crate::neural_network::traits::LayerBase) for that contract. A layer calls
 //! each of its sublayers inside [`Ctx::sublayer`]. The call appends 1 frame to the current
-//! [`LayerPath`] for the time of the closure, and it removes the frame when the closure
-//! returns. Each channel then keys on the full path:
+//! [`LayerPath`] for the time of the closure. It removes the frame when the closure returns,
+//! and also when the closure panics. Each channel then keys on the full path:
 //!
 //! 1. A gradient lands at the [`ParamId`] of the sublayer, so 2 sublayers of 1 type never share
 //!    1 gradient.
@@ -29,6 +29,10 @@
 //!    sublayer.
 //! 3. A cache lands in its own stack per call and per frame, so the backward pass of 1 sublayer
 //!    never takes the cache of another, whatever order the holding layer uses.
+//!
+//! A training pass also records the layer of each sublayer call at its path. A model compares
+//! each record against the layer tree, so a call under the name of another sublayer stops the
+//! step.
 //!
 //! [`ParamId`]: crate::neural_network::traits::ParamId
 
@@ -225,7 +229,7 @@ fn standard(grad: Tensor) -> Tensor {
 /// The non-trainable state of 1 layer that a forward pass proposed to change
 ///
 /// After the forward pass, a model gives 1 view to
-/// [`LayerBase::apply_state`](crate::neural_network::traits::LayerBase::apply_state) for each
+/// [`LayerBase::apply_state`] for each
 /// layer and each sublayer that has a value. The layer moves each value it recognizes into its
 /// own storage. The view reaches the values at the path of 1 layer, and no value of a sublayer
 pub struct StateSlot<'a> {
@@ -403,7 +407,7 @@ impl Ctx {
     ///
     /// A layer that holds other layers calls each of them inside this method, in the forward
     /// pass and in the backward pass. The name must be the name that
-    /// [`LayerBase::sublayers`](crate::neural_network::traits::LayerBase::sublayers) gives the
+    /// [`LayerBase::sublayers`] gives the
     /// sublayer, and `layer` must be the sublayer that `body` calls. The method appends the
     /// name to the current path, runs `body`, and removes the name again before it returns.
     /// The removal also happens when `body` returns an error or panics
@@ -467,8 +471,8 @@ impl Ctx {
         if self.training {
             self.record_sublayer_call(layer);
         }
-        let mut guard = FrameGuard { ctx: self, depth };
-        body(&mut guard.ctx)
+        let guard = FrameGuard { ctx: self, depth };
+        body(guard.ctx)
     }
 
     /// Records the layer that the current sublayer path calls, and notes a second layer at
@@ -710,7 +714,7 @@ impl Ctx {
     ///
     /// The address is the current [`layer_path`](Ctx::layer_path) and the name. The value stays
     /// in the context until the model applies it with
-    /// [`LayerBase::apply_state`](crate::neural_network::traits::LayerBase::apply_state) of the
+    /// [`LayerBase::apply_state`] of the
     /// layer at that path
     ///
     /// # Parameters
