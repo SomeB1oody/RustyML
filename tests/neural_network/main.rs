@@ -74,11 +74,7 @@ mod sequential;
 mod serialize;
 /// Tests for `Shape` and the pure `compute_output_shape` method of every layer
 mod shape;
-/// The checkpoint and the build checks of a layer that holds other layers
-mod sublayers_checkpoint;
-/// Guard tests for layers that hold other layers: loops, panics, paths, and hand-driven steps
-mod sublayers_guards;
-/// Training tests for layers that hold other layers: parity, addresses, state, and refusals
-mod sublayers_training;
+/// Tests for layers that hold other layers: addresses, state, checkpoints, and guards
+mod sublayers;
 /// Tests for the upsampling layers: shapes, interpolation modes, layout, and error paths
 mod upsampling;
