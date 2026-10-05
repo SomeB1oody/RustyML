@@ -243,8 +243,10 @@ impl GraphBuilder {
     /// - `Error::InvalidInput` - If `outputs` is empty, if an id names no node, if a node reads
     ///   a node at or after its own position, if the graph holds no input node, if the input
     ///   count of a node does not match the arity of its layer, if a node or an inlet reaches
-    ///   no output, if a layer refuses the shapes that reach it, or if a layer gives 2 of its
-    ///   arrays the same name
+    ///   no output, if a layer refuses the shapes that reach it, or if a layer tree breaks an
+    ///   address rule. The rules refuse 2 arrays or 2 sublayers of 1 layer with 1 name. They
+    ///   also refuse an empty name, a name that holds a `.`, 2 sublayer rosters that disagree,
+    ///   and 1 layer at 2 nodes of 1 layer tree
     pub fn build(mut self, outputs: &[NodeId]) -> Result<Graph, Error> {
         if self.nodes.is_empty() {
             return Err(Error::NeuralNetwork(NnError::EmptyModel));
@@ -345,8 +347,8 @@ impl GraphBuilder {
         }
 
         // The arrays are real now, so every roster is the one the model will address. The walk
-        // is the arena, because the arena index is the layer half of every address. A layer that
-        // several nodes share holds 1 entry, so it is checked once
+        // is the arena, because the arena index is the model position of every address. A layer
+        // that several nodes share holds 1 entry, so it is checked once
         for (index, layer) in self.layers.iter_mut().enumerate() {
             check_addresses(index, &mut **layer)?;
         }
@@ -622,6 +624,8 @@ impl Graph {
     ///   has no batch axis
     /// - `Error::EmptyInput` - If a tensor is empty
     /// - `Error::DimensionMismatch` - If 2 tensors disagree on the sample count
+    /// - `Error::Computation` - If a gradient lands at an address that no parameter reads, or
+    ///   if a state value stays in the context because no layer takes it back
     /// - `Error` - Whatever a layer reports from its forward or backward pass
     pub fn train_batch(&mut self, xs: &[&Tensor], ys: &[&Tensor]) -> Result<f32, Error> {
         self.check_compiled(true)?;
@@ -938,6 +942,8 @@ impl Graph {
     }
 
     /// Prints the nodes of the model, their layers, and their shapes
+    ///
+    /// The parameter count of a layer includes the arrays of all of its sublayers
     pub fn summary(&self) {
         let mut output = String::from("Model: \"graph\"\n");
         output.push_str(&format!(

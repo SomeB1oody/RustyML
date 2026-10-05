@@ -20,6 +20,16 @@
 //! [`Ctx::inference`](crate::neural_network::Ctx::inference) pick the mode. A built model is
 //! therefore `Send` and `Sync`, and several threads can run inference against 1 model
 //!
+//! A layer can hold other layers, which are its sublayers.
+//! [`LayerBase::sublayers`](crate::neural_network::traits::LayerBase::sublayers) lists them by
+//! name, and the layer calls each sublayer inside
+//! [`Ctx::sublayer`](crate::neural_network::Ctx::sublayer). A
+//! [`LayerPath`](crate::neural_network::LayerPath) addresses each layer of that tree. The path
+//! `2.forward` is the sublayer `forward` of the layer at model position 2. The gradient store,
+//! the optimizer state, the state channel, and the checkpoint all key on this path. 2 sublayers
+//! of 1 type therefore never share 1 address. A checkpoint path is the layer path and the name of
+//! the array, such as `2.forward.kernel`
+//!
 //! # Core components
 //!
 //! ## Layers

@@ -5,6 +5,24 @@ This change log records updates after 2025-3-24, summarized per version — each
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [Unreleased]
+### Added
+- **A layer can hold other layers, and each sublayer gets its own parameter address.** `LayerBase::sublayers` and `sublayers_mut` list the sublayers of a layer by name, through the new `Sublayer` and `SublayerMut` views. Both return an empty list by default. A layer calls each sublayer inside `Ctx::sublayer(name, f)`. A layer that calls 1 sublayer several times in 1 pass uses `Ctx::sublayer_call(name, call, f)`. Every channel of the context then keys on the sublayer. 2 sublayers of 1 type therefore never share a gradient, an optimizer buffer, a state value, or a cache.
+  - A layer that holds other layers lists them in `sublayers`. It does not pass their arrays on as its own under a prefixed name.
+  - The optimizer update, the global gradient norm, the state apply, the checkpoint, and `weight_paths` all walk every layer tree in pre-order: a layer first, then each sublayer in roster order.
+- **`LayerPath`, the address of 1 layer inside a model.** It holds the model position and the sublayer names below it, and its text form is `2.forward`. `Ctx::layer_path` gives the current path. `Ctx::state_left_under` lists the state values of a model position that no layer took back. `neural_network` re-exports `LayerPath`, `Sublayer`, `SublayerMut`, and `SublayerName`.
+- **`layer_path::total_param_count` sums the parameters of a layer and all of its sublayers.** `Sequential::summary` and `Graph::summary` use it. `LayerBase::param_count` still counts the arrays of 1 layer alone.
+
+### Changed
+- **Breaking: `ParamId` is `{ layer: LayerPath, name }` in place of `{ scope, name }`, and it is no longer `Copy`.** `ParamId::new(scope, name)` still addresses the layer at a model position. `ParamId::at(path, name)` and `LayerPath::param(name)` address a sublayer. `ParamId` implements `Display` and prints its checkpoint path.
+- **Breaking: `Grads::get` takes `&ParamId`, and `Grads::iter` yields `(&ParamId, &Tensor)`.**
+- **Breaking: `Optimizer::update` takes `path: &LayerPath` in place of `scope: usize`.** A model calls it once for each layer and each sublayer. Only out-of-crate optimizers need an edit: build each address with `path.param(name)`.
+- **Breaking: `Ctx::has_state` and `Ctx::state_slot` take `&LayerPath` in place of a model position.** Pass `&LayerPath::root(scope)` for the layer at a model position.
+- **Breaking: `MODEL_FORMAT_VERSION` is 4, and no version 3 checkpoint loads.** `LayerCheckpoint` gains a `sublayers` field of the new `SublayerCheckpoint` records, so a file holds the same tree as the model. A checkpoint path is `<layer path>.<name>`, such as `2.kernel` or `2.forward.kernel`. A layer with no sublayer keeps the path it had in version 3. Rebuild the model, retrain, and save again.
+- **Breaking: `weight_path` moves from `layers::checkpoint` to `layer_path`, and it takes a `&LayerPath` in place of a model position.**
+- **Behavior change: a state value that no layer takes back stops the training step.** `Sequential::train_batch` and `Graph::train_batch` return `Error::Computation`, and the message names each value. Before, a debug assertion caught this case, and a release build ignored the value.
+- **Behavior change: the model build checks the whole layer tree.** It refuses 2 arrays or 2 sublayers of 1 layer with 1 name. It also refuses an empty name, a name that holds a `.`, 2 sublayer rosters that disagree, and 1 layer at 2 nodes of 1 tree. The message names the layer path.
+
 ## [v0.16.0] - 2026-08-23
 ### Added
 - **`Graph` and `GraphBuilder`, a model whose layers form a directed graph rather than a chain,** for residual connections, multiple towers, shared encoders, and several inputs or outputs. `input`, `layer`, `apply`, and `add` are infallible, and `build(&outputs)` is the one fallible call. It refuses an empty graph, a forward reference, or a node that reaches no output, and names the node in the message. Several nodes can call 1 layer, which is weight sharing: 1 set of arrays and 1 update per step, with the gradient summed over the nodes. `compile_many` and `with_loss_weights` give each output its own loss. Training, inference, and persistence follow `Sequential`. A graph that holds 1 chain agrees with the equivalent `Sequential` bit for bit.

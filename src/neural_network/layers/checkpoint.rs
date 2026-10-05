@@ -37,6 +37,8 @@
 //!
 //! [`LayerBase::layer_type`]: crate::neural_network::traits::LayerBase::layer_type
 //! [`LayerPath`]: crate::neural_network::LayerPath
+//! [`LayerCheckpoint`]: crate::neural_network::layers::checkpoint::LayerCheckpoint
+//! [`SublayerCheckpoint`]: crate::neural_network::layers::checkpoint::SublayerCheckpoint
 //! [`apply`]: crate::neural_network::layers::checkpoint::apply
 //! [`apply_partial`]: crate::neural_network::layers::checkpoint::apply_partial
 //! [`BatchNormalization`]: crate::neural_network::layers::BatchNormalization
@@ -67,10 +69,10 @@ pub const MODEL_MAGIC: u32 = 0x524D_4C4D;
 /// and the refusal names both versions
 ///
 /// Bump this on any change to a record layout, a field order, or a field meaning. The load
-/// path checks the layer count, the layer type of each node, the sublayer names of each node,
-/// and the name, the kind, and the shape of every array. Those checks can all pass for a file that another release wrote.
-/// This number is what makes such a file fail instead of loading values that mean something
-/// else
+/// path checks the number of model positions, the layer type of each node, the sublayer names
+/// of each node, and the name, the kind, and the shape of every array. Those checks can all
+/// pass for a file that another release wrote. This number is what makes such a file fail
+/// instead of loading values that mean something else
 pub const MODEL_FORMAT_VERSION: u32 = 4;
 
 /// The shapes that a layer was built for
@@ -153,7 +155,7 @@ impl BuildConfig {
 /// name, and loading owns both
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WeightRecord<'a> {
-    /// Name the layer gives the array. It is the second half of the checkpoint path
+    /// Name the layer gives the array. It is the last part of the checkpoint path
     pub name: Cow<'a, str>,
     /// Whether an optimizer updates the array
     pub kind: WeightKind,
@@ -231,7 +233,8 @@ pub struct LoadReport {
     pub unused: Vec<String>,
 }
 
-/// Reads every array of every layer into a checkpoint that borrows the model
+/// Reads every array of every layer and every sublayer into a checkpoint that borrows the
+/// model
 ///
 /// Nothing is copied. Each record borrows the name and the elements of the live array, so the
 /// checkpoint is a view of the model until it is serialized. An array that a layer does not

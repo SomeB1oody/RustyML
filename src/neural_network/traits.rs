@@ -376,7 +376,7 @@ pub(crate) fn check_every_gradient_is_claimed(
 ///
 /// The entry holds no gradient. A backward pass puts every gradient in the
 /// [`Grads`] store of the context. The optimizer reads
-/// it back with the [`ParamId`] that this name and the layer position build
+/// it back with the [`ParamId`] that this name and the path of the layer build
 ///
 /// Construct one with [`ParamRef::weight`] for a tensor that decoupled weight decay applies to
 /// (weight matrices, conv/recurrent kernels). Use [`ParamRef::no_decay`] for a tensor it skips
@@ -898,6 +898,10 @@ pub trait LayerBase: std::any::Any + Send + Sync {
     /// [`BatchNormalization`](crate::neural_network::layers::BatchNormalization)
     /// takes its running statistics here, and a dropout layer takes its random stream
     ///
+    /// The model calls this once for each layer and each sublayer that has a value. The slot
+    /// reaches the values of this layer alone, and never a value of a sublayer. If a value
+    /// stays in the context after the walk, the training step of the model returns an error
+    ///
     /// The default does nothing, which is right for every layer whose forward pass changes
     /// nothing outside the context
     ///
@@ -1096,10 +1100,10 @@ pub trait UnaryLayer: LayerBase {
     /// [`SequentialBuilder::build`](crate::neural_network::sequential::SequentialBuilder::build)
     /// has already built every layer it holds
     ///
-    /// The method also moves the non-trainable state that the pass proposed into the layer,
-    /// with [`LayerBase::apply_state`]. A model does that step itself, and a caller that drives
-    /// 1 layer by hand has no other place for it. Without the step the random stream of a
-    /// dropout layer never advances, and 2 calls draw the same mask
+    /// The method also moves the non-trainable state that the pass proposed into the layer and
+    /// into each of its sublayers, with [`LayerBase::apply_state`]. A model does that step
+    /// itself, and a caller that drives 1 layer by hand has no other place for it. Without the
+    /// step the random stream of a dropout layer never advances, and 2 calls draw the same mask
     ///
     /// # Parameters
     ///

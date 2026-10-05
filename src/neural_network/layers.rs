@@ -197,7 +197,12 @@ pub use upsampling::*;
 /// The generated `param_count` returns `ParamCounts::none()`, and both weight methods return
 /// the empty vector, so such a layer contributes no path to a checkpoint
 ///
+/// The 3 methods cover the arrays of the layer itself. A layer that holds sublayers can use
+/// this macro, because a model reaches the arrays of each sublayer through
+/// [`LayerBase::sublayers`]
+///
 /// [`LayerBase::parameters_mut`]: crate::neural_network::traits::LayerBase::parameters_mut
+/// [`LayerBase::sublayers`]: crate::neural_network::traits::LayerBase::sublayers
 macro_rules! no_trainable_parameters_layer_functions {
     () => {
         fn param_count(&self) -> ParamCounts {
@@ -219,13 +224,18 @@ pub(in crate::neural_network::layers) use no_trainable_parameters_layer_function
 ///
 /// 1 list serves both directions, so the name, the kind, and the order of an array cannot
 /// drift between the read and write paths. The checkpoint format reads the name and the kind
-/// from it, so this list is the layer half of every checkpoint path
+/// from it, so this list gives the last part of every checkpoint path of the layer
+///
+/// The list holds the arrays of the layer itself. A layer that holds sublayers does not put
+/// the arrays of a sublayer in this list. The model reaches them through
+/// [`LayerBase::sublayers`]
 ///
 /// Each entry reads `trainable "<name>" => <field>` or `non_trainable "<name>" => <field>`.
 /// The name is the name of the array in the checkpoint, and the field is the field of the
 /// layer struct that holds it. A field of a nested struct is written with dots, such as
 /// `gates.kernel`. The 2 halves stay next to each other, so a renamed field breaks this list
-/// instead of leaving a stale name behind
+/// instead of leaving a stale name behind. The dots of a field are Rust syntax alone. The name
+/// must not hold a `.`, because a checkpoint path joins its parts with `.`
 ///
 /// An entry that ends in `if <flag>` is optional. The flag is a `bool` field of the same
 /// layer, and the array reaches the list only while the flag is true. `Dense` writes
@@ -244,6 +254,7 @@ pub(in crate::neural_network::layers) use no_trainable_parameters_layer_function
 /// `use crate::neural_network::layers::named_weight_layer_functions;`
 ///
 /// [`LayerBase::parameters_mut`]: crate::neural_network::traits::LayerBase::parameters_mut
+/// [`LayerBase::sublayers`]: crate::neural_network::traits::LayerBase::sublayers
 macro_rules! named_weight_layer_functions {
     ($($kind:ident $name:literal => $($field:ident).+ $(if $flag:ident)?),+ $(,)?) => {
         fn weights(&self) -> Vec<$crate::neural_network::traits::WeightRef<'_>> {
@@ -301,6 +312,9 @@ macro_rules! built_layer_shape_functions {
 pub(in crate::neural_network::layers) use built_layer_shape_functions;
 
 /// Generates [`LayerBase::build_config`] of a layer that holds a `built: Option<Shape>` field
+///
+/// The generated `is_built` reads the `built` field alone. A layer that holds sublayers must
+/// report itself as built only when every sublayer is built, so it writes its own `is_built`
 ///
 /// [`LayerBase::build_config`]: crate::neural_network::traits::LayerBase::build_config
 macro_rules! build_config_function {

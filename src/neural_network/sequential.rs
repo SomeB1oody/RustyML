@@ -257,6 +257,10 @@ impl SequentialBuilder {
     /// - `Error::NeuralNetwork(NnError::EmptyModel)` - If the builder holds no layer
     /// - `Error::InvalidInput` - If a layer refuses the shape that reaches it. The message
     ///   names the position of the layer and its type
+    /// - `Error::InvalidInput` - If a layer tree breaks an address rule. The rules refuse 2
+    ///   arrays or 2 sublayers of 1 layer with 1 name. They also refuse an empty name, a name
+    ///   that holds a `.`, 2 sublayer rosters that disagree, and 1 layer at 2 nodes of 1 tree.
+    ///   The message names the layer path
     pub fn build(mut self, input_shape: &Shape) -> Result<Sequential, Error> {
         if self.layers.is_empty() {
             return Err(Error::NeuralNetwork(NnError::EmptyModel));
@@ -298,8 +302,8 @@ impl SequentialBuilder {
             shape = output;
         }
 
-        // The arrays are real now, so every roster is the one the model will address. A layer
-        // that gives 2 arrays 1 name is refused here, before the model computes anything
+        // The arrays are real now, so every roster is the one the model will address. The check
+        // refuses a layer tree that gives 2 things 1 address, before the model computes anything
         for (index, layer) in self.layers.iter_mut().enumerate() {
             check_addresses(index, &mut **layer)?;
         }
@@ -541,6 +545,8 @@ impl Sequential {
     /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::DimensionMismatch` - If the
     ///   tensors are empty, rank-0, or disagree on the batch size
     /// - `Error::Computation` - If a layer fails during forward or backward pass
+    /// - `Error::Computation` - If a gradient lands at an address that no parameter reads, or
+    ///   if a state value stays in the context because no layer takes it back
     pub fn train_batch(&mut self, x: &Tensor, y: &Tensor) -> Result<f32, Error> {
         // The unwraps below rest on this: it rejects a missing optimizer, a missing loss and an
         // empty layer stack before anything is touched
@@ -649,6 +655,8 @@ impl Sequential {
     /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::DimensionMismatch` - If inputs
     ///   are empty, rank-0, or batch sizes disagree
     /// - `Error::Computation` - If a layer fails during forward or backward pass
+    /// - `Error::Computation` - If a gradient lands at an address that no parameter reads, or
+    ///   if a state value stays in the context because no layer takes it back
     pub fn fit(&mut self, x: &Tensor, y: &Tensor, epochs: u32) -> Result<History, Error> {
         // Validate up front so a broken model or mismatched data fails before any epoch runs.
         // With `epochs == 0`, the per-batch validation inside `train_batch` never happens
@@ -711,6 +719,8 @@ impl Sequential {
     ///   are empty, rank-0, or batch sizes disagree
     /// - `Error::InvalidParameter` - If `batch_size` is 0 or larger than the dataset
     /// - `Error::Computation` - If a layer fails during forward or backward pass
+    /// - `Error::Computation` - If a gradient lands at an address that no parameter reads, or
+    ///   if a state value stays in the context because no layer takes it back
     pub fn fit_with_batches(
         &mut self,
         x: &Tensor,
@@ -880,6 +890,8 @@ impl Sequential {
     }
 
     /// Prints the layers of the model, their shapes, and their parameter counts
+    ///
+    /// The count of a layer includes the arrays of all of its sublayers
     pub fn summary(&self) {
         let col1_width = 33;
         let col2_width = 24;
@@ -1109,7 +1121,7 @@ impl Sequential {
     ///   release whose on-disk format version differs from this one wrote it
     /// - `Error::Io(IoError::Serialization)` - Deserialization failed
     /// - `Error::Io(IoError::ModelStructureMismatch)` - The file and the model disagree. The
-    ///   message names the checkpoint path, or the layer position for a whole-layer
+    ///   message names the checkpoint path, or the layer path for a whole-layer
     ///   disagreement
     pub fn load_from_path(
         &mut self,

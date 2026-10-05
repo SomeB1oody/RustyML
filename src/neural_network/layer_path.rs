@@ -18,7 +18,7 @@
 //!    `<path>.<name>`.
 //!
 //! A layer that holds no sublayer is a tree of 1 node. Its path is its model position, so
-//! every address of such a layer stays `<scope>.<name>`.
+//! every address of such a layer has the form `<scope>.<name>`.
 //!
 //! The walks in this module visit a tree in pre-order: a node first, and then each sublayer in
 //! the order that [`LayerBase::sublayers`] gives. This order is the canonical order of a model.
@@ -26,6 +26,8 @@
 //! paths all use it.
 //!
 //! [`Ctx`]: crate::neural_network::Ctx
+//! [`LayerBase::sublayers`]: crate::neural_network::traits::LayerBase::sublayers
+//! [`ParamId`]: crate::neural_network::traits::ParamId
 
 use crate::error::Error;
 use crate::math::reduction::det_reduce;

@@ -29,6 +29,8 @@
 //!    sublayer.
 //! 3. A cache lands in its own stack per call and per frame, so the backward pass of 1 sublayer
 //!    never takes the cache of another, whatever order the holding layer uses.
+//!
+//! [`ParamId`]: crate::neural_network::traits::ParamId
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -207,9 +209,10 @@ fn standard(grad: Tensor) -> Tensor {
 
 /// The non-trainable state of 1 layer that a forward pass proposed to change
 ///
-/// [`Sequential`](crate::neural_network::sequential::Sequential) hands this to
-/// [`LayerBase::apply_state`](crate::neural_network::traits::LayerBase::apply_state) after the
-/// forward pass, and the layer moves each value it recognizes into its own storage
+/// After the forward pass, a model gives 1 view to
+/// [`LayerBase::apply_state`](crate::neural_network::traits::LayerBase::apply_state) for each
+/// layer and each sublayer that has a value. The layer moves each value it recognizes into its
+/// own storage. The view reaches the values at the path of 1 layer, and no value of a sublayer
 pub struct StateSlot<'a> {
     /// The state channel of the whole context
     states: &'a mut AHashMap<(LayerPath, &'static str), Slot>,
@@ -443,7 +446,7 @@ impl Ctx {
     ///
     /// A model calls this before it calls a layer. The caches, the state, and the gradients of
     /// that call then reach the address of that layer. A caller that drives 1 layer by hand
-    /// never calls it, and everything lands at layer 0
+    /// never calls it, and everything lands at model position 0
     ///
     /// # Parameters
     ///
@@ -495,9 +498,10 @@ impl Ctx {
     /// Parks a value that the backward pass of this call needs
     ///
     /// The caches of 1 call form a stack, and [`pop_cache`](Ctx::pop_cache) takes the newest
-    /// first. The stack belongs to the call alone, so a layer that a model reaches from
-    /// several positions keeps 1 stack per position. A branch of a model that never reaches
-    /// the loss leaves its cache behind and moves no other call
+    /// first. The stack belongs to the call and to the open sublayer frames alone. A layer that
+    /// a model reaches from several positions therefore keeps 1 stack per position. Each call
+    /// of a sublayer inside [`Ctx::sublayer_call`] also keeps its own stack. A branch of a
+    /// model that never reaches the loss leaves its cache behind and moves no other call
     ///
     /// # Parameters
     ///
@@ -517,6 +521,10 @@ impl Ctx {
     }
 
     /// Takes back the newest value that this call parked
+    ///
+    /// The method reads the stack of the current call and the current sublayer frames. A layer
+    /// that holds sublayers must therefore open the same frames in the backward pass as in the
+    /// forward pass
     ///
     /// # Parameters
     ///
@@ -578,6 +586,8 @@ impl Ctx {
 
     /// The value this layer holds for the name, when the forward pass already proposed one
     ///
+    /// The address is the current [`layer_path`](Ctx::layer_path) and the name
+    ///
     /// A layer reads the channel first and falls back to its own storage. That is what makes
     /// 2 calls of 1 shared layer compose: the second call reads what the first call wrote
     ///
@@ -618,8 +628,10 @@ impl Ctx {
 
     /// Proposes a new value of the named non-trainable state of this layer
     ///
-    /// The value stays in the context until the model applies it with
-    /// [`LayerBase::apply_state`](crate::neural_network::traits::LayerBase::apply_state)
+    /// The address is the current [`layer_path`](Ctx::layer_path) and the name. The value stays
+    /// in the context until the model applies it with
+    /// [`LayerBase::apply_state`](crate::neural_network::traits::LayerBase::apply_state) of the
+    /// layer at that path
     ///
     /// # Parameters
     ///
@@ -637,9 +649,10 @@ impl Ctx {
 
     /// How many proposed state changes no layer has taken back
     ///
-    /// The count is 0 after a full pass, because a model applies the state of every layer it
-    /// calls. A value left here is a defect: the layer that wrote it did not take it back.
-    /// Its running statistics or its random stream never moved
+    /// The count is 0 after a full pass, because a model applies the state of every layer and
+    /// every sublayer it calls. A value left here is a defect, because no layer took it back.
+    /// Its running statistics or its random stream never moved. A training step of a model
+    /// refuses such a value with an error
     ///
     /// # Returns
     ///
@@ -705,7 +718,8 @@ impl Ctx {
 
     /// Adds the gradient of 1 named parameter of this layer to the store
     ///
-    /// The store sums, so a layer that runs twice in 1 pass gives the total
+    /// The address is the [`ParamId`] of the current [`layer_path`](Ctx::layer_path) and the
+    /// name. The store sums, so a layer that runs twice in 1 pass gives the total
     ///
     /// # Parameters
     ///
