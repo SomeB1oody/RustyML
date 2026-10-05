@@ -297,7 +297,8 @@ pub fn visit_every_layer(visitor: &mut impl LayerVisitor) {
     visitor.visit(unary(&flat, "(None, 4)"), &|| {
         LayerNormalization::new(1e-5).unwrap()
     });
-    visitor.visit(unary(&signal, "(None, 8, 2)"), &|| {
+    // A rank-2 input has no spatial axis, so each group folds over its own channels alone
+    visitor.visit(unary(&flat, "(None, 4)"), &|| {
         GroupNormalization::new(2, 1e-5).unwrap()
     });
     visitor.visit(unary(&signal, "(None, 8, 2)"), &|| {
