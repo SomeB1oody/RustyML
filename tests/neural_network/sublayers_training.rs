@@ -39,6 +39,9 @@ enum Wiring {
     Unscoped,
     /// Inside `Ctx::sublayer`, under the name `other`, which no roster gives
     Misnamed,
+    /// Inside `Ctx::sublayer`, under the name `first`, which the roster gives the other
+    /// sublayer
+    Crossed,
 }
 
 /// A composite that runs 2 sublayers in a chain
@@ -73,9 +76,10 @@ impl<A: UnaryLayer, B: UnaryLayer> Pair<A, B> {
     /// Runs 1 call of the second sublayer with the wiring of the pair
     fn run_second<R>(&self, ctx: &mut Ctx, body: impl FnOnce(&mut Ctx) -> R) -> R {
         match self.wiring {
-            Wiring::Scoped => ctx.sublayer("second", body),
+            Wiring::Scoped => ctx.sublayer("second", &self.second, body),
             Wiring::Unscoped => body(ctx),
-            Wiring::Misnamed => ctx.sublayer("other", body),
+            Wiring::Misnamed => ctx.sublayer("other", &self.second, body),
+            Wiring::Crossed => ctx.sublayer("first", &self.second, body),
         }
     }
 }
@@ -112,12 +116,14 @@ impl<A: UnaryLayer, B: UnaryLayer> LayerBase for Pair<A, B> {
 
 impl<A: UnaryLayer, B: UnaryLayer> UnaryLayer for Pair<A, B> {
     fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        let hidden = ctx.sublayer("first", |ctx| self.first.forward(input, ctx))?;
+        let hidden = ctx.sublayer("first", &self.first, |ctx| self.first.forward(input, ctx))?;
         self.run_second(ctx, |ctx| self.second.forward(&hidden, ctx))
     }
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let grad_hidden = self.run_second(ctx, |ctx| self.second.backward(grad_output, ctx))?;
-        ctx.sublayer("first", |ctx| self.first.backward(&grad_hidden, ctx))
+        ctx.sublayer("first", &self.first, |ctx| {
+            self.first.backward(&grad_hidden, ctx)
+        })
     }
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         self.first.build(input)?;
@@ -182,17 +188,17 @@ impl UnaryLayer for Tied {
         let cell = &self.cell;
         match self.pattern {
             TiedPattern::ChainNumbered => {
-                let hidden = ctx.sublayer_call("cell", 0, |ctx| cell.forward(input, ctx))?;
-                ctx.sublayer_call("cell", 1, |ctx| cell.forward(&hidden, ctx))
+                let hidden = ctx.sublayer_call("cell", 0, cell, |ctx| cell.forward(input, ctx))?;
+                ctx.sublayer_call("cell", 1, cell, |ctx| cell.forward(&hidden, ctx))
             }
             TiedPattern::ChainSameCall => {
-                let hidden = ctx.sublayer("cell", |ctx| cell.forward(input, ctx))?;
-                ctx.sublayer("cell", |ctx| cell.forward(&hidden, ctx))
+                let hidden = ctx.sublayer("cell", cell, |ctx| cell.forward(input, ctx))?;
+                ctx.sublayer("cell", cell, |ctx| cell.forward(&hidden, ctx))
             }
             TiedPattern::SumForwardOrder | TiedPattern::SumReverseOrder => {
                 let half = input * 0.5;
-                let whole = ctx.sublayer_call("cell", 0, |ctx| cell.forward(input, ctx))?;
-                let halved = ctx.sublayer_call("cell", 1, |ctx| cell.forward(&half, ctx))?;
+                let whole = ctx.sublayer_call("cell", 0, cell, |ctx| cell.forward(input, ctx))?;
+                let halved = ctx.sublayer_call("cell", 1, cell, |ctx| cell.forward(&half, ctx))?;
                 Ok(whole + halved)
             }
         }
@@ -202,21 +208,26 @@ impl UnaryLayer for Tied {
         match self.pattern {
             TiedPattern::ChainNumbered => {
                 let grad_hidden =
-                    ctx.sublayer_call("cell", 1, |ctx| cell.backward(grad_output, ctx))?;
-                ctx.sublayer_call("cell", 0, |ctx| cell.backward(&grad_hidden, ctx))
+                    ctx.sublayer_call("cell", 1, cell, |ctx| cell.backward(grad_output, ctx))?;
+                ctx.sublayer_call("cell", 0, cell, |ctx| cell.backward(&grad_hidden, ctx))
             }
             TiedPattern::ChainSameCall => {
-                let grad_hidden = ctx.sublayer("cell", |ctx| cell.backward(grad_output, ctx))?;
-                ctx.sublayer("cell", |ctx| cell.backward(&grad_hidden, ctx))
+                let grad_hidden =
+                    ctx.sublayer("cell", cell, |ctx| cell.backward(grad_output, ctx))?;
+                ctx.sublayer("cell", cell, |ctx| cell.backward(&grad_hidden, ctx))
             }
             TiedPattern::SumForwardOrder => {
-                let whole = ctx.sublayer_call("cell", 0, |ctx| cell.backward(grad_output, ctx))?;
-                let halved = ctx.sublayer_call("cell", 1, |ctx| cell.backward(grad_output, ctx))?;
+                let whole =
+                    ctx.sublayer_call("cell", 0, cell, |ctx| cell.backward(grad_output, ctx))?;
+                let halved =
+                    ctx.sublayer_call("cell", 1, cell, |ctx| cell.backward(grad_output, ctx))?;
                 Ok(whole + halved * 0.5)
             }
             TiedPattern::SumReverseOrder => {
-                let halved = ctx.sublayer_call("cell", 1, |ctx| cell.backward(grad_output, ctx))?;
-                let whole = ctx.sublayer_call("cell", 0, |ctx| cell.backward(grad_output, ctx))?;
+                let halved =
+                    ctx.sublayer_call("cell", 1, cell, |ctx| cell.backward(grad_output, ctx))?;
+                let whole =
+                    ctx.sublayer_call("cell", 0, cell, |ctx| cell.backward(grad_output, ctx))?;
                 Ok(whole + halved * 0.5)
             }
         }
@@ -850,7 +861,7 @@ fn misnamed_sublayer_call_is_refused() {
         &mut model,
         &ramp(&[4, 6], 0),
         &ramp(&[4, 3], 1),
-        &["1.other.kernel", "1.other.bias"],
+        &["1.other"],
     );
 }
 
@@ -870,7 +881,46 @@ fn misnamed_sublayer_state_is_refused() {
         &mut model,
         &ramp(&[4, 5], 0),
         &ramp(&[4, 4], 1),
-        &["0.other.rng"],
+        &["0.other"],
+    );
+}
+
+/// A composite that calls its second Dense under the name of its first Dense stops the step.
+/// The 2 sublayers have the same type and the same shapes, so the gradients of the second
+/// would otherwise sum into the first, and the second would never train
+#[test]
+fn crossed_sublayer_call_is_refused() {
+    let mut model = SequentialBuilder::new()
+        .add(Pair::wired(dense(4, 2), dense(4, 3), Wiring::Crossed))
+        .build(&Shape::new(vec![None, Some(4)]))
+        .unwrap();
+    model.compile(sgd_momentum(), MeanSquaredError::new());
+    assert_step_refused(
+        &mut model,
+        &ramp(&[4, 4], 0),
+        &ramp(&[4, 4], 1),
+        &["0.first", "Dense"],
+    );
+}
+
+/// A composite that calls its second Dropout under the name of its first Dropout stops the
+/// step before any random stream moves
+#[test]
+fn crossed_sublayer_state_is_refused() {
+    let mut model = SequentialBuilder::new()
+        .add(Pair::wired(
+            Dropout::new(0.5).unwrap().with_random_state(1),
+            Dropout::new(0.5).unwrap().with_random_state(2),
+            Wiring::Crossed,
+        ))
+        .build(&Shape::new(vec![None, Some(4)]))
+        .unwrap();
+    model.compile(sgd_momentum(), MeanSquaredError::new());
+    assert_step_refused(
+        &mut model,
+        &ramp(&[4, 4], 0),
+        &ramp(&[4, 4], 1),
+        &["0.first"],
     );
 }
 

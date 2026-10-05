@@ -27,8 +27,8 @@ use crate::neural_network::Shape;
 use crate::neural_network::Tensor;
 use crate::neural_network::ctx::Ctx;
 use crate::neural_network::layer_path::{
-    LayerPath, apply_state_tree, check_state_taken, find_weight, global_grad_norm,
-    model_weight_paths, total_param_count, update_model,
+    LayerPath, apply_state_tree, check_state_taken, check_sublayer_calls, find_weight,
+    global_grad_norm, model_weight_paths, total_param_count, update_model,
 };
 use crate::neural_network::layers::checkpoint::{
     LoadReport, MODEL_FORMAT_VERSION, MODEL_MAGIC, ModelCheckpoint, apply, apply_partial, capture,
@@ -557,15 +557,18 @@ impl Sequential {
         // Forward pass. The first layer reads the argument, and every later layer reads the
         // output of the layer before it
         let mut output: Option<Tensor> = None;
-        for (scope, layer) in self.layers.iter_mut().enumerate() {
+        for scope in 0..self.layers.len() {
             ctx.set_owner(scope);
             let input = output.as_ref().unwrap_or(x);
-            let next = layer.forward_many(&[input], &mut ctx)?;
+            let next = self.layers[scope].forward_many(&[input], &mut ctx)?;
             // The running statistics of a normalization layer and the random stream of a
             // dropout layer reach the layer here, because the forward pass took `&self`. The
             // walk reaches every sublayer of the position, and a value that no node takes back
             // stops the step
-            apply_state_tree(&mut **layer, &LayerPath::root(scope), &mut ctx);
+            // A state value moves only into the sublayer that its path names, so every call of
+            // the forward pass must reach that sublayer
+            check_sublayer_calls(&self.layers[..=scope], &ctx)?;
+            apply_state_tree(&mut *self.layers[scope], &LayerPath::root(scope), &mut ctx);
             check_state_taken(&ctx, scope)?;
             output = Some(next);
         }
@@ -595,6 +598,8 @@ impl Sequential {
         // Every gradient of the pass must reach a parameter. The optimizer walk below skips an
         // address that holds no gradient, so a gradient at an address no parameter reads would
         // otherwise be dropped without a word
+        // Every sublayer call of the backward pass must reach the sublayer that its path names
+        check_sublayer_calls(&self.layers, &ctx)?;
         check_every_gradient_is_claimed(&mut self.layers, ctx.grads())?;
 
         let global_clipnorm = self

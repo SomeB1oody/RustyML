@@ -26,15 +26,14 @@
 use crate::error::Error;
 use crate::neural_network::Shape;
 use crate::neural_network::Tensor;
-use crate::neural_network::ctx::{Ctx, Grads, StateSlot};
+use crate::neural_network::ctx::{Ctx, Grads, LayerIdentity, StateSlot, identity_of};
 use crate::neural_network::layer_path::{
-    LayerPath, Sublayer, SublayerMut, apply_state_tree, walk, walk_model_mut, walk_mut,
+    LayerPath, Sublayer, SublayerMut, apply_state_tree, walk_model_mut,
 };
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::checkpoint::BuildConfig;
 use crate::{Deserialize, Serialize};
 use ndarray::{ArrayViewD, ArrayViewMutD};
-use std::any::{Any, TypeId};
 use std::fmt;
 
 /// The stable address of 1 parameter tensor inside a model
@@ -156,48 +155,77 @@ impl fmt::Display for ParamId {
 ///
 /// - [`Error::InvalidInput`] - If a node breaks a rule. The message names the path of the node
 pub(crate) fn check_addresses(scope: usize, layer: &mut dyn LayerBase) -> Result<(), Error> {
+    let root = LayerPath::root(scope);
+    let mut storages: Vec<(LayerIdentity, LayerPath)> = Vec::new();
+    check_tree(&*layer, &root, &mut storages)?;
+    // The read roster is a tree now: no node repeats and no path is too deep. The write
+    // rosters must agree with it, and the check of each node runs before the walk goes down
+    // the write roster, so a write roster that lists its own layer stops here as well
+    check_tree_mut(layer, &root)
+}
+
+/// The deepest sublayer path that a model build accepts
+///
+/// No real layer nests this deep. The limit stops a roster that lists its own layer, which
+/// would otherwise recurse until the stack overflows. A zero-sized layer that lists itself
+/// passes the storage check, so the limit is the check that stops it
+const MAX_SUBLAYER_DEPTH: usize = 64;
+
+/// Checks the read rosters of 1 node, and then of each sublayer below it
+///
+/// The storage of a node joins `storages` before the walk goes down a level. A roster that
+/// reaches a node a second time therefore stops at that node
+fn check_tree(
+    node: &dyn LayerBase,
+    path: &LayerPath,
+    storages: &mut Vec<(LayerIdentity, LayerPath)>,
+) -> Result<(), Error> {
+    if path.sublayers().len() > MAX_SUBLAYER_DEPTH {
+        return Err(too_deep(path, node));
+    }
     // A layer is identified by its address and its concrete type. The address alone is not
     // enough: a struct and its first field share 1 address, and both can be nodes of 1 tree.
     // A zero-sized layer holds no storage, so 2 nodes of it share nothing
-    let mut storages: Vec<((*const (), TypeId), LayerPath)> = Vec::new();
-    let mut failure: Option<Error> = None;
-    walk(layer, &LayerPath::root(scope), &mut |path, node| {
-        if failure.is_some() {
-            return;
+    if std::mem::size_of_val(node) > 0 {
+        let storage = identity_of(node);
+        if let Some((_, first)) = storages.iter().find(|(seen, _)| *seen == storage) {
+            return Err(Error::invalid_input(format!(
+                "layer `{path}` (`{}`) is the same storage as layer `{first}`. The optimizer \
+                 would update that storage once per node. Give each node of a layer tree its \
+                 own layer",
+                node.layer_type()
+            )));
         }
-        if std::mem::size_of_val(node) > 0 {
-            let storage = (
-                node as *const dyn LayerBase as *const (),
-                (node as &dyn Any).type_id(),
-            );
-            if let Some((_, first)) = storages.iter().find(|(seen, _)| *seen == storage) {
-                failure = Some(Error::invalid_input(format!(
-                    "layer `{path}` (`{}`) is the same storage as layer `{first}`. The \
-                     optimizer would update that storage once per node. Give each node of a \
-                     layer tree its own layer",
-                    node.layer_type()
-                )));
-                return;
-            }
-            storages.push((storage, path.clone()));
-        }
-        if let Err(error) = check_node(path, node) {
-            failure = Some(error);
-        }
-    });
-    if let Some(error) = failure {
-        return Err(error);
+        storages.push((storage, path.clone()));
     }
+    check_node(path, node)?;
+    for sub in node.sublayers() {
+        check_tree(sub.layer, &path.child(sub.name), storages)?;
+    }
+    Ok(())
+}
 
-    let mut failure: Option<Error> = None;
-    walk_mut(layer, &LayerPath::root(scope), &mut |path, node| {
-        if failure.is_none()
-            && let Err(error) = check_node_mut(path, node)
-        {
-            failure = Some(error);
-        }
-    });
-    failure.map_or(Ok(()), Err)
+/// Checks the write rosters of 1 node, and then of each sublayer below it
+fn check_tree_mut(node: &mut dyn LayerBase, path: &LayerPath) -> Result<(), Error> {
+    if path.sublayers().len() > MAX_SUBLAYER_DEPTH {
+        return Err(too_deep(path, node));
+    }
+    check_node_mut(path, node)?;
+    for sub in node.sublayers_mut() {
+        check_tree_mut(sub.layer, &path.child(sub.name))?;
+    }
+    Ok(())
+}
+
+/// Builds the refusal of a sublayer path deeper than [`MAX_SUBLAYER_DEPTH`]
+#[cold]
+fn too_deep(path: &LayerPath, node: &dyn LayerBase) -> Error {
+    Error::invalid_input(format!(
+        "layer `{path}` (`{}`) is more than {MAX_SUBLAYER_DEPTH} sublayers deep. A sublayer \
+         roster probably lists its own layer. A roster must list only the layers that its layer \
+         holds",
+        node.layer_type()
+    ))
 }
 
 /// Checks the read roster of 1 node: array names and sublayer names
@@ -259,11 +287,8 @@ fn check_node_mut(path: &LayerPath, node: &mut dyn LayerBase) -> Result<(), Erro
 struct RosterEntry {
     /// The name of the sublayer
     name: String,
-    /// The address of the sublayer
-    address: *const (),
-    /// The concrete type of the sublayer. A struct and its first field share 1 address, so the
-    /// address alone does not identify a layer
-    type_id: TypeId,
+    /// The identity of the sublayer: its address and its concrete type
+    identity: LayerIdentity,
     /// The type name of the sublayer, for the message
     layer_type: String,
 }
@@ -272,8 +297,7 @@ struct RosterEntry {
 fn roster_entry(name: &str, layer: &dyn LayerBase) -> RosterEntry {
     RosterEntry {
         name: name.to_string(),
-        address: layer as *const dyn LayerBase as *const (),
-        type_id: (layer as &dyn Any).type_id(),
+        identity: identity_of(layer),
         layer_type: layer.layer_type().to_string(),
     }
 }
@@ -703,12 +727,12 @@ impl Arity {
 ///
 /// impl UnaryLayer for TwoDense {
 ///     fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-///         let hidden = ctx.sublayer("first", |ctx| self.first.forward(input, ctx))?;
-///         ctx.sublayer("second", |ctx| self.second.forward(&hidden, ctx))
+///         let hidden = ctx.sublayer("first", &self.first, |ctx| self.first.forward(input, ctx))?;
+///         ctx.sublayer("second", &self.second, |ctx| self.second.forward(&hidden, ctx))
 ///     }
 ///     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-///         let grad_hidden = ctx.sublayer("second", |ctx| self.second.backward(grad_output, ctx))?;
-///         ctx.sublayer("first", |ctx| self.first.backward(&grad_hidden, ctx))
+///         let grad_hidden = ctx.sublayer("second", &self.second, |ctx| self.second.backward(grad_output, ctx))?;
+///         ctx.sublayer("first", &self.first, |ctx| self.first.backward(&grad_hidden, ctx))
 ///     }
 ///     fn build(&mut self, input: &Shape) -> Result<(), Error> {
 ///         self.first.build(input)?;
@@ -1124,7 +1148,7 @@ pub trait UnaryLayer: LayerBase {
         }
         let output = self.forward(input, ctx)?;
         // A forward pass cannot write state itself, so this entry point applies it here
-        apply_own_state(self, ctx);
+        apply_own_state(self, ctx)?;
         Ok(output)
     }
 }
@@ -1132,9 +1156,13 @@ pub trait UnaryLayer: LayerBase {
 /// Moves the state that a pass proposed into a layer and into each of its sublayers
 ///
 /// The layer is the root of the tree at the current path of `ctx`. The 2 entry points that let
-/// a caller drive 1 layer by hand call this. A model calls
-/// [`apply_state_tree`] itself
-fn apply_own_state<L: LayerBase + ?Sized>(layer: &mut L, ctx: &mut Ctx) {
+/// a caller drive 1 layer by hand call this. A model applies the state itself
+///
+/// # Errors
+///
+/// - `Error::Computation` - If a state value at the path of the layer, or below it, stays in
+///   the context, because no node took it back
+fn apply_own_state<L: LayerBase + ?Sized>(layer: &mut L, ctx: &mut Ctx) -> Result<(), Error> {
     let path = ctx.layer_path();
     if ctx.has_state(&path) {
         layer.apply_state(&mut ctx.state_slot(&path));
@@ -1142,6 +1170,16 @@ fn apply_own_state<L: LayerBase + ?Sized>(layer: &mut L, ctx: &mut Ctx) {
     for sub in layer.sublayers_mut() {
         apply_state_tree(sub.layer, &path.child(sub.name), ctx);
     }
+    let left = ctx.state_left_below(&path);
+    if left.is_empty() {
+        return Ok(());
+    }
+    Err(Error::computation(format!(
+        "the forward pass proposed the state value(s) {} and no layer took them back. A layer \
+         must take every value that it writes with `Ctx::set_state` in its own \
+         `LayerBase::apply_state`",
+        left.join(", ")
+    )))
 }
 
 /// A layer that takes 1 input or several, and gives 1 output
@@ -1253,7 +1291,7 @@ pub trait Layer: LayerBase {
         let output = self.forward_many(inputs, ctx)?;
         // See [`UnaryLayer::forward_mut`]: this entry point completes the pass of a layer that
         // a caller drives by hand, by moving the proposed state into the layer
-        apply_own_state(self, ctx);
+        apply_own_state(self, ctx)?;
         Ok(output)
     }
 

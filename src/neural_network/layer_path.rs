@@ -31,7 +31,7 @@
 
 use crate::error::Error;
 use crate::math::reduction::det_reduce;
-use crate::neural_network::ctx::{Ctx, Grads};
+use crate::neural_network::ctx::{Ctx, Grads, identity_of};
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::traits::{Layer, LayerBase, Optimizer, ParamId};
 use crate::parallel_gates::sq_sum_f32_parallel_min_elems;
@@ -155,6 +155,20 @@ impl LayerPath {
         ParamId::at(self.clone(), name)
     }
 
+    /// Whether this path is `prefix` or a path below it
+    ///
+    /// # Parameters
+    ///
+    /// - `prefix` - The path to compare against
+    ///
+    /// # Returns
+    ///
+    /// - `bool` - `true` when the 2 paths share the model position and this path starts with
+    ///   every sublayer name of `prefix`
+    pub fn starts_with(&self, prefix: &LayerPath) -> bool {
+        self.scope == prefix.scope && self.sublayers.starts_with(&prefix.sublayers)
+    }
+
     /// Builds a path from the model position and the sublayer names
     pub(crate) fn from_parts(scope: usize, sublayers: Vec<SublayerName>) -> Self {
         Self { scope, sublayers }
@@ -239,7 +253,7 @@ impl<'a> SublayerMut<'a> {
 /// - `layer` - The root of the tree
 /// - `path` - The path of the root
 /// - `visit` - Called once per node, with the path of the node and the node
-pub(crate) fn walk(
+pub fn walk(
     layer: &dyn LayerBase,
     path: &LayerPath,
     visit: &mut dyn FnMut(&LayerPath, &dyn LayerBase),
@@ -257,7 +271,7 @@ pub(crate) fn walk(
 /// - `layer` - The root of the tree
 /// - `path` - The path of the root
 /// - `visit` - Called once per node, with the path of the node and the node
-pub(crate) fn walk_mut(
+pub fn walk_mut(
     layer: &mut dyn LayerBase,
     path: &LayerPath,
     visit: &mut dyn FnMut(&LayerPath, &mut dyn LayerBase),
@@ -370,6 +384,10 @@ pub(crate) fn find_weight<'a>(
     }
     let name = parts.pop()?;
     let scope: usize = parts[0].parse().ok()?;
+    // 1 position has 1 spelling, so `00` and `+0` reach nothing
+    if parts[0] != scope.to_string() {
+        return None;
+    }
     let mut node: &'a dyn LayerBase = &**layers.get(scope)?;
     for step in &parts[1..] {
         node = node
@@ -383,15 +401,16 @@ pub(crate) fn find_weight<'a>(
 
 /// Moves the state that a pass proposed into every node of 1 tree
 ///
-/// Each node takes the values at its own path. The caller checks afterwards that no value
-/// stayed behind, with [`check_state_taken`]
+/// Each node takes the values at its own path. A model checks afterwards that no value stayed
+/// behind. A caller that drives a layer by hand reads [`Ctx::state_left_under`] for the same
+/// check
 ///
 /// # Parameters
 ///
 /// - `layer` - The root of the tree
 /// - `path` - The path of the root
 /// - `ctx` - The context of the pass
-pub(crate) fn apply_state_tree(layer: &mut dyn LayerBase, path: &LayerPath, ctx: &mut Ctx) {
+pub fn apply_state_tree(layer: &mut dyn LayerBase, path: &LayerPath, ctx: &mut Ctx) {
     walk_mut(layer, path, &mut |node_path, node| {
         if ctx.has_state(node_path) {
             node.apply_state(&mut ctx.state_slot(node_path));
@@ -431,6 +450,30 @@ pub(crate) fn check_state_taken(ctx: &Ctx, scope: usize) -> Result<(), Error> {
     )))
 }
 
+/// Updates every parameter of every node of 1 tree, in the canonical pre-order
+///
+/// [`Optimizer::update`] covers the parameters of 1 node. A caller that drives a layer with
+/// sublayers by hand calls this, so every sublayer takes its update under its own path
+///
+/// # Parameters
+///
+/// - `optimizer` - The optimizer that updates the parameters
+/// - `layer` - The root of the tree
+/// - `path` - The path of the root
+/// - `grads` - Every gradient the backward pass produced
+/// - `grad_scale` - The uniform factor of the global-norm clip, or `1.0`
+pub fn update_tree(
+    optimizer: &mut dyn Optimizer,
+    layer: &mut dyn LayerBase,
+    path: &LayerPath,
+    grads: &Grads,
+    grad_scale: f32,
+) {
+    walk_mut(layer, path, &mut |node_path, node| {
+        optimizer.update(node_path, node, grads, grad_scale);
+    });
+}
+
 /// Updates every parameter of every node of a model, in the canonical order
 ///
 /// # Parameters
@@ -445,9 +488,15 @@ pub(crate) fn update_model(
     grads: &Grads,
     grad_scale: f32,
 ) {
-    walk_model_mut(layers, &mut |path, node| {
-        optimizer.update(path, node, grads, grad_scale);
-    });
+    for (scope, layer) in layers.iter_mut().enumerate() {
+        update_tree(
+            optimizer,
+            &mut **layer,
+            &LayerPath::root(scope),
+            grads,
+            grad_scale,
+        );
+    }
 }
 
 /// The global L2 norm of every gradient of a model, for a global-norm clip
@@ -489,4 +538,69 @@ pub(crate) fn global_grad_norm(layers: &mut [Box<dyn Layer>], grads: &Grads) -> 
         }
     });
     sum_sq.sqrt() as f32
+}
+
+/// Refuses a training pass that called a sublayer path with a layer that the tree does not
+/// hold there
+///
+/// [`Ctx::sublayer`] records the layer that each call reaches. The check resolves each recorded
+/// path through [`LayerBase::sublayers`] and compares the 2 layers by identity. A holding layer
+/// that calls sublayer `b` under the name of sublayer `a` would otherwise give `a` the
+/// gradients, the cache, and the state of `b`, and no other check would see it when the 2
+/// sublayers have the same type and shape
+///
+/// # Parameters
+///
+/// - `layers` - The layers of the model, by position
+/// - `ctx` - The context of the training pass
+///
+/// # Returns
+///
+/// - `Result<(), Error>` - `Ok` when every recorded call reached the sublayer of its path
+///
+/// # Errors
+///
+/// - `Error::Computation` - If 1 path received 2 different layers, if a path names no
+///   sublayer of the tree, or if a path reached another layer than the tree holds there
+pub(crate) fn check_sublayer_calls(layers: &[Box<dyn Layer>], ctx: &Ctx) -> Result<(), Error> {
+    let (calls, conflicts) = ctx.sublayer_calls();
+    if let Some(conflict) = conflicts.first() {
+        return Err(Error::computation(format!(
+            "the pass called the sublayer path {conflict}. Call each sublayer under its own \
+             name with `Ctx::sublayer`"
+        )));
+    }
+    let mut recorded: Vec<(
+        &LayerPath,
+        &(crate::neural_network::ctx::LayerIdentity, String),
+    )> = calls.iter().collect();
+    recorded.sort_by(|a, b| a.0.cmp(b.0));
+    for (path, (identity, called_type)) in recorded {
+        let Some(root) = layers.get(path.scope()) else {
+            return Err(Error::computation(format!(
+                "the pass called the sublayer path `{path}`, and the model holds no position {}",
+                path.scope()
+            )));
+        };
+        let mut node: &dyn LayerBase = &**root;
+        for step in path.sublayers() {
+            let Some(sub) = node.sublayers().into_iter().find(|sub| sub.name == *step) else {
+                return Err(Error::computation(format!(
+                    "the pass called the sublayer path `{path}` with layer `{called_type}`, and \
+                     no `LayerBase::sublayers` roster of the tree gives that path. Call each \
+                     sublayer with the name that its roster gives it"
+                )));
+            };
+            node = sub.layer;
+        }
+        if identity_of(node) != *identity {
+            return Err(Error::computation(format!(
+                "the pass called the sublayer path `{path}` with a layer `{called_type}` that is \
+                 not the layer `{}` that the tree holds at that path. Call each sublayer with \
+                 the name that its roster gives it",
+                node.layer_type()
+            )));
+        }
+    }
+    Ok(())
 }

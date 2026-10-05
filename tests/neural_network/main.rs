@@ -74,6 +74,8 @@ mod sequential;
 mod serialize;
 /// Tests for `Shape` and the pure `compute_output_shape` method of every layer
 mod shape;
+/// Guard tests for layers that hold other layers: loops, panics, paths, and hand-driven steps
+mod sublayers_guards;
 /// Training tests for layers that hold other layers: parity, addresses, state, and refusals
 mod sublayers_training;
 /// Tests for the upsampling layers: shapes, interpolation modes, layout, and error paths

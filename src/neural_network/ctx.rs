@@ -35,9 +35,9 @@
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer_path::{LayerPath, SublayerName};
-use crate::neural_network::traits::ParamId;
+use crate::neural_network::traits::{LayerBase, ParamId};
 use ahash::AHashMap;
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::collections::BTreeMap;
 
 /// The position of 1 layer in the model that drives it
@@ -73,6 +73,21 @@ struct Frame {
     name: SublayerName,
     /// The call of the sublayer inside 1 call of the holding layer
     call: usize,
+}
+
+/// The identity of 1 layer: the address of its storage and its concrete type
+///
+/// The address alone does not identify a layer. A struct and its first field share 1 address,
+/// and both can be layers. The address is a plain number, so the context stays `Send` and
+/// `Sync`
+pub(crate) type LayerIdentity = (usize, TypeId);
+
+/// The identity of a layer, as [`LayerIdentity`] describes it
+pub(crate) fn identity_of(layer: &dyn LayerBase) -> LayerIdentity {
+    (
+        layer as *const dyn LayerBase as *const () as usize,
+        (layer as &dyn Any).type_id(),
+    )
 }
 
 /// The address of 1 cache stack: the call of the model position, and the sublayer frames
@@ -244,6 +259,23 @@ impl StateSlot<'_> {
     }
 }
 
+/// Removes the frames above a depth when it goes out of scope
+///
+/// [`Ctx::sublayer_call`] holds 1 of these while its body runs. The frame of the call
+/// therefore leaves the stack on a normal return and on a panic alike
+struct FrameGuard<'a> {
+    /// The context whose frames the guard restores
+    ctx: &'a mut Ctx,
+    /// The frame count before the call
+    depth: usize,
+}
+
+impl Drop for FrameGuard<'_> {
+    fn drop(&mut self) {
+        self.ctx.frames.truncate(self.depth);
+    }
+}
+
 /// Everything 1 pass of a model needs to carry between its layers
 ///
 /// See the [module documentation](self) for the 4 channels
@@ -284,6 +316,13 @@ pub struct Ctx {
     /// The sublayer frames below the model position, root side first. Empty while the pass
     /// runs a layer of the model itself
     frames: Vec<Frame>,
+    /// The layer that a training pass called at each sublayer path, and the type name of it
+    ///
+    /// A model compares each entry against the sublayer that the tree gives at the path. A
+    /// layer that calls 1 sublayer under the name of another therefore stops the step
+    sublayer_calls: AHashMap<LayerPath, (LayerIdentity, String)>,
+    /// 1 description per sublayer path that a training pass called with 2 different layers
+    sublayer_conflicts: Vec<String>,
     /// 1 stack of caches per CALL and per sublayer frame, in the order the forward pass pushed
     /// them
     ///
@@ -365,8 +404,14 @@ impl Ctx {
     /// A layer that holds other layers calls each of them inside this method, in the forward
     /// pass and in the backward pass. The name must be the name that
     /// [`LayerBase::sublayers`](crate::neural_network::traits::LayerBase::sublayers) gives the
-    /// sublayer. The method appends the name to the current path, runs `body`, and removes the
-    /// name again before it returns. The removal also happens when `body` returns an error
+    /// sublayer, and `layer` must be the sublayer that `body` calls. The method appends the
+    /// name to the current path, runs `body`, and removes the name again before it returns.
+    /// The removal also happens when `body` returns an error or panics
+    ///
+    /// A training pass records `layer` at the path. A model compares each record against the
+    /// sublayer that the tree gives at the same path, and refuses the step on a difference.
+    /// A name that reaches another sublayer of the same type therefore cannot train the wrong
+    /// arrays
     ///
     /// This is [`Ctx::sublayer_call`] with call 0. A layer that calls 1 sublayer once per pass
     /// uses this form
@@ -374,6 +419,7 @@ impl Ctx {
     /// # Parameters
     ///
     /// - `name` - The name of the sublayer
+    /// - `layer` - The sublayer that `body` calls
     /// - `body` - The call of the sublayer, which receives this context
     ///
     /// # Returns
@@ -382,9 +428,10 @@ impl Ctx {
     pub fn sublayer<R>(
         &mut self,
         name: impl Into<SublayerName>,
+        layer: &dyn LayerBase,
         body: impl FnOnce(&mut Ctx) -> R,
     ) -> R {
-        self.sublayer_call(name, 0, body)
+        self.sublayer_call(name, 0, layer, body)
     }
 
     /// Runs 1 numbered call of a sublayer, with every channel pointed at that sublayer
@@ -399,6 +446,7 @@ impl Ctx {
     ///
     /// - `name` - The name of the sublayer
     /// - `call` - The number of this call of the sublayer
+    /// - `layer` - The sublayer that `body` calls
     /// - `body` - The call of the sublayer, which receives this context
     ///
     /// # Returns
@@ -408,6 +456,7 @@ impl Ctx {
         &mut self,
         name: impl Into<SublayerName>,
         call: usize,
+        layer: &dyn LayerBase,
         body: impl FnOnce(&mut Ctx) -> R,
     ) -> R {
         let depth = self.frames.len();
@@ -415,12 +464,43 @@ impl Ctx {
             name: name.into(),
             call,
         });
-        let result = body(self);
-        // `body` holds the only access to the frames, and every frame it pushes it also pops,
-        // so the stack is 1 frame deeper here
-        debug_assert_eq!(self.frames.len(), depth + 1);
-        self.frames.truncate(depth);
-        result
+        if self.training {
+            self.record_sublayer_call(layer);
+        }
+        let mut guard = FrameGuard { ctx: self, depth };
+        body(&mut guard.ctx)
+    }
+
+    /// Records the layer that the current sublayer path calls, and notes a second layer at
+    /// the same path
+    fn record_sublayer_call(&mut self, layer: &dyn LayerBase) {
+        let path = self.layer_path();
+        let identity = identity_of(layer);
+        match self.sublayer_calls.get(&path) {
+            Some((seen, first_type)) if *seen != identity => {
+                let conflict = format!(
+                    "`{path}` with a layer `{first_type}` and with another layer `{}`",
+                    layer.layer_type()
+                );
+                self.sublayer_conflicts.push(conflict);
+            }
+            Some(_) => {}
+            None => {
+                self.sublayer_calls
+                    .insert(path, (identity, layer.layer_type().to_string()));
+            }
+        }
+    }
+
+    /// Every sublayer path that this training pass called, with the layer it called there
+    ///
+    /// # Returns
+    ///
+    /// - The records, and the paths that the pass called with 2 different layers
+    pub(crate) fn sublayer_calls(
+        &self,
+    ) -> (&AHashMap<LayerPath, (LayerIdentity, String)>, &[String]) {
+        (&self.sublayer_calls, &self.sublayer_conflicts)
     }
 
     /// The key of the cache stack of the current call and the current frames
@@ -692,6 +772,26 @@ impl Ctx {
             .states
             .keys()
             .filter(|(layer, _)| layer.scope() == scope)
+            .map(|(layer, name)| format!("{layer}.{name}"))
+            .collect();
+        left.sort();
+        left
+    }
+
+    /// Every state value at a path, or below it, that no layer has taken back yet
+    ///
+    /// # Parameters
+    ///
+    /// - `path` - The path of the layer
+    ///
+    /// # Returns
+    ///
+    /// - `Vec<String>` - 1 entry `<path>.<name>` per value, sorted
+    pub fn state_left_below(&self, path: &LayerPath) -> Vec<String> {
+        let mut left: Vec<String> = self
+            .states
+            .keys()
+            .filter(|(layer, _)| layer.starts_with(path))
             .map(|(layer, name)| format!("{layer}.{name}"))
             .collect();
         left.sort();
