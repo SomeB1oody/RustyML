@@ -127,18 +127,6 @@ fn new_stores_parameters() {
 // fit error paths
 
 #[test]
-fn fit_rejects_empty_x() {
-    let x: Array2<f64> = Array2::zeros((0, 2));
-    let y: Array1<f64> = Array1::zeros(0);
-    let mut model = LinearSVC::default();
-    let result = model.fit(&x, &y);
-    assert!(
-        matches!(result, Err(Error::EmptyInput(_))),
-        "0-row input must return EmptyInput"
-    );
-}
-
-#[test]
 fn fit_rejects_empty_y() {
     let x: Array2<f64> = Array2::zeros((3, 2));
     let y: Array1<f64> = Array1::zeros(0);
@@ -162,45 +150,7 @@ fn fit_rejects_dimension_mismatch_xy() {
     );
 }
 
-#[test]
-fn fit_rejects_non_finite_in_x() {
-    // Each non-finite sentinel (NaN / +Inf) in x hits the same finiteness guard
-    // and must return NonFinite.
-    for sentinel in [f64::NAN, f64::INFINITY] {
-        let x = Array2::from_shape_vec((2, 2), vec![1.0, 2.0, sentinel, 4.0]).unwrap();
-        let y = array![0.0, 1.0];
-        let mut model = LinearSVC::default();
-        let result = model.fit(&x, &y);
-        assert!(
-            matches!(result, Err(Error::NonFinite(_))),
-            "expected NonFinite for sentinel={sentinel:?} in x"
-        );
-    }
-}
-
 // predict / decision_function error paths
-
-#[test]
-fn predict_not_fitted_returns_not_fitted_error() {
-    let model = LinearSVC::default();
-    let x = Array2::zeros((2, 2));
-    let result = model.predict(&x);
-    assert!(
-        matches!(result, Err(Error::NotFitted("LinearSVC"))),
-        "predict before fit must return NotFitted(\"LinearSVC\")"
-    );
-}
-
-#[test]
-fn decision_function_not_fitted_returns_not_fitted_error() {
-    let model = LinearSVC::default();
-    let x = Array2::zeros((2, 2));
-    let result = model.decision_function(&x);
-    assert!(
-        matches!(result, Err(Error::NotFitted("LinearSVC"))),
-        "decision_function before fit must return NotFitted(\"LinearSVC\")"
-    );
-}
 
 #[test]
 fn predict_wrong_feature_count_returns_dimension_mismatch() {
@@ -234,18 +184,6 @@ fn decision_function_wrong_feature_count_returns_dimension_mismatch() {
             })
         ),
         "wrong feature count must return DimensionMismatch(expected=2, found=1)"
-    );
-}
-
-#[test]
-fn predict_empty_input_after_fit_returns_error() {
-    let model = fit_separable_model();
-    // 0-row input with correct ncols
-    let x_empty: Array2<f64> = Array2::zeros((0, 2));
-    let result = model.predict(&x_empty);
-    assert!(
-        result.is_err(),
-        "empty input to predict after fit must return an error"
     );
 }
 
@@ -501,15 +439,6 @@ fn save_load_round_trip_yields_identical_predictions() {
     }
 
     let _ = std::fs::remove_file(path);
-}
-
-#[test]
-fn load_from_nonexistent_path_returns_io_error() {
-    let result = LinearSVC::load_from_path("/tmp/this_file_does_not_exist_rustyml_svc.bin");
-    assert!(
-        matches!(result, Err(Error::Io(_))),
-        "loading from non-existent path must return Err(Io(...))"
-    );
 }
 
 #[test]

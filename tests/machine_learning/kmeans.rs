@@ -126,33 +126,6 @@ fn default_constructor_has_documented_defaults() {
 
 // fit error paths
 
-/// `fit` on an empty array must yield `Error::EmptyInput`
-#[test]
-fn fit_empty_data_is_error() {
-    let mut km = KMeans::new(1, 100, 1e-4).unwrap().with_random_state(0);
-    let data: Array2<f64> = Array2::zeros((0, 2));
-    let err = km.fit(&data).unwrap_err();
-    assert!(
-        matches!(err, Error::EmptyInput(_)),
-        "expected EmptyInput, got {err:?}"
-    );
-}
-
-/// `fit` on data containing a non-finite sentinel (NaN or `+Inf`) must yield
-/// `Error::NonFinite` for each sentinel
-#[test]
-fn fit_non_finite_data_is_error() {
-    for sentinel in [f64::NAN, f64::INFINITY] {
-        let mut km = KMeans::new(1, 100, 1e-4).unwrap().with_random_state(0);
-        let data = array![[1.0, sentinel], [2.0, 3.0]];
-        let err = km.fit(&data).unwrap_err();
-        assert!(
-            matches!(err, Error::NonFinite(_)),
-            "expected NonFinite for sentinel={sentinel:?}, got {err:?}"
-        );
-    }
-}
-
 /// `fit` with `n_samples < n_clusters` must yield `Error::InvalidInput`
 #[test]
 fn fit_fewer_samples_than_clusters_is_error() {
@@ -168,18 +141,6 @@ fn fit_fewer_samples_than_clusters_is_error() {
 
 // predict error paths
 
-/// `predict` before `fit` must yield `Error::NotFitted`
-#[test]
-fn predict_before_fit_is_not_fitted() {
-    let km = KMeans::new(3, 100, 1e-4).unwrap().with_random_state(42);
-    let data = array![[1.0, 2.0]];
-    let err = km.predict(&data).unwrap_err();
-    assert!(
-        matches!(err, Error::NotFitted(_)),
-        "expected NotFitted, got {err:?}"
-    );
-}
-
 /// `predict` with wrong number of features must yield `Error::DimensionMismatch`
 #[test]
 fn predict_wrong_feature_count_is_dimension_mismatch() {
@@ -193,35 +154,6 @@ fn predict_wrong_feature_count_is_dimension_mismatch() {
     assert!(
         matches!(err, Error::DimensionMismatch { .. }),
         "expected DimensionMismatch, got {err:?}"
-    );
-}
-
-/// `predict` with an empty matrix (after fit) must yield `Error::EmptyInput`
-#[test]
-fn predict_empty_input_after_fit_is_empty_input() {
-    let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
-    km.fit(&three_blob_data()).unwrap();
-
-    let empty: Array2<f64> = Array2::zeros((0, 2));
-    let err = km.predict(&empty).unwrap_err();
-    assert!(
-        matches!(err, Error::EmptyInput(_)),
-        "expected EmptyInput, got {err:?}"
-    );
-}
-
-/// `predict` with NaN input (after fit) must yield `Error::NonFinite`
-#[test]
-fn predict_nan_input_is_non_finite() {
-    let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
-    let data = three_blob_data();
-    km.fit(&data).unwrap();
-
-    let bad = array![[f64::NAN, 1.0]];
-    let err = km.predict(&bad).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {err:?}"
     );
 }
 
@@ -545,17 +477,6 @@ fn save_load_round_trip_preserves_predictions() {
     let co = km.get_centroids().unwrap();
     let cl = km_loaded.get_centroids().unwrap();
     assert_allclose(co, cl, 0.0_f64);
-}
-
-/// Loading from a nonexistent path must yield an `Error::Io` variant
-#[test]
-fn load_from_nonexistent_path_is_io_error() {
-    let err =
-        KMeans::load_from_path("/tmp/this_path_does_not_exist_rustyml_kmeans.bin").unwrap_err();
-    assert!(
-        matches!(err, Error::Io(_)),
-        "expected Error::Io, got {err:?}"
-    );
 }
 
 // Larger-dataset fit: a correctness check at 1200 points

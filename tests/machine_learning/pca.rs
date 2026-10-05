@@ -46,48 +46,7 @@ fn test_new_valid_n_components() {
         .with_svd_solver(SVDSolver::Full);
 }
 
-// Error paths: not fitted
-
-/// transform before fit returns Error::NotFitted
-#[test]
-fn test_transform_before_fit_is_not_fitted() {
-    let pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
-    let x = collinear_data();
-    let err = pca.transform(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::NotFitted(_)),
-        "expected NotFitted, got {:?}",
-        err
-    );
-}
-
-/// inverse_transform before fit returns Error::NotFitted
-#[test]
-fn test_inverse_transform_before_fit_is_not_fitted() {
-    let pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
-    let scores = array![[1.0], [0.0], [0.0], [0.0], [0.0]];
-    let err = pca.inverse_transform(&scores).unwrap_err();
-    assert!(
-        matches!(err, Error::NotFitted(_)),
-        "expected NotFitted, got {:?}",
-        err
-    );
-}
-
 // Error paths: bad inputs at fit time
-
-/// Empty matrix returns EmptyInput
-#[test]
-fn test_fit_empty_input_is_empty_input() {
-    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
-    let x: Array2<f64> = Array2::zeros((0, 2));
-    let err = pca.fit(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::EmptyInput(_)),
-        "expected EmptyInput, got {:?}",
-        err
-    );
-}
 
 /// Single sample returns InvalidInput (check_min_samples requires >= 2)
 #[test]
@@ -115,22 +74,6 @@ fn test_fit_n_components_exceeds_n_features_is_invalid_parameter() {
     );
 }
 
-/// Non-finite values (NaN, +Inf) in input return NonFinite at fit time
-#[test]
-fn test_fit_non_finite_input_is_non_finite() {
-    for sentinel in [f64::NAN, f64::INFINITY] {
-        let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
-        let x = array![[1.0, sentinel], [2.0, 4.0], [3.0, 6.0]];
-        let err = pca.fit(&x).unwrap_err();
-        assert!(
-            matches!(err, Error::NonFinite(_)),
-            "expected NonFinite for sentinel {:?}, got {:?}",
-            sentinel,
-            err
-        );
-    }
-}
-
 // Error paths: bad inputs at transform time
 
 /// Wrong feature count on transform returns DimensionMismatch
@@ -143,20 +86,6 @@ fn test_transform_wrong_feature_count_is_dimension_mismatch() {
     assert!(
         matches!(err, Error::DimensionMismatch { .. }),
         "expected DimensionMismatch, got {:?}",
-        err
-    );
-}
-
-/// NaN during transform returns NonFinite
-#[test]
-fn test_transform_nan_is_non_finite() {
-    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
-    pca.fit(&collinear_data()).unwrap();
-    let x = array![[1.0, f64::NAN], [2.0, 4.0]];
-    let err = pca.transform(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {:?}",
         err
     );
 }
@@ -551,13 +480,6 @@ fn test_save_load_roundtrip_preserves_transform() {
     assert_allclose(&result_before, &result_after, 1e-10);
 
     let _ = fs::remove_file(path);
-}
-
-/// load_from_path on a non-existent file returns Err(Error::Io)
-#[test]
-fn test_load_nonexistent_path_is_error() {
-    let result = PCA::load_from_path("/tmp/rustyml_pca_no_such_file_xyz.bin");
-    assert!(result.is_err(), "loading a missing file should fail");
 }
 
 // Output shape contract

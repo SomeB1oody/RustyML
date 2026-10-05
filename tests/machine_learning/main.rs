@@ -41,7 +41,7 @@ mod logistic_regression;
 /// Tests for `MeanShift` clustering and `estimate_bandwidth`.
 mod mean_shift;
 
-/// Cross-cutting tests for the Fit and Predict traits, save/load, and NotFitted errors.
+/// Cross-cutting tests for the Fit and Predict traits, save/load, and shared input validation.
 mod ml_infra;
 
 /// Tests for PCA: construction, validation, and each SVD solver.

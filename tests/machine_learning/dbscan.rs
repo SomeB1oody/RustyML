@@ -88,44 +88,7 @@ fn constructor_default_values() {
     assert!(m.get_core_sample_indices().is_none());
 }
 
-// fit() error paths
-
-/// fit on a 0-row matrix returns EmptyInput
-#[test]
-fn fit_rejects_empty_data() {
-    let data: Array2<f64> = Array2::zeros((0, 2));
-    let mut m = DBSCAN::new(0.5, 2).unwrap();
-    assert!(
-        matches!(m.fit(&data), Err(Error::EmptyInput(_))),
-        "expected EmptyInput for 0-row data"
-    );
-}
-
-/// fit on data containing a non-finite value (NaN or infinity) returns NonFinite
-#[test]
-fn fit_rejects_non_finite_in_data() {
-    for bad in [f64::NAN, f64::INFINITY] {
-        let data = array![[1.0f64, 2.0], [bad, 3.0]];
-        let mut m = DBSCAN::new(0.5, 2).unwrap();
-        assert!(
-            matches!(m.fit(&data), Err(Error::NonFinite(_))),
-            "expected NonFinite for {bad:?} in data"
-        );
-    }
-}
-
-// predict() error paths (before / without fit)
-
-/// predict before fit returns NotFitted
-#[test]
-fn predict_before_fit_returns_not_fitted() {
-    let m = DBSCAN::new(0.5, 2).unwrap();
-    let data = array![[1.0f64, 2.0]];
-    assert!(
-        matches!(m.predict(&data), Err(Error::NotFitted(_))),
-        "expected NotFitted before fit"
-    );
-}
+// predict() after fit: empty input and error paths
 
 /// predict on empty new_data returns Ok with an empty array
 #[test]
@@ -151,22 +114,6 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
         matches!(m.predict(&wrong), Err(Error::DimensionMismatch { .. })),
         "expected DimensionMismatch for wrong feature count"
     );
-}
-
-/// predict with a non-finite value (NaN or infinity) in new_data returns NonFinite
-#[test]
-fn predict_non_finite_in_new_data_returns_non_finite() {
-    let train = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2).unwrap();
-    m.fit(&train).unwrap();
-
-    for bad_val in [f64::NAN, f64::INFINITY] {
-        let bad = array![[bad_val, 1.0f64]];
-        assert!(
-            matches!(m.predict(&bad), Err(Error::NonFinite(_))),
-            "expected NonFinite for {bad_val:?} in new_data"
-        );
-    }
 }
 
 // Correctness: fit + cluster structure (Euclidean metric)

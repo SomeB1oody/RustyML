@@ -364,57 +364,6 @@ fn fit_transform_single_sample_returns_invalid_input() {
     );
 }
 
-/// Empty input (0 rows) is rejected as EmptyInput
-#[test]
-fn fit_transform_empty_input_returns_empty_input() {
-    let x: Array2<f64> = Array2::zeros((0, 3));
-    let tsne = TSNE::new(2, 2.0, 200.0, 100)
-        .unwrap()
-        .with_random_state(42)
-        .with_init(Init::PCA)
-        .with_method(TSNEMethod::Exact)
-        .unwrap();
-    let err = tsne.fit_transform(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::EmptyInput(_)),
-        "expected EmptyInput, got {err:?}"
-    );
-}
-
-/// NaN in input data is rejected as NonFinite
-#[test]
-fn fit_transform_nan_input_returns_non_finite() {
-    let x = ndarray::array![[1.0, f64::NAN], [2.0, 3.0], [4.0, 5.0]];
-    let tsne = TSNE::new(2, 2.0, 200.0, 100)
-        .unwrap()
-        .with_random_state(42)
-        .with_init(Init::PCA)
-        .with_method(TSNEMethod::Exact)
-        .unwrap();
-    let err = tsne.fit_transform(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {err:?}"
-    );
-}
-
-/// +inf in input data is rejected as NonFinite
-#[test]
-fn fit_transform_infinity_input_returns_non_finite() {
-    let x = ndarray::array![[f64::INFINITY, 1.0], [2.0, 3.0], [4.0, 5.0]];
-    let tsne = TSNE::new(2, 2.0, 200.0, 100)
-        .unwrap()
-        .with_random_state(42)
-        .with_init(Init::PCA)
-        .with_method(TSNEMethod::Exact)
-        .unwrap();
-    let err = tsne.fit_transform(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {err:?}"
-    );
-}
-
 // Getter roundtrips
 
 /// Getters return exactly the values set by the constructor and builder methods

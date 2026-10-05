@@ -185,38 +185,6 @@ fn fit_rejects_fractional_labels() {
     );
 }
 
-// predict / decision_function before fit
-
-/// predict before fit -> NotFitted
-#[test]
-fn predict_before_fit_returns_not_fitted() {
-    let svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100)
-        .unwrap()
-        .with_random_state(42);
-    let x = Array2::from_shape_vec((2, 2), vec![1.0, 0.0, -1.0, 0.0]).unwrap();
-    let result = svc.predict(&x);
-    assert!(
-        matches!(result, Err(Error::NotFitted(_))),
-        "expected NotFitted, got {:?}",
-        result
-    );
-}
-
-/// decision_function before fit -> NotFitted
-#[test]
-fn decision_function_before_fit_returns_not_fitted() {
-    let svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100)
-        .unwrap()
-        .with_random_state(42);
-    let x = Array2::from_shape_vec((2, 2), vec![1.0, 0.0, -1.0, 0.0]).unwrap();
-    let result = svc.decision_function(&x);
-    assert!(
-        matches!(result, Err(Error::NotFitted(_))),
-        "expected NotFitted, got {:?}",
-        result
-    );
-}
-
 // predict / decision_function dimension checks
 
 /// predict with wrong feature dimension -> DimensionMismatch
@@ -670,44 +638,6 @@ fn save_load_round_trip_linear_kernel() {
     );
 
     let _ = std::fs::remove_file(path);
-}
-
-// EmptyInput guard
-
-/// predict on an empty input matrix -> EmptyInput
-#[test]
-fn predict_empty_input_returns_error() {
-    let (x, y) = linearly_separable_data();
-    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000)
-        .unwrap()
-        .with_random_state(42);
-    svc.fit(&x, &y).expect("fit must succeed");
-
-    let x_empty = Array2::<f64>::zeros((0, 2));
-    let result = svc.predict(&x_empty);
-    assert!(
-        matches!(result, Err(Error::EmptyInput(_))),
-        "expected EmptyInput for zero-row input, got {:?}",
-        result
-    );
-}
-
-/// decision_function on an empty input matrix -> EmptyInput
-#[test]
-fn decision_function_empty_input_returns_error() {
-    let (x, y) = linearly_separable_data();
-    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000)
-        .unwrap()
-        .with_random_state(42);
-    svc.fit(&x, &y).expect("fit must succeed");
-
-    let x_empty = Array2::<f64>::zeros((0, 2));
-    let result = svc.decision_function(&x_empty);
-    assert!(
-        matches!(result, Err(Error::EmptyInput(_))),
-        "expected EmptyInput for zero-row input, got {:?}",
-        result
-    );
 }
 
 // Sigmoid kernel: construct, fit, predict
