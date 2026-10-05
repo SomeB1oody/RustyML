@@ -18,6 +18,7 @@
 use crate::common::assert_allclose;
 use ndarray::{Array, Array1, Array2, Array3, Array4, Array5, IxDyn};
 use rustyml::error::{Error, IoError};
+use rustyml::neural_network::LayerPath;
 use rustyml::neural_network::layers::activation::Activation;
 use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
 use rustyml::neural_network::layers::convolution::conv_1d_transpose::Conv1DTranspose;
@@ -107,7 +108,7 @@ fn train_once(layer: &mut dyn Layer, input: &Tensor, upstream: &Tensor) -> Ctx {
 /// The gradient of 1 named parameter of a layer that `train_once` drove
 fn grad_of<'a>(ctx: &'a Ctx, name: &'static str) -> &'a Tensor {
     ctx.grads()
-        .get(ParamId::new(0, name))
+        .get(&ParamId::new(0, name))
         .unwrap_or_else(|| panic!("the pass gave `{name}` no gradient"))
 }
 
@@ -408,7 +409,7 @@ fn dropping_gamma_does_not_give_beta_the_optimizer_state_of_gamma() {
         }
     }
     optimizer.step();
-    optimizer.update(0, &mut full, full_ctx.grads(), 1.0);
+    optimizer.update(&LayerPath::root(0), &mut full, full_ctx.grads(), 1.0);
     assert!(
         array_of(&full, "gamma").iter().any(|v| *v != 1.0),
         "gamma must have moved, or the buffer of gamma holds nothing"
@@ -425,7 +426,12 @@ fn dropping_gamma_does_not_give_beta_the_optimizer_state_of_gamma() {
     let scale_free_ctx = train_once(&mut scale_free, &x, &upstream);
     assert_eq!(parameter_names(&mut scale_free), vec!["beta"]);
     optimizer.step();
-    optimizer.update(0, &mut scale_free, scale_free_ctx.grads(), 1.0);
+    optimizer.update(
+        &LayerPath::root(0),
+        &mut scale_free,
+        scale_free_ctx.grads(),
+        1.0,
+    );
 
     assert_eq!(
         array_of(&scale_free, "beta"),
@@ -844,7 +850,7 @@ fn a_checkpoint_with_a_bias_fails_to_load_into_a_bias_free_layer() {
         .build(&Shape::known(&[1, 2]))
         .unwrap();
     let message = refusal(bias_free.load_from_path(file.path()));
-    assert!(message.contains("layer 0"), "{message}");
+    assert!(message.contains("layer `0`"), "{message}");
     assert!(message.contains("Dense"), "{message}");
     assert!(message.contains("bias"), "{message}");
 
@@ -873,7 +879,7 @@ fn a_bias_free_checkpoint_fails_to_load_into_a_layer_with_a_bias() {
         .build(&Shape::known(&[3, 2]))
         .unwrap();
     let message = refusal(with_bias.load_from_path(file.path()));
-    assert!(message.contains("layer 0"), "{message}");
+    assert!(message.contains("layer `0`"), "{message}");
     assert!(message.contains("bias"), "{message}");
 }
 

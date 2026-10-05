@@ -2,15 +2,16 @@
 //! address and view types that connect them.
 //!
 //! [`LayerBase`](crate::neural_network::traits::LayerBase) holds what every layer has regardless of
-//! its input count: its type name, its arrays, and its build state.
+//! its input count: its type name, its arrays, its sublayers, and its build state.
 //! [`UnaryLayer`](crate::neural_network::traits::UnaryLayer) adds the forward and backward pass for
 //! a layer with 1 input, and a blanket implementation gives it the general
 //! [`Layer`](crate::neural_network::traits::Layer) interface that a model holds every layer
 //! through. Implement [`Layer`](crate::neural_network::traits::Layer) directly only for a layer
 //! with several inputs, such as a merge layer.
 //!
-//! [`ParamId`](crate::neural_network::traits::ParamId) names the address of 1 parameter tensor: the
-//! layer position plus the name the layer gives the tensor.
+//! [`ParamId`](crate::neural_network::traits::ParamId) names the address of 1 parameter tensor:
+//! the [`LayerPath`](crate::neural_network::LayerPath) of the layer that holds it, plus the name
+//! the layer gives the tensor.
 //! [`ParamRef`](crate::neural_network::traits::ParamRef),
 //! [`WeightRef`](crate::neural_network::traits::WeightRef), and
 //! [`WeightMut`](crate::neural_network::traits::WeightMut) are the borrowed views that a layer
@@ -25,11 +26,15 @@
 use crate::error::Error;
 use crate::neural_network::Shape;
 use crate::neural_network::Tensor;
-use crate::neural_network::ctx::{Ctx, Grads, StateSlot};
+use crate::neural_network::ctx::{Ctx, Grads, LayerIdentity, StateSlot, identity_of};
+use crate::neural_network::layer_path::{
+    LayerPath, Sublayer, SublayerMut, apply_state_tree, walk_model_mut,
+};
 use crate::neural_network::layers::ParamCounts;
 use crate::neural_network::layers::checkpoint::BuildConfig;
 use crate::{Deserialize, Serialize};
 use ndarray::{ArrayViewD, ArrayViewMutD};
+use std::fmt;
 
 /// The stable address of 1 parameter tensor inside a model
 ///
@@ -37,24 +42,43 @@ use ndarray::{ArrayViewD, ArrayViewMutD};
 /// it. Neither half moves while the model trains. An optimizer can therefore key its
 /// per-parameter state on the pair and reach the same buffer on every step
 ///
-/// The scope is the position of the layer in the model that drives the update.
-/// [`Sequential`](crate::neural_network::sequential::Sequential) passes the index of the layer,
-/// counted from the input. A caller that drives 1 layer directly passes any value it likes. It
-/// must pass the same value on every step for that layer
+/// The layer half is a [`LayerPath`]: the position of the layer in the model that drives the
+/// update, and the sublayer names down to the layer that holds the tensor.
+/// [`Sequential`](crate::neural_network::sequential::Sequential) gives each layer its index,
+/// counted from the input. A caller that drives 1 layer directly takes position 0
 ///
 /// The name is the `&'static str` that [`LayerBase::parameters_mut`] puts in the
 /// [`ParamRef`]. It follows the layer. A layer that stops yielding 1 of its
 /// tensors, or that starts yielding a new one, moves no other tensor's address
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+///
+/// The text form is the checkpoint path of the tensor, such as `2.kernel` or
+/// `2.forward.kernel`
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::LayerPath;
+/// use rustyml::neural_network::traits::ParamId;
+///
+/// assert_eq!(ParamId::new(2, "kernel").to_string(), "2.kernel");
+///
+/// let nested = LayerPath::root(2).child("forward").param("kernel");
+/// assert_eq!(nested.to_string(), "2.forward.kernel");
+/// assert_ne!(nested, ParamId::new(2, "kernel"));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ParamId {
-    /// Position of the owning layer in the model, counted from the input
-    pub scope: usize,
+    /// The path of the layer that holds the tensor
+    pub layer: LayerPath,
     /// Name the layer gives the tensor, such as `"kernel"`, `"bias"`, or `"gamma"`
     pub name: &'static str,
 }
 
 impl ParamId {
-    /// Builds the address of the named parameter of the layer at the given position
+    /// Builds the address of the named parameter of the layer at a model position
+    ///
+    /// The address reaches the layer at the position itself, and no sublayer of it. Use
+    /// [`ParamId::at`] or [`LayerPath::param`] for a sublayer
     ///
     /// # Parameters
     ///
@@ -66,76 +90,246 @@ impl ParamId {
     /// - `ParamId` - The parameter address
     #[inline]
     pub const fn new(scope: usize, name: &'static str) -> Self {
-        Self { scope, name }
+        Self {
+            layer: LayerPath::root(scope),
+            name,
+        }
+    }
+
+    /// Builds the address of the named parameter of the layer at a path
+    ///
+    /// # Parameters
+    ///
+    /// - `layer` - The path of the layer that holds the tensor
+    /// - `name` - Name the layer gives the tensor
+    ///
+    /// # Returns
+    ///
+    /// - `ParamId` - The parameter address
+    #[inline]
+    pub fn at(layer: LayerPath, name: &'static str) -> Self {
+        Self { layer, name }
     }
 }
 
-/// Refuses a layer that gives 2 of its arrays 1 name
+impl fmt::Display for ParamId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.layer, self.name)
+    }
+}
+
+/// Refuses a model position whose tree of layers gives 2 things 1 address
 ///
 /// The name of an array is its address inside the layer. The gradient store, the per-parameter
 /// state of the optimizer, and the path of the checkpoint all key on it. 2 arrays under 1 name
 /// therefore share 1 gradient, 1 momentum buffer, and 1 checkpoint path. Each of those is a
 /// wrong number that no later check reports.
 ///
-/// [`LayerBase::parameters_mut`] and [`LayerBase::weights`] both state this rule in their own
-/// documentation. A model build calls this once per layer, before the model computes anything,
-/// so a layer that breaks the rule never reaches a training step.
+/// A sublayer name is the address of a sublayer in the same way, and the check holds it to the
+/// same rule. The check also holds the rules that keep the text form of an address readable
+/// in 1 way only, and the rules that keep the 2 sublayer rosters in agreement.
 ///
-/// The 2 rosters are separate hand-written lists, and nothing binds them together, so the check
-/// reads both.
+/// A model build calls this once per model position, before the model computes anything, so a
+/// layer that breaks a rule never reaches a training step. The check visits every node of the
+/// tree, and it holds each node to these rules:
+///
+/// 1. No 2 arrays of [`LayerBase::weights`] share a name. The same holds for
+///    [`LayerBase::parameters_mut`].
+/// 2. No array name and no sublayer name is empty or holds a `.`.
+/// 3. No 2 sublayers share a name.
+/// 4. [`LayerBase::sublayers`] and [`LayerBase::sublayers_mut`] give the same names, in the same
+///    order, and reach the same layers.
+/// 5. No layer that occupies memory appears at 2 nodes of the tree. 2 nodes that reach 1
+///    storage would update it twice per step.
 ///
 /// # Parameters
 ///
 /// - `scope` - Position of the layer in the model, which the message names
-/// - `layer` - The layer to check
+/// - `layer` - The root of the tree to check
 ///
 /// # Returns
 ///
-/// - `Result<(), Error>` - `Ok(())` when every array of the layer holds its own name
+/// - `Result<(), Error>` - `Ok(())` when every node of the tree keeps every rule
 ///
 /// # Errors
 ///
-/// - [`Error::InvalidInput`] - If 2 arrays of the layer share a name
+/// - [`Error::InvalidInput`] - If a node breaks a rule. The message names the path of the node
 pub(crate) fn check_addresses(scope: usize, layer: &mut dyn LayerBase) -> Result<(), Error> {
-    let layer_type = layer.layer_type().to_string();
-    let weights: Vec<&'static str> = layer.weights().iter().map(|entry| entry.name).collect();
-    if let Some(name) = first_repeat(&weights) {
-        return Err(duplicate_address(scope, &layer_type, name, "weights"));
+    let root = LayerPath::root(scope);
+    let mut storages: Vec<(LayerIdentity, LayerPath)> = Vec::new();
+    check_tree(&*layer, &root, &mut storages)?;
+    // The read roster is a tree now: no node repeats and no path is too deep. The write
+    // rosters must agree with it, and the check of each node runs before the walk goes down
+    // the write roster, so a write roster that lists its own layer stops here as well
+    check_tree_mut(layer, &root)
+}
+
+/// The deepest sublayer path that a model build accepts
+///
+/// No real layer nests this deep. The limit stops a roster that lists its own layer, which
+/// would otherwise recurse until the stack overflows. A zero-sized layer that lists itself
+/// passes the storage check, so the limit is the check that stops it
+const MAX_SUBLAYER_DEPTH: usize = 64;
+
+/// Checks the read rosters of 1 node, and then of each sublayer below it
+///
+/// The storage of a node joins `storages` before the walk goes down a level. A roster that
+/// reaches a node a second time therefore stops at that node
+fn check_tree(
+    node: &dyn LayerBase,
+    path: &LayerPath,
+    storages: &mut Vec<(LayerIdentity, LayerPath)>,
+) -> Result<(), Error> {
+    if path.sublayers().len() > MAX_SUBLAYER_DEPTH {
+        return Err(too_deep(path, node));
     }
-    let parameters: Vec<&'static str> = layer
-        .parameters_mut()
-        .iter()
-        .map(|entry| entry.name)
-        .collect();
-    if let Some(name) = first_repeat(&parameters) {
-        return Err(duplicate_address(
-            scope,
-            &layer_type,
-            name,
-            "parameters_mut",
-        ));
+    // A layer is identified by its address and its concrete type. The address alone is not
+    // enough: a struct and its first field share 1 address, and both can be nodes of 1 tree.
+    // A zero-sized layer holds no storage, so 2 nodes of it share nothing
+    if std::mem::size_of_val(node) > 0 {
+        let storage = identity_of(node);
+        if let Some((_, first)) = storages.iter().find(|(seen, _)| *seen == storage) {
+            return Err(Error::invalid_input(format!(
+                "layer `{path}` (`{}`) is the same storage as layer `{first}`. The optimizer \
+                 would update that storage once per node. Give each node of a layer tree its \
+                 own layer",
+                node.layer_type()
+            )));
+        }
+        storages.push((storage, path.clone()));
+    }
+    check_node(path, node)?;
+    for sub in node.sublayers() {
+        check_tree(sub.layer, &path.child(sub.name), storages)?;
     }
     Ok(())
 }
 
-/// The first name that the list holds twice, or `None` when every name is its own
-fn first_repeat(names: &[&'static str]) -> Option<&'static str> {
-    names
-        .iter()
-        .enumerate()
-        .find(|(index, name)| names[..*index].contains(name))
-        .map(|(_, name)| *name)
+/// Checks the write rosters of 1 node, and then of each sublayer below it
+fn check_tree_mut(node: &mut dyn LayerBase, path: &LayerPath) -> Result<(), Error> {
+    if path.sublayers().len() > MAX_SUBLAYER_DEPTH {
+        return Err(too_deep(path, node));
+    }
+    check_node_mut(path, node)?;
+    for sub in node.sublayers_mut() {
+        check_tree_mut(sub.layer, &path.child(sub.name))?;
+    }
+    Ok(())
 }
 
-/// Builds the refusal that [`check_addresses`] returns
-fn duplicate_address(scope: usize, layer_type: &str, name: &str, roster: &str) -> Error {
+/// Builds the refusal of a sublayer path deeper than [`MAX_SUBLAYER_DEPTH`]
+#[cold]
+fn too_deep(path: &LayerPath, node: &dyn LayerBase) -> Error {
     Error::invalid_input(format!(
-        "layer {scope} (`{layer_type}`) gives 2 of its arrays the name `{name}`, through \
-         `LayerBase::{roster}`. The name is the address of the array, and the gradient store, \
-         the state of the optimizer, and the path of the checkpoint all key on it, so the 2 \
-         arrays would share all 3. Give every array of 1 layer its own name. A layer that holds \
-         other layers must put its own prefix in front of the name of each array it passes on"
+        "layer `{path}` (`{}`) is more than {MAX_SUBLAYER_DEPTH} sublayers deep. A sublayer \
+         roster probably lists its own layer. A roster must list only the layers that its layer \
+         holds",
+        node.layer_type()
     ))
+}
+
+/// Checks the read roster of 1 node: array names and sublayer names
+fn check_node(path: &LayerPath, node: &dyn LayerBase) -> Result<(), Error> {
+    let layer_type = node.layer_type();
+    let weights: Vec<&str> = node.weights().iter().map(|entry| entry.name).collect();
+    check_names(path, layer_type, &weights, "weights", "array")?;
+    let sublayers: Vec<String> = node
+        .sublayers()
+        .iter()
+        .map(|sub| sub.name.to_string())
+        .collect();
+    let sublayer_refs: Vec<&str> = sublayers.iter().map(String::as_str).collect();
+    check_names(path, layer_type, &sublayer_refs, "sublayers", "sublayer")
+}
+
+/// Checks the write rosters of 1 node: parameter names, and the agreement of the 2 sublayer
+/// rosters
+fn check_node_mut(path: &LayerPath, node: &mut dyn LayerBase) -> Result<(), Error> {
+    let layer_type = node.layer_type().to_string();
+    let parameters: Vec<&'static str> = node
+        .parameters_mut()
+        .iter()
+        .map(|entry| entry.name)
+        .collect();
+    check_names(path, &layer_type, &parameters, "parameters_mut", "array")?;
+
+    let read: Vec<RosterEntry> = node
+        .sublayers()
+        .iter()
+        .map(|sub| roster_entry(&sub.name, sub.layer))
+        .collect();
+    let write: Vec<RosterEntry> = node
+        .sublayers_mut()
+        .iter()
+        .map(|sub| roster_entry(&sub.name, &*sub.layer))
+        .collect();
+    if read != write {
+        let names = |roster: &[RosterEntry]| {
+            roster
+                .iter()
+                .map(|entry| format!("{} (`{}`)", entry.name, entry.layer_type))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        return Err(Error::invalid_input(format!(
+            "layer `{path}` (`{layer_type}`) gives the sublayers [{}] through \
+             `LayerBase::sublayers`, and [{}] through `LayerBase::sublayers_mut`. The 2 rosters \
+             must give the same names, in the same order, and reach the same layers",
+            names(&read),
+            names(&write)
+        )));
+    }
+    Ok(())
+}
+
+/// 1 entry of a sublayer roster, as the agreement check compares it
+#[derive(PartialEq)]
+struct RosterEntry {
+    /// The name of the sublayer
+    name: String,
+    /// The identity of the sublayer: its address and its concrete type
+    identity: LayerIdentity,
+    /// The type name of the sublayer, for the message
+    layer_type: String,
+}
+
+/// Reads 1 sublayer into the form that the agreement check compares
+fn roster_entry(name: &str, layer: &dyn LayerBase) -> RosterEntry {
+    RosterEntry {
+        name: name.to_string(),
+        identity: identity_of(layer),
+        layer_type: layer.layer_type().to_string(),
+    }
+}
+
+/// Refuses an empty name, a name that holds a `.`, and a name that the list holds twice
+fn check_names(
+    path: &LayerPath,
+    layer_type: &str,
+    names: &[&str],
+    roster: &str,
+    what: &str,
+) -> Result<(), Error> {
+    for (index, name) in names.iter().enumerate() {
+        if name.is_empty() || name.contains('.') {
+            return Err(Error::invalid_input(format!(
+                "layer `{path}` (`{layer_type}`) gives 1 {what} the name `{name}`, through \
+                 `LayerBase::{roster}`. A name must not be empty and must not hold a `.`, \
+                 because a checkpoint path joins the names with `.`"
+            )));
+        }
+        if names[..index].contains(name) {
+            return Err(Error::invalid_input(format!(
+                "layer `{path}` (`{layer_type}`) gives 2 of its {what}s the name `{name}`, \
+                 through `LayerBase::{roster}`. The name is the address, and the gradient \
+                 store, the state of the optimizer, and the path of the checkpoint all key on \
+                 it. Give every {what} of 1 layer its own name. A layer that holds other layers \
+                 lists them in `LayerBase::sublayers` and does not pass their arrays on as its \
+                 own"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Refuses a pass that parked a gradient at an address no parameter of the model reads
@@ -145,13 +339,14 @@ fn duplicate_address(scope: usize, layer_type: &str, name: &str, roster: &str) -
 /// dropped in silence. That is what turns a layer that misspells 1 of its own names into a
 /// parameter that never trains. It reports no error of its own.
 ///
-/// The walk below is the same walk that the optimizer makes, so the count it reaches is the
-/// number of addresses the optimizer will read. A store that holds more than that holds an
-/// address that nothing claims.
+/// The walk below is the same walk that the optimizer makes. It visits every node of every
+/// layer tree, so the count it reaches is the number of addresses the optimizer will read. A
+/// store that holds more than that holds an address that nothing claims.
 ///
 /// # Parameters
 ///
-/// - `layers` - Every layer of the model, in the order that gives the layer half of an address
+/// - `layers` - Every layer of the model, in the order that gives the model position of an
+///   address
 /// - `grads` - The gradient store of the pass
 ///
 /// # Returns
@@ -165,35 +360,33 @@ pub(crate) fn check_every_gradient_is_claimed(
     layers: &mut [Box<dyn Layer>],
     grads: &Grads,
 ) -> Result<(), Error> {
-    let mut claimed = 0_usize;
-    for (scope, layer) in layers.iter_mut().enumerate() {
-        for param in layer.parameters_mut() {
-            if grads.get(ParamId::new(scope, param.name)).is_some() {
-                claimed += 1;
-            }
+    let mut reachable: Vec<ParamId> = Vec::new();
+    walk_model_mut(layers, &mut |path, node| {
+        for param in node.parameters_mut() {
+            reachable.push(path.param(param.name));
         }
-    }
+    });
+    let claimed = reachable
+        .iter()
+        .filter(|id| grads.get(id).is_some())
+        .count();
     if claimed == grads.len() {
         return Ok(());
     }
 
-    let mut reachable = Vec::new();
-    for (scope, layer) in layers.iter_mut().enumerate() {
-        for param in layer.parameters_mut() {
-            reachable.push(ParamId::new(scope, param.name));
-        }
-    }
     let orphans: Vec<String> = grads
         .iter()
         .filter(|(id, _)| !reachable.contains(id))
-        .map(|(id, _)| format!("{}.{}", id.scope, id.name))
+        .map(|(id, _)| id.to_string())
         .collect();
     Err(Error::computation(format!(
         "the backward pass parked a gradient at {} address(es) that no parameter of the model \
          reads: {}. An optimizer reads a gradient at the address that \
          `LayerBase::parameters_mut` gives the parameter, so a gradient at any other address \
          updates nothing and the parameter it was meant for keeps its value. A layer must add \
-         every gradient under a name that its own roster holds",
+         every gradient under a name that its own roster holds. A layer that holds sublayers \
+         must call each of them inside `Ctx::sublayer` with the name that \
+         `LayerBase::sublayers` gives it",
         orphans.len(),
         orphans.join(", ")
     )))
@@ -207,7 +400,7 @@ pub(crate) fn check_every_gradient_is_claimed(
 ///
 /// The entry holds no gradient. A backward pass puts every gradient in the
 /// [`Grads`] store of the context. The optimizer reads
-/// it back with the [`ParamId`] that this name and the layer position build
+/// it back with the [`ParamId`] that this name and the path of the layer build
 ///
 /// Construct one with [`ParamRef::weight`] for a tensor that decoupled weight decay applies to
 /// (weight matrices, conv/recurrent kernels). Use [`ParamRef::no_decay`] for a tensor it skips
@@ -457,11 +650,118 @@ impl Arity {
 
 /// What every layer holds, whatever number of inputs it takes
 ///
-/// The trait covers the 3 things that do not depend on the arity of a layer. It covers what the
-/// layer is, what arrays it owns, and what shape it was built for. The computation itself lives
-/// in [`UnaryLayer`] for a layer with 1 input and in [`Layer`] for a layer with several
+/// The trait covers the 4 things that do not depend on the arity of a layer. It covers what the
+/// layer is, what arrays it owns, what sublayers it holds, and what shape it was built for. The
+/// computation itself lives in [`UnaryLayer`] for a layer with 1 input and in [`Layer`] for a
+/// layer with several
 ///
 /// A layer holds no gradient and no cache. See [`Ctx`]
+///
+/// # A layer that holds other layers
+///
+/// A layer can hold other layers, which are its sublayers. Each sublayer is a full layer with
+/// its own arrays, its own state, and its own sublayers. The rosters of this trait, such as
+/// [`weights`](LayerBase::weights) and [`parameters_mut`](LayerBase::parameters_mut), give the
+/// arrays of the layer itself and never the arrays of a sublayer. The model visits every
+/// sublayer through [`sublayers`](LayerBase::sublayers) and
+/// [`sublayers_mut`](LayerBase::sublayers_mut), and it gives each 1 its own
+/// [`LayerPath`]. An optimizer, a checkpoint, and the state channel therefore reach every
+/// sublayer with no help from the holding layer.
+///
+/// A layer that holds sublayers does these 4 things:
+///
+/// 1. List each sublayer in [`sublayers`](LayerBase::sublayers) and in
+///    [`sublayers_mut`](LayerBase::sublayers_mut), under 1 fixed name.
+/// 2. Call each sublayer inside [`Ctx::sublayer`], with the name of step 1 and the sublayer
+///    itself. Do this in the forward pass and in the backward pass.
+/// 3. Build each sublayer in its own build.
+/// 4. Report itself as built only when every sublayer is built.
+///
+/// A model build refuses a layer whose 2 rosters disagree. A training step refuses a sublayer
+/// call that reaches another layer than the roster gives at its name. It also refuses a
+/// gradient at a path that no roster gives, and a state value that no node takes back. A
+/// mistake in step 1 or step 2 therefore stops the model and does not train it wrong
+///
+/// # Examples
+///
+/// A layer that runs 2 [`Dense`](crate::neural_network::layers::Dense) layers in a chain:
+///
+/// ```rust
+/// use ndarray::Array;
+/// use rustyml::error::Error;
+/// use rustyml::neural_network::layers::{Activation, Dense, ParamCounts};
+/// use rustyml::neural_network::sequential::SequentialBuilder;
+/// use rustyml::neural_network::traits::{LayerBase, UnaryLayer, WeightMut, WeightRef};
+/// use rustyml::neural_network::{Ctx, Shape, Sublayer, SublayerMut, Tensor};
+///
+/// struct TwoDense {
+///     first: Dense,
+///     second: Dense,
+/// }
+///
+/// impl LayerBase for TwoDense {
+///     fn layer_type(&self) -> &str {
+///         "TwoDense"
+///     }
+///     fn param_count(&self) -> ParamCounts {
+///         ParamCounts::none()
+///     }
+///     fn weights(&self) -> Vec<WeightRef<'_>> {
+///         Vec::new()
+///     }
+///     fn weights_mut(&mut self) -> Vec<WeightMut<'_>> {
+///         Vec::new()
+///     }
+///     fn is_built(&self) -> bool {
+///         self.first.is_built() && self.second.is_built()
+///     }
+///     fn sublayers(&self) -> Vec<Sublayer<'_>> {
+///         vec![Sublayer::new("first", &self.first), Sublayer::new("second", &self.second)]
+///     }
+///     fn sublayers_mut(&mut self) -> Vec<SublayerMut<'_>> {
+///         vec![
+///             SublayerMut::new("first", &mut self.first),
+///             SublayerMut::new("second", &mut self.second),
+///         ]
+///     }
+/// }
+///
+/// impl UnaryLayer for TwoDense {
+///     fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+///         let hidden = ctx.sublayer("first", &self.first, |ctx| self.first.forward(input, ctx))?;
+///         ctx.sublayer("second", &self.second, |ctx| self.second.forward(&hidden, ctx))
+///     }
+///     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
+///         let grad_hidden = ctx.sublayer("second", &self.second, |ctx| self.second.backward(grad_output, ctx))?;
+///         ctx.sublayer("first", &self.first, |ctx| self.first.backward(&grad_hidden, ctx))
+///     }
+///     fn build(&mut self, input: &Shape) -> Result<(), Error> {
+///         self.first.build(input)?;
+///         let hidden = self.first.compute_output_shape(input)?;
+///         self.second.build(&hidden)
+///     }
+///     fn compute_output_shape(&self, input: &Shape) -> Result<Shape, Error> {
+///         self.second.compute_output_shape(&self.first.compute_output_shape(input)?)
+///     }
+/// }
+///
+/// let layer = TwoDense {
+///     first: Dense::new(3, Activation::ReLU).unwrap(),
+///     second: Dense::new(1, Activation::Linear).unwrap(),
+/// };
+/// let model = SequentialBuilder::new()
+///     .add(layer)
+///     .build(&Shape::known(&[2, 4]))
+///     .unwrap();
+///
+/// // Each sublayer has its own addresses, so the 2 kernels never share 1 gradient
+/// assert_eq!(
+///     model.weight_paths(),
+///     vec!["0.first.kernel", "0.first.bias", "0.second.kernel", "0.second.bias"]
+/// );
+/// let prediction = model.predict(&Array::ones((2, 4)).into_dyn()).unwrap();
+/// assert_eq!(prediction.shape(), &[2, 1]);
+/// ```
 pub trait LayerBase: std::any::Any + Send + Sync {
     /// Returns the type name of the layer (e.g. "Dense")
     ///
@@ -473,6 +773,10 @@ pub trait LayerBase: std::any::Any + Send + Sync {
     }
 
     /// Returns how many parameters the layer holds, split by whether training updates them
+    ///
+    /// The count covers the arrays of the layer itself, and no array of a sublayer.
+    /// [`total_param_count`](crate::neural_network::layer_path::total_param_count) adds the
+    /// sublayers
     ///
     /// # Returns
     ///
@@ -493,6 +797,9 @@ pub trait LayerBase: std::any::Any + Send + Sync {
     /// that breaks that rule, so the mistake never reaches a training step. The order is free,
     /// and it is the order that a global gradient norm reduces in, so a layer must keep it
     /// stable
+    ///
+    /// The roster holds the tensors of the layer itself, and no tensor of a sublayer. The model
+    /// reaches each sublayer through [`sublayers_mut`](LayerBase::sublayers_mut)
     ///
     /// # Returns
     ///
@@ -520,6 +827,9 @@ pub trait LayerBase: std::any::Any + Send + Sync {
     ///
     /// The order is free, and it is the order a checkpoint records. Layers without any array
     /// return the empty vector
+    ///
+    /// The roster holds the arrays of the layer itself, and no array of a sublayer. A
+    /// checkpoint reaches each sublayer through [`sublayers`](LayerBase::sublayers)
     ///
     /// # Returns
     ///
@@ -613,6 +923,10 @@ pub trait LayerBase: std::any::Any + Send + Sync {
     /// [`BatchNormalization`](crate::neural_network::layers::BatchNormalization)
     /// takes its running statistics here, and a dropout layer takes its random stream
     ///
+    /// The model calls this once for each layer and each sublayer that has a value. The slot
+    /// reaches the values of this layer alone, and never a value of a sublayer. If a value
+    /// stays in the context after the walk, the training step of the model returns an error
+    ///
     /// The default does nothing, which is right for every layer whose forward pass changes
     /// nothing outside the context
     ///
@@ -621,6 +935,42 @@ pub trait LayerBase: std::any::Any + Send + Sync {
     /// - `state` - The state channel of this layer, for the pass that just ran
     fn apply_state(&mut self, state: &mut StateSlot<'_>) {
         let _ = state;
+    }
+
+    /// Every layer that this layer holds, by name, borrowed for reading
+    ///
+    /// The name is the address of the sublayer inside this layer. A [`LayerPath`] appends it to
+    /// the path of this layer, so the sublayer `forward` of the layer at position 2 has the
+    /// path `2.forward`. A name must not be empty, must not hold a `.`, and must be unique
+    /// among the sublayers of 1 layer. A layer must give 1 sublayer the same name on every
+    /// call
+    ///
+    /// The order is the canonical order of the sublayers. The optimizer update, the global
+    /// gradient norm, and the checkpoint all visit the sublayers in this order, so a layer must
+    /// keep it stable
+    ///
+    /// The default is the empty roster, which is right for every layer that holds no other
+    /// layer. See the [trait documentation](LayerBase) for what a layer that holds sublayers
+    /// must do
+    ///
+    /// # Returns
+    ///
+    /// - `Vec<Sublayer<'_>>` - 1 named entry per sublayer
+    fn sublayers(&self) -> Vec<Sublayer<'_>> {
+        Vec::new()
+    }
+
+    /// Every layer that this layer holds, by name, borrowed for writing
+    ///
+    /// The roster, the names, and the order repeat [`sublayers`](LayerBase::sublayers)
+    /// exactly, and each entry reaches the same layer. A model build refuses a layer whose 2
+    /// rosters disagree
+    ///
+    /// # Returns
+    ///
+    /// - `Vec<SublayerMut<'_>>` - 1 named entry per sublayer
+    fn sublayers_mut(&mut self) -> Vec<SublayerMut<'_>> {
+        Vec::new()
     }
 }
 
@@ -775,10 +1125,10 @@ pub trait UnaryLayer: LayerBase {
     /// [`SequentialBuilder::build`](crate::neural_network::sequential::SequentialBuilder::build)
     /// has already built every layer it holds
     ///
-    /// The method also moves the non-trainable state that the pass proposed into the layer,
-    /// with [`LayerBase::apply_state`]. A model does that step itself, and a caller that drives
-    /// 1 layer by hand has no other place for it. Without the step the random stream of a
-    /// dropout layer never advances, and 2 calls draw the same mask
+    /// The method also moves the non-trainable state that the pass proposed into the layer and
+    /// into each of its sublayers, with [`LayerBase::apply_state`]. A model does that step
+    /// itself, and a caller that drives 1 layer by hand has no other place for it. Without the
+    /// step the random stream of a dropout layer never advances, and 2 calls draw the same mask
     ///
     /// # Parameters
     ///
@@ -792,6 +1142,8 @@ pub trait UnaryLayer: LayerBase {
     /// # Errors
     ///
     /// - `Error::InvalidInput` - If the layer cannot accept an input of that shape
+    /// - `Error::Computation` - If a state value of the layer or of a sublayer stays in the
+    ///   context, because no layer took it back
     /// - `Error` - If the forward pass fails
     fn forward_mut(&mut self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if !self.is_built() {
@@ -799,12 +1151,38 @@ pub trait UnaryLayer: LayerBase {
         }
         let output = self.forward(input, ctx)?;
         // A forward pass cannot write state itself, so this entry point applies it here
-        let owner = ctx.owner();
-        if ctx.has_state(owner) {
-            self.apply_state(&mut ctx.state_slot(owner));
-        }
+        apply_own_state(self, ctx)?;
         Ok(output)
     }
+}
+
+/// Moves the state that a pass proposed into a layer and into each of its sublayers
+///
+/// The layer is the root of the tree at the current path of `ctx`. The 2 entry points that let
+/// a caller drive 1 layer by hand call this. A model applies the state itself
+///
+/// # Errors
+///
+/// - `Error::Computation` - If a state value at the path of the layer, or below it, stays in
+///   the context, because no node took it back
+fn apply_own_state<L: LayerBase + ?Sized>(layer: &mut L, ctx: &mut Ctx) -> Result<(), Error> {
+    let path = ctx.layer_path();
+    if ctx.has_state(&path) {
+        layer.apply_state(&mut ctx.state_slot(&path));
+    }
+    for sub in layer.sublayers_mut() {
+        apply_state_tree(sub.layer, &path.child(sub.name), ctx);
+    }
+    let left = ctx.state_left_below(&path);
+    if left.is_empty() {
+        return Ok(());
+    }
+    Err(Error::computation(format!(
+        "the forward pass proposed the state value(s) {} and no layer took them back. A layer \
+         must take every value that it writes with `Ctx::set_state` in its own \
+         `LayerBase::apply_state`",
+        left.join(", ")
+    )))
 }
 
 /// A layer that takes 1 input or several, and gives 1 output
@@ -907,6 +1285,8 @@ pub trait Layer: LayerBase {
     /// # Errors
     ///
     /// - `Error::InvalidInput` - If the layer cannot accept inputs of those shapes
+    /// - `Error::Computation` - If a state value of the layer or of a sublayer stays in the
+    ///   context, because no layer took it back
     /// - `Error` - If the forward pass fails
     fn forward_many_mut(&mut self, inputs: &[&Tensor], ctx: &mut Ctx) -> Result<Tensor, Error> {
         if !self.is_built() {
@@ -916,10 +1296,7 @@ pub trait Layer: LayerBase {
         let output = self.forward_many(inputs, ctx)?;
         // See [`UnaryLayer::forward_mut`]: this entry point completes the pass of a layer that
         // a caller drives by hand, by moving the proposed state into the layer
-        let owner = ctx.owner();
-        if ctx.has_state(owner) {
-            self.apply_state(&mut ctx.state_slot(owner));
-        }
+        apply_own_state(self, ctx)?;
         Ok(output)
     }
 
@@ -1042,7 +1419,7 @@ pub trait Optimizer: Send + Sync {
     /// here, so the correction moves once per batch rather than once per layer. SGD, RMSprop,
     /// and AdaGrad hold no such counter and keep the no-op default
     ///
-    /// Per-parameter state is keyed by [`ParamId`], the position of the layer plus the name the
+    /// Per-parameter state is keyed by [`ParamId`], the path of the layer plus the name the
     /// layer gives the tensor. No cursor or call order matters to that address
     fn step(&mut self) {}
 
@@ -1067,22 +1444,31 @@ pub trait Optimizer: Send + Sync {
         None
     }
 
-    /// Updates the parameters of a layer according to the optimization algorithm
+    /// Updates the parameters of 1 layer according to the optimization algorithm
     ///
-    /// The optimizer builds a [`ParamId`] from `scope` and the name of each
-    /// [`ParamRef`], and keys its per-parameter state on that address. It reads the gradient
-    /// of that address out of `grads`, and it skips a parameter that holds none. The caller
-    /// must therefore give the same layer the same `scope` on every step
+    /// The optimizer builds a [`ParamId`] from `path` and the name of each [`ParamRef`], and
+    /// keys its per-parameter state on that address. It reads the gradient of that address out
+    /// of `grads`, and it skips a parameter that holds none. The caller must therefore give the
+    /// same layer the same `path` on every step
+    ///
+    /// The call covers the parameters of `layer` itself, and no parameter of a sublayer. A model
+    /// calls this once for every node of every layer tree, each with its own path
     ///
     /// # Parameters
     ///
-    /// - `scope` - Position of this layer in the model, counted from the input. It is the
-    ///   layer half of the parameter address
+    /// - `path` - The path of this layer in the model. It is the layer half of the parameter
+    ///   address
     /// - `layer` - The layer whose parameters should be updated
     /// - `grads` - Every gradient the backward pass produced
     /// - `grad_scale` - Uniform factor that the training loop applies to every gradient before
     ///   the update, to implement clip-by-global-norm. Pass `1.0` for an unscaled update
-    fn update(&mut self, scope: usize, layer: &mut dyn LayerBase, grads: &Grads, grad_scale: f32);
+    fn update(
+        &mut self,
+        path: &LayerPath,
+        layer: &mut dyn LayerBase,
+        grads: &Grads,
+        grad_scale: f32,
+    );
 
     /// The current learning rate
     ///

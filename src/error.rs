@@ -240,8 +240,8 @@ pub enum IoError {
     Serialization(#[from] postcard::Error),
 
     /// The loaded model does not match the saved model. Causes include a different number of
-    /// layers, a different layer type at some position, or a weight shape that does not match
-    /// the target layer
+    /// layers, a different layer type at some layer path, a different list of sublayers, or a
+    /// weight shape that does not match the target layer
     #[error("model structure mismatch: {0}")]
     ModelStructureMismatch(String),
 

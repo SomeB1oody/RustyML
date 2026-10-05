@@ -6,6 +6,7 @@
 //! [`AdamW`](crate::neural_network::optimizers::AdamW)
 
 use crate::error::Error;
+use crate::neural_network::LayerPath;
 use crate::neural_network::ctx::Grads;
 use crate::neural_network::optimizers::adam_core::AdamCore;
 use crate::neural_network::traits::{LayerBase, Optimizer};
@@ -104,7 +105,13 @@ impl Optimizer for Adam {
         self.core.step();
     }
 
-    fn update(&mut self, scope: usize, layer: &mut dyn LayerBase, grads: &Grads, grad_scale: f32) {
-        self.core.update(scope, layer, grads, grad_scale);
+    fn update(
+        &mut self,
+        path: &LayerPath,
+        layer: &mut dyn LayerBase,
+        grads: &Grads,
+        grad_scale: f32,
+    ) {
+        self.core.update(path, layer, grads, grad_scale);
     }
 }

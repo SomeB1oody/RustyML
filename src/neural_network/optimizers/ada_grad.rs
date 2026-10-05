@@ -6,6 +6,7 @@
 //! decay is decoupled (AdamW-style), and gradient clipping stays off until a caller opts in
 
 use crate::error::Error;
+use crate::neural_network::LayerPath;
 use crate::neural_network::ctx::Grads;
 use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
@@ -101,19 +102,22 @@ impl Optimizer for AdaGrad {
         self.learning_rate = learning_rate;
     }
 
-    fn update(&mut self, scope: usize, layer: &mut dyn LayerBase, grads: &Grads, grad_scale: f32) {
+    fn update(
+        &mut self,
+        path: &LayerPath,
+        layer: &mut dyn LayerBase,
+        grads: &Grads,
+        grad_scale: f32,
+    ) {
         for pg in layer.parameters_mut() {
-            let Some(grad) = grads.get(ParamId::new(scope, pg.name)) else {
+            let Some(grad) = grads.get(&path.param(pg.name)) else {
                 continue;
             };
             let grad = grad
                 .as_slice()
                 .expect("a stored gradient is in the standard memory order");
             debug_assert_eq!(grad.len(), pg.value.len());
-            let accumulator = self
-                .accumulators
-                .entry(ParamId::new(scope, pg.name))
-                .or_default();
+            let accumulator = self.accumulators.entry(path.param(pg.name)).or_default();
             if accumulator.len() != pg.value.len() {
                 // The tensor was resized under its own name: start the accumulator again
                 *accumulator = vec![0.0; pg.value.len()];

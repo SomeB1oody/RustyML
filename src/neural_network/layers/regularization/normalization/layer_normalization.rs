@@ -1366,8 +1366,8 @@ mod tests {
         );
         for name in ["gamma", "beta"] {
             assert_eq!(
-                ctx_multi.grads().get(ParamId::new(0, name)),
-                ctx_default.grads().get(ParamId::new(0, name)),
+                ctx_multi.grads().get(&ParamId::new(0, name)),
+                ctx_default.grads().get(&ParamId::new(0, name)),
                 "parameter grads must match bit for bit"
             );
         }

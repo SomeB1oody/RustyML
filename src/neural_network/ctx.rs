@@ -14,12 +14,34 @@
 //!
 //! The context lives for 1 pass. A gradient therefore cannot survive into the next step, and a
 //! cache cannot survive into the next pass.
+//!
+//! # Sublayers
+//!
+//! A layer can hold other layers. See
+//! [`LayerBase`](crate::neural_network::traits::LayerBase) for that contract. A layer calls
+//! each of its sublayers inside [`Ctx::sublayer`]. The call appends 1 frame to the current
+//! [`LayerPath`] for the time of the closure. It removes the frame when the closure returns,
+//! and also when the closure panics. Each channel then keys on the full path:
+//!
+//! 1. A gradient lands at the [`ParamId`] of the sublayer, so 2 sublayers of 1 type never share
+//!    1 gradient.
+//! 2. A state value lands at the path of the sublayer, so the model moves it into that
+//!    sublayer.
+//! 3. A cache lands in its own stack per call and per frame, so the backward pass of 1 sublayer
+//!    never takes the cache of another, whatever order the holding layer uses.
+//!
+//! A training pass also records the layer of each sublayer call at its path. A model compares
+//! each record against the layer tree, so a call under the name of another sublayer stops the
+//! step.
+//!
+//! [`ParamId`]: crate::neural_network::traits::ParamId
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::traits::ParamId;
+use crate::neural_network::layer_path::{LayerPath, SublayerName};
+use crate::neural_network::traits::{LayerBase, ParamId};
 use ahash::AHashMap;
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::collections::BTreeMap;
 
 /// The position of 1 layer in the model that drives it
@@ -44,6 +66,43 @@ pub type CallId = usize;
 /// A value that a layer parks in the context between 2 calls
 type Slot = Box<dyn Any + Send + Sync>;
 
+/// 1 sublayer frame of the current path: the name of the sublayer, and the call of it
+///
+/// The call number separates 2 calls of 1 sublayer inside 1 pass of the holding layer. It
+/// reaches the cache channel alone. The gradients and the state of both calls belong to the 1
+/// sublayer, so they key on the name
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Frame {
+    /// The name that the holding layer gives the sublayer
+    name: SublayerName,
+    /// The call of the sublayer inside 1 call of the holding layer
+    call: usize,
+}
+
+/// The identity of 1 layer: the address of its storage and its concrete type
+///
+/// The address alone does not identify a layer. A struct and its first field share 1 address,
+/// and both can be layers. The address is a plain number, so the context stays `Send` and
+/// `Sync`
+pub(crate) type LayerIdentity = (usize, TypeId);
+
+/// The identity of a layer, as [`LayerIdentity`] describes it
+pub(crate) fn identity_of(layer: &dyn LayerBase) -> LayerIdentity {
+    (
+        layer as *const dyn LayerBase as *const () as usize,
+        (layer as &dyn Any).type_id(),
+    )
+}
+
+/// The address of 1 cache stack: the call of the model position, and the sublayer frames
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct CacheKey {
+    /// The call of the model position
+    call: CallId,
+    /// The sublayer frames, root side first
+    frames: Vec<Frame>,
+}
+
 /// 1 parked cache, together with the type name of the layer that parked it
 ///
 /// The name is what makes a mis-addressed take an error. A cache is `dyn Any`, and most layers
@@ -62,7 +121,7 @@ struct CacheSlot {
 /// A backward pass adds gradients here, and the optimizer reads them. The store owns the
 /// values, so no layer holds a gradient field and no gradient survives the pass that made it
 ///
-/// The order of [`iter`](Grads::iter) follows [`ParamId`], which sorts by layer position and
+/// The order of [`iter`](Grads::iter) follows [`ParamId`], which sorts by layer path and
 /// then by name. A caller that needs the canonical order of the model walks the layers instead
 /// and looks each name up. The layer order is the order that every reduction of this crate
 /// uses
@@ -83,8 +142,8 @@ impl Grads {
     ///
     /// - `Option<&Tensor>` - The gradient, in the memory order of the parameter
     #[inline]
-    pub fn get(&self, id: ParamId) -> Option<&Tensor> {
-        self.map.get(&id)
+    pub fn get(&self, id: &ParamId) -> Option<&Tensor> {
+        self.map.get(id)
     }
 
     /// How many parameters hold a gradient
@@ -111,9 +170,9 @@ impl Grads {
     ///
     /// # Returns
     ///
-    /// - `impl Iterator` - The pairs, sorted by layer position and then by parameter name
-    pub fn iter(&self) -> impl Iterator<Item = (ParamId, &Tensor)> {
-        self.map.iter().map(|(id, grad)| (*id, grad))
+    /// - `impl Iterator` - The pairs, sorted by layer path and then by parameter name
+    pub fn iter(&self) -> impl Iterator<Item = (&ParamId, &Tensor)> {
+        self.map.iter()
     }
 
     /// Adds a gradient to the address, and sums it with what the address already holds
@@ -139,10 +198,8 @@ impl Grads {
             Some(total) => {
                 if total.shape() != grad.shape() {
                     return Err(Error::invalid_input(format!(
-                        "the gradient of parameter `{}` of layer {} has shape {:?}, and the \
-                         gradient already in the store has shape {:?}",
-                        id.name,
-                        id.scope,
+                        "the gradient of parameter `{id}` has shape {:?}, and the gradient \
+                         already in the store has shape {:?}",
                         grad.shape(),
                         total.shape()
                     )));
@@ -171,14 +228,15 @@ fn standard(grad: Tensor) -> Tensor {
 
 /// The non-trainable state of 1 layer that a forward pass proposed to change
 ///
-/// [`Sequential`](crate::neural_network::sequential::Sequential) hands this to
-/// [`LayerBase::apply_state`](crate::neural_network::traits::LayerBase::apply_state) after the
-/// forward pass, and the layer moves each value it recognizes into its own storage
+/// After the forward pass, a model gives 1 view to
+/// [`LayerBase::apply_state`] for each
+/// layer and each sublayer that has a value. The layer moves each value it recognizes into its
+/// own storage. The view reaches the values at the path of 1 layer, and no value of a sublayer
 pub struct StateSlot<'a> {
     /// The state channel of the whole context
-    states: &'a mut AHashMap<(LayerId, &'static str), Slot>,
+    states: &'a mut AHashMap<(LayerPath, &'static str), Slot>,
     /// The layer whose state this view reaches
-    owner: LayerId,
+    path: LayerPath,
 }
 
 impl StateSlot<'_> {
@@ -193,14 +251,32 @@ impl StateSlot<'_> {
     ///
     /// - `Option<T>` - The value, or `None` when the forward pass proposed no change
     pub fn take<T: Any + Send + Sync>(&mut self, name: &'static str) -> Option<T> {
-        let slot = self.states.remove(&(self.owner, name))?;
+        let key = (self.path.clone(), name);
+        let slot = self.states.remove(&key)?;
         match slot.downcast::<T>() {
             Ok(value) => Some(*value),
             Err(slot) => {
-                self.states.insert((self.owner, name), slot);
+                self.states.insert(key, slot);
                 None
             }
         }
+    }
+}
+
+/// Removes the frames above a depth when it goes out of scope
+///
+/// [`Ctx::sublayer_call`] holds 1 of these while its body runs. The frame of the call
+/// therefore leaves the stack on a normal return and on a panic alike
+struct FrameGuard<'a> {
+    /// The context whose frames the guard restores
+    ctx: &'a mut Ctx,
+    /// The frame count before the call
+    depth: usize,
+}
+
+impl Drop for FrameGuard<'_> {
+    fn drop(&mut self) {
+        self.ctx.frames.truncate(self.depth);
     }
 }
 
@@ -226,7 +302,7 @@ impl StateSlot<'_> {
 /// assert_eq!(grad_input.shape(), &[2, 4]);
 ///
 /// // The kernel gradient is in the store, and not in the layer
-/// assert!(ctx.grads().get(ParamId::new(0, "kernel")).is_some());
+/// assert!(ctx.grads().get(&ParamId::new(0, "kernel")).is_some());
 ///
 /// // An inference pass writes no cache at all
 /// let mut ctx = Ctx::inference();
@@ -241,14 +317,25 @@ pub struct Ctx {
     owner: LayerId,
     /// The call of that layer that the cache channel belongs to
     call: CallId,
-    /// 1 stack of caches per CALL, in the order the forward pass pushed them
+    /// The sublayer frames below the model position, root side first. Empty while the pass
+    /// runs a layer of the model itself
+    frames: Vec<Frame>,
+    /// The layer that a training pass called at each sublayer path, and the type name of it
+    ///
+    /// A model compares each entry against the sublayer that the tree gives at the path. A
+    /// layer that calls 1 sublayer under the name of another therefore stops the step
+    sublayer_calls: AHashMap<LayerPath, (LayerIdentity, String)>,
+    /// 1 description per sublayer path that a training pass called with 2 different layers
+    sublayer_conflicts: Vec<String>,
+    /// 1 stack of caches per CALL and per sublayer frame, in the order the forward pass pushed
+    /// them
     ///
     /// The key is the call and not the layer. A branch of a model that never reaches the loss
     /// leaves its cache behind. A stack shared with another call of the same layer would then
     /// hand that stale cache to the wrong backward pass
-    caches: AHashMap<CallId, Vec<CacheSlot>>,
+    caches: AHashMap<CacheKey, Vec<CacheSlot>>,
     /// The non-trainable values that the forward pass proposed to change
-    states: AHashMap<(LayerId, &'static str), Slot>,
+    states: AHashMap<(LayerPath, &'static str), Slot>,
     /// Every parameter gradient of the pass
     grads: Grads,
 }
@@ -291,14 +378,141 @@ impl Ctx {
         self.training
     }
 
-    /// The layer that the gradient channel and the state channel belong to
+    /// The model position that the gradient channel and the state channel belong to
+    ///
+    /// Inside [`Ctx::sublayer`], the position is still the position of the root layer. Use
+    /// [`Ctx::layer_path`] for the full path
     ///
     /// # Returns
     ///
-    /// - `LayerId` - The position of the layer
+    /// - `LayerId` - The position of the root layer
     #[inline]
     pub fn owner(&self) -> LayerId {
         self.owner
+    }
+
+    /// The path of the layer that the gradient channel and the state channel belong to
+    ///
+    /// # Returns
+    ///
+    /// - `LayerPath` - The model position, and each sublayer frame below it
+    pub fn layer_path(&self) -> LayerPath {
+        LayerPath::from_parts(
+            self.owner,
+            self.frames.iter().map(|frame| frame.name.clone()).collect(),
+        )
+    }
+
+    /// Runs 1 call of a sublayer, with every channel pointed at that sublayer
+    ///
+    /// A layer that holds other layers calls each of them inside this method, in the forward
+    /// pass and in the backward pass. The name must be the name that
+    /// [`LayerBase::sublayers`] gives the
+    /// sublayer, and `layer` must be the sublayer that `body` calls. The method appends the
+    /// name to the current path, runs `body`, and removes the name again before it returns.
+    /// The removal also happens when `body` returns an error or panics
+    ///
+    /// A training pass records `layer` at the path. A model compares each record against the
+    /// sublayer that the tree gives at the same path, and refuses the step on a difference.
+    /// A name that reaches another sublayer of the same type therefore cannot train the wrong
+    /// arrays
+    ///
+    /// This is [`Ctx::sublayer_call`] with call 0. A layer that calls 1 sublayer once per pass
+    /// uses this form
+    ///
+    /// # Parameters
+    ///
+    /// - `name` - The name of the sublayer
+    /// - `layer` - The sublayer that `body` calls
+    /// - `body` - The call of the sublayer, which receives this context
+    ///
+    /// # Returns
+    ///
+    /// - `R` - What `body` returns
+    pub fn sublayer<R>(
+        &mut self,
+        name: impl Into<SublayerName>,
+        layer: &dyn LayerBase,
+        body: impl FnOnce(&mut Ctx) -> R,
+    ) -> R {
+        self.sublayer_call(name, 0, layer, body)
+    }
+
+    /// Runs 1 numbered call of a sublayer, with every channel pointed at that sublayer
+    ///
+    /// A layer that calls 1 sublayer several times in 1 pass gives each call its own number.
+    /// The backward pass of a call must use the number of its forward pass. Each number has its
+    /// own cache stack, so the backward passes can run in any order. The gradients of all the
+    /// calls sum at the 1 address of the sublayer, and the state of all the calls belongs to
+    /// the 1 sublayer
+    ///
+    /// # Parameters
+    ///
+    /// - `name` - The name of the sublayer
+    /// - `call` - The number of this call of the sublayer
+    /// - `layer` - The sublayer that `body` calls
+    /// - `body` - The call of the sublayer, which receives this context
+    ///
+    /// # Returns
+    ///
+    /// - `R` - What `body` returns
+    pub fn sublayer_call<R>(
+        &mut self,
+        name: impl Into<SublayerName>,
+        call: usize,
+        layer: &dyn LayerBase,
+        body: impl FnOnce(&mut Ctx) -> R,
+    ) -> R {
+        let depth = self.frames.len();
+        self.frames.push(Frame {
+            name: name.into(),
+            call,
+        });
+        if self.training {
+            self.record_sublayer_call(layer);
+        }
+        let guard = FrameGuard { ctx: self, depth };
+        body(guard.ctx)
+    }
+
+    /// Records the layer that the current sublayer path calls, and notes a second layer at
+    /// the same path
+    fn record_sublayer_call(&mut self, layer: &dyn LayerBase) {
+        let path = self.layer_path();
+        let identity = identity_of(layer);
+        match self.sublayer_calls.get(&path) {
+            Some((seen, first_type)) if *seen != identity => {
+                let conflict = format!(
+                    "`{path}` with a layer `{first_type}` and with another layer `{}`",
+                    layer.layer_type()
+                );
+                self.sublayer_conflicts.push(conflict);
+            }
+            Some(_) => {}
+            None => {
+                self.sublayer_calls
+                    .insert(path, (identity, layer.layer_type().to_string()));
+            }
+        }
+    }
+
+    /// Every sublayer path that this training pass called, with the layer it called there
+    ///
+    /// # Returns
+    ///
+    /// - The records, and the paths that the pass called with 2 different layers
+    pub(crate) fn sublayer_calls(
+        &self,
+    ) -> (&AHashMap<LayerPath, (LayerIdentity, String)>, &[String]) {
+        (&self.sublayer_calls, &self.sublayer_conflicts)
+    }
+
+    /// The key of the cache stack of the current call and the current frames
+    fn cache_key(&self) -> CacheKey {
+        CacheKey {
+            call: self.call,
+            frames: self.frames.clone(),
+        }
     }
 
     /// The call of that layer that the cache channel belongs to
@@ -316,7 +530,7 @@ impl Ctx {
     ///
     /// A model calls this before it calls a layer. The caches, the state, and the gradients of
     /// that call then reach the address of that layer. A caller that drives 1 layer by hand
-    /// never calls it, and everything lands at layer 0
+    /// never calls it, and everything lands at model position 0
     ///
     /// # Parameters
     ///
@@ -325,8 +539,17 @@ impl Ctx {
     /// # Returns
     ///
     /// - `LayerId` - The position that the channels pointed at before the call
+    ///
+    /// # Panics
+    ///
+    /// - If a call of [`Ctx::sublayer`] is still open. A layer must not point the context at
+    ///   another model position from inside its own pass
     #[inline]
     pub fn set_owner(&mut self, owner: LayerId) -> LayerId {
+        assert!(
+            self.frames.is_empty(),
+            "`Ctx::set_owner` ran inside `Ctx::sublayer`"
+        );
         self.call = owner;
         std::mem::replace(&mut self.owner, owner)
     }
@@ -341,8 +564,17 @@ impl Ctx {
     ///
     /// - `owner` - The layer that the model is about to call
     /// - `call` - The position of this call of that layer
+    ///
+    /// # Panics
+    ///
+    /// - If a call of [`Ctx::sublayer`] is still open. A layer must not point the context at
+    ///   another model position from inside its own pass
     #[inline]
     pub fn set_position(&mut self, owner: LayerId, call: CallId) {
+        assert!(
+            self.frames.is_empty(),
+            "`Ctx::set_position` ran inside `Ctx::sublayer`"
+        );
         self.owner = owner;
         self.call = call;
     }
@@ -350,9 +582,10 @@ impl Ctx {
     /// Parks a value that the backward pass of this call needs
     ///
     /// The caches of 1 call form a stack, and [`pop_cache`](Ctx::pop_cache) takes the newest
-    /// first. The stack belongs to the call alone, so a layer that a model reaches from
-    /// several positions keeps 1 stack per position. A branch of a model that never reaches
-    /// the loss leaves its cache behind and moves no other call
+    /// first. The stack belongs to the call and to the open sublayer frames alone. A layer that
+    /// a model reaches from several positions therefore keeps 1 stack per position. Each call
+    /// of a sublayer inside [`Ctx::sublayer_call`] also keeps its own stack. A branch of a
+    /// model that never reaches the loss leaves its cache behind and moves no other call
     ///
     /// # Parameters
     ///
@@ -364,13 +597,18 @@ impl Ctx {
             self.training,
             "a layer must write no cache in an inference pass"
         );
-        self.caches.entry(self.call).or_default().push(CacheSlot {
+        let key = self.cache_key();
+        self.caches.entry(key).or_default().push(CacheSlot {
             layer,
             value: Box::new(cache),
         });
     }
 
     /// Takes back the newest value that this call parked
+    ///
+    /// The method reads the stack of the current call and the current sublayer frames. A layer
+    /// that holds sublayers must therefore open the same frames in the backward pass as in the
+    /// forward pass
     ///
     /// # Parameters
     ///
@@ -388,9 +626,10 @@ impl Ctx {
     ///   if it holds another type. Both mean that 2 layers share 1 call, or that a layer
     ///   parked 1 type and took back another
     pub fn pop_cache<T: Any + Send + Sync>(&mut self, layer: &'static str) -> Result<T, Error> {
+        let key = self.cache_key();
         let stack = self
             .caches
-            .get_mut(&self.call)
+            .get_mut(&key)
             .ok_or_else(|| Error::forward_pass_not_run(layer))?;
         let slot = stack
             .pop()
@@ -399,9 +638,11 @@ impl Ctx {
             let found = slot.layer;
             stack.push(slot);
             return Err(Error::computation(format!(
-                "the cache of call {} came from layer `{found}`, and layer `{layer}` asked for \
-                 it. Give each layer its own position with `Ctx::set_position`",
-                self.call
+                "the cache of call {} at path `{}` came from layer `{found}`, and layer \
+                 `{layer}` asked for it. Give each layer its own position with \
+                 `Ctx::set_position`, and call each sublayer inside `Ctx::sublayer`",
+                self.call,
+                self.layer_path()
             )));
         }
         match slot.value.downcast::<T>() {
@@ -429,6 +670,8 @@ impl Ctx {
 
     /// The value this layer holds for the name, when the forward pass already proposed one
     ///
+    /// The address is the current [`layer_path`](Ctx::layer_path) and the name
+    ///
     /// A layer reads the channel first and falls back to its own storage. That is what makes
     /// 2 calls of 1 shared layer compose: the second call reads what the first call wrote
     ///
@@ -441,7 +684,9 @@ impl Ctx {
     ///
     /// - `Option<&T>` - The proposed value, or `None` when the pass proposed none
     pub fn state<T: Any + Send + Sync>(&self, name: &'static str) -> Option<&T> {
-        self.states.get(&(self.owner, name))?.downcast_ref::<T>()
+        self.states
+            .get(&(self.layer_path(), name))?
+            .downcast_ref::<T>()
     }
 
     /// Removes the value this layer holds for the name and gives it back
@@ -459,16 +704,18 @@ impl Ctx {
     /// - `Option<T>` - The proposed value, or `None` when the pass proposed none
     pub fn take_state<T: Any + Send + Sync>(&mut self, name: &'static str) -> Option<T> {
         StateSlot {
+            path: self.layer_path(),
             states: &mut self.states,
-            owner: self.owner,
         }
         .take(name)
     }
 
     /// Proposes a new value of the named non-trainable state of this layer
     ///
-    /// The value stays in the context until the model applies it with
-    /// [`LayerBase::apply_state`](crate::neural_network::traits::LayerBase::apply_state)
+    /// The address is the current [`layer_path`](Ctx::layer_path) and the name. The value stays
+    /// in the context until the model applies it with
+    /// [`LayerBase::apply_state`] of the
+    /// layer at that path
     ///
     /// # Parameters
     ///
@@ -480,14 +727,16 @@ impl Ctx {
             self.training,
             "a layer must change no state in an inference pass"
         );
-        self.states.insert((self.owner, name), Box::new(value));
+        self.states
+            .insert((self.layer_path(), name), Box::new(value));
     }
 
     /// How many proposed state changes no layer has taken back
     ///
-    /// The count is 0 after a full pass, because a model applies the state of every layer it
-    /// calls. A value left here is a defect: the layer that wrote it did not take it back.
-    /// Its running statistics or its random stream never moved
+    /// The count is 0 after a full pass, because a model applies the state of every layer and
+    /// every sublayer it calls. A value left here is a defect, because no layer took it back.
+    /// Its running statistics or its random stream never moved. A training step of a model
+    /// refuses such a value with an error
     ///
     /// # Returns
     ///
@@ -496,38 +745,85 @@ impl Ctx {
         self.states.len()
     }
 
-    /// Whether the pass proposed any state change for the layer
+    /// Whether the pass proposed any state change for the layer at the path
+    ///
+    /// The answer covers the layer at the path alone, and no sublayer of it
     ///
     /// # Parameters
     ///
-    /// - `owner` - The position of the layer
+    /// - `path` - The path of the layer
     ///
     /// # Returns
     ///
     /// - `bool` - `true` when the layer has something to apply
-    pub fn has_state(&self, owner: LayerId) -> bool {
-        self.states.keys().any(|(layer, _)| *layer == owner)
+    pub fn has_state(&self, path: &LayerPath) -> bool {
+        self.states.keys().any(|(layer, _)| layer == path)
+    }
+
+    /// Every state value of a model position that no layer has taken back yet
+    ///
+    /// The list covers the layer at the position and every sublayer below it
+    ///
+    /// # Parameters
+    ///
+    /// - `scope` - The model position
+    ///
+    /// # Returns
+    ///
+    /// - `Vec<String>` - 1 entry `<path>.<name>` per value, sorted
+    pub fn state_left_under(&self, scope: LayerId) -> Vec<String> {
+        let mut left: Vec<String> = self
+            .states
+            .keys()
+            .filter(|(layer, _)| layer.scope() == scope)
+            .map(|(layer, name)| format!("{layer}.{name}"))
+            .collect();
+        left.sort();
+        left
+    }
+
+    /// Every state value at a path, or below it, that no layer has taken back yet
+    ///
+    /// # Parameters
+    ///
+    /// - `path` - The path of the layer
+    ///
+    /// # Returns
+    ///
+    /// - `Vec<String>` - 1 entry `<path>.<name>` per value, sorted
+    pub fn state_left_below(&self, path: &LayerPath) -> Vec<String> {
+        let mut left: Vec<String> = self
+            .states
+            .keys()
+            .filter(|(layer, _)| layer.starts_with(path))
+            .map(|(layer, name)| format!("{layer}.{name}"))
+            .collect();
+        left.sort();
+        left
     }
 
     /// A view of the state channel of 1 layer, to move the values into the layer
     ///
+    /// The view reaches the layer at the path alone, and no sublayer of it
+    ///
     /// # Parameters
     ///
-    /// - `owner` - The position of the layer
+    /// - `path` - The path of the layer
     ///
     /// # Returns
     ///
     /// - `StateSlot` - The view
-    pub fn state_slot(&mut self, owner: LayerId) -> StateSlot<'_> {
+    pub fn state_slot(&mut self, path: &LayerPath) -> StateSlot<'_> {
         StateSlot {
             states: &mut self.states,
-            owner,
+            path: path.clone(),
         }
     }
 
     /// Adds the gradient of 1 named parameter of this layer to the store
     ///
-    /// The store sums, so a layer that runs twice in 1 pass gives the total
+    /// The address is the [`ParamId`] of the current [`layer_path`](Ctx::layer_path) and the
+    /// name. The store sums, so a layer that runs twice in 1 pass gives the total
     ///
     /// # Parameters
     ///
@@ -542,7 +838,7 @@ impl Ctx {
     ///
     /// - `Error::InvalidInput` - If the address already holds a gradient of another shape
     pub fn add_grad(&mut self, name: &'static str, grad: Tensor) -> Result<(), Error> {
-        self.grads.add(ParamId::new(self.owner, name), grad)
+        self.grads.add(ParamId::at(self.layer_path(), name), grad)
     }
 
     /// Every parameter gradient the pass produced
@@ -577,6 +873,7 @@ impl std::fmt::Debug for Ctx {
             .field("training", &self.training)
             .field("owner", &self.owner)
             .field("call", &self.call)
+            .field("path", &self.layer_path().to_string())
             .field("caches", &self.pending_caches())
             .field("states", &self.states.len())
             .field("grads", &self.grads.len())
@@ -682,7 +979,7 @@ mod tests {
         let taken = ctx.take_grads();
         assert_eq!(taken.len(), 1);
         assert_eq!(
-            taken.get(ParamId::new(0, "kernel")).unwrap(),
+            taken.get(&ParamId::new(0, "kernel")).unwrap(),
             &Tensor::from_elem([2].as_slice(), 2.0),
             "the store sums a gradient that arrives twice"
         );

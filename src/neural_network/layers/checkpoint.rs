@@ -1,8 +1,9 @@
-//! The named checkpoint format for a Sequential model
+//! The named checkpoint format for a model
 //!
 //! A checkpoint addresses every array of a model by a dotted path. The path is
-//! `<scope>.<name>`: the position of the layer, counted from the input, and the name that the
-//! layer gives the array. It is the same pair that
+//! `<layer path>.<name>`: the [`LayerPath`] of the layer that holds the array, and the name that
+//! the layer gives the array. A layer at model position 2 gives the path `2.kernel`. A sublayer
+//! `forward` of that layer gives the path `2.forward.kernel`. It is the same pair that
 //! [`ParamId`](crate::neural_network::traits::ParamId) uses for optimizer state, so 1 address
 //! serves the training loop and the file alike
 //!
@@ -10,12 +11,16 @@
 //!
 //! ```text
 //! ModelCheckpoint      magic, format_version, layers
-//! LayerCheckpoint      layer_type, build, weights
+//! LayerCheckpoint      layer_type, build, weights, sublayers
+//! SublayerCheckpoint   name, layer
 //! WeightRecord         name, kind, shape, data
 //! ```
 //!
+//! A [`LayerCheckpoint`] holds the arrays of 1 layer, and 1 [`SublayerCheckpoint`] per
+//! sublayer of that layer. The file therefore holds the same tree as the model
+//!
 //! The layer type is the string that [`LayerBase::layer_type`] returns, and a load compares it
-//! per position. Name and shape alone are too weak for that comparison.
+//! for every node of the tree. Name and shape alone are too weak for that comparison.
 //! `InstanceNormalization`, `GroupNormalization`, and a rank-2 `LayerNormalization` all hold
 //! `gamma` and `beta` of the same extent. Only the type name tells them apart
 //!
@@ -31,13 +36,17 @@
 //! and leave the difference to show up as a wrong prediction
 //!
 //! [`LayerBase::layer_type`]: crate::neural_network::traits::LayerBase::layer_type
+//! [`LayerPath`]: crate::neural_network::LayerPath
+//! [`LayerCheckpoint`]: crate::neural_network::layers::checkpoint::LayerCheckpoint
+//! [`SublayerCheckpoint`]: crate::neural_network::layers::checkpoint::SublayerCheckpoint
 //! [`apply`]: crate::neural_network::layers::checkpoint::apply
 //! [`apply_partial`]: crate::neural_network::layers::checkpoint::apply_partial
 //! [`BatchNormalization`]: crate::neural_network::layers::BatchNormalization
 
 use crate::error::{Error, IoError};
 use crate::neural_network::Shape;
-use crate::neural_network::traits::{Layer, WeightKind};
+use crate::neural_network::layer_path::{LayerPath, walk, weight_path};
+use crate::neural_network::traits::{Layer, LayerBase, WeightKind};
 use crate::{Deserialize, Serialize};
 use ndarray::ArrayViewMutD;
 use std::borrow::Cow;
@@ -51,19 +60,20 @@ pub const MODEL_MAGIC: u32 = 0x524D_4C4D;
 
 /// On-disk model format version written by this build
 ///
-/// Version 3 is the named checkpoint. It addresses every array by `<scope>.<name>`, it carries
-/// the kind of each array, and it records 1 build shape per input of a layer. Version 2
-/// recorded a single build shape. Version 1 held a closed enum of per-layer weight containers,
-/// and it wrote the variant index of each container in place of any name. No byte of these
-/// layouts agrees between versions, so a file from an earlier version stops loading, and the
-/// refusal names both versions
+/// Version 4 records the tree of layers at each model position. Each layer record holds the
+/// records of its sublayers, and it addresses every array by `<layer path>.<name>`. Version 3
+/// held 1 flat record per model position and addressed every array by `<scope>.<name>`.
+/// Version 2 recorded a single build shape. Version 1 held a closed enum of per-layer weight
+/// containers, and it wrote the variant index of each container in place of any name. No byte
+/// of these layouts agrees between versions, so a file from an earlier version stops loading,
+/// and the refusal names both versions
 ///
 /// Bump this on any change to a record layout, a field order, or a field meaning. The load
-/// path checks the layer count, the layer type of each position, and the name, the kind, and
-/// the shape of every array. Those checks can all pass for a file that another release wrote.
-/// This number is what makes such a file fail instead of loading values that mean something
-/// else
-pub const MODEL_FORMAT_VERSION: u32 = 3;
+/// path checks the number of model positions, the layer type of each node, the sublayer names
+/// of each node, and the name, the kind, and the shape of every array. Those checks can all
+/// pass for a file that another release wrote. This number is what makes such a file fail
+/// instead of loading values that mean something else
+pub const MODEL_FORMAT_VERSION: u32 = 4;
 
 /// The shapes that a layer was built for
 ///
@@ -145,7 +155,7 @@ impl BuildConfig {
 /// name, and loading owns both
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WeightRecord<'a> {
-    /// Name the layer gives the array. It is the second half of the checkpoint path
+    /// Name the layer gives the array. It is the last part of the checkpoint path
     pub name: Cow<'a, str>,
     /// Whether an optimizer updates the array
     pub kind: WeightKind,
@@ -157,20 +167,38 @@ pub struct WeightRecord<'a> {
 
 /// 1 layer of a model, as a file holds it
 ///
+/// The record holds the arrays of the layer itself, and 1 [`SublayerCheckpoint`] per sublayer
+/// of the layer. A layer that holds no sublayer gives an empty list
+///
 /// The `'a` lifetime is threaded from the layer, as in [`WeightRecord`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerCheckpoint<'a> {
     /// The string that [`LayerBase::layer_type`] returned. A load compares it against the layer
-    /// at the same position
+    /// at the same path
     ///
     /// [`LayerBase::layer_type`]: crate::neural_network::traits::LayerBase::layer_type
     pub layer_type: Cow<'a, str>,
     /// The shape the layer was built for, when the layer reports one. See [`BuildConfig`]
     pub build: Option<BuildConfig>,
-    /// Every array the layer holds, in the order [`LayerBase::weights`] gives them
+    /// Every array of the layer itself, in the order [`LayerBase::weights`] gives them
     ///
     /// [`LayerBase::weights`]: crate::neural_network::traits::LayerBase::weights
     pub weights: Vec<WeightRecord<'a>>,
+    /// Every sublayer of the layer, in the order [`LayerBase::sublayers`] gives them
+    ///
+    /// [`LayerBase::sublayers`]: crate::neural_network::traits::LayerBase::sublayers
+    pub sublayers: Vec<SublayerCheckpoint<'a>>,
+}
+
+/// 1 sublayer of a layer, as a file holds it
+///
+/// The `'a` lifetime is threaded from the layer, as in [`WeightRecord`]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SublayerCheckpoint<'a> {
+    /// The name that the holding layer gives the sublayer. It is 1 part of the checkpoint path
+    pub name: Cow<'a, str>,
+    /// The record of the sublayer
+    pub layer: LayerCheckpoint<'a>,
 }
 
 /// A whole model, as a file holds it
@@ -182,9 +210,9 @@ pub struct ModelCheckpoint<'a> {
     ///
     /// A file saved before this tag existed is refused rather than loaded with wrong values
     pub magic: u32,
-    /// On-disk format version of this file. See [`MODEL_FORMAT_VERSION`]
+    /// On-disk model format version of this file. See [`MODEL_FORMAT_VERSION`]
     pub format_version: u32,
-    /// Every layer, from the input
+    /// Every model position, from the input
     pub layers: Vec<LayerCheckpoint<'a>>,
 }
 
@@ -205,22 +233,8 @@ pub struct LoadReport {
     pub unused: Vec<String>,
 }
 
-/// Builds the checkpoint path of 1 array
-///
-/// # Parameters
-///
-/// - `scope` - Position of the layer in the model, counted from the input
-/// - `name` - Name the layer gives the array
-///
-/// # Returns
-///
-/// - `String` - The dotted path, such as `2.kernel`
-#[inline]
-pub fn weight_path(scope: usize, name: &str) -> String {
-    format!("{scope}.{name}")
-}
-
-/// Reads every array of every layer into a checkpoint that borrows the model
+/// Reads every array of every layer and every sublayer into a checkpoint that borrows the
+/// model
 ///
 /// Nothing is copied. Each record borrows the name and the elements of the live array, so the
 /// checkpoint is a view of the model until it is serialized. An array that a layer does not
@@ -235,46 +249,56 @@ pub fn weight_path(scope: usize, name: &str) -> String {
 /// - `ModelCheckpoint` - The whole model, with the magic tag and the format version of this
 ///   build
 pub fn capture(layers: &[Box<dyn Layer>]) -> ModelCheckpoint<'_> {
-    let recorded = layers
-        .iter()
-        .map(|layer| LayerCheckpoint {
-            layer_type: Cow::Borrowed(layer.layer_type()),
-            build: layer.build_config(),
-            weights: layer
-                .weights()
-                .into_iter()
-                .map(|entry| WeightRecord {
-                    name: Cow::Borrowed(entry.name),
-                    kind: entry.kind,
-                    shape: entry.value.shape().to_vec(),
-                    // `to_slice` keeps the lifetime of the layer, so a contiguous array is
-                    // borrowed here instead of copied
-                    data: match entry.value.to_slice() {
-                        Some(run) => Cow::Borrowed(run),
-                        None => Cow::Owned(entry.value.iter().copied().collect()),
-                    },
-                })
-                .collect(),
-        })
-        .collect();
-
     ModelCheckpoint {
         magic: MODEL_MAGIC,
         format_version: MODEL_FORMAT_VERSION,
-        layers: recorded,
+        layers: layers.iter().map(|layer| capture_layer(&**layer)).collect(),
+    }
+}
+
+/// Reads 1 layer and all of its sublayers into a record that borrows the layer
+fn capture_layer(layer: &dyn LayerBase) -> LayerCheckpoint<'_> {
+    LayerCheckpoint {
+        layer_type: Cow::Borrowed(layer.layer_type()),
+        build: layer.build_config(),
+        weights: layer
+            .weights()
+            .into_iter()
+            .map(|entry| WeightRecord {
+                name: Cow::Borrowed(entry.name),
+                kind: entry.kind,
+                shape: entry.value.shape().to_vec(),
+                // `to_slice` keeps the lifetime of the layer, so a contiguous array is
+                // borrowed here instead of copied
+                data: match entry.value.to_slice() {
+                    Some(run) => Cow::Borrowed(run),
+                    None => Cow::Owned(entry.value.iter().copied().collect()),
+                },
+            })
+            .collect(),
+        sublayers: layer
+            .sublayers()
+            .into_iter()
+            .map(|sub| SublayerCheckpoint {
+                name: sub.name,
+                layer: capture_layer(sub.layer),
+            })
+            .collect(),
     }
 }
 
 /// Applies a checkpoint to a model, and refuses every disagreement
 ///
-/// The load runs in 2 passes, and the first one writes nothing. It checks, in this order:
+/// The load runs in 2 passes, and the first one writes nothing. It checks the number of model
+/// positions first. Then it visits every node of every layer tree, and it checks, in this
+/// order:
 ///
-/// 1. The number of layers.
-/// 2. The layer type of each position.
-/// 3. The build shape of a position, when the file and the layer both carry one.
-/// 4. The number of arrays of a layer, and the name of each one, in order.
-/// 5. The kind of each array.
-/// 6. The shape of each array, and the element count of the record.
+/// 1. The layer type of the node.
+/// 2. The build shape of the node, when the file and the layer both carry one.
+/// 3. The number of arrays of the node, and the name of each one, in order.
+/// 4. The kind of each array.
+/// 5. The shape of each array, and the element count of the record.
+/// 6. The number of sublayers of the node, and the name of each one, in order.
 ///
 /// The second pass writes. A refusal therefore leaves the model exactly as it was. A model
 /// never holds the arrays of 1 file next to the arrays of another
@@ -291,7 +315,7 @@ pub fn capture(layers: &[Box<dyn Layer>]) -> ModelCheckpoint<'_> {
 /// # Errors
 ///
 /// - `Error::Io(IoError::ModelStructureMismatch)` - The file and the model disagree. The
-///   message names the checkpoint path, or the layer position for a whole-layer disagreement
+///   message names the checkpoint path, or the layer path for a whole-layer disagreement
 pub fn apply(layers: &mut [Box<dyn Layer>], file: &ModelCheckpoint<'_>) -> Result<(), Error> {
     if file.layers.len() != layers.len() {
         return Err(mismatch(format!(
@@ -303,94 +327,135 @@ pub fn apply(layers: &mut [Box<dyn Layer>], file: &ModelCheckpoint<'_>) -> Resul
 
     // Pass 1 reads the model alone, so a refusal here leaves every array where it was
     for (scope, (layer, saved)) in layers.iter().zip(file.layers.iter()).enumerate() {
-        let layer_type = layer.layer_type();
-        if layer_type != saved.layer_type {
-            return Err(mismatch(format!(
-                "layer {scope} type mismatch: model has `{layer_type}`, file has `{}`",
-                saved.layer_type
-            )));
-        }
-
-        // A layer that owns no array carries no build shape, so this compares only when both
-        // sides carry one
-        if let (Some(wanted), Some(found)) = (layer.build_config(), saved.build.as_ref())
-            && wanted != *found
-        {
-            return Err(mismatch(format!(
-                "layer {scope} (`{layer_type}`) was built for input shape {}, and the file \
-                 records {}",
-                wanted.describe(),
-                found.describe()
-            )));
-        }
-
-        let targets = layer.weights();
-        if targets.len() != saved.weights.len() {
-            // Name both rosters. An optional parameter such as a bias is exactly the case
-            // where the counts differ, and the names say which array is the extra one
-            return Err(mismatch(format!(
-                "layer {scope} (`{layer_type}`) holds the arrays {:?}, and the file holds {:?}",
-                targets.iter().map(|e| e.name).collect::<Vec<_>>(),
-                saved.weights.iter().map(|r| &*r.name).collect::<Vec<_>>()
-            )));
-        }
-
-        for (target, record) in targets.iter().zip(saved.weights.iter()) {
-            let path = weight_path(scope, target.name);
-            if target.name != record.name {
-                return Err(mismatch(format!(
-                    "the model holds `{path}` where the file holds `{}`",
-                    weight_path(scope, &record.name)
-                )));
-            }
-            if target.kind != record.kind {
-                return Err(mismatch(format!(
-                    "`{path}` is {} in the model, and {} in the file",
-                    kind_word(target.kind),
-                    kind_word(record.kind)
-                )));
-            }
-            if target.value.shape() != record.shape.as_slice() {
-                return Err(mismatch(format!(
-                    "`{path}` has shape {:?} in the model, and {:?} in the file",
-                    target.value.shape(),
-                    record.shape
-                )));
-            }
-            if record.data.len() != target.value.len() {
-                return Err(mismatch(format!(
-                    "`{path}` holds {} elements at shape {:?}, and the file record carries {}",
-                    target.value.len(),
-                    record.shape,
-                    record.data.len()
-                )));
-            }
-        }
+        check_layer(&LayerPath::root(scope), &**layer, saved)?;
     }
 
     // Pass 2 writes, and every check above already passed
     for (layer, saved) in layers.iter_mut().zip(file.layers.iter()) {
-        for (target, record) in layer.weights_mut().iter_mut().zip(saved.weights.iter()) {
-            write_record(&mut target.value, &record.data);
-        }
+        write_layer(&mut **layer, saved);
     }
 
     Ok(())
 }
 
+/// Compares 1 node and all of its sublayers against the record of the file, and writes nothing
+fn check_layer(
+    path: &LayerPath,
+    layer: &dyn LayerBase,
+    saved: &LayerCheckpoint<'_>,
+) -> Result<(), Error> {
+    let layer_type = layer.layer_type();
+    if layer_type != saved.layer_type {
+        return Err(mismatch(format!(
+            "layer `{path}` type mismatch: model has `{layer_type}`, file has `{}`",
+            saved.layer_type
+        )));
+    }
+
+    // A layer that owns no array carries no build shape, so this compares only when both
+    // sides carry one
+    if let (Some(wanted), Some(found)) = (layer.build_config(), saved.build.as_ref())
+        && wanted != *found
+    {
+        return Err(mismatch(format!(
+            "layer `{path}` (`{layer_type}`) was built for input shape {}, and the file records \
+             {}",
+            wanted.describe(),
+            found.describe()
+        )));
+    }
+
+    let targets = layer.weights();
+    if targets.len() != saved.weights.len() {
+        // Name both rosters. An optional parameter such as a bias is exactly the case where
+        // the counts differ, and the names say which array is the extra one
+        return Err(mismatch(format!(
+            "layer `{path}` (`{layer_type}`) holds the arrays {:?}, and the file holds {:?}",
+            targets.iter().map(|e| e.name).collect::<Vec<_>>(),
+            saved.weights.iter().map(|r| &*r.name).collect::<Vec<_>>()
+        )));
+    }
+
+    for (target, record) in targets.iter().zip(saved.weights.iter()) {
+        let at = weight_path(path, target.name);
+        if target.name != record.name {
+            return Err(mismatch(format!(
+                "the model holds `{at}` where the file holds `{}`",
+                weight_path(path, &record.name)
+            )));
+        }
+        if target.kind != record.kind {
+            return Err(mismatch(format!(
+                "`{at}` is {} in the model, and {} in the file",
+                kind_word(target.kind),
+                kind_word(record.kind)
+            )));
+        }
+        if target.value.shape() != record.shape.as_slice() {
+            return Err(mismatch(format!(
+                "`{at}` has shape {:?} in the model, and {:?} in the file",
+                target.value.shape(),
+                record.shape
+            )));
+        }
+        if record.data.len() != target.value.len() {
+            return Err(mismatch(format!(
+                "`{at}` holds {} elements at shape {:?}, and the file record carries {}",
+                target.value.len(),
+                record.shape,
+                record.data.len()
+            )));
+        }
+    }
+
+    let subs = layer.sublayers();
+    let model_names: Vec<&str> = subs.iter().map(|sub| &*sub.name).collect();
+    let file_names: Vec<&str> = saved.sublayers.iter().map(|sub| &*sub.name).collect();
+    if model_names != file_names {
+        return Err(mismatch(format!(
+            "layer `{path}` (`{layer_type}`) holds the sublayers {model_names:?}, and the file \
+             holds {file_names:?}"
+        )));
+    }
+    for (sub, record) in subs.iter().zip(saved.sublayers.iter()) {
+        check_layer(&path.child(sub.name.clone()), sub.layer, &record.layer)?;
+    }
+    Ok(())
+}
+
+/// Writes the arrays of 1 record into 1 node and all of its sublayers
+///
+/// [`check_layer`] already compared the 2 trees, so every roster lines up
+fn write_layer(layer: &mut dyn LayerBase, saved: &LayerCheckpoint<'_>) {
+    for (target, record) in layer.weights_mut().iter_mut().zip(saved.weights.iter()) {
+        write_record(&mut target.value, &record.data);
+    }
+    for (sub, record) in layer
+        .sublayers_mut()
+        .into_iter()
+        .zip(saved.sublayers.iter())
+    {
+        write_layer(sub.layer, &record.layer);
+    }
+}
+
 /// Applies what the file and the model agree on, and reports the rest
 ///
 /// This is the opt-in lenient load. It writes an array only when 3 conditions all hold: the
-/// position holds the same layer type, the 2 sides agree on the build shape, and the file
-/// holds the same name, kind, and shape. Everything else goes into the report and nothing
-/// else fails.
-/// A position whose layer type differs contributes every path of that layer to both lists.
-/// A name and a shape cannot tell 2 normalization layers apart
+/// node holds the same layer type, the 2 sides agree on the build shape, and the file holds
+/// the same name, kind, and shape. Everything else goes into the report and nothing else
+/// fails.
 ///
-/// A position whose build shape differs does the same. [`apply`] refuses such a file, and this
-/// skips the layer: the 2 paths agree that a layer built for another input takes no weights.
-/// The per-array shape check cannot stand in for it, because a convolution kernel is the same
-/// shape for every spatial extent
+/// A node whose layer type differs contributes every path of its tree to both lists. A name
+/// and a shape cannot tell 2 normalization layers apart
+///
+/// A node whose build shape differs does the same. [`apply`] refuses such a file, and this
+/// skips the node and its sublayers: the 2 paths agree that a layer built for another input
+/// takes no weights. The per-array shape check cannot stand in for it, because a convolution
+/// kernel is the same shape for every spatial extent
+///
+/// A sublayer of the model meets the sublayer of the file with the same name. A sublayer that
+/// only 1 side holds contributes every path of its tree to 1 list
 ///
 /// # Parameters
 ///
@@ -405,80 +470,134 @@ pub fn apply_partial(layers: &mut [Box<dyn Layer>], file: &ModelCheckpoint<'_>) 
     let mut report = LoadReport::default();
 
     for (scope, layer) in layers.iter_mut().enumerate() {
-        let at_scope = file.layers.get(scope);
-        let saved = at_scope.filter(|saved| saved.layer_type == layer.layer_type());
-        let Some(saved) = saved else {
-            // The position holds another layer type, or the file is shorter than the model.
-            // Neither side reaches the other, so every path of both sides is left over
-            report
-                .missing
-                .extend(layer.weights().iter().map(|e| weight_path(scope, e.name)));
-            if let Some(other) = at_scope {
-                report
-                    .unused
-                    .extend(other.weights.iter().map(|r| weight_path(scope, &r.name)));
-            }
-            continue;
-        };
-
-        // A build shape mismatch skips the whole layer. The per-array shape check below
-        // cannot catch it, because a kernel shape does not depend on the spatial extent
-        if let (Some(wanted), Some(found)) = (layer.build_config(), saved.build.as_ref())
-            && wanted != *found
-        {
-            report
-                .missing
-                .extend(layer.weights().iter().map(|e| weight_path(scope, e.name)));
-            report
-                .unused
-                .extend(saved.weights.iter().map(|r| weight_path(scope, &r.name)));
-            continue;
-        }
-
-        let mut taken = vec![false; saved.weights.len()];
-        for target in layer.weights_mut().iter_mut() {
-            let path = weight_path(scope, target.name);
-            // `taken` stops 2 target arrays from matching 1 record
-            let found = saved
-                .weights
-                .iter()
-                .enumerate()
-                .find(|(index, record)| {
-                    !taken[*index]
-                        && record.name == target.name
-                        && record.kind == target.kind
-                        && record.shape.as_slice() == target.value.shape()
-                        && record.data.len() == target.value.len()
-                })
-                .map(|(index, _)| index);
-            match found {
-                Some(index) => {
-                    taken[index] = true;
-                    write_record(&mut target.value, &saved.weights[index].data);
-                    report.applied.push(path);
-                }
-                None => report.missing.push(path),
-            }
-        }
-
-        report.unused.extend(
-            saved
-                .weights
-                .iter()
-                .zip(taken.iter())
-                .filter(|(_, used)| !**used)
-                .map(|(record, _)| weight_path(scope, &record.name)),
+        partial_layer(
+            &LayerPath::root(scope),
+            &mut **layer,
+            file.layers.get(scope),
+            &mut report,
         );
     }
 
     // A file longer than the model has whole layers that reached nothing
     for (scope, saved) in file.layers.iter().enumerate().skip(layers.len()) {
-        report
-            .unused
-            .extend(saved.weights.iter().map(|r| weight_path(scope, &r.name)));
+        file_paths(&LayerPath::root(scope), saved, &mut report.unused);
     }
 
     report
+}
+
+/// Applies what 1 record and 1 node agree on, and reports the rest, for the node and all of
+/// its sublayers
+fn partial_layer(
+    path: &LayerPath,
+    layer: &mut dyn LayerBase,
+    at_path: Option<&LayerCheckpoint<'_>>,
+    report: &mut LoadReport,
+) {
+    let saved = at_path.filter(|saved| saved.layer_type == layer.layer_type());
+    let Some(saved) = saved else {
+        // The path holds another layer type, or the file holds no record at the path.
+        // Neither side reaches the other, so every path of both sides is left over
+        model_paths(path, layer, &mut report.missing);
+        if let Some(other) = at_path {
+            file_paths(path, other, &mut report.unused);
+        }
+        return;
+    };
+
+    // A build shape mismatch skips the whole node. The per-array shape check below cannot
+    // catch it, because a kernel shape does not depend on the spatial extent
+    if let (Some(wanted), Some(found)) = (layer.build_config(), saved.build.as_ref())
+        && wanted != *found
+    {
+        model_paths(path, layer, &mut report.missing);
+        file_paths(path, saved, &mut report.unused);
+        return;
+    }
+
+    let mut taken = vec![false; saved.weights.len()];
+    for target in layer.weights_mut().iter_mut() {
+        let at = weight_path(path, target.name);
+        // `taken` stops 2 target arrays from matching 1 record
+        let found = saved
+            .weights
+            .iter()
+            .enumerate()
+            .find(|(index, record)| {
+                !taken[*index]
+                    && record.name == target.name
+                    && record.kind == target.kind
+                    && record.shape.as_slice() == target.value.shape()
+                    && record.data.len() == target.value.len()
+            })
+            .map(|(index, _)| index);
+        match found {
+            Some(index) => {
+                taken[index] = true;
+                write_record(&mut target.value, &saved.weights[index].data);
+                report.applied.push(at);
+            }
+            None => report.missing.push(at),
+        }
+    }
+    report.unused.extend(
+        saved
+            .weights
+            .iter()
+            .zip(taken.iter())
+            .filter(|(_, used)| !**used)
+            .map(|(record, _)| weight_path(path, &record.name)),
+    );
+
+    let mut sub_taken = vec![false; saved.sublayers.len()];
+    for sub in layer.sublayers_mut() {
+        let sub_path = path.child(sub.name.clone());
+        // A model build refuses 2 sublayers of 1 name, and `sub_taken` keeps 2 file records
+        // of 1 name from both reaching it
+        let found = saved
+            .sublayers
+            .iter()
+            .enumerate()
+            .find(|(index, record)| !sub_taken[*index] && record.name == sub.name)
+            .map(|(index, _)| index);
+        if let Some(index) = found {
+            sub_taken[index] = true;
+        }
+        partial_layer(
+            &sub_path,
+            sub.layer,
+            found.map(|index| &saved.sublayers[index].layer),
+            report,
+        );
+    }
+    for (record, used) in saved.sublayers.iter().zip(sub_taken.iter()) {
+        if !*used {
+            file_paths(
+                &path.child(record.name.to_string()),
+                &record.layer,
+                &mut report.unused,
+            );
+        }
+    }
+}
+
+/// Appends the checkpoint path of every array of 1 node and all of its sublayers
+fn model_paths(path: &LayerPath, layer: &dyn LayerBase, into: &mut Vec<String>) {
+    walk(layer, path, &mut |node_path, node| {
+        into.extend(
+            node.weights()
+                .iter()
+                .map(|e| weight_path(node_path, e.name)),
+        );
+    });
+}
+
+/// Appends the checkpoint path of every array of 1 record and all of its sublayer records
+fn file_paths(path: &LayerPath, saved: &LayerCheckpoint<'_>, into: &mut Vec<String>) {
+    into.extend(saved.weights.iter().map(|r| weight_path(path, &r.name)));
+    for sub in &saved.sublayers {
+        file_paths(&path.child(sub.name.to_string()), &sub.layer, into);
+    }
 }
 
 /// Writes the elements of 1 record into the array of the layer

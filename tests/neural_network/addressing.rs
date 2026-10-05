@@ -189,7 +189,7 @@ fn a_sequential_build_refuses_2_arrays_under_1_name() {
     };
     let text = format!("{error}");
     assert!(
-        text.contains("layer 0"),
+        text.contains("layer `0`"),
         "the message names the layer: {text}"
     );
     assert!(text.contains("Twin"), "the message names the type: {text}");
@@ -198,7 +198,7 @@ fn a_sequential_build_refuses_2_arrays_under_1_name() {
         "the message names the array: {text}"
     );
     assert!(
-        text.contains("prefix"),
+        text.contains("LayerBase::sublayers"),
         "the message says what a layer that holds layers must do: {text}"
     );
 }

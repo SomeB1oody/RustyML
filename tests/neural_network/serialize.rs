@@ -1085,7 +1085,7 @@ fn load_refuses_a_layer_type_that_no_longer_matches() {
     match target.load_from_path(tmp.path()) {
         Err(Error::Io(IoError::ModelStructureMismatch(message))) => {
             assert!(
-                message.contains("layer 0")
+                message.contains("layer `0`")
                     && message.contains("GroupNormalization")
                     && message.contains("InstanceNormalization"),
                 "the refusal must name the position and both types, got {message:?}"
@@ -1479,6 +1479,7 @@ fn a_refused_load_writes_no_earlier_array_of_the_layer_that_disagrees() {
                     data: Cow::Owned(vec![9.0f32; 3]),
                 },
             ],
+            sublayers: Vec::new(),
         }],
     };
     std::fs::write(tmp.path(), postcard::to_allocvec(&file).unwrap()).unwrap();
@@ -1567,7 +1568,7 @@ fn a_checkpoint_of_another_build_shape_is_refused() {
 
     match target.load_from_path(tmp.path()) {
         Err(Error::Io(IoError::ModelStructureMismatch(message))) => {
-            assert!(message.contains("layer 0"), "{message}");
+            assert!(message.contains("layer `0`"), "{message}");
             assert!(message.contains("built for input shape"), "{message}");
         }
         other => panic!("expected ModelStructureMismatch, got {other:?}"),

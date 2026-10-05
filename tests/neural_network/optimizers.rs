@@ -15,6 +15,7 @@ use crate::common::named;
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, ArrayD};
 use rustyml::error::Error;
+use rustyml::neural_network::LayerPath;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::dense::Dense;
@@ -791,7 +792,7 @@ fn dense_after_one_sgd_step(
 
     let mut opt = SGD::new(lr, 0.0, false, weight_decay).unwrap();
     opt.step();
-    opt.update(0, &mut layer, ctx.grads(), 1.0);
+    opt.update(&LayerPath::root(0), &mut layer, ctx.grads(), 1.0);
     (
         named(&layer, "kernel").to_owned(),
         named(&layer, "bias").to_owned(),
@@ -847,7 +848,7 @@ fn batchnorm_gamma_beta_after_one_sgd_step(weight_decay: f32) -> (ArrayD<f32>, A
 
     let mut opt = SGD::new(0.1, 0.0, false, weight_decay).unwrap();
     opt.step();
-    opt.update(0, &mut bn, ctx.grads(), 1.0);
+    opt.update(&LayerPath::root(0), &mut bn, ctx.grads(), 1.0);
     (
         named(&bn, "gamma").to_owned(),
         named(&bn, "beta").to_owned(),
@@ -900,7 +901,7 @@ fn dense_weights_after_one_step<O: Optimizer>(
     layer.backward(&grad_out, &mut ctx).unwrap();
 
     opt.step();
-    opt.update(0, &mut layer, ctx.grads(), 1.0);
+    opt.update(&LayerPath::root(0), &mut layer, ctx.grads(), 1.0);
     (
         named(&layer, "kernel").to_owned(),
         named(&layer, "bias").to_owned(),
@@ -1120,16 +1121,16 @@ fn a_changing_parameter_count_must_not_move_another_layer_state() {
     );
     assert_eq!(tracked_ctx.grads().len(), 2);
     opt.step();
-    opt.update(0, &mut quiet, quiet_ctx.grads(), 1.0);
-    opt.update(1, &mut tracked, tracked_ctx.grads(), 1.0);
+    opt.update(&LayerPath::root(0), &mut quiet, quiet_ctx.grads(), 1.0);
+    opt.update(&LayerPath::root(1), &mut tracked, tracked_ctx.grads(), 1.0);
 
     // Step 2: both hold gradients
     let quiet_ctx = one_pass(&mut quiet, 0);
     let tracked_ctx = one_pass(&mut tracked, 1);
     assert_eq!(quiet_ctx.grads().len(), 2);
     opt.step();
-    opt.update(0, &mut quiet, quiet_ctx.grads(), 1.0);
-    opt.update(1, &mut tracked, tracked_ctx.grads(), 1.0);
+    opt.update(&LayerPath::root(0), &mut quiet, quiet_ctx.grads(), 1.0);
+    opt.update(&LayerPath::root(1), &mut tracked, tracked_ctx.grads(), 1.0);
 
     // Control 1: `tracked` alone, on the same 2-step schedule and its own optimizer
     let mut tracked_control = pass_through_dense();
@@ -1137,7 +1138,7 @@ fn a_changing_parameter_count_must_not_move_another_layer_state() {
     for _ in 0..2 {
         let ctx = one_pass(&mut tracked_control, 1);
         tracked_control_opt.step();
-        tracked_control_opt.update(1, &mut tracked_control, ctx.grads(), 1.0);
+        tracked_control_opt.update(&LayerPath::root(1), &mut tracked_control, ctx.grads(), 1.0);
     }
 
     // Control 2: `quiet` alone, on the 1 step it takes part in, and its own optimizer
@@ -1145,7 +1146,12 @@ fn a_changing_parameter_count_must_not_move_another_layer_state() {
     let mut quiet_control_opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
     let quiet_control_ctx = one_pass(&mut quiet_control, 0);
     quiet_control_opt.step();
-    quiet_control_opt.update(0, &mut quiet_control, quiet_control_ctx.grads(), 1.0);
+    quiet_control_opt.update(
+        &LayerPath::root(0),
+        &mut quiet_control,
+        quiet_control_ctx.grads(),
+        1.0,
+    );
 
     assert_same_kernel(
         &dense_kernel(&tracked),
@@ -1347,23 +1353,43 @@ fn a_tensor_joining_the_roster_must_not_take_another_tensor_state() {
     let mut layer = RosterLayer::new();
     let mut opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
     opt.step();
-    opt.update(0, &mut layer, roster_grads(false).grads(), 1.0);
+    opt.update(
+        &LayerPath::root(0),
+        &mut layer,
+        roster_grads(false).grads(),
+        1.0,
+    );
     opt.step();
-    opt.update(0, &mut layer, roster_grads(true).grads(), 1.0);
+    opt.update(
+        &LayerPath::root(0),
+        &mut layer,
+        roster_grads(true).grads(),
+        1.0,
+    );
 
     // Control for beta: the same 2 steps, and gamma never joins
     let mut beta_control = RosterLayer::new();
     let mut beta_control_opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
     for _ in 0..2 {
         beta_control_opt.step();
-        beta_control_opt.update(0, &mut beta_control, roster_grads(false).grads(), 1.0);
+        beta_control_opt.update(
+            &LayerPath::root(0),
+            &mut beta_control,
+            roster_grads(false).grads(),
+            1.0,
+        );
     }
 
     // Control for gamma: 1 step from a zero momentum buffer of its own
     let mut gamma_control = RosterLayer::new();
     let mut gamma_control_opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
     gamma_control_opt.step();
-    gamma_control_opt.update(0, &mut gamma_control, roster_grads(true).grads(), 1.0);
+    gamma_control_opt.update(
+        &LayerPath::root(0),
+        &mut gamma_control,
+        roster_grads(true).grads(),
+        1.0,
+    );
 
     for i in 0..4 {
         assert!(
@@ -1434,8 +1460,8 @@ fn scope_must_separate_2_same_shape_layers<O: Optimizer>(make: impl Fn() -> O, o
         let first_ctx = one_pass_with(&mut first, 0, FIRST_LAYER_GRAD);
         let second_ctx = one_pass_with(&mut second, 1, SECOND_LAYER_GRAD);
         opt.step();
-        opt.update(0, &mut first, first_ctx.grads(), 1.0);
-        opt.update(1, &mut second, second_ctx.grads(), 1.0);
+        opt.update(&LayerPath::root(0), &mut first, first_ctx.grads(), 1.0);
+        opt.update(&LayerPath::root(1), &mut second, second_ctx.grads(), 1.0);
     }
 
     // Control: the same schedule, with 1 optimizer per layer, so no state can cross
@@ -1448,8 +1474,18 @@ fn scope_must_separate_2_same_shape_layers<O: Optimizer>(make: impl Fn() -> O, o
         let second_ctx = one_pass_with(&mut second_control, 1, SECOND_LAYER_GRAD);
         first_opt.step();
         second_opt.step();
-        first_opt.update(0, &mut first_control, first_ctx.grads(), 1.0);
-        second_opt.update(1, &mut second_control, second_ctx.grads(), 1.0);
+        first_opt.update(
+            &LayerPath::root(0),
+            &mut first_control,
+            first_ctx.grads(),
+            1.0,
+        );
+        second_opt.update(
+            &LayerPath::root(1),
+            &mut second_control,
+            second_ctx.grads(),
+            1.0,
+        );
     }
 
     let first_kernel = dense_kernel(&first);
@@ -1554,7 +1590,7 @@ fn sgd_momentum_velocity_must_survive_between_steps() {
     let mut plain_opt = SGD::new(0.1, 0.0, false, 0.0).unwrap();
     let plain_ctx = one_pass(&mut plain, 0);
     plain_opt.step();
-    plain_opt.update(0, &mut plain, plain_ctx.grads(), 1.0);
+    plain_opt.update(&LayerPath::root(0), &mut plain, plain_ctx.grads(), 1.0);
     let start = dense_kernel(&pass_through_dense());
     let unit = &start - &dense_kernel(&plain);
     assert!(
@@ -1568,7 +1604,7 @@ fn sgd_momentum_velocity_must_survive_between_steps() {
         for _ in 0..3 {
             let ctx = one_pass(&mut layer, 0);
             opt.step();
-            opt.update(0, &mut layer, ctx.grads(), 1.0);
+            opt.update(&LayerPath::root(0), &mut layer, ctx.grads(), 1.0);
         }
         let got = dense_kernel(&layer);
         for ((g, s), u) in got.iter().zip(start.iter()).zip(unit.iter()) {

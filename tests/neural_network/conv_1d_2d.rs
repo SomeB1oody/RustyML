@@ -1142,7 +1142,7 @@ fn conv2d_parallel_weight_grad_constant_count() {
     let _input_grad = layer.backward(&grad, &mut ctx).unwrap();
 
     // The gradient store holds the weight gradient under its parameter name.
-    let weight_grad = ctx.grads().get(ParamId::new(0, "kernel")).unwrap();
+    let weight_grad = ctx.grads().get(&ParamId::new(0, "kernel")).unwrap();
     // 3*3 taps * 2 input channels * 1 filter
     assert_eq!(weight_grad.len(), 18, "expected 18 weight-grad entries");
     // dL/dw[kh,kw,c,f] = sum_{b,oh,ow} grad * x = 4 batches * 118*118 positions * 1 * 1 = 55_696
@@ -1585,8 +1585,8 @@ fn conv1d_causal_dilated_gradients_match_a_finite_difference() {
     let mut ctx = Ctx::training();
     layer.forward(&input, &mut ctx).unwrap();
     let input_grad = layer.backward(&upstream, &mut ctx).unwrap();
-    let weight_grad = flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap());
-    let bias_grad = flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap());
+    let weight_grad = flat(ctx.grads().get(&ParamId::new(0, "kernel")).unwrap());
+    let bias_grad = flat(ctx.grads().get(&ParamId::new(0, "bias")).unwrap());
 
     // Loss is `sum(output * upstream)`, whose gradient of the output is `upstream`
     let loss = |layer: &Conv1D, input: &ndarray::ArrayD<f32>| -> f32 {
@@ -1720,12 +1720,12 @@ fn conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_same() {
         "grad_input",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "kernel")).unwrap()),
         &[-0.3125, -1.1875, 0.0, 0.0, 0.1875, 0.0625],
         "grad_weights",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "bias")).unwrap()),
         &[0.625, 0.625],
         "grad_bias",
     );
@@ -1774,12 +1774,12 @@ fn conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_causal() {
         "grad_input",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "kernel")).unwrap()),
         &[0.0, 0.0, -0.3125, -1.1875, 0.0, 0.0],
         "grad_weights",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "bias")).unwrap()),
         &[0.625, 0.625],
         "grad_bias",
     );
@@ -1826,7 +1826,7 @@ fn conv1d_plain_kernel_longer_than_the_input_matches_keras_under_same() {
         "grad_input",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "kernel")).unwrap()),
         &[
             -0.3125, -1.1875, -1.4375, -0.0625, -1.25, -0.625, 0.0, 0.0, 0.125, 0.0, 0.3125,
             -0.0625, 0.1875, 0.0625,
@@ -1834,7 +1834,7 @@ fn conv1d_plain_kernel_longer_than_the_input_matches_keras_under_same() {
         "grad_weights",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "bias")).unwrap()),
         &[0.625, 0.625],
         "grad_bias",
     );
@@ -1880,12 +1880,12 @@ fn conv2d_dilated_kernel_longer_than_the_input_matches_keras_under_same() {
         "grad_input",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "kernel")).unwrap()),
         &[-0.75, -0.4375, 0.0625, -0.75],
         "grad_weights",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "bias")).unwrap()),
         &[0.625],
         "grad_bias",
     );
@@ -1931,12 +1931,12 @@ fn depthwise_conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_sam
         "grad_input",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "kernel")).unwrap()),
         &[-0.125, -0.5, 1.25, -1.25, -0.125, -0.9375],
         "grad_weights",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "bias")).unwrap()),
         &[0.625, 0.625],
         "grad_bias",
     );
@@ -1987,7 +1987,7 @@ fn separable_conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_sam
     assert_flat_close(
         &flat(
             ctx.grads()
-                .get(ParamId::new(0, "depthwise_kernel"))
+                .get(&ParamId::new(0, "depthwise_kernel"))
                 .unwrap(),
         ),
         &[0.5625, -0.25, -1.875, -0.625, -0.1875, -0.46875],
@@ -1996,14 +1996,14 @@ fn separable_conv1d_dilated_kernel_longer_than_the_input_matches_keras_under_sam
     assert_flat_close(
         &flat(
             ctx.grads()
-                .get(ParamId::new(0, "pointwise_kernel"))
+                .get(&ParamId::new(0, "pointwise_kernel"))
                 .unwrap(),
         ),
         &[-0.25, 0.5, -0.40625, -0.21875],
         "grad_pointwise_weights",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "bias")).unwrap()),
         &[0.625, 0.625],
         "grad_bias",
     );
@@ -2058,12 +2058,12 @@ fn conv2d_dilated_gradients_match_keras_under_valid() {
         "grad_input",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "kernel")).unwrap()),
         &[-0.5, 0.75, 1.375, -1.125, 1.375, -1.125, -0.125, -0.75],
         "grad_weights",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "bias")).unwrap()),
         &[0.875, 0.625],
         "grad_bias",
     );
@@ -2121,14 +2121,14 @@ fn conv2d_dilated_gradients_match_keras_under_same() {
         "grad_input",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "kernel")).unwrap()),
         &[
             -2.4375, 0.3125, 1.1875, -1.1875, -0.6875, 0.4375, -1.875, -0.25,
         ],
         "grad_weights",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "bias")).unwrap()),
         &[3.75, 3.75],
         "grad_bias",
     );
@@ -2181,12 +2181,12 @@ fn depthwise_conv1d_stride_and_dilation_gradients_match_keras() {
         "grad_input",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "kernel")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "kernel")).unwrap()),
         &[1.5, 1.5, 0.5, -0.25, -1.125, 0.75, -0.0625, 0.3125],
         "grad_weights",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "bias")).unwrap()),
         &[0.625, 0.125, -0.375, 0.375],
         "grad_bias",
     );
@@ -2235,7 +2235,7 @@ fn separable_conv1d_stride_and_dilation_gradients_match_keras() {
     assert_flat_close(
         &flat(
             ctx.grads()
-                .get(ParamId::new(0, "depthwise_kernel"))
+                .get(&ParamId::new(0, "depthwise_kernel"))
                 .unwrap(),
         ),
         &[-1.75, 0.5625, 0.6875, -0.46875],
@@ -2244,14 +2244,14 @@ fn separable_conv1d_stride_and_dilation_gradients_match_keras() {
     assert_flat_close(
         &flat(
             ctx.grads()
-                .get(ParamId::new(0, "pointwise_kernel"))
+                .get(&ParamId::new(0, "pointwise_kernel"))
                 .unwrap(),
         ),
         &[-1.4375, 0.59375, 0.3125, -0.5625],
         "grad_pointwise_weights",
     );
     assert_flat_close(
-        &flat(ctx.grads().get(ParamId::new(0, "bias")).unwrap()),
+        &flat(ctx.grads().get(&ParamId::new(0, "bias")).unwrap()),
         &[0.375, -0.125],
         "grad_bias",
     );

@@ -877,14 +877,14 @@ fn conv2d_transpose_exposes_no_parameters_before_backward() {
     let mut layer = Conv2DTranspose::new(2, (2, 2), (1, 1), Linear::new()).unwrap();
     let mut ctx = Ctx::training();
     assert!(
-        ctx.grads().get(ParamId::new(0, "kernel")).is_none(),
+        ctx.grads().get(&ParamId::new(0, "kernel")).is_none(),
         "a fresh context holds no gradient"
     );
 
     let x = ramp_of(&[1, 3, 3, 1]);
     let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert!(
-        ctx.grads().get(ParamId::new(0, "kernel")).is_none(),
+        ctx.grads().get(&ParamId::new(0, "kernel")).is_none(),
         "a forward pass alone produces no gradient"
     );
 
@@ -1245,12 +1245,12 @@ fn conv2d_transpose_parallel_gradient_counts_are_constant() {
         assert_abs_diff_eq!(v, (k * k * filters) as f32, epsilon = 1e-3f32);
     }
 
-    let kernel_grad = ctx.grads().get(ParamId::new(0, "kernel")).unwrap();
+    let kernel_grad = ctx.grads().get(&ParamId::new(0, "kernel")).unwrap();
     assert_eq!(kernel_grad.len(), k * k * filters * cin);
     for &v in kernel_grad.iter() {
         assert_abs_diff_eq!(v, (batch * in_plane) as f32, epsilon = 1e-1f32);
     }
-    let bias_grad = ctx.grads().get(ParamId::new(0, "bias")).unwrap();
+    let bias_grad = ctx.grads().get(&ParamId::new(0, "bias")).unwrap();
     for &v in bias_grad.iter() {
         assert_abs_diff_eq!(v, (batch * out_side * out_side) as f32, epsilon = 1e-1f32);
     }

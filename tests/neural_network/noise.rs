@@ -9,6 +9,7 @@
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
 use rustyml::neural_network::Ctx;
+use rustyml::neural_network::LayerPath;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::regularization::noise_injection::gaussian_dropout::GaussianDropout;
@@ -205,7 +206,7 @@ fn gaussian_noise_training_consecutive_calls_differ() {
 
     let mut ctx = Ctx::training();
     let out1 = layer.forward_mut(&input, &mut ctx).unwrap();
-    layer.apply_state(&mut ctx.state_slot(0));
+    layer.apply_state(&mut ctx.state_slot(&LayerPath::root(0)));
 
     let mut ctx = Ctx::training();
     let out2 = layer.forward(&input, &mut ctx).unwrap();
@@ -461,7 +462,7 @@ fn gaussian_dropout_training_consecutive_calls_differ() {
 
     let mut ctx = Ctx::training();
     let out1 = layer.forward_mut(&input, &mut ctx).unwrap();
-    layer.apply_state(&mut ctx.state_slot(0));
+    layer.apply_state(&mut ctx.state_slot(&LayerPath::root(0)));
 
     let mut ctx = Ctx::training();
     let out2 = layer.forward(&input, &mut ctx).unwrap();

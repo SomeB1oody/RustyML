@@ -270,8 +270,8 @@ fn dense_backward_rank_3_produces_the_3_gradients_of_the_fold() {
     assert_eq!(grad_input.shape(), x.shape());
     assert_allclose(&grad_input, &expected_input, 1e-3_f32);
 
-    let grad_kernel = ctx.grads().get(ParamId::new(0, "kernel")).unwrap();
-    let grad_bias = ctx.grads().get(ParamId::new(0, "bias")).unwrap();
+    let grad_kernel = ctx.grads().get(&ParamId::new(0, "kernel")).unwrap();
+    let grad_bias = ctx.grads().get(&ParamId::new(0, "bias")).unwrap();
     // grad_weight = X2^T * G2, summed over all 6 folded rows
     let expected_weight = [411.0_f32, 447.0, 483.0, 462.0, 504.0, 546.0];
     // grad_bias sums the 6 folded rows, 1 sum for each unit
@@ -457,8 +457,8 @@ fn dense_rank_3_matches_across_the_tuning_gates() {
         let mut ctx = Ctx::training();
         let out = d.forward(&x, &mut ctx).unwrap();
         let grad = d.backward(&Tensor::ones(out.raw_dim()), &mut ctx).unwrap();
-        let grad_kernel = ctx.grads().get(ParamId::new(0, "kernel")).unwrap();
-        let grad_bias = ctx.grads().get(ParamId::new(0, "bias")).unwrap();
+        let grad_kernel = ctx.grads().get(&ParamId::new(0, "kernel")).unwrap();
+        let grad_bias = ctx.grads().get(&ParamId::new(0, "bias")).unwrap();
         (
             out.iter().cloned().collect::<Vec<f32>>(),
             grad.iter().cloned().collect::<Vec<f32>>(),
