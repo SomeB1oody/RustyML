@@ -436,7 +436,7 @@ fn param_snapshots(layer: &mut dyn UnaryLayer, ctx: &Ctx) -> Vec<(Vec<f32>, Vec<
             let value = layer.parameters_mut()[index].value.to_vec();
             let grad = ctx
                 .grads()
-                .get(ParamId::new(0, name))
+                .get(&ParamId::new(0, name))
                 .unwrap_or_else(|| panic!("the backward pass gave parameter `{name}` no gradient"))
                 .iter()
                 .cloned()

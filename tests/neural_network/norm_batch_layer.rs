@@ -6,6 +6,7 @@
 
 use ndarray::{ArrayD, Dimension};
 use rustyml::neural_network::Ctx;
+use rustyml::neural_network::LayerPath;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization;
 use rustyml::neural_network::layers::regularization::normalization::layer_normalization::{
@@ -170,7 +171,7 @@ fn bn_running_stats_update_after_one_forward() {
     bn.forward_mut(&input_train, &mut ctx).unwrap();
     // The forward pass proposed the new statistics in the context, and `apply_state` moves
     // them into the layer, exactly as `Sequential` does after each forward pass
-    bn.apply_state(&mut ctx.state_slot(0));
+    bn.apply_state(&mut ctx.state_slot(&LayerPath::root(0)));
 
     // Feed the declared shape [4,1] to an inference pass
     // All rows = 5.0, so each produces the same inference output
@@ -237,7 +238,7 @@ fn bn_predict_equals_forward_in_eval_mode() {
 
     // An inference pass writes no cache and proposes no state change, so it moves nothing
     assert_eq!(first.pending_caches(), 0);
-    assert!(!first.has_state(0));
+    assert!(!first.has_state(&LayerPath::root(0)));
 
     assert_allclose(&out_forward, &out_again, 0.0f32);
 }
@@ -307,9 +308,9 @@ fn bn_running_stats_accumulate_over_multiple_forwards() {
     let mut first = Ctx::training();
     let mut second = Ctx::training();
     bn.forward_mut(&x, &mut first).unwrap();
-    bn.apply_state(&mut first.state_slot(0));
+    bn.apply_state(&mut first.state_slot(&LayerPath::root(0)));
     bn.forward(&x, &mut second).unwrap();
-    bn.apply_state(&mut second.state_slot(0));
+    bn.apply_state(&mut second.state_slot(&LayerPath::root(0)));
 
     // running_mean ~= 0.75, running_var ~= 1.0. Feed shape [2,1] to match input_shape.
     let x_eval = tensor2(vec![1.0f32, 5.0], 2, 1);
@@ -1016,7 +1017,7 @@ fn bn_run(shape: &[usize], gate: usize) -> (ArrayD<f32>, ArrayD<f32>, Vec<f32>) 
     for name in ["gamma", "beta"] {
         let grad = ctx
             .grads()
-            .get(ParamId::new(0, name))
+            .get(&ParamId::new(0, name))
             .expect("the backward pass must write the gradient of gamma and of beta");
         grads.extend(grad.iter().copied());
     }

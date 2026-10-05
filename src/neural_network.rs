@@ -180,6 +180,8 @@ pub mod error;
 pub mod graph;
 /// How a layer draws the starting values of a weight array
 pub mod initializer;
+/// The address of 1 layer inside a model, and the walks over a tree of layers
+pub mod layer_path;
 /// Neural network layer implementations
 pub mod layers;
 /// Loss function implementations
@@ -196,4 +198,5 @@ pub mod traits;
 pub use ctx::{Ctx, Grads, LayerId, StateSlot};
 pub use error::NnError;
 pub use initializer::{Fans, Initializer};
+pub use layer_path::{LayerPath, Sublayer, SublayerMut, SublayerName};
 pub use shape::Shape;

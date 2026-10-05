@@ -41,7 +41,7 @@ use rustyml::{error::Error, neural_network::NnError};
 /// position 0 of the gradient store.
 fn grad_of<'a>(ctx: &'a Ctx, name: &'static str) -> &'a [f32] {
     ctx.grads()
-        .get(ParamId::new(0, name))
+        .get(&ParamId::new(0, name))
         .unwrap_or_else(|| panic!("the backward pass must give `{name}` a gradient"))
         .as_slice()
         .expect("a gradient of the store is in the standard memory order")

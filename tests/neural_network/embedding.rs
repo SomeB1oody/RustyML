@@ -224,7 +224,7 @@ fn embedding_backward_matches_the_keras_scatter_add_reference() {
     assert_eq!(ctx.grads().len(), 1, "the layer holds exactly 1 tensor");
     let values: Vec<f32> = ctx
         .grads()
-        .get(ParamId::new(0, "embeddings"))
+        .get(&ParamId::new(0, "embeddings"))
         .unwrap()
         .iter()
         .copied()
@@ -263,7 +263,7 @@ fn embedding_backward_leaves_an_unused_row_at_zero() {
 
     let values: Vec<f32> = ctx
         .grads()
-        .get(ParamId::new(0, "embeddings"))
+        .get(&ParamId::new(0, "embeddings"))
         .unwrap()
         .iter()
         .copied()
@@ -289,7 +289,7 @@ fn embedding_backward_clears_the_gradient_of_the_previous_step() {
 
     let table_gradient = |ctx: &Ctx| -> Vec<f32> {
         ctx.grads()
-            .get(ParamId::new(0, "embeddings"))
+            .get(&ParamId::new(0, "embeddings"))
             .unwrap()
             .iter()
             .copied()
@@ -505,12 +505,12 @@ fn embedding_names_its_table_embeddings() {
 fn embedding_exposes_no_parameter_before_the_backward_pass() {
     let mut layer = Embedding::new(4, 3).unwrap();
     let mut ctx = Ctx::training();
-    assert!(ctx.grads().get(ParamId::new(0, "embeddings")).is_none());
+    assert!(ctx.grads().get(&ParamId::new(0, "embeddings")).is_none());
 
     let x = t2(2, 2, vec![0.0, 1.0, 2.0, 3.0]);
     let out = layer.forward_mut(&x, &mut ctx).unwrap();
     assert!(
-        ctx.grads().get(ParamId::new(0, "embeddings")).is_none(),
+        ctx.grads().get(&ParamId::new(0, "embeddings")).is_none(),
         "a forward pass alone produces no gradient"
     );
 

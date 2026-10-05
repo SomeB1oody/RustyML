@@ -39,19 +39,19 @@
 //! ```
 
 use crate::error::Error;
-use crate::math::reduction::det_reduce;
 use crate::neural_network::NnError;
 use crate::neural_network::Shape;
 use crate::neural_network::Tensor;
-use crate::neural_network::ctx::{Ctx, Grads, LayerId};
-use crate::neural_network::layers::checkpoint::{
-    LoadReport, apply, apply_partial, capture, weight_path,
+use crate::neural_network::ctx::{Ctx, LayerId};
+use crate::neural_network::layer_path::{
+    LayerPath, apply_state_tree, check_state_taken, find_weight, global_grad_norm,
+    model_weight_paths, total_param_count, update_model,
 };
+use crate::neural_network::layers::checkpoint::{LoadReport, apply, apply_partial, capture};
 use crate::neural_network::sequential::{History, read_checkpoint};
 use crate::neural_network::traits::{
-    Layer, Loss, Optimizer, ParamId, check_addresses, check_every_gradient_is_claimed,
+    Layer, Loss, Optimizer, check_addresses, check_every_gradient_is_claimed,
 };
-use crate::parallel_gates::sq_sum_f32_parallel_min_elems;
 use ahash::AHashMap;
 use ndarray::{ArrayViewD, Axis};
 use ndarray_rand::rand::seq::SliceRandom;
@@ -588,16 +588,19 @@ impl Graph {
     }
 
     /// Moves the non-trainable state that the pass proposed into every layer that proposed one
-    fn apply_state(&mut self, ctx: &mut Ctx) {
+    ///
+    /// The walk reaches every sublayer of every arena entry
+    ///
+    /// # Errors
+    ///
+    /// - `Error::Computation` - If a state value stays in the context, because no node took
+    ///   it back
+    fn apply_state(&mut self, ctx: &mut Ctx) -> Result<(), Error> {
         for (id, layer) in self.layers.iter_mut().enumerate() {
-            if ctx.has_state(id) {
-                layer.apply_state(&mut ctx.state_slot(id));
-                debug_assert!(
-                    !ctx.has_state(id),
-                    "layer {id} proposed a state change and did not take it back"
-                );
-            }
+            apply_state_tree(&mut **layer, &LayerPath::root(id), ctx);
+            check_state_taken(ctx, id)?;
         }
+        Ok(())
     }
 
     /// Runs the model on 1 batch, and gives back the loss it reports
@@ -627,7 +630,7 @@ impl Graph {
 
         let mut ctx = Ctx::training();
         let values = self.forward_values(xs, &mut ctx)?;
-        self.apply_state(&mut ctx);
+        self.apply_state(&mut ctx)?;
 
         let mut total = 0.0_f32;
         let mut grads: Vec<Option<Tensor>> = vec![None; self.nodes.len()];
@@ -693,13 +696,11 @@ impl Graph {
             None => 1.0,
         };
 
-        // The walk is the arena order, and the arena position is the layer half of every
-        // parameter address. A layer that several nodes call holds 1 arena entry. Its
-        // gradient is the sum of the gradients of those nodes, and it updates once
+        // The walk is the arena order, and the arena position is the root of every parameter
+        // address. A layer that several nodes call holds 1 arena entry. Its gradient is the
+        // sum of the gradients of those nodes, and it updates once
         if let Some(ref mut optimizer) = self.optimizer {
-            for (scope, layer) in self.layers.iter_mut().enumerate() {
-                optimizer.update(scope, &mut **layer, ctx.grads(), grad_scale);
-            }
+            update_model(&mut **optimizer, &mut self.layers, ctx.grads(), grad_scale);
         }
 
         Ok(total)
@@ -848,24 +849,16 @@ impl Graph {
 
     /// Every checkpoint path of the model, in arena order
     ///
-    /// A path is `<scope>.<name>`: the position of the layer in the arena, and the name the
-    /// layer gives the array. A layer that several nodes call holds 1 arena entry, so it holds
-    /// 1 set of paths
+    /// A path is `<layer path>.<name>`: the [`LayerPath`] of the layer that holds the array,
+    /// and the name the layer gives the array. The layer path starts with the position of the
+    /// layer in the arena, and adds 1 part per sublayer. A layer that several nodes call holds
+    /// 1 arena entry, so it holds 1 set of paths
     ///
     /// # Returns
     ///
     /// - `Vec<String>` - Every path, in file order
     pub fn weight_paths(&self) -> Vec<String> {
-        self.layers
-            .iter()
-            .enumerate()
-            .flat_map(|(scope, layer)| {
-                layer
-                    .weights()
-                    .into_iter()
-                    .map(move |entry| weight_path(scope, entry.name))
-            })
-            .collect()
+        model_weight_paths(&self.layers)
     }
 
     /// 1 named array of the model, or `None` when no layer holds that path
@@ -878,9 +871,7 @@ impl Graph {
     ///
     /// - `Option<ArrayViewD<'_, f32>>` - A read view of the array
     pub fn weight(&self, path: &str) -> Option<ArrayViewD<'_, f32>> {
-        let (scope, name) = path.split_once('.')?;
-        let scope: usize = scope.parse().ok()?;
-        self.layers.get(scope)?.weight(name)
+        find_weight(&self.layers, path)
     }
 
     /// Writes every array of the model to a file
@@ -973,7 +964,7 @@ impl Graph {
                         format!("{}_{}", kind.to_lowercase(), count)
                     };
                     *count += 1;
-                    let counts = self.layers[*layer].param_count();
+                    let counts = total_param_count(&*self.layers[*layer]);
                     let shown = if counted[*layer] {
                         // A shared layer counts once, which is the whole point of sharing
                         "shared".to_string()
@@ -1076,38 +1067,6 @@ fn accumulate(grads: &mut [Option<Tensor>], node: NodeId, gradient: Tensor) -> R
 /// Takes the rows of `tensor` that `rows` names, in that order
 fn gather(tensor: &Tensor, rows: &[usize]) -> Tensor {
     tensor.select(Axis(0), rows)
-}
-
-/// The global L2 norm of every gradient of the model, for a global-norm clip
-///
-/// The walk is the arena order, and the parameter order of each layer. The gradient store
-/// sorts by address instead, and a sum of `f64` squares is not associative, so reducing in
-/// store order would move the last bit of the norm. A tensor folds in deterministic blocks,
-/// and the rayon path above the square-sum gate gives the same result as the serial path. A
-/// layer with no gradient contributes nothing, and a pass with no gradient at all gives a norm
-/// of 0.0
-///
-/// This is the same walk order that the parameter-update loop in [`Graph::train_batch`] uses
-fn global_grad_norm(layers: &mut [Box<dyn Layer>], grads: &Grads) -> f32 {
-    let mut sum_sq = 0.0_f64;
-    for (scope, layer) in layers.iter_mut().enumerate() {
-        for param in layer.parameters_mut() {
-            let Some(grad) = grads.get(ParamId::new(scope, param.name)) else {
-                continue;
-            };
-            let grad = grad
-                .as_slice()
-                .expect("a stored gradient is in the standard memory order");
-            sum_sq += det_reduce(
-                grad,
-                grad.len() >= sq_sum_f32_parallel_min_elems(),
-                |block| block.iter().map(|&g| (g as f64) * (g as f64)).sum::<f64>(),
-                |a, b| a + b,
-                0.0,
-            );
-        }
-    }
-    sum_sq.sqrt() as f32
 }
 
 /// Unit tests that hold the graph executor against the chain it generalizes

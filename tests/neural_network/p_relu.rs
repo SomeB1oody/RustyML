@@ -61,7 +61,7 @@ fn slope_gradient(layer: &mut PReLU, ctx: &Ctx) -> Vec<f32> {
         "decoupled weight decay must skip the slopes"
     );
     ctx.grads()
-        .get(ParamId::new(0, "alpha"))
+        .get(&ParamId::new(0, "alpha"))
         .expect("the backward pass must give the slopes a gradient")
         .iter()
         .copied()
@@ -404,11 +404,11 @@ fn p_relu_slope_gradient_weights_by_the_upstream_gradient() {
 fn p_relu_exposes_no_parameter_before_the_first_backward() {
     let mut layer = PReLU::new(0.25).unwrap();
     let mut ctx = Ctx::training();
-    assert!(ctx.grads().get(ParamId::new(0, "alpha")).is_none());
+    assert!(ctx.grads().get(&ParamId::new(0, "alpha")).is_none());
     layer
         .forward_mut(&Tensor::zeros(IxDyn(&[2, 3])), &mut ctx)
         .unwrap();
-    assert!(ctx.grads().get(ParamId::new(0, "alpha")).is_none());
+    assert!(ctx.grads().get(&ParamId::new(0, "alpha")).is_none());
     layer
         .backward(&Tensor::ones(IxDyn(&[2, 3])), &mut ctx)
         .unwrap();
@@ -432,7 +432,7 @@ fn p_relu_shared_axes_drops_a_stale_gradient() {
         .backward(&Tensor::ones(IxDyn(&[2, 3, 4])), &mut ctx)
         .unwrap();
     assert_eq!(ctx.grads().len(), 1);
-    let stale = ctx.grads().get(ParamId::new(0, "alpha")).unwrap().len();
+    let stale = ctx.grads().get(&ParamId::new(0, "alpha")).unwrap().len();
 
     let mut layer = layer.with_shared_axes(vec![1]).unwrap();
     assert_ne!(

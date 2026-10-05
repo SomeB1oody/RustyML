@@ -8,6 +8,7 @@
 //! lazily-sized per-parameter moment buffers) lives here once
 
 use crate::error::Error;
+use crate::neural_network::LayerPath;
 use crate::neural_network::ctx::Grads;
 use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
@@ -142,28 +143,28 @@ impl AdamCore {
     ///
     /// # Parameters
     ///
-    /// - `scope` - position of this layer in the model, counted from the input. It is the layer
-    ///   half of the parameter address
+    /// - `path` - path of this layer in the model. It is the layer half of the parameter
+    ///   address
     /// - `layer` - the layer whose parameters should be updated
     /// - `grads` - every gradient the backward pass produced
     /// - `grad_scale` - uniform factor applied to every gradient before the update, to implement
     ///   clip-by-global-norm. Pass `1.0` for an unscaled update
     pub(super) fn update(
         &mut self,
-        scope: usize,
+        path: &LayerPath,
         layer: &mut dyn LayerBase,
         grads: &Grads,
         grad_scale: f32,
     ) {
         for pg in layer.parameters_mut() {
-            let Some(grad) = grads.get(ParamId::new(scope, pg.name)) else {
+            let Some(grad) = grads.get(&path.param(pg.name)) else {
                 continue;
             };
             let grad = grad
                 .as_slice()
                 .expect("a stored gradient is in the standard memory order");
             debug_assert_eq!(grad.len(), pg.value.len());
-            let state = self.states.entry(ParamId::new(scope, pg.name)).or_default();
+            let state = self.states.entry(path.param(pg.name)).or_default();
             if state.m.len() != pg.value.len() {
                 // The tensor was resized under its own name: start the moment buffers again
                 *state = AdamParamState {

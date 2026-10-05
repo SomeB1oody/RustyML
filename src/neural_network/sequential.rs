@@ -20,20 +20,19 @@
 //! `save_to_path` and `load_from_path` read and write every array of the model, in the
 //! format that [`checkpoint`](crate::neural_network::layers::checkpoint) defines
 
-use super::traits::{
-    Layer, Loss, Optimizer, ParamId, check_addresses, check_every_gradient_is_claimed,
-};
+use super::traits::{Layer, Loss, Optimizer, check_addresses, check_every_gradient_is_claimed};
 use crate::error::{Error, IoError};
-use crate::math::reduction::det_reduce;
 use crate::neural_network::NnError;
 use crate::neural_network::Shape;
 use crate::neural_network::Tensor;
-use crate::neural_network::ctx::{Ctx, Grads};
+use crate::neural_network::ctx::Ctx;
+use crate::neural_network::layer_path::{
+    LayerPath, apply_state_tree, check_state_taken, find_weight, global_grad_norm,
+    model_weight_paths, total_param_count, update_model,
+};
 use crate::neural_network::layers::checkpoint::{
     LoadReport, MODEL_FORMAT_VERSION, MODEL_MAGIC, ModelCheckpoint, apply, apply_partial, capture,
-    weight_path,
 };
-use crate::parallel_gates::sq_sum_f32_parallel_min_elems;
 use ahash::AHashMap;
 use ndarray::{ArrayViewD, Axis};
 use ndarray_rand::rand::seq::SliceRandom;
@@ -326,39 +325,6 @@ fn build_refusal(index: usize, layer_type: &str, input: &Shape, source: Error) -
     ))
 }
 
-/// The global L2 norm of every gradient stored across `layers`, for a global-norm clip
-///
-/// The walk is the layer order of the model, from the input, and the parameter order of each
-/// layer. The gradient store sorts by address instead, and a sum of `f64` squares is not
-/// associative, so reducing in store order would move the last bit of the norm. A tensor folds
-/// in deterministic blocks, and the rayon path above the square-sum gate gives the same result
-/// as the serial path. A layer with no gradient contributes nothing, and a pass with no
-/// gradient at all gives a norm of 0.0
-///
-/// This is the same walk order that the parameter-update loop in
-/// [`Sequential::train_batch`] uses
-fn global_grad_norm(layers: &mut [Box<dyn Layer>], grads: &Grads) -> f32 {
-    let mut sum_sq = 0.0_f64;
-    for (scope, layer) in layers.iter_mut().enumerate() {
-        for param in layer.parameters_mut() {
-            let Some(grad) = grads.get(ParamId::new(scope, param.name)) else {
-                continue;
-            };
-            let grad = grad
-                .as_slice()
-                .expect("a stored gradient is in the standard memory order");
-            sum_sq += det_reduce(
-                grad,
-                grad.len() >= sq_sum_f32_parallel_min_elems(),
-                |block| block.iter().map(|&g| (g as f64) * (g as f64)).sum::<f64>(),
-                |a, b| a + b,
-                0.0,
-            );
-        }
-    }
-    sum_sq.sqrt() as f32
-}
-
 /// The per-epoch training loss that [`Sequential::fit`] and [`Sequential::fit_with_batches`]
 /// record
 ///
@@ -590,14 +556,11 @@ impl Sequential {
             let input = output.as_ref().unwrap_or(x);
             let next = layer.forward_many(&[input], &mut ctx)?;
             // The running statistics of a normalization layer and the random stream of a
-            // dropout layer reach the layer here, because the forward pass took `&self`
-            if ctx.has_state(scope) {
-                layer.apply_state(&mut ctx.state_slot(scope));
-                debug_assert!(
-                    !ctx.has_state(scope),
-                    "layer {scope} proposed a state change and did not take it back"
-                );
-            }
+            // dropout layer reach the layer here, because the forward pass took `&self`. The
+            // walk reaches every sublayer of the position, and a value that no node takes back
+            // stops the step
+            apply_state_tree(&mut **layer, &LayerPath::root(scope), &mut ctx);
+            check_state_taken(&ctx, scope)?;
             output = Some(next);
         }
         let output = output.ok_or(Error::NeuralNetwork(NnError::EmptyModel))?;
@@ -644,13 +607,12 @@ impl Sequential {
             None => 1.0,
         };
 
-        // Parameter updates walk forward, from the input: the same canonical order
-        // `global_grad_norm` above uses. The index is the layer half of the parameter address
-        // the optimizer keys its state on, so it must count from the input, never the output
+        // Parameter updates walk the canonical order of the model, from the input: the same
+        // order that `global_grad_norm` uses. The model position is the root of the parameter
+        // address that the optimizer keys its state on, so it must count from the input, never
+        // the output
         if let Some(ref mut optimizer) = self.optimizer {
-            for (scope, layer) in self.layers.iter_mut().enumerate() {
-                optimizer.update(scope, &mut **layer, ctx.grads(), grad_scale);
-            }
+            update_model(&mut **optimizer, &mut self.layers, ctx.grads(), grad_scale);
         }
 
         Ok(loss_value)
@@ -971,7 +933,7 @@ impl Sequential {
 
             // Both counts are added, so a layer that holds non-trainable state (the running
             // statistics of batch normalization) reaches the total and the third column
-            let counts = layer.param_count();
+            let counts = total_param_count(&**layer);
             trainable_param_count += counts.trainable;
             non_trainable_param_count += counts.non_trainable;
             total_params += counts.total();
@@ -1039,24 +1001,18 @@ impl Sequential {
 
     /// Every checkpoint path of the model, in order
     ///
-    /// A path is `<scope>.<name>`: the position of the layer, counted from the input, and the
-    /// name that the layer gives the array. The list holds the trainable arrays and the
-    /// non-trainable state alike, which is exactly what a saved file holds
+    /// A path is `<layer path>.<name>`: the [`LayerPath`] of the layer that holds the array,
+    /// and the name that the layer gives the array. The layer path starts with the position of
+    /// the layer, counted from the input, and adds 1 part per sublayer. The list holds the
+    /// trainable arrays and the non-trainable state alike, which is exactly what a saved file
+    /// holds. The order is the canonical order: by position, and in pre-order inside each
+    /// position
     ///
     /// # Returns
     ///
     /// - `Vec<String>` - 1 path per array of the model
     pub fn weight_paths(&self) -> Vec<String> {
-        let mut paths = Vec::new();
-        for (scope, layer) in self.layers.iter().enumerate() {
-            paths.extend(
-                layer
-                    .weights()
-                    .iter()
-                    .map(|entry| weight_path(scope, entry.name)),
-            );
-        }
-        paths
+        model_weight_paths(&self.layers)
     }
 
     /// 1 array of the model, by its checkpoint path
@@ -1065,7 +1021,7 @@ impl Sequential {
     ///
     /// # Parameters
     ///
-    /// - `path` - The dotted path of the array, such as `"0.kernel"`. See
+    /// - `path` - The dotted path of the array, such as `"0.kernel"` or `"0.first.kernel"`. See
     ///   [`weight_paths`](Sequential::weight_paths)
     ///
     /// # Returns
@@ -1073,9 +1029,7 @@ impl Sequential {
     /// - `Option<ArrayViewD<'_, f32>>` - A read view of the array, or `None` when the model
     ///   holds no array at that path
     pub fn weight(&self, path: &str) -> Option<ArrayViewD<'_, f32>> {
-        let (scope, name) = path.split_once('.')?;
-        let layer = self.layers.get(scope.parse::<usize>().ok()?)?;
-        layer.weight(name)
+        find_weight(&self.layers, path)
     }
 
     /// Writes a named checkpoint of every array of the model to a binary file

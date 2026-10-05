@@ -661,6 +661,7 @@ impl UnaryLayer for BatchNormalization {
 mod tests {
     use super::super::folds::rows_per_block;
     use super::*;
+    use crate::neural_network::LayerPath;
     use approx::assert_abs_diff_eq;
     use ndarray::{Array2, IxDyn};
 
@@ -816,13 +817,13 @@ mod tests {
         let mut spatial_ctx = Ctx::training();
         let out4 = spatial.forward_mut(&x4, &mut spatial_ctx).unwrap();
         // The running statistics live in the context until the layer takes them back
-        spatial.apply_state(&mut spatial_ctx.state_slot(0));
+        spatial.apply_state(&mut spatial_ctx.state_slot(&LayerPath::root(0)));
 
         let mut folded = BatchNormalization::new(0.9, 1e-5).unwrap();
         let x2 = Tensor::from_shape_vec(IxDyn(&[b * h * w, c]), flat).unwrap();
         let mut folded_ctx = Ctx::training();
         let out2 = folded.forward_mut(&x2, &mut folded_ctx).unwrap();
-        folded.apply_state(&mut folded_ctx.state_slot(0));
+        folded.apply_state(&mut folded_ctx.state_slot(&LayerPath::root(0)));
 
         assert_eq!(
             out4.iter().copied().collect::<Vec<f32>>(),
