@@ -161,24 +161,6 @@ fn rescaling_offset_defaults_to_zero() {
     );
 }
 
-/// A forward pass with an inference context returns exactly what a forward pass with a
-/// training context returns
-///
-/// The layer has no training mode and no inference mode. The Keras probe confirmed that
-/// `training=True` and `training=False` give bit-identical answers
-#[test]
-fn rescaling_predict_equals_forward_bit_for_bit() {
-    let x = ramp(&[2, 3, 4]);
-    let layer = Rescaling::new(1.0 / 255.0).with_offset(-0.25);
-
-    let trained = layer.forward(&x, &mut Ctx::training()).unwrap();
-    let inferred = layer.forward(&x, &mut Ctx::inference()).unwrap();
-
-    for (a, b) in trained.iter().zip(inferred.iter()) {
-        assert_eq!(a.to_bits(), b.to_bits(), "predict differs from forward");
-    }
-}
-
 /// The backward pass returns the incoming gradient times the scale, and the offset drops out
 ///
 /// Keras, through a jax gradient of `sum(y * upstream)`, gives the recorded values. The probe

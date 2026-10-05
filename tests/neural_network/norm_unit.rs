@@ -620,27 +620,6 @@ fn unit_normalization_parallel_path_matches_the_serial_path() {
 
 // contract
 
-/// An inference pass writes no cache, so it cannot serve a later backward pass
-#[test]
-fn unit_normalization_predict_matches_forward_and_caches_nothing() {
-    let x = ramp(&[2, 4], 3.0);
-    let mut layer = last_axis();
-
-    let mut inference = Ctx::inference();
-    let inferred = layer.forward_mut(&x, &mut inference).unwrap();
-    assert!(
-        matches!(
-            layer.backward(&inferred, &mut inference),
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "an inference pass must not leave a cache behind"
-    );
-
-    let mut training = Ctx::training();
-    let trained = layer.forward(&x, &mut training).unwrap();
-    assert_eq!(inferred, trained);
-}
-
 /// The layer holds nothing an optimizer can update
 #[test]
 fn unit_normalization_holds_no_parameter() {

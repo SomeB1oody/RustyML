@@ -165,19 +165,6 @@ fn dense_forward_3_to_2_linear_single_row() {
     assert_allclose(&out, &expected, 1e-5_f32);
 }
 
-// Dense: an inference pass equals a training pass (no activation side effects)
-
-/// Dense has no mode-dependent behavior, so the 2 contexts produce identical outputs
-#[test]
-fn dense_predict_equals_forward() {
-    let d = dense_2x2_with_weights(vec![1.0, 2.0, 3.0, 4.0], vec![0.5, -0.5]);
-    let x = t2(2, 2, vec![1.0, -1.0, 0.5, 2.0]);
-
-    let fwd = d.forward(&x, &mut Ctx::training()).unwrap();
-    let pred = d.forward(&x, &mut Ctx::inference()).unwrap();
-    assert_allclose(&fwd, &pred, 1e-6_f32);
-}
-
 // Dense: input of rank 3 or more, where the last axis is the only contracted axis
 
 /// Dense(2 -> 3, Linear) with the fixed kernel [[1, 2, 3], [4, 5, 6]] and the bias
@@ -539,22 +526,6 @@ fn dense_backward_rank_3_rejects_a_folded_gradient() {
     );
 }
 
-#[test]
-fn dense_backward_before_forward_returns_err() {
-    let d = Dense::new(2, Linear::new()).unwrap();
-    // no forward called yet
-    let grad = t2(1, 2, vec![1.0, 1.0]);
-    let result = d.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
-}
-
 /// A wrong-shaped upstream gradient returns ShapeMismatch instead of panicking
 #[test]
 fn dense_backward_wrong_grad_shape_returns_err() {
@@ -830,36 +801,6 @@ fn flatten_forward_rejects_6d_input() {
         "expected InvalidInput for 6D input, got {:?}",
         result
     );
-}
-
-#[test]
-fn flatten_backward_before_forward_returns_err() {
-    let fl = Flatten::new();
-    // No forward call happened yet, so the context holds no cache of this layer
-    let grad = t2(2, 12, vec![0.0_f32; 24]);
-    let result = fl.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
-}
-
-// Flatten: an inference pass equals a training pass (no training-mode difference)
-
-#[test]
-fn flatten_predict_equals_forward() {
-    let data: Vec<f32> = (0..24).map(|v| v as f32).collect();
-    let x = t3(2, 3, 4, data);
-
-    let mut fl = Flatten::new();
-    fl.build(&Shape::known(&[2, 3, 4])).unwrap();
-    let fwd = fl.forward(&x, &mut Ctx::training()).unwrap();
-    let pred = fl.forward(&x, &mut Ctx::inference()).unwrap();
-    assert_allclose(&fwd, &pred, 1e-6_f32);
 }
 
 // Flatten: the named weight list is empty (no trainable parameters)

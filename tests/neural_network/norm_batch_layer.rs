@@ -643,23 +643,6 @@ fn ln_default_constant_row_is_finite_and_zero() {
     }
 }
 
-// An inference pass == a training pass, for LN
-
-/// An inference pass matches a training pass, since LN always computes stats from the input
-#[test]
-fn ln_predict_equals_forward() {
-    let data = vec![1.0f32, 3.0, 5.0, 7.0, 2.0, -2.0, 0.0, 4.0];
-    let input = tensor2(data, 2, 4);
-    let mut ln = LayerNormalization::new(1e-5).unwrap();
-
-    // A training pass runs first, and it writes a cache
-    let out_forward = ln.forward_mut(&input, &mut Ctx::training()).unwrap();
-    // An inference pass computes the same values and writes no cache
-    let out_predict = ln.forward(&input, &mut Ctx::inference()).unwrap();
-
-    assert_allclose(&out_forward, &out_predict, 1e-6);
-}
-
 // set_weights: custom gamma/beta applied
 
 /// LN set_weights: custom gamma and beta scale and shift the normalized output
@@ -734,21 +717,6 @@ fn ln_mode_switch_does_not_change_forward_output() {
     assert_allclose(&out_train, &out_eval, 1e-6);
 }
 
-// 2 LN inference passes give the same values
-
-/// 2 LN inference passes agree exactly
-#[test]
-fn ln_predict_equals_forward_in_eval_mode() {
-    let data = vec![1.0f32, 3.0, 5.0, 7.0, 2.0, -2.0, 0.0, 4.0];
-    let input = tensor2(data, 2, 4);
-    let mut ln = LayerNormalization::new(1e-5).unwrap();
-
-    let out_forward = ln.forward_mut(&input, &mut Ctx::inference()).unwrap();
-    let out_predict = ln.forward(&input, &mut Ctx::inference()).unwrap();
-
-    assert_allclose(&out_forward, &out_predict, 0.0f32);
-}
-
 // LN Multiple axes: forward-time axis validation
 
 /// LN forward with valid Multiple([0, 1]) axes succeeds
@@ -765,40 +733,6 @@ fn ln_multiple_valid_axes_forward_succeeds() {
         result.is_ok(),
         "forward with valid Multiple axes failed: {:?}",
         result
-    );
-}
-
-// backward() before forward() must error
-
-/// BatchNormalization::backward before any forward pass returns Err(ForwardPassNotRun)
-#[test]
-fn bn_backward_before_forward_errors() {
-    let bn = BatchNormalization::new(0.9, 1e-5).unwrap();
-    let grad = tensor2(vec![1.0f32; 6], 2, 3);
-    let err = bn.backward(&grad, &mut Ctx::training()).unwrap_err();
-    assert!(
-        matches!(
-            err,
-            Error::NeuralNetwork(NnError::ForwardPassNotRun("BatchNormalization"))
-        ),
-        "expected ForwardPassNotRun(\"BatchNormalization\"), got {:?}",
-        err
-    );
-}
-
-/// LayerNormalization::backward before any forward pass returns Err(ForwardPassNotRun)
-#[test]
-fn ln_backward_before_forward_errors() {
-    let ln = LayerNormalization::new(1e-5).unwrap();
-    let grad = tensor2(vec![1.0f32; 8], 2, 4);
-    let err = ln.backward(&grad, &mut Ctx::training()).unwrap_err();
-    assert!(
-        matches!(
-            err,
-            Error::NeuralNetwork(NnError::ForwardPassNotRun("LayerNormalization"))
-        ),
-        "expected ForwardPassNotRun(\"LayerNormalization\"), got {:?}",
-        err
     );
 }
 

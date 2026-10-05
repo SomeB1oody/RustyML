@@ -5,7 +5,6 @@
 //! - Eval mode: output == input (identity), whatever the rate
 //! - SpatialDropout channel-consistency: whole channel 0 or fully kept and scaled
 //! - Constructor rejects invalid rates
-//! - backward before forward -> Err(ForwardPassNotRun)
 //! - backward() in eval mode passes gradient through unchanged
 //! - Shape / ndim validation error paths
 //! - Dropout noise_shape: the small draw, the shared axis, the right-aligned short form, and
@@ -234,67 +233,6 @@ fn dropout_constructor_rejects_invalid_rate() {
 fn dropout_constructor_accepts_boundary_rates_zero_and_one() {
     assert!(Dropout::new(0.0).is_ok());
     assert!(Dropout::new(1.0).is_ok());
-}
-
-#[test]
-fn dropout_backward_before_forward_returns_forward_pass_not_run() {
-    // The context holds no mask -> backward before forward -> ForwardPassNotRun error
-    let layer = Dropout::new(0.5).unwrap();
-
-    let grad = filled(&[4], 1.0);
-    let err = layer.backward(&grad, &mut Ctx::training()).unwrap_err();
-    assert!(
-        matches!(err, Error::NeuralNetwork(NnError::ForwardPassNotRun(_))),
-        "expected ForwardPassNotRun, got {:?}",
-        err
-    );
-}
-
-#[test]
-fn spatial_dropout_backward_before_forward_reports_concrete_layer_name() {
-    // The shared dropout_backward helper must name the concrete SpatialDropout layer in
-    // ForwardPassNotRun, not a hardcoded Dropout name
-    // Channels-last: (batch=2, length=8, channels=4)
-    let d1 = SpatialDropout1D::new(0.5).unwrap();
-    let err1 = d1
-        .backward(&filled(&[2, 8, 4], 1.0), &mut Ctx::training())
-        .unwrap_err();
-    assert!(
-        matches!(
-            err1,
-            Error::NeuralNetwork(NnError::ForwardPassNotRun("SpatialDropout1D"))
-        ),
-        "expected ForwardPassNotRun(\"SpatialDropout1D\"), got {:?}",
-        err1
-    );
-
-    // Channels-last: (batch=2, height=4, width=4, channels=3)
-    let d2 = SpatialDropout2D::new(0.5).unwrap();
-    let err2 = d2
-        .backward(&filled(&[2, 4, 4, 3], 1.0), &mut Ctx::training())
-        .unwrap_err();
-    assert!(
-        matches!(
-            err2,
-            Error::NeuralNetwork(NnError::ForwardPassNotRun("SpatialDropout2D"))
-        ),
-        "expected ForwardPassNotRun(\"SpatialDropout2D\"), got {:?}",
-        err2
-    );
-
-    // Channels-last: (batch=1, depth=3, height=3, width=3, channels=2)
-    let d3 = SpatialDropout3D::new(0.5).unwrap();
-    let err3 = d3
-        .backward(&filled(&[1, 3, 3, 3, 2], 1.0), &mut Ctx::training())
-        .unwrap_err();
-    assert!(
-        matches!(
-            err3,
-            Error::NeuralNetwork(NnError::ForwardPassNotRun("SpatialDropout3D"))
-        ),
-        "expected ForwardPassNotRun(\"SpatialDropout3D\"), got {:?}",
-        err3
-    );
 }
 
 /// A built layer accepts a feature count that its build shape does not name
@@ -561,19 +499,6 @@ fn spatial_dropout_1d_rejects_wrong_ndim_predict() {
     assert!(layer.forward(&input_2d, &mut Ctx::inference()).is_err());
 }
 
-#[test]
-fn spatial_dropout_1d_backward_before_forward_returns_error() {
-    let layer = SpatialDropout1D::new(0.5).unwrap();
-
-    let grad = filled(&[1, 8, 4], 1.0);
-    let err = layer.backward(&grad, &mut Ctx::training()).unwrap_err();
-    assert!(
-        matches!(err, Error::NeuralNetwork(NnError::ForwardPassNotRun(_))),
-        "expected ForwardPassNotRun, got {:?}",
-        err
-    );
-}
-
 // SpatialDropout2D - channel-consistency and values
 
 #[test]
@@ -669,19 +594,6 @@ fn spatial_dropout_2d_predict_rejects_wrong_ndim() {
 fn spatial_dropout_2d_rejects_invalid_rate() {
     assert!(SpatialDropout2D::new(-0.5).is_err());
     assert!(SpatialDropout2D::new(1.1).is_err());
-}
-
-#[test]
-fn spatial_dropout_2d_backward_before_forward_returns_error() {
-    let layer = SpatialDropout2D::new(0.5).unwrap();
-
-    let grad = filled(&[1, 4, 4, 2], 1.0);
-    let err = layer.backward(&grad, &mut Ctx::training()).unwrap_err();
-    assert!(
-        matches!(err, Error::NeuralNetwork(NnError::ForwardPassNotRun(_))),
-        "expected ForwardPassNotRun, got {:?}",
-        err
-    );
 }
 
 #[test]
@@ -812,19 +724,6 @@ fn spatial_dropout_3d_predict_rejects_wrong_ndim() {
 fn spatial_dropout_3d_rejects_invalid_rate() {
     assert!(SpatialDropout3D::new(-0.1).is_err());
     assert!(SpatialDropout3D::new(2.0).is_err());
-}
-
-#[test]
-fn spatial_dropout_3d_backward_before_forward_returns_error() {
-    let layer = SpatialDropout3D::new(0.5).unwrap();
-
-    let grad = filled(&[1, 2, 3, 3, 2], 1.0);
-    let err = layer.backward(&grad, &mut Ctx::training()).unwrap_err();
-    assert!(
-        matches!(err, Error::NeuralNetwork(NnError::ForwardPassNotRun(_))),
-        "expected ForwardPassNotRun, got {:?}",
-        err
-    );
 }
 
 #[test]

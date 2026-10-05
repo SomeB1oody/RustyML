@@ -11,6 +11,8 @@
 mod common;
 /// Finite-difference checks that compare analytic backward gradients to numerical derivatives
 mod gradient_check;
+/// The roster of every layer type, for the tests that hold every layer to 1 contract
+mod roster;
 
 /// Tests for the activation layers and the `Activation` enum
 mod activation;
@@ -36,6 +38,8 @@ mod embedding;
 mod graph;
 /// Tests for the Identity layer: pass-through, layout, and error paths
 mod identity;
+/// The contract that every layer type keeps: the backward guard, inference mode, and checkpoints
+mod layer_contract;
 /// Tests for the loss functions: forward values, gradients, and error paths
 mod losses;
 /// Tests for GaussianNoise and GaussianDropout

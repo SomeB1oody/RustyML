@@ -1,6 +1,6 @@
 //! Integration tests for the AveragePooling and GlobalAveragePooling layers, covering forward
-//! values, output shape, predict()==forward(), backward-before-forward and wrong-rank errors,
-//! layer_type()/output_shape(), and constructor validation.
+//! values, output shape, wrong-rank errors, layer_type()/output_shape(), and constructor
+//! validation.
 //!
 //! Gradient correctness is not checked here. The finite-difference harness in
 //! tests/neural_network/gradient_check.rs covers that.
@@ -18,7 +18,6 @@ use rustyml::neural_network::layers::pooling::global_average_pooling_1d::GlobalA
 use rustyml::neural_network::layers::pooling::global_average_pooling_2d::GlobalAveragePooling2D;
 use rustyml::neural_network::layers::pooling::global_average_pooling_3d::GlobalAveragePooling3D;
 use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
-use rustyml::{error::Error, neural_network::NnError};
 
 // AveragePooling1D, input [batch, length, channels]
 // pooled_length = (length - pool_size) / stride + 1
@@ -80,40 +79,6 @@ fn avg_pool_1d_forward_multi_batch() {
     // Batch 1: (1+3)/2, (5+7)/2
     assert_abs_diff_eq!(out[[1, 0, 0]], 2.0_f32, epsilon = 1e-5);
     assert_abs_diff_eq!(out[[1, 1, 0]], 6.0_f32, epsilon = 1e-5);
-}
-
-#[test]
-fn avg_pool_1d_predict_equals_forward() {
-    let mut layer = AveragePooling1D::new(2).with_stride(2).unwrap();
-    let x: Tensor = Array::from_shape_vec((1, 6, 1), vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0])
-        .unwrap()
-        .into_dyn();
-    let fwd = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
-    // A forward pass with Ctx::inference() is on &self, so a fresh layer (no forward cache) must
-    // still agree
-    let mut layer_pred = AveragePooling1D::new(2).with_stride(2).unwrap();
-    layer_pred.build(&Shape::known(&[1, 6, 1])).unwrap();
-    let pred = layer_pred.forward(&x, &mut Ctx::inference()).unwrap();
-    assert_eq!(fwd.shape(), pred.shape());
-    for (a, b) in fwd.iter().zip(pred.iter()) {
-        assert_abs_diff_eq!(a, b, epsilon = 1e-6);
-    }
-}
-
-/// backward() before forward() returns ForwardPassNotRun
-#[test]
-fn avg_pool_1d_backward_before_forward_errors() {
-    let layer = AveragePooling1D::new(2).with_stride(2).unwrap();
-    let grad: Tensor = Array::ones((1, 2, 1)).into_dyn();
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
 }
 
 /// forward() and predict() reject wrong-rank input (2D instead of 3D)
@@ -242,40 +207,6 @@ fn avg_pool_2d_forward_multi_channel_independence() {
     assert_abs_diff_eq!(out[[0, 1, 1, 1]], 112.5_f32, epsilon = 1e-5);
 }
 
-/// predict() produces the same values as forward() for AveragePooling2D
-#[test]
-fn avg_pool_2d_predict_equals_forward() {
-    let mut layer = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
-    let vals: Vec<f32> = (0..16).map(|v| v as f32).collect();
-    let x: Tensor = Array::from_shape_vec((1, 4, 4, 1), vals)
-        .unwrap()
-        .into_dyn();
-    let fwd = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
-    let mut layer_pred = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
-    layer_pred.build(&Shape::known(&[1, 4, 4, 1])).unwrap();
-    let pred = layer_pred.forward(&x, &mut Ctx::inference()).unwrap();
-    assert_eq!(fwd.shape(), pred.shape());
-    for (a, b) in fwd.iter().zip(pred.iter()) {
-        assert_abs_diff_eq!(a, b, epsilon = 1e-6);
-    }
-}
-
-/// backward() before forward() returns ForwardPassNotRun
-#[test]
-fn avg_pool_2d_backward_before_forward_errors() {
-    let layer = AveragePooling2D::new((2, 2)).with_strides((2, 2)).unwrap();
-    let grad: Tensor = Array::ones((1, 2, 2, 1)).into_dyn();
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
-}
-
 /// Wrong-rank input to forward/predict errors (3D instead of 4D)
 #[test]
 fn avg_pool_2d_wrong_rank_input_errors() {
@@ -378,46 +309,6 @@ fn avg_pool_3d_forward_values_two_depth_windows() {
     assert_abs_diff_eq!(out[[0, 0, 0, 0, 0]], 3.5_f32, epsilon = 1e-5);
     // Window at depth_start=2 covers values 8..15, mean 92/8
     assert_abs_diff_eq!(out[[0, 1, 0, 0, 0]], 11.5_f32, epsilon = 1e-5);
-}
-
-/// predict() produces the same values as forward() for AveragePooling3D
-#[test]
-fn avg_pool_3d_predict_equals_forward() {
-    let mut layer = AveragePooling3D::new((2, 2, 2))
-        .with_strides((1, 1, 1))
-        .unwrap();
-    let vals: Vec<f32> = (0..8).map(|v| v as f32).collect();
-    let x: Tensor = Array::from_shape_vec((1, 2, 2, 2, 1), vals)
-        .unwrap()
-        .into_dyn();
-    let fwd = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
-    let mut layer_pred = AveragePooling3D::new((2, 2, 2))
-        .with_strides((1, 1, 1))
-        .unwrap();
-    layer_pred.build(&Shape::known(&[1, 2, 2, 2, 1])).unwrap();
-    let pred = layer_pred.forward(&x, &mut Ctx::inference()).unwrap();
-    assert_eq!(fwd.shape(), pred.shape());
-    for (a, b) in fwd.iter().zip(pred.iter()) {
-        assert_abs_diff_eq!(a, b, epsilon = 1e-6);
-    }
-}
-
-/// backward() before forward() returns ForwardPassNotRun for AveragePooling3D
-#[test]
-fn avg_pool_3d_backward_before_forward_errors() {
-    let layer = AveragePooling3D::new((2, 2, 2))
-        .with_strides((2, 2, 2))
-        .unwrap();
-    let grad: Tensor = Array::ones((1, 2, 2, 2, 1)).into_dyn();
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
 }
 
 /// Wrong-rank input (4D instead of 5D) errors
@@ -534,41 +425,6 @@ fn global_avg_pool_1d_forward_multi_batch() {
     assert_abs_diff_eq!(out[[1, 0]], 4.0_f32, epsilon = 1e-5); // 16/4
 }
 
-/// predict() equals forward() for GlobalAveragePooling1D
-#[test]
-fn global_avg_pool_1d_predict_equals_forward() {
-    let mut layer_fwd = GlobalAveragePooling1D::new();
-    let layer_pred = GlobalAveragePooling1D::new();
-    let x: Tensor = Array::from_shape_vec(
-        (1, 5, 2),
-        vec![1.0f32, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0, 5.0, 50.0],
-    )
-    .unwrap()
-    .into_dyn();
-    let fwd = layer_fwd.forward_mut(&x, &mut Ctx::training()).unwrap();
-    let pred = layer_pred.forward(&x, &mut Ctx::inference()).unwrap();
-    assert_eq!(fwd.shape(), pred.shape());
-    for (a, b) in fwd.iter().zip(pred.iter()) {
-        assert_abs_diff_eq!(a, b, epsilon = 1e-6);
-    }
-}
-
-/// backward() before forward() returns ForwardPassNotRun for GlobalAveragePooling1D
-#[test]
-fn global_avg_pool_1d_backward_before_forward_errors() {
-    let layer = GlobalAveragePooling1D::new();
-    let grad: Tensor = Array::ones((1, 2)).into_dyn();
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
-}
-
 /// Wrong-rank input (2D instead of 3D) errors
 #[test]
 fn global_avg_pool_1d_wrong_rank_input_errors() {
@@ -672,36 +528,6 @@ fn global_avg_pool_2d_forward_single_spatial_pixel() {
     }
 }
 
-/// predict() equals forward() for GlobalAveragePooling2D
-#[test]
-fn global_avg_pool_2d_predict_equals_forward() {
-    let mut layer_fwd = GlobalAveragePooling2D::new();
-    let layer_pred = GlobalAveragePooling2D::new();
-    let x: Tensor = Array::ones((2, 4, 4, 3)).into_dyn();
-    let fwd = layer_fwd.forward_mut(&x, &mut Ctx::training()).unwrap();
-    let pred = layer_pred.forward(&x, &mut Ctx::inference()).unwrap();
-    assert_eq!(fwd.shape(), pred.shape());
-    for (a, b) in fwd.iter().zip(pred.iter()) {
-        assert_abs_diff_eq!(a, b, epsilon = 1e-6);
-    }
-}
-
-/// backward() before forward() returns ForwardPassNotRun for GlobalAveragePooling2D
-#[test]
-fn global_avg_pool_2d_backward_before_forward_errors() {
-    let layer = GlobalAveragePooling2D::new();
-    let grad: Tensor = Array::ones((1, 2)).into_dyn();
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
-}
-
 /// Wrong-rank input (3D instead of 4D) errors
 #[test]
 fn global_avg_pool_2d_wrong_rank_input_errors() {
@@ -794,39 +620,6 @@ fn global_avg_pool_3d_forward_multi_batch() {
     assert_eq!(out.shape(), &[2, 1]);
     assert_abs_diff_eq!(out[[0, 0]], 3.0_f32, epsilon = 1e-5);
     assert_abs_diff_eq!(out[[1, 0]], 7.0_f32, epsilon = 1e-5);
-}
-
-/// predict() equals forward() for GlobalAveragePooling3D
-#[test]
-fn global_avg_pool_3d_predict_equals_forward() {
-    let mut layer_fwd = GlobalAveragePooling3D::new();
-    let layer_pred = GlobalAveragePooling3D::new();
-    let vals: Vec<f32> = (0..8).map(|v| v as f32).collect();
-    let x: Tensor = Array::from_shape_vec((1, 2, 2, 2, 1), vals)
-        .unwrap()
-        .into_dyn();
-    let fwd = layer_fwd.forward_mut(&x, &mut Ctx::training()).unwrap();
-    let pred = layer_pred.forward(&x, &mut Ctx::inference()).unwrap();
-    assert_eq!(fwd.shape(), pred.shape());
-    for (a, b) in fwd.iter().zip(pred.iter()) {
-        assert_abs_diff_eq!(a, b, epsilon = 1e-6);
-    }
-}
-
-/// backward() before forward() returns ForwardPassNotRun for GlobalAveragePooling3D
-#[test]
-fn global_avg_pool_3d_backward_before_forward_errors() {
-    let layer = GlobalAveragePooling3D::new();
-    let grad: Tensor = Array::ones((1, 2)).into_dyn();
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
 }
 
 /// Wrong-rank input (4D instead of 5D) errors

@@ -4,6 +4,7 @@
 //! `gradient_check.rs` covers gradient values. This file does not duplicate them.
 
 use ndarray::{Array2, Array3, Array4, Array5, IxDyn};
+use rustyml::error::Error;
 use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
@@ -19,7 +20,6 @@ use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
 use rustyml::prelude::Activation;
-use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
 
@@ -289,20 +289,6 @@ fn permute_forward_rejects_empty_input() {
     );
 }
 
-/// backward before any forward pass reports ForwardPassNotRun
-#[test]
-fn permute_backward_before_forward_returns_err() {
-    let p = Permute::new(vec![2, 1]).unwrap();
-    let result = p.backward(&ramp_of(&[2, 4, 3]), &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun, got {result:?}"
-    );
-}
-
 /// backward rejects a gradient whose shape is not the forward output shape
 #[test]
 fn permute_backward_wrong_grad_shape_returns_err() {
@@ -461,20 +447,6 @@ fn repeat_vector_forward_rejects_empty_input() {
             Err(Error::EmptyInput(_))
         ),
         "RepeatVector must reject an empty input"
-    );
-}
-
-/// backward before any forward pass reports ForwardPassNotRun
-#[test]
-fn repeat_vector_backward_before_forward_returns_err() {
-    let r = RepeatVector::new(3).unwrap();
-    let result = r.backward(&ramp_of(&[2, 3, 4]), &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun, got {result:?}"
     );
 }
 

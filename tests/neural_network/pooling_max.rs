@@ -1,6 +1,5 @@
 //! Integration tests for MaxPooling 1D/2D/3D and GlobalMaxPooling 1D/2D/3D: forward values,
-//! predict-equals-forward, output_shape strings, and error paths. Gradient correctness lives
-//! in gradient_check.rs.
+//! output_shape strings, and error paths. Gradient correctness lives in gradient_check.rs.
 //!
 //! Every tensor here is channels-last. The 1D layers use `[batch, length, channels]`, the 2D
 //! layers use `[batch, height, width, channels]`, and the 3D layers use
@@ -8,6 +7,7 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
+use rustyml::error::Error;
 use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::layers::convolution::PaddingType;
@@ -18,7 +18,6 @@ use rustyml::neural_network::layers::pooling::max_pooling_1d::MaxPooling1D;
 use rustyml::neural_network::layers::pooling::max_pooling_2d::MaxPooling2D;
 use rustyml::neural_network::layers::pooling::max_pooling_3d::MaxPooling3D;
 use rustyml::neural_network::traits::{Layer, UnaryLayer};
-use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
 
@@ -117,22 +116,6 @@ fn max_pooling_1d_forward_values_batch() {
     assert_allclose(&out, &expected, 1e-6);
 }
 
-// MaxPooling1D - predict equals forward in eval mode
-
-#[test]
-fn max_pooling_1d_predict_equals_forward() {
-    let mut layer = MaxPooling1D::new(2);
-    layer.build(&Shape::known(&[1, 6, 1])).unwrap();
-
-    let data: Vec<f32> = vec![1.0, 5.0, 2.0, 4.0, 3.0, 6.0];
-    let x = Array::from_shape_vec((1, 6, 1), data).unwrap().into_dyn();
-
-    let fwd = layer.forward(&x, &mut Ctx::training()).unwrap();
-    let pred = layer.forward(&x, &mut Ctx::inference()).unwrap();
-
-    assert_allclose(&pred, &fwd, 1e-6);
-}
-
 // MaxPooling1D - output_shape string
 
 /// output_shape reports the pooled spatial length as "(None, 4, 2)"
@@ -183,23 +166,6 @@ fn max_pooling_1d_err_wrong_ndim() {
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for a rank-2 build shape, got {result:?}"
-    );
-}
-
-// MaxPooling1D - backward-before-forward error
-
-#[test]
-fn max_pooling_1d_backward_before_forward_err() {
-    let layer = MaxPooling1D::new(2);
-    let grad = Array::ones((1, 2, 1)).into_dyn();
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun before forward, got {:?}",
-        result
     );
 }
 
@@ -287,24 +253,6 @@ fn max_pooling_2d_forward_values_two_channels() {
     assert_allclose(&out, &expected, 1e-6);
 }
 
-// MaxPooling2D - predict equals forward
-
-#[test]
-fn max_pooling_2d_predict_equals_forward() {
-    let mut layer = MaxPooling2D::new((2, 2));
-    layer.build(&Shape::known(&[1, 4, 4, 1])).unwrap();
-
-    let data: Vec<f32> = (0..16).map(|v| v as f32).collect();
-    let x = Array::from_shape_vec((1, 4, 4, 1), data)
-        .unwrap()
-        .into_dyn();
-
-    let fwd = layer.forward(&x, &mut Ctx::training()).unwrap();
-    let pred = layer.forward(&x, &mut Ctx::inference()).unwrap();
-
-    assert_allclose(&pred, &fwd, 1e-6);
-}
-
 // MaxPooling2D - output_shape string
 
 /// output_shape reports the pooled 2D shape as "(None, 3, 3, 3)"
@@ -362,23 +310,6 @@ fn max_pooling_2d_err_wrong_ndim() {
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for a rank-3 build shape, got {result:?}"
-    );
-}
-
-// MaxPooling2D - backward-before-forward error
-
-#[test]
-fn max_pooling_2d_backward_before_forward_err() {
-    let layer = MaxPooling2D::new((2, 2));
-    let grad = Array::ones((1, 2, 2, 1)).into_dyn();
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun before forward, got {:?}",
-        result
     );
 }
 
@@ -443,24 +374,6 @@ fn max_pooling_3d_forward_values_4x4x4_pool2x2x2() {
     assert_allclose(&out, &expected, 1e-6);
 }
 
-// MaxPooling3D - predict equals forward
-
-#[test]
-fn max_pooling_3d_predict_equals_forward() {
-    let mut layer = MaxPooling3D::new((2, 2, 2));
-    layer.build(&Shape::known(&[1, 4, 4, 4, 1])).unwrap();
-
-    let data: Vec<f32> = (0..64).map(|v| v as f32).collect();
-    let x = Array::from_shape_vec((1, 4, 4, 4, 1), data)
-        .unwrap()
-        .into_dyn();
-
-    let fwd = layer.forward(&x, &mut Ctx::training()).unwrap();
-    let pred = layer.forward(&x, &mut Ctx::inference()).unwrap();
-
-    assert_allclose(&pred, &fwd, 1e-6);
-}
-
 // MaxPooling3D - output_shape string
 
 /// output_shape reports the pooled 3D shape as "(None, 2, 2, 2, 2)"
@@ -518,23 +431,6 @@ fn max_pooling_3d_err_wrong_ndim() {
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for a rank-4 build shape, got {result:?}"
-    );
-}
-
-// MaxPooling3D - backward-before-forward error
-
-#[test]
-fn max_pooling_3d_backward_before_forward_err() {
-    let layer = MaxPooling3D::new((2, 2, 2));
-    let grad = Array::ones((1, 2, 2, 2, 1)).into_dyn();
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun before forward, got {:?}",
-        result
     );
 }
 
@@ -609,21 +505,6 @@ fn global_max_pooling_1d_forward_values_batch() {
     assert_allclose(&out, &expected, 1e-6);
 }
 
-// GlobalMaxPooling1D - predict equals forward
-
-#[test]
-fn global_max_pooling_1d_predict_equals_forward() {
-    let mut layer = GlobalMaxPooling1D::new();
-
-    let data: Vec<f32> = vec![0.0, 9.0, 1.0, 8.0, 2.0, 7.0, 3.0, 6.0, 4.0, 5.0];
-    let x = Array::from_shape_vec((1, 5, 2), data).unwrap().into_dyn();
-
-    let fwd = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
-    let pred = layer.forward(&x, &mut Ctx::inference()).unwrap();
-
-    assert_allclose(&pred, &fwd, 1e-6);
-}
-
 // GlobalMaxPooling1D - output_shape string
 
 /// output_shape returns "(batch_size, channels)" once a forward pass caches the input shape
@@ -635,23 +516,6 @@ fn global_max_pooling_1d_output_shape_after_forward() {
         .into_dyn();
     layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(layer.output_shape(), "(None, 2)");
-}
-
-// GlobalMaxPooling1D - backward-before-forward error
-
-#[test]
-fn global_max_pooling_1d_backward_before_forward_err() {
-    let layer = GlobalMaxPooling1D::new();
-    let grad = Array::ones((1, 2)).into_dyn();
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun before forward, got {:?}",
-        result
-    );
 }
 
 // GlobalMaxPooling1D - wrong ndim at forward time
@@ -719,23 +583,6 @@ fn global_max_pooling_2d_forward_values_batch() {
     assert_allclose(&out, &expected, 1e-6);
 }
 
-// GlobalMaxPooling2D - predict equals forward
-
-#[test]
-fn global_max_pooling_2d_predict_equals_forward() {
-    let mut layer = GlobalMaxPooling2D::new();
-
-    let data: Vec<f32> = (0..18).map(|v| v as f32).collect();
-    let x = Array::from_shape_vec((1, 3, 3, 2), data)
-        .unwrap()
-        .into_dyn();
-
-    let fwd = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
-    let pred = layer.forward(&x, &mut Ctx::inference()).unwrap();
-
-    assert_allclose(&pred, &fwd, 1e-6);
-}
-
 // GlobalMaxPooling2D - output_shape string
 
 #[test]
@@ -746,23 +593,6 @@ fn global_max_pooling_2d_output_shape_after_forward() {
         .into_dyn();
     layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(layer.output_shape(), "(None, 3)");
-}
-
-// GlobalMaxPooling2D - backward-before-forward error
-
-#[test]
-fn global_max_pooling_2d_backward_before_forward_err() {
-    let layer = GlobalMaxPooling2D::new();
-    let grad = Array::ones((1, 2)).into_dyn();
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun before forward, got {:?}",
-        result
-    );
 }
 
 // GlobalMaxPooling2D - wrong ndim at forward time
@@ -826,23 +656,6 @@ fn global_max_pooling_3d_forward_values_batch() {
     assert_allclose(&out, &expected, 1e-6);
 }
 
-// GlobalMaxPooling3D - predict equals forward
-
-#[test]
-fn global_max_pooling_3d_predict_equals_forward() {
-    let mut layer = GlobalMaxPooling3D::new();
-
-    let data: Vec<f32> = (0..16).map(|v| v as f32).collect();
-    let x = Array::from_shape_vec((1, 2, 2, 2, 2), data)
-        .unwrap()
-        .into_dyn();
-
-    let fwd = layer.forward_mut(&x, &mut Ctx::training()).unwrap();
-    let pred = layer.forward(&x, &mut Ctx::inference()).unwrap();
-
-    assert_allclose(&pred, &fwd, 1e-6);
-}
-
 // GlobalMaxPooling3D - output_shape string
 
 #[test]
@@ -853,23 +666,6 @@ fn global_max_pooling_3d_output_shape_after_forward() {
         .into_dyn();
     layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(layer.output_shape(), "(None, 4)");
-}
-
-// GlobalMaxPooling3D - backward-before-forward error
-
-#[test]
-fn global_max_pooling_3d_backward_before_forward_err() {
-    let layer = GlobalMaxPooling3D::new();
-    let grad = Array::ones((1, 2)).into_dyn();
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun before forward, got {:?}",
-        result
-    );
 }
 
 // GlobalMaxPooling3D - wrong ndim at forward time

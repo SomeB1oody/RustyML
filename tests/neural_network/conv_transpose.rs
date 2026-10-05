@@ -1,5 +1,5 @@
 //! Integration tests for Conv1DTranspose, Conv2DTranspose, and Conv3DTranspose forward values,
-//! shapes, error paths, param counts, set_weights, and predict==forward equivalence.
+//! shapes, error paths, param counts, and set_weights.
 //!
 //! Layout is channels-last: Conv1DTranspose sees \[batch, length, channels\] and Conv2DTranspose
 //! sees \[batch, height, width, channels\]. A transposed kernel is \[k, F, Cin\] and
@@ -265,21 +265,6 @@ fn conv1d_transpose_reports_its_type_and_output_shape() {
     let same = layer.with_padding(PaddingType::Same);
     // Same: 5 * 2 = 10
     assert_eq!(same.output_shape(), "(None, 10, 3)");
-}
-
-/// A forward pass with an inference context returns the same values as a forward pass with a
-/// training context, for a deterministic layer
-#[test]
-fn conv1d_transpose_predict_equals_forward() {
-    let mut layer = Conv1DTranspose::new(2, 3, 2, Linear::new())
-        .unwrap()
-        .with_random_state(7);
-    let x = ramp_of(&[1, 4, 2]);
-    let mut train_ctx = Ctx::training();
-    let forward_output = layer.forward_mut(&x, &mut train_ctx).unwrap();
-    let mut infer_ctx = Ctx::inference();
-    let predict_output = layer.forward(&x, &mut infer_ctx).unwrap();
-    assert_allclose(&predict_output, &forward_output, 0.0f32);
 }
 
 // Conv2DTranspose - forward with known weights
@@ -782,21 +767,6 @@ fn conv2d_transpose_forward_empty_spatial_axis_errors() {
     );
 }
 
-/// backward before forward returns ForwardPassNotRun
-#[test]
-fn conv2d_transpose_backward_before_forward_errors() {
-    let layer = Conv2DTranspose::new(1, (3, 3), (1, 1), Linear::new()).unwrap();
-    let mut ctx = Ctx::training();
-    let result = layer.backward(&Array::ones((1, 6, 6, 1)).into_dyn(), &mut ctx);
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun, got {result:?}"
-    );
-}
-
 /// backward with a gradient of the wrong shape returns ShapeMismatch
 #[test]
 fn conv2d_transpose_backward_checks_the_gradient_shape() {
@@ -944,67 +914,6 @@ fn conv_transpose_layers_reject_a_tensor_of_the_wrong_rank() {
             "[{label}] predict must reject a tensor of the wrong rank, got {predict:?}"
         );
     }
-}
-
-/// Every rank reports ForwardPassNotRun, and names itself
-#[test]
-fn conv_transpose_layers_reject_backward_before_forward() {
-    let one = Conv1DTranspose::new(1, 2, 1, Linear::new()).unwrap();
-    let three = Conv3DTranspose::new(1, (2, 2, 2), (1, 1, 1), Linear::new()).unwrap();
-
-    let mut one_ctx = Ctx::training();
-    let one_result = one.backward(&ramp_of(&[1, 4, 1]), &mut one_ctx);
-    let mut three_ctx = Ctx::training();
-    let three_result = three.backward(&ramp_of(&[1, 4, 4, 4, 1]), &mut three_ctx);
-
-    for (expected, result) in [
-        ("Conv1DTranspose", one_result),
-        ("Conv3DTranspose", three_result),
-    ] {
-        match result {
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(name))) => {
-                assert_eq!(
-                    name, expected,
-                    "the error must name the layer that raised it"
-                );
-            }
-            other => panic!("[{expected}] expected ForwardPassNotRun, got {other:?}"),
-        }
-    }
-}
-
-/// A forward pass with an inference context returns the same values as a forward pass with a
-/// training context, at every rank
-///
-/// A save and load round trip cannot pin this, because both of its sides use an inference
-/// context
-#[test]
-fn conv_transpose_layers_predict_equals_forward() {
-    let mut two = Conv2DTranspose::new(2, (3, 2), (2, 1), Linear::new())
-        .unwrap()
-        .with_random_state(23);
-    two.build(&Shape::known(&[1, 3, 4, 2])).unwrap();
-    let x = ramp_of(&[1, 3, 4, 2]);
-    let mut two_infer = Ctx::inference();
-    let mut two_train = Ctx::training();
-    assert_allclose(
-        &two.forward(&x, &mut two_infer).unwrap(),
-        &two.forward(&x, &mut two_train).unwrap(),
-        0.0f32,
-    );
-
-    let mut three = Conv3DTranspose::new(2, (2, 2, 3), (1, 2, 1), Linear::new())
-        .unwrap()
-        .with_random_state(23);
-    three.build(&Shape::known(&[1, 2, 3, 2, 2])).unwrap();
-    let x = ramp_of(&[1, 2, 3, 2, 2]);
-    let mut three_infer = Ctx::inference();
-    let mut three_train = Ctx::training();
-    assert_allclose(
-        &three.forward(&x, &mut three_infer).unwrap(),
-        &three.forward(&x, &mut three_train).unwrap(),
-        0.0f32,
-    );
 }
 
 /// Conv3DTranspose seeds its kernel from the channel axis, and reports its axes in order

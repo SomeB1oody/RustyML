@@ -635,17 +635,6 @@ fn p_relu_rejects_an_empty_input() {
 
 // Error paths on backward
 
-/// Backward needs the cached input, and the message names the layer
-#[test]
-fn p_relu_rejects_backward_before_forward() {
-    let layer = PReLU::new(0.25).unwrap();
-    let err = layer
-        .backward(&Tensor::ones(IxDyn(&[2, 3])), &mut Ctx::training())
-        .unwrap_err();
-    let text = err.to_string();
-    assert!(text.contains("PReLU"), "{text}");
-}
-
 /// The layer keeps the shape, so the upstream gradient must match the cached input
 #[test]
 fn p_relu_rejects_a_gradient_of_the_wrong_shape() {
@@ -695,25 +684,6 @@ fn p_relu_reports_its_type_and_output_shape() {
         .forward(&Tensor::ones(IxDyn(&[7, 3, 4])), &mut Ctx::training())
         .unwrap();
     assert_eq!(layer.output_shape(), "(None, 3, 4)");
-}
-
-#[test]
-fn p_relu_predict_equals_forward_and_caches_nothing() {
-    let layer = p_relu_with(vec![2, 3], vec![], vec![0.25, -0.1, 0.5]);
-    let x = tensor(&[2, 3], vec![-1.0, 2.0, -3.0, 4.0, -5.0, 0.0]);
-
-    let mut inference = Ctx::inference();
-    let predicted = layer.forward(&x, &mut inference).unwrap();
-    let err = layer
-        .backward(&Tensor::ones(x.raw_dim()), &mut inference)
-        .unwrap_err();
-    assert!(
-        err.to_string().contains("PReLU"),
-        "an inference pass must not cache"
-    );
-
-    let forwarded = layer.forward(&x, &mut Ctx::training()).unwrap();
-    assert_allclose(&predicted, &forwarded, 0.0_f32);
 }
 
 // Training

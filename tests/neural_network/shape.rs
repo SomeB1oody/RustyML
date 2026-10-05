@@ -9,6 +9,7 @@
 //! shape into the next layer. It also lets that change reject a bad stack before any data
 //! arrives. The last test of this file threads such a stack by hand, with no tensor anywhere.
 
+use crate::roster::{Case, LAYER_TYPE_COUNT, LayerVisitor, visit_every_layer};
 use ndarray::{Array, ArrayD, IxDyn};
 use rustyml::neural_network::layers::*;
 use rustyml::neural_network::sequential::SequentialBuilder;
@@ -591,313 +592,6 @@ fn a_built_layer_refuses_the_extents_its_summary_does_not_name() {
 
 // The whole roster: every layer type answers before its build
 
-/// 1 unbuilt layer of each covered type, with the shape it takes and the shape it must give
-/// back
-///
-/// The entries hold no built layer and no forward pass, so every answer comes from the
-/// constructor arguments and from the input shape.
-///
-/// This table is the only roster of the layer types that the 2 tests below cover. No item of
-/// the crate lists its layer types, so no other file can supply that roster. Add a case here
-/// for each new layer type. Raise the count in the test below in the same change.
-fn unbuilt_layers() -> Vec<(Shape, Box<dyn Layer>, &'static str)> {
-    let flat = Shape::with_free_batch(&[1, 4]);
-    let sequence = Shape::with_free_batch(&[1, 5, 2]);
-    let signal = Shape::with_free_batch(&[1, 8, 2]);
-    let image = Shape::with_free_batch(&[1, 8, 8, 2]);
-    let volume = Shape::with_free_batch(&[1, 4, 4, 4, 2]);
-
-    vec![
-        // Dense and the shape layers
-        (
-            flat.clone(),
-            Box::new(Dense::new(4, Linear::new()).unwrap()),
-            "(None, 4)",
-        ),
-        (
-            Shape::with_free_batch(&[1, 2, 3]),
-            Box::new(Flatten::new()),
-            "(None, 6)",
-        ),
-        (flat.clone(), Box::new(Identity::new()), "(None, 4)"),
-        (
-            flat.clone(),
-            Box::new(Reshape::new(vec![2, 2]).unwrap()),
-            "(None, 2, 2)",
-        ),
-        (
-            Shape::with_free_batch(&[1, 2, 3]),
-            Box::new(Permute::new(vec![2, 1]).unwrap()),
-            "(None, 3, 2)",
-        ),
-        (
-            flat.clone(),
-            Box::new(RepeatVector::new(3).unwrap()),
-            "(None, 3, 4)",
-        ),
-        (flat.clone(), Box::new(Rescaling::new(2.0)), "(None, 4)"),
-        (
-            Shape::with_free_batch(&[1, 5]),
-            Box::new(Embedding::new(10, 3).unwrap()),
-            "(None, 5, 3)",
-        ),
-        // Activations
-        (flat.clone(), Box::new(ReLU::new()), "(None, 4)"),
-        (
-            flat.clone(),
-            Box::new(LeakyReLU::new(0.1).unwrap()),
-            "(None, 4)",
-        ),
-        (flat.clone(), Box::new(ELU::new(1.0).unwrap()), "(None, 4)"),
-        (flat.clone(), Box::new(SELU::new()), "(None, 4)"),
-        (flat.clone(), Box::new(Softplus::new()), "(None, 4)"),
-        (flat.clone(), Box::new(Softsign::new()), "(None, 4)"),
-        (flat.clone(), Box::new(HardSigmoid::new()), "(None, 4)"),
-        (flat.clone(), Box::new(Exponential::new()), "(None, 4)"),
-        (flat.clone(), Box::new(Linear::new()), "(None, 4)"),
-        (flat.clone(), Box::new(Sigmoid::new()), "(None, 4)"),
-        (flat.clone(), Box::new(Tanh::new()), "(None, 4)"),
-        (flat.clone(), Box::new(Softmax::new()), "(None, 4)"),
-        (
-            flat.clone(),
-            Box::new(PReLU::new(0.25).unwrap()),
-            "(None, 4)",
-        ),
-        // Convolution
-        (
-            signal.clone(),
-            Box::new(Conv1D::new(4, 3, 1, ReLU::new()).unwrap()),
-            "(None, 6, 4)",
-        ),
-        (
-            image.clone(),
-            Box::new(Conv2D::new(4, (3, 3), (1, 1), ReLU::new()).unwrap()),
-            "(None, 6, 6, 4)",
-        ),
-        (
-            volume.clone(),
-            Box::new(Conv3D::new(3, (2, 2, 2), (1, 1, 1), ReLU::new()).unwrap()),
-            "(None, 3, 3, 3, 3)",
-        ),
-        (
-            Shape::with_free_batch(&[1, 4, 2]),
-            Box::new(Conv1DTranspose::new(3, 2, 2, Linear::new()).unwrap()),
-            "(None, 8, 3)",
-        ),
-        (
-            Shape::with_free_batch(&[1, 4, 4, 2]),
-            Box::new(Conv2DTranspose::new(3, (2, 2), (2, 2), Linear::new()).unwrap()),
-            "(None, 8, 8, 3)",
-        ),
-        (
-            Shape::with_free_batch(&[1, 2, 2, 2, 1]),
-            Box::new(Conv3DTranspose::new(2, (2, 2, 2), (2, 2, 2), Linear::new()).unwrap()),
-            "(None, 4, 4, 4, 2)",
-        ),
-        (
-            signal.clone(),
-            Box::new(SeparableConv1D::new(4, 3, 1, 1, ReLU::new()).unwrap()),
-            "(None, 6, 4)",
-        ),
-        (
-            image.clone(),
-            Box::new(SeparableConv2D::new(4, (3, 3), (1, 1), 1, ReLU::new()).unwrap()),
-            "(None, 6, 6, 4)",
-        ),
-        // A depthwise layer reads its channel count from the input, so the unbuilt answer
-        // carries the channel count of the argument
-        (
-            signal.clone(),
-            Box::new(DepthwiseConv1D::new(3, 1, ReLU::new()).unwrap()),
-            "(None, 6, 2)",
-        ),
-        (
-            image.clone(),
-            Box::new(DepthwiseConv2D::new((3, 3), (1, 1), ReLU::new()).unwrap()),
-            "(None, 6, 6, 2)",
-        ),
-        // Pooling
-        (
-            signal.clone(),
-            Box::new(MaxPooling1D::new(2)),
-            "(None, 4, 2)",
-        ),
-        (
-            image.clone(),
-            Box::new(MaxPooling2D::new((2, 2))),
-            "(None, 4, 4, 2)",
-        ),
-        (
-            volume.clone(),
-            Box::new(MaxPooling3D::new((2, 2, 2))),
-            "(None, 2, 2, 2, 2)",
-        ),
-        (
-            signal.clone(),
-            Box::new(AveragePooling1D::new(2)),
-            "(None, 4, 2)",
-        ),
-        (
-            image.clone(),
-            Box::new(AveragePooling2D::new((2, 2))),
-            "(None, 4, 4, 2)",
-        ),
-        (
-            volume.clone(),
-            Box::new(AveragePooling3D::new((2, 2, 2))),
-            "(None, 2, 2, 2, 2)",
-        ),
-        (
-            signal.clone(),
-            Box::new(GlobalMaxPooling1D::new()),
-            "(None, 2)",
-        ),
-        (
-            image.clone(),
-            Box::new(GlobalMaxPooling2D::new()),
-            "(None, 2)",
-        ),
-        (
-            volume.clone(),
-            Box::new(GlobalMaxPooling3D::new()),
-            "(None, 2)",
-        ),
-        (
-            signal.clone(),
-            Box::new(GlobalAveragePooling1D::new()),
-            "(None, 2)",
-        ),
-        (
-            image.clone(),
-            Box::new(GlobalAveragePooling2D::new()),
-            "(None, 2)",
-        ),
-        (
-            volume.clone(),
-            Box::new(GlobalAveragePooling3D::new()),
-            "(None, 2)",
-        ),
-        // Resampling and borders
-        (
-            Shape::with_free_batch(&[1, 4, 2]),
-            Box::new(UpSampling1D::new(2).unwrap()),
-            "(None, 8, 2)",
-        ),
-        (
-            Shape::with_free_batch(&[1, 4, 4, 2]),
-            Box::new(UpSampling2D::new(2, Interpolation::Nearest).unwrap()),
-            "(None, 8, 8, 2)",
-        ),
-        (
-            Shape::with_free_batch(&[1, 2, 2, 2, 1]),
-            Box::new(UpSampling3D::new(2).unwrap()),
-            "(None, 4, 4, 4, 1)",
-        ),
-        (
-            Shape::with_free_batch(&[1, 4, 2]),
-            Box::new(ZeroPadding1D::new(1)),
-            "(None, 6, 2)",
-        ),
-        (
-            Shape::with_free_batch(&[1, 4, 4, 2]),
-            Box::new(ZeroPadding2D::new(1)),
-            "(None, 6, 6, 2)",
-        ),
-        (
-            Shape::with_free_batch(&[1, 2, 2, 2, 1]),
-            Box::new(ZeroPadding3D::new(1)),
-            "(None, 4, 4, 4, 1)",
-        ),
-        (
-            Shape::with_free_batch(&[1, 6, 2]),
-            Box::new(Cropping1D::new(1)),
-            "(None, 4, 2)",
-        ),
-        (
-            Shape::with_free_batch(&[1, 6, 6, 2]),
-            Box::new(Cropping2D::new(1)),
-            "(None, 4, 4, 2)",
-        ),
-        (
-            volume.clone(),
-            Box::new(Cropping3D::new(1)),
-            "(None, 2, 2, 2, 2)",
-        ),
-        // Recurrent
-        (
-            sequence.clone(),
-            Box::new(SimpleRNN::new(3, Tanh::new()).unwrap()),
-            "(None, 3)",
-        ),
-        (
-            sequence.clone(),
-            Box::new(LSTM::new(3, Tanh::new()).unwrap()),
-            "(None, 3)",
-        ),
-        (
-            sequence.clone(),
-            Box::new(GRU::new(3, Tanh::new()).unwrap()),
-            "(None, 3)",
-        ),
-        // Regularization
-        (
-            flat.clone(),
-            Box::new(Dropout::new(0.5).unwrap()),
-            "(None, 4)",
-        ),
-        (
-            signal.clone(),
-            Box::new(SpatialDropout1D::new(0.5).unwrap()),
-            "(None, 8, 2)",
-        ),
-        (
-            image.clone(),
-            Box::new(SpatialDropout2D::new(0.5).unwrap()),
-            "(None, 8, 8, 2)",
-        ),
-        (
-            volume.clone(),
-            Box::new(SpatialDropout3D::new(0.5).unwrap()),
-            "(None, 4, 4, 4, 2)",
-        ),
-        (
-            flat.clone(),
-            Box::new(GaussianDropout::new(0.3).unwrap()),
-            "(None, 4)",
-        ),
-        (
-            flat.clone(),
-            Box::new(GaussianNoise::new(0.1).unwrap()),
-            "(None, 4)",
-        ),
-        (
-            flat.clone(),
-            Box::new(BatchNormalization::new(0.9, 1e-5).unwrap()),
-            "(None, 4)",
-        ),
-        (
-            flat.clone(),
-            Box::new(LayerNormalization::new(1e-5).unwrap()),
-            "(None, 4)",
-        ),
-        (
-            flat.clone(),
-            Box::new(GroupNormalization::new(2, 1e-5).unwrap()),
-            "(None, 4)",
-        ),
-        (
-            signal.clone(),
-            Box::new(InstanceNormalization::new(1e-5).unwrap()),
-            "(None, 8, 2)",
-        ),
-        (
-            flat.clone(),
-            Box::new(UnitNormalization::new(UnitNormalizationAxis::Default).unwrap()),
-            "(None, 4)",
-        ),
-    ]
-}
-
 /// Every layer type answers `compute_output_shape` before its build
 ///
 /// This is the contract that the method exists for. The answer reads the layer configuration
@@ -910,60 +604,67 @@ fn unbuilt_layers() -> Vec<(Shape, Box<dyn Layer>, &'static str)> {
 /// built for
 #[test]
 fn every_layer_type_answers_before_its_build() {
-    let mut covered = BTreeSet::new();
-    for (input, layer, expected) in unbuilt_layers() {
-        let name = layer.layer_type().to_string();
-        assert!(
-            layer.build_config().is_none(),
-            "{name} must hold no build in this table"
-        );
+    struct AnswersUnbuilt(BTreeSet<String>);
+    impl LayerVisitor for AnswersUnbuilt {
+        fn visit<L: Layer + 'static>(&mut self, case: Case, make: &dyn Fn() -> L) {
+            let layer = make();
+            let name = layer.layer_type().to_string();
+            assert!(
+                layer.build_config().is_none(),
+                "{name} must hold no build before its build"
+            );
 
-        let computed = layer
-            .compute_output_shape_many(std::slice::from_ref(&input))
-            .unwrap_or_else(|error| {
-                panic!("{name} refused the shape {input} before its build: {error}")
-            });
-        assert_eq!(computed.to_string(), expected, "{name}");
+            let computed = layer
+                .compute_output_shape_many(&case.inputs)
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "{name} refused the shapes {:?} before its build: {error}",
+                        case.inputs
+                    )
+                });
+            assert_eq!(computed.to_string(), case.output, "{name}");
 
-        assert!(
-            covered.insert(name.clone()),
-            "{name} reaches the table more than once"
-        );
+            assert!(
+                self.0.insert(name.clone()),
+                "{name} reaches the roster more than once"
+            );
+        }
     }
 
-    assert_eq!(
-        covered.len(),
-        66,
-        "the table above is the only roster of the covered layer types. A new layer type needs \
-         a case here, and a removed one needs its case deleted. Move this count in the same \
-         change"
-    );
+    let mut visitor = AnswersUnbuilt(BTreeSet::new());
+    visit_every_layer(&mut visitor);
+    assert_eq!(visitor.0.len(), LAYER_TYPE_COUNT);
 }
 
 /// A build changes no answer that `compute_output_shape` already gave
 ///
-/// The 2 halves of the contract meet here. Every layer of the table above answers for the
-/// shape it is about to be built for, then takes that build, then answers again. A layer that
-/// reads build state gives 2 different answers, and a layer that reads the argument alone
-/// gives 1
+/// The 2 halves of the contract meet here. Every layer of the roster answers for the shapes it
+/// is about to be built for, then takes that build, then answers again. A layer that reads
+/// build state gives 2 different answers, and a layer that reads the argument alone gives 1
 #[test]
 fn a_build_changes_no_answer() {
-    for (input, mut layer, expected) in unbuilt_layers() {
-        let name = layer.layer_type().to_string();
-        let before = layer
-            .compute_output_shape_many(std::slice::from_ref(&input))
-            .unwrap();
+    struct SameAfterBuild;
+    impl LayerVisitor for SameAfterBuild {
+        fn visit<L: Layer + 'static>(&mut self, case: Case, make: &dyn Fn() -> L) {
+            let mut layer = make();
+            let name = layer.layer_type().to_string();
+            let before = layer.compute_output_shape_many(&case.inputs).unwrap();
 
-        layer
-            .build_many(std::slice::from_ref(&input))
-            .unwrap_or_else(|error| panic!("{name} refused to build for {input}: {error}"));
+            layer.build_many(&case.inputs).unwrap_or_else(|error| {
+                panic!("{name} refused to build for {:?}: {error}", case.inputs)
+            });
 
-        let after = layer
-            .compute_output_shape_many(std::slice::from_ref(&input))
-            .unwrap_or_else(|error| panic!("{name} refused {input} after its build: {error}"));
-        assert_eq!(before, after, "{name}");
-        assert_eq!(after.to_string(), expected, "{name}");
+            let after = layer
+                .compute_output_shape_many(&case.inputs)
+                .unwrap_or_else(|error| {
+                    panic!("{name} refused {:?} after its build: {error}", case.inputs)
+                });
+            assert_eq!(before, after, "{name}");
+            assert_eq!(after.to_string(), case.output, "{name}");
+        }
     }
+
+    visit_every_layer(&mut SameAfterBuild);
 }
 
 /// A model input with an empty feature axis is refused, and the refusal names the axis

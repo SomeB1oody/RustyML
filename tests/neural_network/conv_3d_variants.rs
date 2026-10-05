@@ -190,41 +190,7 @@ fn conv3d_known_weight_forward_values() {
     assert_abs_diff_eq!(out[[0, 1, 1, 1, 0]], 4.60_f32, epsilon = 1e-5);
 }
 
-/// A forward pass with an inference context returns the same values as one with a training
-/// context (Conv3D has no train/eval difference)
-#[test]
-fn conv3d_predict_equals_forward() {
-    let mut conv = Conv3D::new(2, (2, 2, 2), (1, 1, 1), Linear::new()).unwrap();
-    conv.build(&Shape::known(&[1_usize, 3, 3, 3, 1])).unwrap();
-
-    let x = Array::from_shape_vec(
-        (1_usize, 3, 3, 3, 1),
-        (0..27).map(|v| 0.05 * v as f32 - 0.4).collect(),
-    )
-    .unwrap()
-    .into_dyn();
-
-    let mut train_ctx = Ctx::training();
-    let fwd = conv.forward(&x, &mut train_ctx).unwrap();
-    let mut infer_ctx = Ctx::inference();
-    let pred = conv.forward(&x, &mut infer_ctx).unwrap();
-    assert_allclose(&fwd, &pred, 1e-6_f32);
-}
-
 // Conv3D - error paths
-
-/// Calling backward before forward must return NeuralNetwork(ForwardPassNotRun)
-#[test]
-fn conv3d_backward_before_forward_errors() {
-    let conv = Conv3D::new(1, (2, 2, 2), (1, 1, 1), Linear::new()).unwrap();
-    let grad = Array::ones((1_usize, 2, 2, 2, 1)).into_dyn();
-    let mut ctx = Ctx::training();
-    let err = conv.backward(&grad, &mut ctx).unwrap_err();
-    assert!(
-        matches!(err, Error::NeuralNetwork(NnError::ForwardPassNotRun(_))),
-        "expected ForwardPassNotRun, got {err:?}"
-    );
-}
 
 /// A non-5D input to forward() must return InvalidInput
 #[test]
@@ -563,40 +529,7 @@ fn depthwise_conv2d_known_weight_single_channel() {
     assert_abs_diff_eq!(out[[0, 1, 1, 0]], 77.5_f32, epsilon = 1e-5);
 }
 
-/// `predict` in eval mode returns the same values as `forward`
-#[test]
-fn depthwise_conv2d_predict_equals_forward() {
-    let mut conv = DepthwiseConv2D::new((2, 2), (1, 1), Linear::new()).unwrap();
-    conv.build(&Shape::known(&[1_usize, 4, 4, 2])).unwrap();
-
-    let x = Array::from_shape_vec(
-        (1_usize, 4, 4, 2),
-        (0..32).map(|v| 0.05 * v as f32 - 0.7).collect(),
-    )
-    .unwrap()
-    .into_dyn();
-
-    let mut train_ctx = Ctx::training();
-    let fwd = conv.forward(&x, &mut train_ctx).unwrap();
-    let mut infer_ctx = Ctx::inference();
-    let pred = conv.forward(&x, &mut infer_ctx).unwrap();
-    assert_allclose(&fwd, &pred, 1e-6_f32);
-}
-
 // DepthwiseConv2D - error paths
-
-/// backward before forward must return ForwardPassNotRun
-#[test]
-fn depthwise_conv2d_backward_before_forward_errors() {
-    let conv = DepthwiseConv2D::new((2, 2), (1, 1), Linear::new()).unwrap();
-    let grad = Array::ones((1_usize, 3, 3, 2)).into_dyn();
-    let mut ctx = Ctx::training();
-    let err = conv.backward(&grad, &mut ctx).unwrap_err();
-    assert!(
-        matches!(err, Error::NeuralNetwork(NnError::ForwardPassNotRun(_))),
-        "expected ForwardPassNotRun, got {err:?}"
-    );
-}
 
 /// set_weights with wrong weight shape must return NeuralNetwork(WeightShape)
 #[test]
@@ -841,40 +774,7 @@ fn separable_conv2d_same_padding_zero_pads_depthwise() {
     }
 }
 
-/// `predict` in eval mode returns the same values as `forward`
-#[test]
-fn separable_conv2d_predict_equals_forward() {
-    let mut conv = SeparableConv2D::new(2, (2, 2), (1, 1), 1, Linear::new()).unwrap();
-    conv.build(&Shape::known(&[1_usize, 4, 4, 2])).unwrap();
-
-    let x = Array::from_shape_vec(
-        (1_usize, 4, 4, 2),
-        (0..32).map(|v| 0.05 * v as f32 - 0.7).collect(),
-    )
-    .unwrap()
-    .into_dyn();
-
-    let mut train_ctx = Ctx::training();
-    let fwd = conv.forward(&x, &mut train_ctx).unwrap();
-    let mut infer_ctx = Ctx::inference();
-    let pred = conv.forward(&x, &mut infer_ctx).unwrap();
-    assert_allclose(&fwd, &pred, 1e-6_f32);
-}
-
 // SeparableConv2D - error paths
-
-/// backward before forward must return ForwardPassNotRun
-#[test]
-fn separable_conv2d_backward_before_forward_errors() {
-    let conv = SeparableConv2D::new(2, (2, 2), (1, 1), 1, Linear::new()).unwrap();
-    let grad = Array::ones((1_usize, 3, 3, 2)).into_dyn();
-    let mut ctx = Ctx::training();
-    let err = conv.backward(&grad, &mut ctx).unwrap_err();
-    assert!(
-        matches!(err, Error::NeuralNetwork(NnError::ForwardPassNotRun(_))),
-        "expected ForwardPassNotRun, got {err:?}"
-    );
-}
 
 /// set_weights with wrong depthwise shape must return NeuralNetwork(WeightShape)
 #[test]
