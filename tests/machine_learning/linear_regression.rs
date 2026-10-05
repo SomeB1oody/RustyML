@@ -124,69 +124,7 @@ fn constructor_getters_round_trip() {
     assert!(model.get_actual_iterations().is_none());
 }
 
-// NotFitted errors before fit
-
-/// predict() on an unfitted model -> NotFitted
-#[test]
-fn predict_before_fit_returns_not_fitted() {
-    let model = LinearRegression::new(true)
-        .with_solver(LeastSquaresSolver::GradientDescent {
-            learning_rate: 0.01,
-            max_iter: 100,
-            tol: 1e-6,
-        })
-        .unwrap();
-    let x = array![[1.0, 2.0]];
-    let result = model.predict(&x);
-    assert!(
-        matches!(result, Err(Error::NotFitted(_))),
-        "expected NotFitted, got {:?}",
-        result
-    );
-}
-
 // fit() input-validation errors
-
-/// fit() with empty X -> EmptyInput
-#[test]
-fn fit_empty_x_returns_empty_input() {
-    let mut model = LinearRegression::new(true)
-        .with_solver(LeastSquaresSolver::GradientDescent {
-            learning_rate: 0.01,
-            max_iter: 100,
-            tol: 1e-6,
-        })
-        .unwrap();
-    let x: Array2<f64> = Array2::zeros((0, 2));
-    let y: Array1<f64> = Array1::zeros(0);
-    let result = model.fit(&x, &y);
-    assert!(
-        matches!(result, Err(Error::EmptyInput(_))),
-        "expected EmptyInput, got {:?}",
-        result
-    );
-}
-
-/// fit() with a non-finite sentinel (NaN / +Inf) in X -> NonFinite
-#[test]
-fn fit_non_finite_in_x_returns_non_finite() {
-    for sentinel in [f64::NAN, f64::INFINITY] {
-        let mut model = LinearRegression::new(true)
-            .with_solver(LeastSquaresSolver::GradientDescent {
-                learning_rate: 0.01,
-                max_iter: 100,
-                tol: 1e-6,
-            })
-            .unwrap();
-        let x = array![[1.0, sentinel], [2.0, 3.0]];
-        let y = array![1.0, 2.0];
-        let result = model.fit(&x, &y);
-        assert!(
-            matches!(result, Err(Error::NonFinite(_))),
-            "expected NonFinite for sentinel={sentinel:?}, got {result:?}"
-        );
-    }
-}
 
 /// fit() with mismatched y length -> DimensionMismatch
 #[test]
@@ -211,30 +149,6 @@ fn fit_y_length_mismatch_returns_dimension_mismatch() {
 
 // predict() input-validation errors (after fit)
 
-/// predict() with empty matrix -> EmptyInput
-#[test]
-fn predict_empty_matrix_returns_empty_input() {
-    let mut model = LinearRegression::new(true)
-        .with_solver(LeastSquaresSolver::GradientDescent {
-            learning_rate: 0.01,
-            max_iter: 5000,
-            tol: 1e-8,
-        })
-        .unwrap();
-    // train on y = 2x + 1
-    let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
-    let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
-    model.fit(&x_train, &y_train).unwrap();
-
-    let x_empty: Array2<f64> = Array2::zeros((0, 1));
-    let result = model.predict(&x_empty);
-    assert!(
-        matches!(result, Err(Error::EmptyInput(_))),
-        "expected EmptyInput, got {:?}",
-        result
-    );
-}
-
 /// predict() with wrong number of columns -> DimensionMismatch
 #[test]
 fn predict_wrong_feature_count_returns_dimension_mismatch() {
@@ -258,30 +172,6 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
         "expected DimensionMismatch, got {:?}",
         result
     );
-}
-
-/// predict() with a non-finite sentinel (NaN / +Inf) in X -> NonFinite
-#[test]
-fn predict_non_finite_in_x_returns_non_finite() {
-    for sentinel in [f64::NAN, f64::INFINITY] {
-        let mut model = LinearRegression::new(true)
-            .with_solver(LeastSquaresSolver::GradientDescent {
-                learning_rate: 0.01,
-                max_iter: 5000,
-                tol: 1e-8,
-            })
-            .unwrap();
-        let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
-        let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
-        model.fit(&x_train, &y_train).unwrap();
-
-        let x_bad = array![[sentinel]];
-        let result = model.predict(&x_bad);
-        assert!(
-            matches!(result, Err(Error::NonFinite(_))),
-            "expected NonFinite for sentinel={sentinel:?}, got {result:?}"
-        );
-    }
 }
 
 // Correctness: univariate y = 2x + 1
@@ -986,24 +876,6 @@ fn score_mean_predictor_is_about_zero() {
         "an uninformative feature should give R² near 0, got {r2}"
     );
     assert!(r2 <= 1.0 + 1e-9);
-}
-
-/// score on an unfitted model returns NotFitted
-#[test]
-fn score_not_fitted_errors() {
-    let model = LinearRegression::new(true)
-        .with_solver(LeastSquaresSolver::GradientDescent {
-            learning_rate: 0.01,
-            max_iter: 100,
-            tol: 1e-6,
-        })
-        .unwrap();
-    let x = array![[1.0], [2.0]];
-    let y = array![1.0, 2.0];
-    assert!(matches!(
-        model.score(&x, &y),
-        Err(Error::NotFitted("LinearRegression"))
-    ));
 }
 
 /// score with a y of the wrong length returns DimensionMismatch

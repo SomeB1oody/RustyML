@@ -101,76 +101,7 @@ fn fit_mismatched_y_length_returns_dimension_mismatch() {
     );
 }
 
-/// Fitting with a non-finite value in x must return Error::NonFinite
-/// (covers NaN and +Inf sentinels hitting the same finiteness guard)
-#[test]
-fn fit_non_finite_in_x_returns_non_finite() {
-    for sentinel in [f64::NAN, f64::INFINITY] {
-        let mut knn = KNN::<i32>::new(1)
-            .unwrap()
-            .with_weighting_strategy(WeightingStrategy::Uniform)
-            .with_metric(Metric::Euclidean)
-            .unwrap();
-        let x = array![[sentinel, 2.0]];
-        let y = array![0];
-        let err = knn.fit(&x, &y).unwrap_err();
-        assert!(
-            matches!(err, Error::NonFinite(_)),
-            "expected NonFinite for sentinel={sentinel:?}, got {err:?}"
-        );
-    }
-}
-
-/// Fitting with an empty x (0 rows) must return Error::EmptyInput
-#[test]
-fn fit_empty_x_returns_empty_input() {
-    let mut knn = KNN::<i32>::new(1)
-        .unwrap()
-        .with_weighting_strategy(WeightingStrategy::Uniform)
-        .with_metric(Metric::Euclidean)
-        .unwrap();
-    let x: Array2<f64> = Array2::zeros((0, 2));
-    let y: Array1<i32> = Array1::zeros(0);
-    let err = knn.fit(&x, &y).unwrap_err();
-    assert!(
-        matches!(err, Error::EmptyInput(_)),
-        "expected EmptyInput, got {err:?}"
-    );
-}
-
 // predict error paths
-
-/// predict before fit must return Error::NotFitted
-#[test]
-fn predict_before_fit_returns_not_fitted() {
-    let knn = KNN::<i32>::new(1)
-        .unwrap()
-        .with_weighting_strategy(WeightingStrategy::Uniform)
-        .with_metric(Metric::Euclidean)
-        .unwrap();
-    let x_test = array![[1.0, 2.0]];
-    let err = knn.predict(&x_test).unwrap_err();
-    assert!(
-        matches!(err, Error::NotFitted(_)),
-        "expected NotFitted, got {err:?}"
-    );
-}
-
-/// predict_parallel before fit must return Error::NotFitted
-#[test]
-fn predict_parallel_before_fit_returns_not_fitted() {
-    let knn = KNN::<i32>::new(1)
-        .unwrap()
-        .with_weighting_strategy(WeightingStrategy::Uniform)
-        .with_metric(Metric::Euclidean)
-        .unwrap();
-    let x_test = array![[1.0, 2.0]];
-    let err = knn.predict_parallel(&x_test).unwrap_err();
-    assert!(
-        matches!(err, Error::NotFitted(_)),
-        "expected NotFitted, got {err:?}"
-    );
-}
 
 /// predict with wrong feature count must return Error::DimensionMismatch (train 2, predict 3)
 #[test]
@@ -190,46 +121,6 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
     assert!(
         matches!(err, Error::DimensionMismatch { .. }),
         "expected DimensionMismatch, got {err:?}"
-    );
-}
-
-/// predict with NaN in x_test must return Error::NonFinite
-#[test]
-fn predict_nan_in_x_test_returns_non_finite() {
-    let mut knn = KNN::<i32>::new(1)
-        .unwrap()
-        .with_weighting_strategy(WeightingStrategy::Uniform)
-        .with_metric(Metric::Euclidean)
-        .unwrap();
-    let x_train = array![[0.0, 0.0], [10.0, 0.0]];
-    let y_train = array![0, 1];
-    knn.fit(&x_train, &y_train).unwrap();
-
-    let x_test = array![[f64::NAN, 0.0]];
-    let err = knn.predict(&x_test).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {err:?}"
-    );
-}
-
-/// predict with empty x_test must return Error::EmptyInput
-#[test]
-fn predict_empty_x_test_returns_empty_input() {
-    let mut knn = KNN::<i32>::new(1)
-        .unwrap()
-        .with_weighting_strategy(WeightingStrategy::Uniform)
-        .with_metric(Metric::Euclidean)
-        .unwrap();
-    let x_train = array![[0.0, 0.0], [10.0, 0.0]];
-    let y_train = array![0, 1];
-    knn.fit(&x_train, &y_train).unwrap();
-
-    let x_test: Array2<f64> = Array2::zeros((0, 2));
-    let err = knn.predict(&x_test).unwrap_err();
-    assert!(
-        matches!(err, Error::EmptyInput(_)),
-        "expected EmptyInput, got {err:?}"
     );
 }
 

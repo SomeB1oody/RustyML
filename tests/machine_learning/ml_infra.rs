@@ -1,7 +1,8 @@
 //! Integration tests for cross-cutting ML infrastructure.
 //!
-//! Covers generic Fit/Predict trait forwarding across every estimator, a save/load
-//! round-trip, and predict-before-fit NotFitted errors.
+//! Covers generic Fit/Predict trait forwarding across every estimator and a save/load
+//! round-trip. Table-driven tests check the shared validation of every estimator: NotFitted
+//! before fit, empty and non-finite input, and a missing file on load.
 //!
 //! Per-type kernel and distance math has unit tests in `src/machine_learning/types.rs`.
 //! The `Error` smart constructors have unit tests in `src/error.rs`. This file does not
@@ -10,22 +11,15 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
-use rustyml::error::Error;
-use rustyml::machine_learning::IsolationForest;
-use rustyml::machine_learning::KMeans;
-use rustyml::machine_learning::KernelType;
-use rustyml::machine_learning::LinearRegression;
-use rustyml::machine_learning::linear_model::LeastSquaresSolver;
-use rustyml::traits::{Fit, Predict};
-
-use rustyml::machine_learning::DBSCAN;
+use rustyml::error::{Error, IoError};
 use rustyml::machine_learning::DistanceCalculationMetric as Metric;
-use rustyml::machine_learning::LDA;
-use rustyml::machine_learning::MeanShift;
-use rustyml::machine_learning::SVC;
-use rustyml::machine_learning::{Algorithm, DecisionTree};
-use rustyml::machine_learning::{KNN, WeightingStrategy};
-use rustyml::machine_learning::{LinearSVC, RegularizationType};
+use rustyml::machine_learning::linear_model::LeastSquaresSolver;
+use rustyml::machine_learning::{
+    Algorithm, DBSCAN, DecisionTree, EigenSolver, Gamma, Init, IsolationForest, KMeans, KNN,
+    KernelPCA, KernelType, LDA, LinearRegression, LinearSVC, LogisticRegression, MeanShift, PCA,
+    RegularizationType, SVC, SVDSolver, TSNE, TSNEMethod, WeightingStrategy,
+};
+use rustyml::traits::{Fit, Predict};
 
 // Fit and Predict traits used generically
 
@@ -159,48 +153,406 @@ fn kmeans_save_load_preserves_hyperparameters() {
     let _ = std::fs::remove_file(path);
 }
 
-// predict() before fit() -> NotFitted
+// Shared validation helpers: one table of models and methods
 
-/// LinearRegression (supervised): predict before fit returns NotFitted
-#[test]
-fn linear_regression_predict_before_fit_is_not_fitted() {
-    let model = LinearRegression::new(true)
-        .with_solver(LeastSquaresSolver::GradientDescent {
-            learning_rate: 0.01,
-            max_iter: 100,
-            tol: 1e-6,
-        })
-        .unwrap();
-    let x = array![[1.0, 2.0]];
-    let result = model.predict(&x);
-    assert!(
-        matches!(result, Err(Error::NotFitted(_))),
-        "expected NotFitted, got {result:?}"
-    );
+/// Holds 1 instance of each estimator that keeps a fitted state.
+///
+/// `TSNE` has no fitted state, so only `fit_calls` uses it.
+struct Models {
+    dbscan: DBSCAN,
+    decision_tree: DecisionTree,
+    isolation_forest: IsolationForest,
+    kernel_pca: KernelPCA,
+    kmeans: KMeans,
+    knn: KNN<i32>,
+    lda: LDA,
+    linear_regression: LinearRegression,
+    linear_svc: LinearSVC,
+    logistic_regression: LogisticRegression,
+    mean_shift: MeanShift,
+    pca: PCA,
+    svc: SVC,
 }
 
-/// KMeans (unsupervised): predict before fit returns NotFitted
-#[test]
-fn kmeans_predict_before_fit_is_not_fitted() {
-    let km = KMeans::new(3, 100, 1e-4).unwrap().with_random_state(42);
-    let x = array![[1.0, 2.0]];
-    let result = km.predict(&x);
-    assert!(
-        matches!(result, Err(Error::NotFitted(_))),
-        "expected NotFitted, got {result:?}"
-    );
+/// Builds a `TSNE` with exact optimization and a seeded PCA start.
+fn new_tsne() -> TSNE {
+    TSNE::new(2, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap()
 }
 
-/// IsolationForest (anomaly detection): predict before fit returns NotFitted
+impl Models {
+    /// Builds every estimator with valid hyperparameters and no fitted state.
+    fn unfitted() -> Self {
+        Self {
+            dbscan: DBSCAN::new(1.0, 2).unwrap(),
+            decision_tree: DecisionTree::new(Algorithm::CART, true).unwrap(),
+            isolation_forest: IsolationForest::new(10, 32).unwrap().with_random_state(42),
+            kernel_pca: KernelPCA::new(
+                KernelType::RBF {
+                    gamma: Gamma::Value(0.5),
+                },
+                2,
+            )
+            .unwrap()
+            .with_eigen_solver(EigenSolver::Dense),
+            kmeans: KMeans::new(2, 100, 1e-4).unwrap().with_random_state(42),
+            knn: KNN::<i32>::new(1)
+                .unwrap()
+                .with_weighting_strategy(WeightingStrategy::Uniform)
+                .with_metric(Metric::Euclidean)
+                .unwrap(),
+            lda: LDA::new(1).unwrap(),
+            linear_regression: LinearRegression::new(true)
+                .with_solver(LeastSquaresSolver::GradientDescent {
+                    learning_rate: 0.01,
+                    max_iter: 100,
+                    tol: 1e-6,
+                })
+                .unwrap(),
+            linear_svc: LinearSVC::default(),
+            logistic_regression: LogisticRegression::default(),
+            mean_shift: MeanShift::new(2.0).unwrap(),
+            pca: PCA::new(2).unwrap().with_svd_solver(SVDSolver::Full),
+            svc: SVC::new(KernelType::Linear, 1.0, 1e-3, 100)
+                .unwrap()
+                .with_random_state(42),
+        }
+    }
+
+    /// Builds every estimator and fits it on `two_class_data`.
+    fn fitted() -> Self {
+        let (x, y) = two_class_data();
+        let mut models = Self::unfitted();
+        for (model, fit) in fit_calls() {
+            if model != "TSNE" {
+                fit(&mut models, &x, &y).unwrap_or_else(|e| panic!("{model}::fit: {e:?}"));
+            }
+        }
+        models
+    }
+}
+
+/// Builds 2 separated classes of 3 samples each, with 2 features.
+///
+/// # Returns
+///
+/// - `(Array2<f64>, Array1<f64>)` - the 6x2 features and the labels 0.0 and 1.0
+fn two_class_data() -> (Array2<f64>, Array1<f64>) {
+    let x = array![
+        [0.0, 0.0],
+        [0.4, 0.1],
+        [0.1, 0.5],
+        [5.0, 5.0],
+        [5.3, 5.1],
+        [5.1, 5.4],
+    ];
+    let y = array![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    (x, y)
+}
+
+/// Calls a fit method on 1 estimator in `Models` with the features and the `f64` labels.
+type FitCall = fn(&mut Models, &Array2<f64>, &Array1<f64>) -> Result<(), Error>;
+
+/// Calls a method on 1 estimator in `Models` and returns the number of output rows.
+type MethodCall = fn(&Models, &Array2<f64>) -> Result<usize, Error>;
+
+/// Lists the fit method of each estimator, with the model name.
+///
+/// `KNN` and `LDA` take `i32` labels, so their calls convert the labels.
+fn fit_calls() -> Vec<(&'static str, FitCall)> {
+    vec![
+        ("DBSCAN", |m, x, _| m.dbscan.fit(x).map(|_| ())),
+        ("DecisionTree", |m, x, y| {
+            m.decision_tree.fit(x, y).map(|_| ())
+        }),
+        ("IsolationForest", |m, x, _| {
+            m.isolation_forest.fit(x).map(|_| ())
+        }),
+        ("KernelPCA", |m, x, _| m.kernel_pca.fit(x).map(|_| ())),
+        ("KMeans", |m, x, _| m.kmeans.fit(x).map(|_| ())),
+        ("KNN", |m, x, y| {
+            m.knn.fit(x, &y.mapv(|v| v as i32)).map(|_| ())
+        }),
+        ("LDA", |m, x, y| {
+            m.lda.fit(x, &y.mapv(|v| v as i32)).map(|_| ())
+        }),
+        ("LinearRegression", |m, x, y| {
+            m.linear_regression.fit(x, y).map(|_| ())
+        }),
+        ("LinearSVC", |m, x, y| m.linear_svc.fit(x, y).map(|_| ())),
+        ("LogisticRegression", |m, x, y| {
+            m.logistic_regression.fit(x, y).map(|_| ())
+        }),
+        ("MeanShift", |m, x, _| m.mean_shift.fit(x).map(|_| ())),
+        ("PCA", |m, x, _| m.pca.fit(x).map(|_| ())),
+        ("SVC", |m, x, y| m.svc.fit(x, y).map(|_| ())),
+        ("TSNE", |_, x, _| new_tsne().fit_transform(x).map(|_| ())),
+    ]
+}
+
+/// Lists each method that takes a feature matrix after fit, with the model and method names.
+fn matrix_method_calls() -> Vec<(&'static str, &'static str, MethodCall)> {
+    vec![
+        ("DBSCAN", "predict", |m, x| {
+            m.dbscan.predict(x).map(|p| p.len())
+        }),
+        ("DecisionTree", "predict", |m, x| {
+            m.decision_tree.predict(x).map(|p| p.len())
+        }),
+        ("DecisionTree", "predict_proba", |m, x| {
+            m.decision_tree.predict_proba(x).map(|p| p.nrows())
+        }),
+        ("IsolationForest", "predict", |m, x| {
+            m.isolation_forest.predict(x).map(|p| p.len())
+        }),
+        ("IsolationForest", "score_samples", |m, x| {
+            m.isolation_forest.score_samples(x).map(|p| p.len())
+        }),
+        ("IsolationForest", "decision_function", |m, x| {
+            m.isolation_forest.decision_function(x).map(|p| p.len())
+        }),
+        ("KernelPCA", "transform", |m, x| {
+            m.kernel_pca.transform(x).map(|p| p.nrows())
+        }),
+        ("KMeans", "predict", |m, x| {
+            m.kmeans.predict(x).map(|p| p.len())
+        }),
+        ("KNN", "predict", |m, x| m.knn.predict(x).map(|p| p.len())),
+        ("KNN", "predict_parallel", |m, x| {
+            m.knn.predict_parallel(x).map(|p| p.len())
+        }),
+        ("LDA", "predict", |m, x| m.lda.predict(x).map(|p| p.len())),
+        ("LDA", "transform", |m, x| {
+            m.lda.transform(x).map(|p| p.nrows())
+        }),
+        ("LDA", "decision_function", |m, x| {
+            m.lda.decision_function(x).map(|p| p.nrows())
+        }),
+        ("LDA", "predict_proba", |m, x| {
+            m.lda.predict_proba(x).map(|p| p.nrows())
+        }),
+        ("LinearRegression", "predict", |m, x| {
+            m.linear_regression.predict(x).map(|p| p.len())
+        }),
+        ("LinearRegression", "score", |m, x| {
+            m.linear_regression
+                .score(x, &Array1::zeros(x.nrows()))
+                .map(|_| 1)
+        }),
+        ("LinearSVC", "predict", |m, x| {
+            m.linear_svc.predict(x).map(|p| p.len())
+        }),
+        ("LinearSVC", "decision_function", |m, x| {
+            m.linear_svc.decision_function(x).map(|p| p.len())
+        }),
+        ("LogisticRegression", "predict", |m, x| {
+            m.logistic_regression.predict(x).map(|p| p.len())
+        }),
+        ("LogisticRegression", "predict_proba", |m, x| {
+            m.logistic_regression.predict_proba(x).map(|p| p.len())
+        }),
+        ("MeanShift", "predict", |m, x| {
+            m.mean_shift.predict(x).map(|p| p.len())
+        }),
+        ("PCA", "transform", |m, x| {
+            m.pca.transform(x).map(|p| p.nrows())
+        }),
+        ("PCA", "inverse_transform", |m, x| {
+            m.pca.inverse_transform(x).map(|p| p.nrows())
+        }),
+        ("SVC", "predict", |m, x| m.svc.predict(x).map(|p| p.len())),
+        ("SVC", "decision_function", |m, x| {
+            m.svc.decision_function(x).map(|p| p.len())
+        }),
+    ]
+}
+
+/// Records the result of 1 call in a form that `assert_eq!` can compare.
+#[derive(Debug, PartialEq)]
+enum Outcome {
+    /// The call succeeded with this number of output rows
+    Rows(usize),
+    /// `Error::NotFitted` with this model name
+    NotFitted(&'static str),
+    /// `Error::EmptyInput`
+    EmptyInput,
+    /// `Error::NonFinite`
+    NonFinite,
+    /// A different error, kept as its debug text
+    Other(String),
+}
+
+impl From<Result<usize, Error>> for Outcome {
+    fn from(result: Result<usize, Error>) -> Self {
+        match result {
+            Ok(rows) => Outcome::Rows(rows),
+            Err(Error::NotFitted(model)) => Outcome::NotFitted(model),
+            Err(Error::EmptyInput(_)) => Outcome::EmptyInput,
+            Err(Error::NonFinite(_)) => Outcome::NonFinite,
+            Err(other) => Outcome::Other(format!("{other:?}")),
+        }
+    }
+}
+
+/// Every method that needs a fitted model returns `NotFitted` with its own model name
+/// before fit.
 #[test]
-fn isolation_forest_predict_before_fit_is_not_fitted() {
-    let forest = IsolationForest::new(10, 32).unwrap().with_random_state(42);
+fn methods_before_fit_return_not_fitted() {
+    let models = Models::unfitted();
     let x = array![[1.0, 2.0]];
-    let result = forest.predict(&x);
-    assert!(
-        matches!(result, Err(Error::NotFitted(_))),
-        "expected NotFitted, got {result:?}"
-    );
+    let row = [1.0, 2.0];
+
+    let mut calls: Vec<(&str, &str, Result<usize, Error>)> = matrix_method_calls()
+        .into_iter()
+        .map(|(model, method, call)| (model, method, call(&models, &x)))
+        .collect();
+    calls.extend([
+        (
+            "DecisionTree",
+            "predict_one",
+            models.decision_tree.predict_one(&row).map(|_| 1),
+        ),
+        (
+            "DecisionTree",
+            "predict_proba_one",
+            models.decision_tree.predict_proba_one(&row).map(|_| 1),
+        ),
+        (
+            "DecisionTree",
+            "generate_tree_structure",
+            models.decision_tree.generate_tree_structure().map(|_| 1),
+        ),
+        (
+            "IsolationForest",
+            "score_sample",
+            models.isolation_forest.score_sample(&row).map(|_| 1),
+        ),
+    ]);
+
+    for (model, method, result) in calls {
+        assert_eq!(
+            Outcome::from(result),
+            Outcome::NotFitted(model),
+            "{model}::{method} before fit"
+        );
+    }
+}
+
+/// Every fit method returns `EmptyInput` for a matrix with 0 rows.
+#[test]
+fn fit_on_empty_input_returns_empty_input() {
+    let x: Array2<f64> = Array2::zeros((0, 2));
+    let y: Array1<f64> = Array1::zeros(0);
+    for (model, fit) in fit_calls() {
+        let mut models = Models::unfitted();
+        let result = fit(&mut models, &x, &y).map(|_| 0);
+        assert_eq!(
+            Outcome::from(result),
+            Outcome::EmptyInput,
+            "{model}::fit on a 0-row matrix"
+        );
+    }
+}
+
+/// Every fit method returns `NonFinite` when the features contain NaN, +inf, or -inf.
+#[test]
+fn fit_on_non_finite_input_returns_non_finite() {
+    let (clean_x, y) = two_class_data();
+    for sentinel in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut x = clean_x.clone();
+        x[[0, 1]] = sentinel;
+        for (model, fit) in fit_calls() {
+            let mut models = Models::unfitted();
+            let result = fit(&mut models, &x, &y).map(|_| 0);
+            assert_eq!(
+                Outcome::from(result),
+                Outcome::NonFinite,
+                "{model}::fit with {sentinel:?} in the features"
+            );
+        }
+    }
+}
+
+/// After fit, each method returns `EmptyInput` for a matrix with 0 rows.
+///
+/// `DBSCAN::predict` is the exception: it returns an empty array.
+#[test]
+fn fitted_methods_on_empty_input() {
+    let models = Models::fitted();
+    let x: Array2<f64> = Array2::zeros((0, 2));
+    for (model, method, call) in matrix_method_calls() {
+        let expected = match (model, method) {
+            ("DBSCAN", "predict") => Outcome::Rows(0),
+            _ => Outcome::EmptyInput,
+        };
+        assert_eq!(
+            Outcome::from(call(&models, &x)),
+            expected,
+            "{model}::{method} on a 0-row matrix"
+        );
+    }
+}
+
+/// After fit, each method returns `NonFinite` when the input contains NaN, +inf, or -inf.
+#[test]
+fn fitted_methods_on_non_finite_input_return_non_finite() {
+    let models = Models::fitted();
+    for sentinel in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let x = array![[sentinel, 1.0], [2.0, 3.0]];
+        for (model, method, call) in matrix_method_calls() {
+            assert_eq!(
+                Outcome::from(call(&models, &x)),
+                Outcome::NonFinite,
+                "{model}::{method} with {sentinel:?} in the input"
+            );
+        }
+    }
+}
+
+/// `load_from_path` on a missing file returns `Error::Io` with the `NotFound` kind.
+///
+/// The `model_save_and_load_methods!` macro gives each estimator this method.
+#[test]
+fn load_from_nonexistent_path_returns_io_not_found() {
+    type LoadCall = fn(&str) -> Result<(), Error>;
+    let loads: [(&str, LoadCall); 13] = [
+        ("DBSCAN", |p| DBSCAN::load_from_path(p).map(|_| ())),
+        ("DecisionTree", |p| {
+            DecisionTree::load_from_path(p).map(|_| ())
+        }),
+        ("IsolationForest", |p| {
+            IsolationForest::load_from_path(p).map(|_| ())
+        }),
+        ("KernelPCA", |p| KernelPCA::load_from_path(p).map(|_| ())),
+        ("KMeans", |p| KMeans::load_from_path(p).map(|_| ())),
+        ("KNN", |p| KNN::<i32>::load_from_path(p).map(|_| ())),
+        ("LDA", |p| LDA::load_from_path(p).map(|_| ())),
+        ("LinearRegression", |p| {
+            LinearRegression::load_from_path(p).map(|_| ())
+        }),
+        ("LinearSVC", |p| LinearSVC::load_from_path(p).map(|_| ())),
+        ("LogisticRegression", |p| {
+            LogisticRegression::load_from_path(p).map(|_| ())
+        }),
+        ("MeanShift", |p| MeanShift::load_from_path(p).map(|_| ())),
+        ("PCA", |p| PCA::load_from_path(p).map(|_| ())),
+        ("SVC", |p| SVC::load_from_path(p).map(|_| ())),
+    ];
+    let path = "/tmp/rustyml_ml_infra_no_such_file.bin";
+    for (model, load) in loads {
+        let result = load(path);
+        assert!(
+            matches!(
+                &result,
+                Err(Error::Io(IoError::Std(e))) if e.kind() == std::io::ErrorKind::NotFound
+            ),
+            "{model}::load_from_path on a missing file: got {result:?}"
+        );
+    }
 }
 
 // Fit and Predict trait forwarding for the remaining estimators. Each test confirms

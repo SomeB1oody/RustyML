@@ -1,6 +1,5 @@
 //! Integration tests for GroupNormalization and InstanceNormalization: forward
-//! values, error paths, mode behavior, eval-mode backward passthrough, and
-//! predict == forward
+//! values, error paths, mode behavior, and eval-mode backward passthrough
 //!
 //! Expected values come from the mathematical definition. Gradient correctness lives in
 //! tests/neural_network/gradient_check.rs.
@@ -241,28 +240,6 @@ fn group_norm_channel_axis_is_last() {
     assert_allclose(&output, &expected, 1e-5_f32);
 }
 
-// GroupNormalization - an inference pass matches a training pass
-
-/// An inference pass matches a training pass: GN always computes from-data statistics, with no
-/// running mean/var and no dependence on the context
-#[test]
-fn group_norm_predict_equals_forward() {
-    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
-    gn.build(&Shape::known(&[1, 4, 4])).unwrap();
-
-    let input = Array::from_shape_vec(
-        (1, 4, 4),
-        (0..16).map(|v| 0.5 * v as f32 - 3.75).collect::<Vec<_>>(),
-    )
-    .unwrap()
-    .into_dyn();
-
-    let out_fwd = gn.forward(&input, &mut Ctx::training()).unwrap();
-    let out_pred = gn.forward(&input, &mut Ctx::inference()).unwrap();
-
-    assert_allclose(&out_pred, &out_fwd, 1e-6_f32);
-}
-
 // GroupNormalization - constructor / forward error paths
 
 /// Constructor rejects each invalid hyperparameter with InvalidParameter. Each row
@@ -311,22 +288,6 @@ fn group_norm_error_channels_not_divisible_by_groups_at_forward() {
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter for non-divisible channels/groups, got {:?}",
-        err
-    );
-}
-
-/// GroupNormalization::backward before any forward pass returns Err(ForwardPassNotRun)
-#[test]
-fn group_norm_error_backward_before_forward() {
-    let gn = GroupNormalization::new(2, 1e-5).unwrap();
-    let grad = Array::ones((1, 4, 4)).into_dyn();
-    let err = gn.backward(&grad, &mut Ctx::training()).unwrap_err();
-    assert!(
-        matches!(
-            err,
-            Error::NeuralNetwork(NnError::ForwardPassNotRun("GroupNormalization"))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
         err
     );
 }
@@ -563,44 +524,6 @@ fn group_norm_full_groups_equals_instance_norm_with_affine() {
     assert_allclose(&out_gn, &out_in, 1e-6_f32);
 }
 
-// InstanceNormalization - an inference pass matches a training pass
-
-/// An inference pass matches a training pass, since IN always computes stats from the input
-#[test]
-fn instance_norm_predict_equals_forward() {
-    let mut inn = InstanceNormalization::new(1e-5).unwrap();
-    inn.build(&Shape::known(&[2, 3, 4])).unwrap();
-
-    let input = Array::from_shape_vec(
-        (2, 3, 4),
-        (0..24).map(|v| 0.5 * v as f32 - 5.75).collect::<Vec<_>>(),
-    )
-    .unwrap()
-    .into_dyn();
-
-    let out_fwd = inn.forward(&input, &mut Ctx::training()).unwrap();
-    let out_pred = inn.forward(&input, &mut Ctx::inference()).unwrap();
-
-    assert_allclose(&out_pred, &out_fwd, 1e-6_f32);
-}
-
-/// An inference pass matches a training pass, since statistics are always
-/// recomputed from the input regardless of the context
-#[test]
-fn instance_norm_predict_equals_forward_training_mode() {
-    let mut inn = InstanceNormalization::new(1e-5).unwrap();
-    inn.build(&Shape::known(&[1, 4, 2])).unwrap();
-
-    let input = Array::from_shape_vec((1, 4, 2), vec![1.0_f32, 5.0, 2.0, 6.0, 3.0, 7.0, 4.0, 8.0])
-        .unwrap()
-        .into_dyn();
-
-    let out_fwd = inn.forward(&input, &mut Ctx::training()).unwrap();
-    let out_pred = inn.forward(&input, &mut Ctx::inference()).unwrap();
-
-    assert_allclose(&out_pred, &out_fwd, 1e-6_f32);
-}
-
 // InstanceNormalization - constructor / forward error paths
 
 /// Constructor rejects a non-positive epsilon (zero / negative) with InvalidParameter
@@ -628,22 +551,6 @@ fn instance_norm_error_empty_input_shape() {
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "expected InvalidInput, got {:?}",
-        err
-    );
-}
-
-/// InstanceNormalization::backward before any forward pass returns Err(ForwardPassNotRun)
-#[test]
-fn instance_norm_error_backward_before_forward() {
-    let inn = InstanceNormalization::new(1e-5).unwrap();
-    let grad = Array::ones((1, 3, 4)).into_dyn();
-    let err = inn.backward(&grad, &mut Ctx::training()).unwrap_err();
-    assert!(
-        matches!(
-            err,
-            Error::NeuralNetwork(NnError::ForwardPassNotRun("InstanceNormalization"))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
         err
     );
 }

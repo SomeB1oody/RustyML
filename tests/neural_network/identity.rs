@@ -183,24 +183,6 @@ fn identity_does_not_change_what_a_model_learns() {
     );
 }
 
-/// A forward pass with an inference context writes no cache, so it cannot serve a later
-/// backward pass
-#[test]
-fn identity_predict_caches_nothing() {
-    let x = ramp(&[2, 3]);
-    let layer = Identity::new();
-    let mut ctx = Ctx::inference();
-    layer.forward(&x, &mut ctx).unwrap();
-
-    assert!(
-        matches!(
-            layer.backward(&x, &mut ctx),
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "predict must not leave a cache behind"
-    );
-}
-
 /// A tensor with no batch axis is rejected
 #[test]
 fn identity_rejects_a_rank_0_input() {

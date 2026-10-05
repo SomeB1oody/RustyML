@@ -4,6 +4,7 @@
 //! `gradient_check.rs` covers gradient values. This file does not duplicate them.
 
 use ndarray::{Array3, Array4, Array5, IxDyn};
+use rustyml::error::Error;
 use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
@@ -19,7 +20,6 @@ use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
-use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
 
@@ -446,30 +446,6 @@ fn cropping_rejects_a_border_that_removes_the_whole_axis() {
     let out = just_fits.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[1, 1, 1]);
     assert_eq!(out[[0, 0, 0]], 3.0);
-}
-
-/// backward before any forward pass reports ForwardPassNotRun
-#[test]
-fn border_layers_backward_before_forward_returns_err() {
-    let pad = ZeroPadding2D::new(1);
-    let result = pad.backward(&ramp_of(&[1, 4, 4, 1]), &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun from ZeroPadding2D, got {result:?}"
-    );
-
-    let crop = Cropping2D::new(1);
-    let result = crop.backward(&ramp_of(&[1, 2, 2, 1]), &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun from Cropping2D, got {result:?}"
-    );
 }
 
 /// backward rejects a gradient whose shape is not the forward output shape

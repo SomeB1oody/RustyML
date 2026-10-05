@@ -1,5 +1,5 @@
 //! Integration tests for Conv1D and Conv2D forward values, shapes, error paths,
-//! param counts, set_weights, and predict==forward equivalence.
+//! param counts, and set_weights.
 //!
 //! Layout is Keras channels-last: Conv1D sees \[batch, length, channels\] and Conv2D sees
 //! \[batch, height, width, channels\]. Kernels are \[k, Cin, F\] / \[kh, kw, Cin, F\] and every
@@ -445,61 +445,6 @@ fn conv1d_forward_wrong_ndim_errors() {
     );
 }
 
-/// backward() before forward() returns ForwardPassNotRun
-#[test]
-fn conv1d_backward_before_forward_errors() {
-    let layer = Conv1D::new(1, 3, 1, Linear::new()).unwrap();
-    let grad = Array::ones((1_usize, 3_usize, 1_usize)).into_dyn();
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun error, got {:?}",
-        result
-    );
-}
-
-// Conv1D - predict == forward in eval mode (no randomness, layer is stateless)
-
-/// predict() returns the same values as forward() for a deterministic layer
-#[test]
-fn conv1d_predict_equals_forward() {
-    let mut layer = Conv1D::new(1, 3, 1, Linear::new()).unwrap();
-    layer.build(&Shape::known(&[1, 5, 1])).unwrap();
-    let weights = Array3::from_elem((3, 1, 1), 1.0f32);
-    let bias = Array1::zeros(1);
-    layer.set_weights(weights, bias).unwrap();
-
-    let input = Array::from_shape_vec((1, 5, 1), vec![1.0f32, 2.0, 3.0, 4.0, 5.0])
-        .unwrap()
-        .into_dyn();
-
-    let forward_output = layer.forward(&input, &mut Ctx::training()).unwrap();
-    let predict_output = layer.forward(&input, &mut Ctx::inference()).unwrap();
-
-    assert_allclose(&predict_output, &forward_output, 1e-7f32);
-}
-
-/// predict() called twice on the same input returns bit-identical output
-#[test]
-fn conv1d_predict_deterministic() {
-    let mut layer = Conv1D::new(1, 3, 1, Linear::new()).unwrap();
-    layer.build(&Shape::known(&[1, 5, 1])).unwrap();
-    let weights = Array3::from_elem((3, 1, 1), 1.0f32);
-    let bias = Array1::zeros(1);
-    layer.set_weights(weights, bias).unwrap();
-
-    let input = Array::from_shape_vec((1, 5, 1), vec![2.0f32, 4.0, 6.0, 8.0, 10.0])
-        .unwrap()
-        .into_dyn();
-
-    let out1 = layer.forward(&input, &mut Ctx::inference()).unwrap();
-    let out2 = layer.forward(&input, &mut Ctx::inference()).unwrap();
-    assert_allclose(&out1, &out2, 0.0f32);
-}
-
 // Conv1D - named weight shapes
 
 /// The Conv1D kernel has shape [kernel, channels, filters], and the bias [filters]
@@ -903,63 +848,6 @@ fn conv2d_forward_wrong_ndim_errors() {
         "expected InvalidInput for 3D tensor, got {:?}",
         result
     );
-}
-
-/// backward() before forward() returns ForwardPassNotRun
-#[test]
-fn conv2d_backward_before_forward_errors() {
-    let layer = Conv2D::new(1, (2, 2), (1, 1), Linear::new()).unwrap();
-    let grad = Array::ones((1_usize, 3_usize, 3_usize, 1_usize)).into_dyn();
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun error, got {:?}",
-        result
-    );
-}
-
-// Conv2D - predict == forward
-
-/// predict() equals forward() for a deterministic layer
-#[test]
-fn conv2d_predict_equals_forward() {
-    let mut layer = Conv2D::new(1, (2, 2), (1, 1), Linear::new()).unwrap();
-    layer.build(&Shape::known(&[1, 4, 4, 1])).unwrap();
-    let weights = Array4::from_elem((2, 2, 1, 1), 1.0f32);
-    let bias = Array1::zeros(1);
-    layer.set_weights(weights, bias).unwrap();
-
-    let input_data: Vec<f32> = (1..=16).map(|v| v as f32).collect();
-    let input = Array::from_shape_vec((1, 4, 4, 1), input_data)
-        .unwrap()
-        .into_dyn();
-
-    let forward_output = layer.forward(&input, &mut Ctx::training()).unwrap();
-    let predict_output = layer.forward(&input, &mut Ctx::inference()).unwrap();
-
-    assert_allclose(&predict_output, &forward_output, 1e-7f32);
-}
-
-/// predict() called twice on the same input returns bit-identical output
-#[test]
-fn conv2d_predict_deterministic() {
-    let mut layer = Conv2D::new(1, (2, 2), (1, 1), Linear::new()).unwrap();
-    layer.build(&Shape::known(&[1, 4, 4, 1])).unwrap();
-    let weights = Array4::from_elem((2, 2, 1, 1), 1.0f32);
-    let bias = Array1::zeros(1);
-    layer.set_weights(weights, bias).unwrap();
-
-    let input_data: Vec<f32> = (1..=16).map(|v| v as f32).collect();
-    let input = Array::from_shape_vec((1, 4, 4, 1), input_data)
-        .unwrap()
-        .into_dyn();
-
-    let out1 = layer.forward(&input, &mut Ctx::inference()).unwrap();
-    let out2 = layer.forward(&input, &mut Ctx::inference()).unwrap();
-    assert_allclose(&out1, &out2, 0.0f32);
 }
 
 // Conv2D - named weight shapes

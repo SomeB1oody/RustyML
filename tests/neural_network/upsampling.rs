@@ -5,14 +5,13 @@
 //! values against finite differences. This file does not duplicate them.
 
 use ndarray::{Array3, Array4, Array5, IxDyn};
+use rustyml::error::Error;
 use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::ParamCounts;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
-use rustyml::neural_network::layers::dense::Dense;
-use rustyml::neural_network::layers::flatten::Flatten;
 use rustyml::neural_network::layers::pooling::max_pooling_2d::MaxPooling2D;
 use rustyml::neural_network::layers::upsampling::{
     Interpolation, UpSampling1D, UpSampling2D, UpSampling3D,
@@ -21,7 +20,6 @@ use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::{Layer, UnaryLayer};
-use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
 
@@ -547,18 +545,6 @@ fn up_sampling_rejects_an_empty_input() {
     ));
 }
 
-/// The backward pass needs the shape the forward pass saw
-#[test]
-fn up_sampling_backward_before_forward_is_an_error() {
-    let layer = UpSampling2D::new(2, Interpolation::Nearest).unwrap();
-    assert!(matches!(
-        layer
-            .backward(&ramp_of(&[1, 2, 2, 1]), &mut Ctx::training())
-            .unwrap_err(),
-        Error::NeuralNetwork(NnError::ForwardPassNotRun(_))
-    ));
-}
-
 /// A gradient that is not the shape the layer produced is an error
 #[test]
 fn up_sampling_backward_checks_the_gradient_shape() {
@@ -638,46 +624,6 @@ fn up_sampling_2d_undoes_the_shape_change_of_pooling() {
 
     let out = model.predict(&x).unwrap();
     assert_eq!(out.shape(), x.shape());
-}
-
-/// A model carrying an upsampling layer survives a save and load round trip
-///
-/// The layer stores no weight, but it still holds its position in the structure check. The
-/// rebuilt model must therefore carry it at the same index with the same type
-#[test]
-fn up_sampling_2d_survives_a_save_and_load_round_trip() {
-    let x = Tensor::from_shape_vec(
-        IxDyn(&[2, 3, 3, 1]),
-        (0..18).map(|k| (k % 5) as f32 * 0.2 - 0.4).collect(),
-    )
-    .unwrap();
-
-    let build = || {
-        SequentialBuilder::new()
-            .add(UpSampling2D::new(2, Interpolation::Lanczos3).unwrap())
-            .add(Conv2D::new(2, (3, 3), (1, 1), Linear::new()).unwrap())
-            .add(Flatten::new())
-            .add(Dense::new(2, Linear::new()).unwrap())
-            .build(&Shape::known(x.shape()))
-            .unwrap()
-    };
-
-    let mut model = build();
-    model.compile(
-        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
-        MeanSquaredError::new(),
-    );
-    let before = model.predict(&x).unwrap();
-
-    let path = std::env::temp_dir().join("rustyml_upsampling_round_trip.bin");
-    model.save_to_path(&path).unwrap();
-
-    let mut restored = build();
-    restored.load_from_path(&path).unwrap();
-    let after = restored.predict(&x).unwrap();
-
-    assert_allclose(&before, &after, 0.0);
-    std::fs::remove_file(&path).unwrap();
 }
 
 /// A decoder that upsamples and then convolves trains without an error, and the loss decreases

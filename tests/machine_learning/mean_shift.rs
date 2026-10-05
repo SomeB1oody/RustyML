@@ -102,18 +102,6 @@ fn test_getters_return_none_before_fit() {
 // predict errors before fitting
 
 #[test]
-fn test_predict_before_fit_returns_not_fitted() {
-    let ms = MeanShift::default();
-    let x = array![[1.0, 2.0]];
-    let result = ms.predict(&x);
-    assert!(
-        matches!(result, Err(Error::NotFitted(_))),
-        "predict before fit should return NotFitted, got {:?}",
-        result
-    );
-}
-
-#[test]
 fn test_predict_wrong_feature_dimension_returns_dimension_mismatch() {
     let data = two_blob_data(); // 2 features
     let mut ms = MeanShift::new(2.0)
@@ -580,29 +568,6 @@ fn test_fit_single_point_produces_one_center() {
     let labels = ms.get_labels().unwrap();
     assert_eq!(labels.len(), 1);
     assert_eq!(labels[0], 0);
-}
-
-// fit on empty data
-
-#[test]
-fn test_fit_empty_data_returns_error() {
-    let x: Array2<f64> = Array2::zeros((0, 2));
-    let mut ms = MeanShift::default();
-    let result = ms.fit(&x);
-    assert!(
-        result.is_err(),
-        "fit on empty data should return Err, got Ok"
-    );
-    // The error should be EmptyInput or InvalidInput (preliminary_check)
-    let is_expected = matches!(
-        result,
-        Err(Error::EmptyInput(_)) | Err(Error::InvalidInput(_))
-    );
-    assert!(
-        is_expected,
-        "expected EmptyInput or InvalidInput, got {:?}",
-        result
-    );
 }
 
 // save / load round-trip

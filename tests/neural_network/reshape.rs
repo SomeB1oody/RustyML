@@ -5,6 +5,7 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, Array3, Array4, IxDyn};
+use rustyml::error::Error;
 use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
@@ -17,7 +18,6 @@ use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
-use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
 
@@ -160,18 +160,6 @@ fn reshape_merge_keeps_c_order_values() {
 
 // Reshape: predict
 
-/// A forward pass with an inference context gives the same output as one with a training
-/// context
-#[test]
-fn reshape_predict_equals_forward() {
-    let mut r = Reshape::new(vec![-1, 2]).unwrap();
-    let x = t2(3, 4, ramp(12));
-
-    let fwd = r.forward_mut(&x, &mut Ctx::training()).unwrap();
-    let pred = r.forward(&x, &mut Ctx::inference()).unwrap();
-    assert_allclose(&fwd, &pred, 1e-6_f32);
-}
-
 /// A forward pass with an inference context needs no build and no cache. It therefore works on
 /// a layer that never ran a forward pass before
 #[test]
@@ -282,23 +270,6 @@ fn reshape_forward_rejects_empty_input() {
     assert!(
         matches!(result, Err(Error::EmptyInput(_))),
         "expected EmptyInput for an empty input, got {:?}",
-        result
-    );
-}
-
-/// backward before any forward pass reports ForwardPassNotRun
-#[test]
-fn reshape_backward_before_forward_returns_err() {
-    let r = Reshape::new(vec![2, 2]).unwrap();
-    // No forward call happened yet, so the context holds no cache of this layer.
-    let grad = t3(5, 2, 2, ramp(20));
-    let result = r.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
         result
     );
 }

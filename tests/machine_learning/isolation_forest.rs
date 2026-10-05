@@ -88,71 +88,7 @@ fn test_default_has_expected_parameter_values() {
     assert!(model.get_trees().is_none());
 }
 
-// NotFitted errors
-
-#[test]
-fn test_predict_before_fit_returns_not_fitted() {
-    let model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
-    let x = array![[1.0, 2.0], [3.0, 4.0]];
-    let err = model.predict(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::NotFitted("IsolationForest")),
-        "expected NotFitted, got: {err:?}"
-    );
-}
-
-#[test]
-fn test_score_sample_before_fit_returns_not_fitted() {
-    let model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
-    let err = model.score_sample(&[1.0, 2.0]).unwrap_err();
-    assert!(
-        matches!(err, Error::NotFitted("IsolationForest")),
-        "expected NotFitted, got: {err:?}"
-    );
-}
-
-// fit error paths
-
-#[test]
-fn test_fit_empty_data_returns_empty_input() {
-    let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
-    let x: Array2<f64> = Array2::zeros((0, 2));
-    let err = model.fit(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::EmptyInput(_)),
-        "expected EmptyInput, got: {err:?}"
-    );
-}
-
-#[test]
-fn test_fit_non_finite_returns_non_finite() {
-    // The finiteness guard in `fit` must reject every non-finite sentinel.
-    for sentinel in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
-        let x = array![[1.0, sentinel], [2.0, 3.0]];
-        let err = model.fit(&x).unwrap_err();
-        assert!(
-            matches!(err, Error::NonFinite(_)),
-            "expected NonFinite for sentinel={sentinel:?}, got: {err:?}"
-        );
-    }
-}
-
 // predict error paths (after fit)
-
-#[test]
-fn test_predict_empty_data_returns_empty_input() {
-    let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
-    let train = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
-    model.fit(&train).unwrap();
-
-    let x_empty: Array2<f64> = Array2::zeros((0, 2));
-    let err = model.predict(&x_empty).unwrap_err();
-    assert!(
-        matches!(err, Error::EmptyInput(_)),
-        "expected EmptyInput, got: {err:?}"
-    );
-}
 
 #[test]
 fn test_predict_wrong_feature_count_returns_dimension_mismatch() {
@@ -172,20 +108,6 @@ fn test_predict_wrong_feature_count_returns_dimension_mismatch() {
             }
         ),
         "expected DimensionMismatch{{expected:2, found:3}}, got: {err:?}"
-    );
-}
-
-#[test]
-fn test_predict_nan_returns_non_finite() {
-    let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
-    let train = array![[1.0, 2.0], [3.0, 4.0]];
-    model.fit(&train).unwrap();
-
-    let x_nan = array![[f64::NAN, 2.0]];
-    let err = model.predict(&x_nan).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got: {err:?}"
     );
 }
 
@@ -580,15 +502,6 @@ fn test_save_load_roundtrip_yields_identical_predictions() {
     let _ = std::fs::remove_file(path);
 }
 
-#[test]
-fn test_load_from_nonexistent_path_returns_io_error() {
-    let err =
-        IsolationForest::load_from_path("/tmp/this_file_does_not_exist_rustyml.bin").unwrap_err();
-    assert!(
-        matches!(err, Error::Io(_)),
-        "expected Io error when loading from missing file, got: {err:?}"
-    );
-}
 // Closed-form anomaly score on identical points: every tree is 1 leaf, and the
 // path-length correction cancels to score = -0.5, using c(n) = 2*H_{n-1} - 2(n-1)/n
 

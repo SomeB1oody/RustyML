@@ -1,11 +1,11 @@
 //! Integration tests for the activation layers and the `Activation` enum.
 //!
 //! Expected values come from the mathematical definitions. `gradient_check.rs` covers gradient
-//! correctness. This file does not duplicate those backward-value checks.
+//! correctness. This file does not duplicate those backward-value checks. `layer_contract.rs`
+//! covers the backward pass before a forward pass, and the inference pass, of every layer type.
 //!
 //! Coverage:
-//!   - forward values, predict() == forward()
-//!   - backward before forward -> NnError::ForwardPassNotRun
+//!   - forward values
 //!   - non-finite input propagates (pure math, no rejection)
 //!   - empty input -> Error::EmptyInput
 //!   - Activation enum forward delegation, and the Linear layer
@@ -20,6 +20,7 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array2};
+use rustyml::error::Error;
 use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::Activation;
@@ -37,7 +38,6 @@ use rustyml::neural_network::layers::activation::softsign::Softsign;
 use rustyml::neural_network::layers::activation::tanh::Tanh;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::traits::{Layer, UnaryLayer};
-use rustyml::{error::Error, neural_network::NnError};
 
 use crate::common::{GateGuard, assert_allclose};
 
@@ -85,35 +85,6 @@ fn relu_forward_all_positive() {
         .forward_mut(&input, &mut Ctx::training())
         .expect("ReLU forward all-positive failed");
     assert_allclose(&output, &input, 1e-6_f32);
-}
-
-#[test]
-fn relu_predict_equals_forward() {
-    let mut layer = ReLU::new();
-    let input = tensor2(1, 3, vec![-2.0, 0.0, 3.0]);
-    let fwd = layer
-        .forward_mut(&input, &mut Ctx::training())
-        .expect("forward");
-    let pred = layer
-        .forward(&input, &mut Ctx::inference())
-        .expect("predict");
-    assert_allclose(&pred, &fwd, 1e-7_f32);
-}
-
-/// backward before forward returns NnError::ForwardPassNotRun
-#[test]
-fn relu_backward_before_forward_is_error() {
-    let layer = ReLU::new();
-    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun("ReLU")))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
 }
 
 /// Non-finite input is not rejected: ReLU is pure math. NaN propagates,
@@ -188,35 +159,6 @@ fn sigmoid_forward_antisymmetry() {
     for (&p, &n) in out_pos.iter().zip(out_neg.iter()) {
         assert_abs_diff_eq!(p + n, 1.0_f32, epsilon = 1e-6);
     }
-}
-
-#[test]
-fn sigmoid_predict_equals_forward() {
-    let mut layer = Sigmoid::new();
-    let input = tensor2(1, 3, vec![0.0, 2.0, -2.0]);
-    let fwd = layer
-        .forward_mut(&input, &mut Ctx::training())
-        .expect("forward");
-    let pred = layer
-        .forward(&input, &mut Ctx::inference())
-        .expect("predict");
-    assert_allclose(&pred, &fwd, 1e-7_f32);
-}
-
-/// backward before forward returns NnError::ForwardPassNotRun
-#[test]
-fn sigmoid_backward_before_forward_is_error() {
-    let layer = Sigmoid::new();
-    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun("Sigmoid")))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
 }
 
 /// NaN input is not rejected: it propagates through (sigmoid(NaN) = NaN)
@@ -294,35 +236,6 @@ fn tanh_forward_outputs_bounded() {
             "tanh({v}) should be strictly in (-1,1)"
         );
     }
-}
-
-#[test]
-fn tanh_predict_equals_forward() {
-    let mut layer = Tanh::new();
-    let input = tensor2(1, 4, vec![0.0, 1.0, -1.0, 2.0]);
-    let fwd = layer
-        .forward_mut(&input, &mut Ctx::training())
-        .expect("forward");
-    let pred = layer
-        .forward(&input, &mut Ctx::inference())
-        .expect("predict");
-    assert_allclose(&pred, &fwd, 1e-7_f32);
-}
-
-/// backward before forward returns NnError::ForwardPassNotRun
-#[test]
-fn tanh_backward_before_forward_is_error() {
-    let layer = Tanh::new();
-    let grad = tensor2(1, 4, vec![1.0; 4]);
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun("Tanh")))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
 }
 
 /// Non-finite input is not rejected: NaN propagates and tanh saturates +/-inf to +/-1
@@ -418,35 +331,6 @@ fn softmax_forward_two_rows_same_difference() {
     assert_abs_diff_eq!(flat[3], 0.73106_f32, epsilon = 1e-4);
 }
 
-#[test]
-fn softmax_predict_equals_forward() {
-    let mut layer = Softmax::new();
-    let input = tensor2(1, 3, vec![0.0, 1.0, 2.0]);
-    let fwd = layer
-        .forward_mut(&input, &mut Ctx::training())
-        .expect("forward");
-    let pred = layer
-        .forward(&input, &mut Ctx::inference())
-        .expect("predict");
-    assert_allclose(&pred, &fwd, 1e-7_f32);
-}
-
-/// backward before forward returns NnError::ForwardPassNotRun
-#[test]
-fn softmax_backward_before_forward_is_error() {
-    let layer = Softmax::new();
-    let grad = tensor2(1, 3, vec![1.0, 0.0, 0.0]);
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun("Softmax")))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
-}
-
 /// 1-D input normalizes its single axis, the way the reference layer does
 ///
 /// The reference layer accepts a rank-1 input, so this pins the agreement
@@ -509,20 +393,6 @@ fn linear_forward_preserves_3d_shape() {
     assert_allclose(&output, &expected, 0.0_f32);
 }
 
-/// predict() equals forward() (both return the input unchanged)
-#[test]
-fn linear_predict_equals_forward() {
-    let mut layer = Linear::new();
-    let input = tensor2(2, 3, vec![-3.0, -1.5, 0.0, 1.0, 4.7, 100.0]);
-    let fwd = layer
-        .forward_mut(&input, &mut Ctx::training())
-        .expect("forward");
-    let pred = layer
-        .forward(&input, &mut Ctx::inference())
-        .expect("predict");
-    assert_allclose(&pred, &fwd, 0.0_f32);
-}
-
 /// Linear backward passes the upstream gradient through unchanged (derivative is 1)
 #[test]
 fn linear_backward_passes_gradient_through() {
@@ -534,22 +404,6 @@ fn linear_backward_passes_gradient_through() {
     let grad = tensor2(1, 3, vec![0.1, -0.2, 0.5]);
     let grad_in = layer.backward(&grad, &mut ctx).expect("backward");
     assert_allclose(&grad_in, &grad, 0.0_f32);
-}
-
-/// backward before forward returns NnError::ForwardPassNotRun
-#[test]
-fn linear_backward_before_forward_is_error() {
-    let layer = Linear::new();
-    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun("Linear")))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
 }
 
 /// Non-finite input is not rejected: Linear is the identity, so NaN and Inf pass straight through
@@ -593,37 +447,6 @@ fn leaky_relu_forward_known_values() {
     assert_allclose(&output, &expected, 1e-6_f32);
 }
 
-#[test]
-fn leaky_relu_predict_equals_forward() {
-    let mut layer = LeakyReLU::new(0.3).expect("slope 0.3 is valid");
-    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
-    let fwd = layer
-        .forward_mut(&input, &mut Ctx::training())
-        .expect("forward");
-    let pred = layer
-        .forward(&input, &mut Ctx::inference())
-        .expect("predict");
-    assert_allclose(&pred, &fwd, 1e-7_f32);
-}
-
-/// backward before forward returns NnError::ForwardPassNotRun
-#[test]
-fn leaky_relu_backward_before_forward_is_error() {
-    let layer = LeakyReLU::new(0.3).expect("slope 0.3 is valid");
-    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(
-                "LeakyReLU"
-            )))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
-}
-
 /// LeakyReLU takes the positive branch at exactly 0, so its derivative there is 1, not the slope
 #[test]
 fn leaky_relu_backward_derivative_at_zero_is_one() {
@@ -660,35 +483,6 @@ fn elu_forward_known_values() {
         vec![-0.63212055, 2.0, -0.95021296, 4.0, -0.99326205, 6.0],
     );
     assert_allclose(&output, &expected, 1e-6_f32);
-}
-
-#[test]
-fn elu_predict_equals_forward() {
-    let mut layer = ELU::new(1.0).expect("alpha 1.0 is valid");
-    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
-    let fwd = layer
-        .forward_mut(&input, &mut Ctx::training())
-        .expect("forward");
-    let pred = layer
-        .forward(&input, &mut Ctx::inference())
-        .expect("predict");
-    assert_allclose(&pred, &fwd, 1e-7_f32);
-}
-
-/// backward before forward returns NnError::ForwardPassNotRun
-#[test]
-fn elu_backward_before_forward_is_error() {
-    let layer = ELU::new(1.0).expect("alpha 1.0 is valid");
-    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun("ELU")))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
 }
 
 /// ELU takes the negative branch at exactly 0, so its derivative there is alpha, not 1
@@ -729,35 +523,6 @@ fn selu_forward_known_values() {
         ],
     );
     assert_allclose(&output, &expected, 1e-6_f32);
-}
-
-#[test]
-fn selu_predict_equals_forward() {
-    let mut layer = SELU::new();
-    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
-    let fwd = layer
-        .forward_mut(&input, &mut Ctx::training())
-        .expect("forward");
-    let pred = layer
-        .forward(&input, &mut Ctx::inference())
-        .expect("predict");
-    assert_allclose(&pred, &fwd, 1e-7_f32);
-}
-
-/// backward before forward returns NnError::ForwardPassNotRun
-#[test]
-fn selu_backward_before_forward_is_error() {
-    let layer = SELU::new();
-    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun("SELU")))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
 }
 
 /// SELU takes the negative branch at exactly 0, so its derivative there is scale * alpha
@@ -816,35 +581,6 @@ fn softplus_forward_outputs_positive() {
     }
 }
 
-#[test]
-fn softplus_predict_equals_forward() {
-    let mut layer = Softplus::new();
-    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
-    let fwd = layer
-        .forward_mut(&input, &mut Ctx::training())
-        .expect("forward");
-    let pred = layer
-        .forward(&input, &mut Ctx::inference())
-        .expect("predict");
-    assert_allclose(&pred, &fwd, 1e-7_f32);
-}
-
-/// backward before forward returns NnError::ForwardPassNotRun
-#[test]
-fn softplus_backward_before_forward_is_error() {
-    let layer = Softplus::new();
-    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun("Softplus")))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
-}
-
 // Softsign layer
 
 /// Softsign(x) = x / (1 + |x|) on known values
@@ -880,35 +616,6 @@ fn softsign_forward_outputs_bounded() {
     }
 }
 
-#[test]
-fn softsign_predict_equals_forward() {
-    let mut layer = Softsign::new();
-    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
-    let fwd = layer
-        .forward_mut(&input, &mut Ctx::training())
-        .expect("forward");
-    let pred = layer
-        .forward(&input, &mut Ctx::inference())
-        .expect("predict");
-    assert_allclose(&pred, &fwd, 1e-7_f32);
-}
-
-/// backward before forward returns NnError::ForwardPassNotRun
-#[test]
-fn softsign_backward_before_forward_is_error() {
-    let layer = Softsign::new();
-    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun("Softsign")))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
-}
-
 // HardSigmoid layer
 
 /// HardSigmoid(x) = clip(x/6 + 0.5, 0, 1) on known values
@@ -922,37 +629,6 @@ fn hard_sigmoid_forward_known_values() {
 
     let expected = tensor2(2, 3, vec![0.33333334, 0.83333337, 0.0, 1.0, 0.0, 1.0]);
     assert_allclose(&output, &expected, 1e-6_f32);
-}
-
-#[test]
-fn hard_sigmoid_predict_equals_forward() {
-    let mut layer = HardSigmoid::new();
-    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
-    let fwd = layer
-        .forward_mut(&input, &mut Ctx::training())
-        .expect("forward");
-    let pred = layer
-        .forward(&input, &mut Ctx::inference())
-        .expect("predict");
-    assert_allclose(&pred, &fwd, 1e-7_f32);
-}
-
-/// backward before forward returns NnError::ForwardPassNotRun
-#[test]
-fn hard_sigmoid_backward_before_forward_is_error() {
-    let layer = HardSigmoid::new();
-    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(
-                "HardSigmoid"
-            )))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
 }
 
 // Exponential layer.
@@ -981,37 +657,6 @@ fn exponential_forward_known_values() {
         ],
     );
     assert_allclose(&output, &expected, 1e-3_f32);
-}
-
-#[test]
-fn exponential_predict_equals_forward() {
-    let mut layer = Exponential::new();
-    let input = tensor2(2, 3, vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]);
-    let fwd = layer
-        .forward_mut(&input, &mut Ctx::training())
-        .expect("forward");
-    let pred = layer
-        .forward(&input, &mut Ctx::inference())
-        .expect("predict");
-    assert_allclose(&pred, &fwd, 1e-3_f32);
-}
-
-/// backward before forward returns NnError::ForwardPassNotRun
-#[test]
-fn exponential_backward_before_forward_is_error() {
-    let layer = Exponential::new();
-    let grad = tensor2(1, 3, vec![1.0, 1.0, 1.0]);
-    let result = layer.backward(&grad, &mut Ctx::training());
-    assert!(
-        matches!(
-            result,
-            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(
-                "Exponential"
-            )))
-        ),
-        "expected ForwardPassNotRun, got {:?}",
-        result
-    );
 }
 
 /// The exponential is its own derivative, so backward with an all-ones upstream gradient

@@ -150,18 +150,6 @@ fn embedding_forward_truncates_an_index_toward_zero() {
     assert_allclose(&out, &t2(5, 3, expected), 1e-6_f32);
 }
 
-/// Inference and training read the same table, so a forward pass gives the same output in
-/// either context
-#[test]
-fn embedding_predict_equals_forward() {
-    let layer = embedding_with_table(4, 3, reference_table());
-    let x = t2(2, 4, vec![1.0, 1.0, 0.0, 3.0, 3.0, 1.0, 2.0, 1.0]);
-
-    let training = layer.forward(&x, &mut Ctx::training()).unwrap();
-    let inference = layer.forward(&x, &mut Ctx::inference()).unwrap();
-    assert_allclose(&inference, &training, 0.0_f32);
-}
-
 // Layout
 
 /// An index tensor whose memory is not in C order still gives the right values, in C order
@@ -425,17 +413,6 @@ fn embedding_rejects_a_scalar_input() {
     assert!(matches!(
         layer.forward_mut(&x, &mut Ctx::training()),
         Err(Error::InvalidInput(_))
-    ));
-}
-
-/// The backward pass needs the indices the forward pass read
-#[test]
-fn embedding_backward_before_forward_is_an_error() {
-    let layer = Embedding::new(3, 2).unwrap();
-    let grad = t2(2, 2, vec![1.0, 1.0, 1.0, 1.0]);
-    assert!(matches!(
-        layer.backward(&grad, &mut Ctx::training()),
-        Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
     ));
 }
 

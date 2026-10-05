@@ -139,18 +139,6 @@ fn test_new_shrinkage_boundary_one_succeeds() {
 // 2. fit() error paths
 
 #[test]
-fn test_fit_empty_rows_errors() {
-    let mut lda = LDA::new(1).unwrap();
-    let x: Array2<f64> = Array2::zeros((0, 2));
-    let y: Array1<i32> = Array1::zeros(0);
-    let err = lda.fit(&x, &y).expect_err("empty x must fail");
-    assert!(
-        matches!(err, Error::EmptyInput(..)),
-        "expected EmptyInput, got {err:?}"
-    );
-}
-
-#[test]
 fn test_fit_x_y_length_mismatch_errors() {
     let mut lda = LDA::new(1).unwrap();
     let x = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
@@ -224,57 +212,7 @@ fn test_fit_n_components_exceeds_max_errors() {
     );
 }
 
-#[test]
-fn test_fit_non_finite_in_x_errors() {
-    // A non-finite entry anywhere in x must trip the finiteness guard in fit
-    for sentinel in [f64::NAN, f64::INFINITY] {
-        let mut lda = LDA::new(1).unwrap();
-        let x = array![
-            [1.0, sentinel],
-            [2.0, 1.0],
-            [3.0, 1.0],
-            [7.0, 5.0],
-            [8.0, 5.0],
-            [9.0, 5.0]
-        ];
-        let y = array![0, 0, 0, 1, 1, 1];
-        let err = lda
-            .fit(&x, &y)
-            .expect_err(&format!("{sentinel:?} in x must fail"));
-        assert!(
-            matches!(err, Error::NonFinite(..) | Error::InvalidInput(..)),
-            "expected NonFinite or InvalidInput for sentinel={sentinel:?}, got {err:?}"
-        );
-    }
-}
-
-// 3. predict / transform NotFitted errors
-
-#[test]
-fn test_predict_before_fit_errors() {
-    let lda = LDA::new(1).unwrap();
-    let x = array![[1.0, 2.0]];
-    let err = lda.predict(&x).expect_err("predict before fit must fail");
-    assert!(
-        matches!(err, Error::NotFitted(..)),
-        "expected NotFitted, got {err:?}"
-    );
-}
-
-#[test]
-fn test_transform_before_fit_errors() {
-    let lda = LDA::new(1).unwrap();
-    let x = array![[1.0, 2.0]];
-    let err = lda
-        .transform(&x)
-        .expect_err("transform before fit must fail");
-    assert!(
-        matches!(err, Error::NotFitted(..)),
-        "expected NotFitted, got {err:?}"
-    );
-}
-
-// 4. predict / transform dimension-mismatch errors (after fit)
+// 3. predict / transform dimension-mismatch errors (after fit)
 
 #[test]
 fn test_predict_wrong_feature_count_errors() {
@@ -315,7 +253,7 @@ fn test_transform_wrong_feature_count_errors() {
     );
 }
 
-// 5. Correctness: fit -> predict on training data (3-class, SVD solver)
+// 4. Correctness: fit -> predict on training data (3-class, SVD solver)
 
 #[test]
 fn test_fit_predict_train_100pct_svd() {
@@ -376,7 +314,7 @@ fn test_classes_sorted_after_fit() {
     assert_eq!(classes.as_slice().unwrap(), &[0, 1, 2]);
 }
 
-// 6. Correctness: all 3 solvers
+// 5. Correctness: all 3 solvers
 
 #[test]
 fn test_all_solvers_classify_correctly() {
@@ -398,7 +336,7 @@ fn test_all_solvers_classify_correctly() {
     }
 }
 
-// 7. transform() output shape and finiteness
+// 6. transform() output shape and finiteness
 
 #[test]
 fn test_transform_output_shape_2d_3class() {
@@ -455,7 +393,7 @@ fn test_transform_single_sample() {
     }
 }
 
-// 8. Hand-computed reference for 2-class 1D case
+// 7. Hand-computed reference for 2-class 1D case
 
 #[test]
 fn test_two_class_1d_classification_correctness() {
@@ -520,7 +458,7 @@ fn test_two_class_1d_projection_is_the_whitening_scale() {
     );
 }
 
-// 9. fit_transform consistency
+// 8. fit_transform consistency
 
 #[test]
 fn test_fit_transform_equals_fit_then_transform() {
@@ -548,7 +486,7 @@ fn test_fit_transform_sets_projection() {
     );
 }
 
-// 10. Shrinkage variants
+// 9. Shrinkage variants
 
 #[test]
 fn test_shrinkage_auto_classifies_correctly() {
@@ -611,7 +549,7 @@ fn test_shrinkage_manual_boundary_one_produces_finite_output() {
     }
 }
 
-// 11. Projection columns are whitened, not unit-norm
+// 10. Projection columns are whitened, not unit-norm
 //
 // scikit-learn's `scalings_` scales each discriminant axis so the projected data has unit
 // within-class covariance. The axes are therefore not unit vectors, and their norms carry the
@@ -683,7 +621,7 @@ fn test_projection_whitens_within_class_covariance_lsqr() {
     }
 }
 
-// 12. Priors sum to 1 after fit
+// 11. Priors sum to 1 after fit
 
 #[test]
 fn test_priors_sum_to_one() {
@@ -710,7 +648,7 @@ fn test_priors_equal_for_balanced_classes() {
     }
 }
 
-// 13. Class means after fit
+// 12. Class means after fit
 
 #[test]
 fn test_class_means_correct_2class_1d() {
@@ -725,7 +663,7 @@ fn test_class_means_correct_2class_1d() {
     assert_abs_diff_eq!(means[[1, 0]], 8.0, epsilon = 1e-12);
 }
 
-// 14. Determinism (same seed -> identical result)
+// 13. Determinism (same seed -> identical result)
 
 #[test]
 fn test_determinism_svd_same_data() {
@@ -753,7 +691,7 @@ fn test_determinism_svd_same_data() {
     }
 }
 
-// 15. save_to_path / load_from_path round-trip
+// 14. save_to_path / load_from_path round-trip
 
 #[test]
 fn test_save_load_round_trip() {
@@ -828,7 +766,7 @@ fn test_load_preserves_fit_state() {
     );
 }
 
-// 16. Large-batch correctness check
+// 15. Large-batch correctness check
 
 /// 600-sample (200 per class) 3-class 2D dataset that is linearly separable by construction
 ///
@@ -1022,22 +960,7 @@ fn test_predict_proba_confident_on_separated_data() {
     }
 }
 
-/// decision_function and predict_proba require a fitted model
-#[test]
-fn test_decision_function_and_predict_proba_not_fitted_error() {
-    let lda = LDA::default();
-    let (x, _) = make_three_class_2d();
-    assert!(matches!(
-        lda.decision_function(&x),
-        Err(Error::NotFitted("LDA"))
-    ));
-    assert!(matches!(
-        lda.predict_proba(&x),
-        Err(Error::NotFitted("LDA"))
-    ));
-}
-
-// 17. scikit-learn parity of transform()
+// 16. scikit-learn parity of transform()
 
 /// `transform` centers input by the training mean before projecting, matching scikit-learn's
 /// `(X - xbar_) @ scalings_`, so the projected training data is mean-zero

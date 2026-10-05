@@ -272,33 +272,6 @@ fn depthwise_conv1d_depth_multiplier_widens_every_shape() {
 
 // DepthwiseConv1D - the remaining contract
 
-/// `predict` in eval mode returns the same values as `forward`, and writes no caches
-#[test]
-fn depthwise_conv1d_predict_equals_forward() {
-    let mut conv = DepthwiseConv1D::new(3, 2, Linear::new()).unwrap();
-    conv.build(&Shape::known(&[2, 9, 2])).unwrap();
-    let x = seq([2, 9, 2], ramp(36));
-
-    let predicted = conv.forward(&x, &mut Ctx::inference()).unwrap();
-    let forwarded = conv.forward(&x, &mut Ctx::training()).unwrap();
-    assert_allclose(&predicted, &forwarded, 0.0_f32);
-
-    // `predict` left no cache, so a 2nd `predict` cannot enable `backward`
-    let mut fresh = DepthwiseConv1D::new(3, 2, Linear::new()).unwrap();
-    fresh.build(&Shape::known(&[2, 9, 2])).unwrap();
-    let mut fresh_ctx = Ctx::inference();
-    fresh.forward(&x, &mut fresh_ctx).unwrap();
-    assert!(fresh.backward(&predicted, &mut fresh_ctx).is_err());
-}
-
-/// `backward` before `forward` returns an error rather than reading an empty cache
-#[test]
-fn depthwise_conv1d_backward_before_forward_errors() {
-    let conv = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
-    let grad = Array::ones((1_usize, 4, 2)).into_dyn();
-    assert!(conv.backward(&grad, &mut Ctx::training()).is_err());
-}
-
 /// A forward call that returns an error leaves the cache empty, so a later backward call still
 /// errors instead of reading a stale cache
 #[test]
@@ -725,25 +698,6 @@ fn separable_conv1d_matches_a_depthwise_then_pointwise_stack() {
 }
 
 // SeparableConv1D - the remaining contract
-
-/// `predict` in eval mode returns the same values as `forward`
-#[test]
-fn separable_conv1d_predict_equals_forward() {
-    let mut conv = SeparableConv1D::new(3, 3, 2, 2, Linear::new()).unwrap();
-    conv.build(&Shape::known(&[2, 9, 2])).unwrap();
-    let x = seq([2, 9, 2], ramp(36));
-    let predicted = conv.forward(&x, &mut Ctx::inference()).unwrap();
-    let forwarded = conv.forward(&x, &mut Ctx::training()).unwrap();
-    assert_allclose(&predicted, &forwarded, 0.0_f32);
-}
-
-/// `backward` before `forward` returns an error rather than reading an empty cache
-#[test]
-fn separable_conv1d_backward_before_forward_errors() {
-    let conv = SeparableConv1D::new(2, 2, 1, 1, Linear::new()).unwrap();
-    let grad = Array::ones((1_usize, 4, 2)).into_dyn();
-    assert!(conv.backward(&grad, &mut Ctx::training()).is_err());
-}
 
 /// `set_weights` rejects any of the 3 arrays whose shape does not match the layer
 #[test]

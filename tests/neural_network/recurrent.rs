@@ -139,34 +139,6 @@ fn simple_rnn_output_shape_batch3_units2() {
     assert_eq!(out.shape(), &[3, 2]);
 }
 
-/// SimpleRNN gives the same values in an inference pass as in a training pass
-#[test]
-fn simple_rnn_predict_equals_forward() {
-    let mut rnn = SimpleRNN::new(3, Tanh::new()).unwrap();
-    rnn.build(&Shape::known(&[2, 3, 2])).unwrap();
-
-    let kernel = Array2::from_shape_vec((2, 3), vec![0.1, -0.2, 0.3, -0.4, 0.5, -0.6]).unwrap();
-    let rk = Array2::from_shape_vec((3, 3), vec![0.1, 0.0, -0.1, 0.0, 0.2, 0.0, -0.1, 0.0, 0.1])
-        .unwrap();
-    let bias = Array2::from_shape_vec((1, 3), vec![0.1, -0.1, 0.2]).unwrap();
-    rnn.set_weights(kernel, rk, bias).unwrap();
-
-    let x = Array::from_shape_vec(
-        (2, 3, 2),
-        vec![
-            0.1, -0.2, 0.3, -0.4, 0.5, -0.6, 0.7, -0.8, 0.9, -1.0, 1.1, -1.2,
-        ],
-    )
-    .unwrap()
-    .into_dyn();
-
-    let out_training = rnn.forward(&x, &mut Ctx::training()).unwrap();
-    let out_inference = rnn.forward(&x, &mut Ctx::inference()).unwrap();
-
-    assert_eq!(out_training.shape(), out_inference.shape());
-    assert_allclose(&out_training, &out_inference, 1e-6);
-}
-
 /// SimpleRNN constructor rejects a dimension of 0, whichever argument carries it
 #[test]
 fn simple_rnn_new_rejects_zero_dimension() {
@@ -209,21 +181,6 @@ fn simple_rnn_forward_rejects_1d_input() {
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "expected InvalidInput, got: {err:?}"
-    );
-}
-
-/// SimpleRNN backward before forward returns ForwardPassNotRun
-#[test]
-fn simple_rnn_backward_before_forward_errors() {
-    let rnn = SimpleRNN::new(1, Tanh::new()).unwrap();
-    let grad = Array::ones((1, 1)).into_dyn();
-    let err = rnn.backward(&grad, &mut Ctx::training()).unwrap_err();
-    assert!(
-        matches!(
-            err,
-            Error::NeuralNetwork(NnError::ForwardPassNotRun("SimpleRNN"))
-        ),
-        "expected ForwardPassNotRun(\"SimpleRNN\"), got: {err:?}"
     );
 }
 
@@ -402,50 +359,6 @@ fn lstm_output_shape_batch2_units3() {
     assert_eq!(out.shape(), &[2, 3]);
 }
 
-/// LSTM gives the same values in an inference pass as in a training pass
-#[test]
-fn lstm_predict_equals_forward() {
-    let mut lstm = LSTM::new(2, Tanh::new()).unwrap();
-    lstm.build(&Shape::known(&[2, 3, 2])).unwrap();
-
-    // Non-trivial weights so both paths exercise the same computation
-    let kernel = Array2::from_shape_vec((2, 2), vec![0.3, -0.3, 0.2, -0.2]).unwrap();
-    let rk = Array2::from_shape_vec((2, 2), vec![0.1, 0.0, 0.0, 0.1]).unwrap();
-    let b_zero = Array2::zeros((1, 2));
-    let b_one = Array2::from_elem((1, 2), 1.0_f32);
-
-    lstm.set_gate_weights(
-        kernel.clone(),
-        rk.clone(),
-        b_zero.clone(),
-        kernel.clone(),
-        rk.clone(),
-        b_one.clone(),
-        kernel.clone(),
-        rk.clone(),
-        b_zero.clone(),
-        kernel.clone(),
-        rk.clone(),
-        b_zero.clone(),
-    )
-    .unwrap();
-
-    let x = Array::from_shape_vec(
-        (2, 3, 2),
-        vec![
-            0.1, -0.2, 0.3, -0.4, 0.5, -0.6, 0.7, -0.8, 0.9, -1.0, 1.1, -1.2,
-        ],
-    )
-    .unwrap()
-    .into_dyn();
-
-    let out_training = lstm.forward(&x, &mut Ctx::training()).unwrap();
-    let out_inference = lstm.forward(&x, &mut Ctx::inference()).unwrap();
-
-    assert_eq!(out_training.shape(), out_inference.shape());
-    assert_allclose(&out_training, &out_inference, 1e-6);
-}
-
 /// LSTM constructor rejects a dimension of 0, whichever argument carries it
 #[test]
 fn lstm_new_rejects_zero_dimension() {
@@ -476,21 +389,6 @@ fn lstm_forward_rejects_2d_input() {
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "expected InvalidInput, got: {err:?}"
-    );
-}
-
-/// LSTM backward before forward returns ForwardPassNotRun
-#[test]
-fn lstm_backward_before_forward_errors() {
-    let lstm = LSTM::new(1, Tanh::new()).unwrap();
-    let grad = Array::ones((1, 1)).into_dyn();
-    let err = lstm.backward(&grad, &mut Ctx::training()).unwrap_err();
-    assert!(
-        matches!(
-            err,
-            Error::NeuralNetwork(NnError::ForwardPassNotRun("LSTM"))
-        ),
-        "expected ForwardPassNotRun(\"LSTM\"), got: {err:?}"
     );
 }
 
@@ -715,46 +613,6 @@ fn gru_output_shape_batch2_units4() {
     assert_eq!(out.shape(), &[2, 4]);
 }
 
-/// GRU gives the same values in an inference pass as in a training pass
-#[test]
-fn gru_predict_equals_forward() {
-    let mut gru = GRU::new(3, Tanh::new()).unwrap();
-    gru.build(&Shape::known(&[2, 3, 2])).unwrap();
-
-    let k = Array2::from_shape_vec((2, 3), vec![0.1, -0.2, 0.3, -0.4, 0.5, -0.6]).unwrap();
-    let rk = Array2::from_shape_vec((3, 3), vec![0.1, 0.0, -0.1, 0.0, 0.2, 0.0, -0.1, 0.0, 0.1])
-        .unwrap();
-    let bias = Array2::from_shape_vec((1, 3), vec![0.1, -0.1, 0.2]).unwrap();
-
-    gru.set_gate_weights(
-        k.clone(),
-        rk.clone(),
-        bias.clone(),
-        k.clone(),
-        rk.clone(),
-        bias.clone(),
-        k.clone(),
-        rk.clone(),
-        bias.clone(),
-    )
-    .unwrap();
-
-    let x = Array::from_shape_vec(
-        (2, 3, 2),
-        vec![
-            0.1, -0.2, 0.3, -0.4, 0.5, -0.6, 0.7, -0.8, 0.9, -1.0, 1.1, -1.2,
-        ],
-    )
-    .unwrap()
-    .into_dyn();
-
-    let out_training = gru.forward(&x, &mut Ctx::training()).unwrap();
-    let out_inference = gru.forward(&x, &mut Ctx::inference()).unwrap();
-
-    assert_eq!(out_training.shape(), out_inference.shape());
-    assert_allclose(&out_training, &out_inference, 1e-6);
-}
-
 /// GRU constructor rejects a dimension of 0, whichever argument carries it
 #[test]
 fn gru_new_rejects_zero_dimension() {
@@ -797,18 +655,6 @@ fn gru_forward_rejects_4d_input() {
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "expected InvalidInput, got: {err:?}"
-    );
-}
-
-/// GRU backward before forward returns ForwardPassNotRun
-#[test]
-fn gru_backward_before_forward_errors() {
-    let gru = GRU::new(1, Tanh::new()).unwrap();
-    let grad = Array::ones((1, 1)).into_dyn();
-    let err = gru.backward(&grad, &mut Ctx::training()).unwrap_err();
-    assert!(
-        matches!(err, Error::NeuralNetwork(NnError::ForwardPassNotRun("GRU"))),
-        "expected ForwardPassNotRun(\"GRU\"), got: {err:?}"
     );
 }
 

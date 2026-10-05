@@ -315,24 +315,6 @@ fn test_new_sigmoid_non_finite_param_returns_invalid_parameter() {
 // fit error paths
 
 #[test]
-fn test_fit_empty_input_returns_empty_input() {
-    let mut kpca = KernelPCA::new(
-        KernelType::RBF {
-            gamma: Gamma::Value(0.5),
-        },
-        1,
-    )
-    .unwrap()
-    .with_eigen_solver(EigenSolver::Dense);
-    let x: Array2<f64> = Array2::zeros((0, 2));
-    let err = kpca.fit(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::EmptyInput(_)),
-        "expected EmptyInput, got {err:?}"
-    );
-}
-
-#[test]
 fn test_fit_one_sample_returns_invalid_input() {
     // KernelPCA requires at least 2 samples
     let mut kpca = KernelPCA::new(
@@ -375,52 +357,7 @@ fn test_fit_n_components_greater_than_n_samples_returns_invalid_parameter() {
     );
 }
 
-#[test]
-fn test_fit_non_finite_in_input_returns_non_finite() {
-    // fit rejects either sentinel (NaN or +Inf) in the input with NonFinite
-    let cases = [
-        ("NaN", array![[1.0, f64::NAN], [0.0, 1.0], [-1.0, 0.0]]),
-        (
-            "+Inf",
-            array![[f64::INFINITY, 0.0], [0.0, 1.0], [-1.0, 0.0]],
-        ),
-    ];
-    for (label, x) in cases {
-        let mut kpca = KernelPCA::new(
-            KernelType::RBF {
-                gamma: Gamma::Value(0.5),
-            },
-            1,
-        )
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
-        let err = kpca.fit(&x).unwrap_err();
-        assert!(
-            matches!(err, Error::NonFinite(_)),
-            "expected NonFinite for {label} in input, got {err:?}"
-        );
-    }
-}
-
 // transform error paths
-
-#[test]
-fn test_transform_before_fit_returns_not_fitted() {
-    let kpca = KernelPCA::new(
-        KernelType::RBF {
-            gamma: Gamma::Value(0.5),
-        },
-        1,
-    )
-    .unwrap()
-    .with_eigen_solver(EigenSolver::Dense);
-    let x = array![[1.0, 0.0], [0.0, 1.0]];
-    let err = kpca.transform(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::NotFitted(_)),
-        "expected NotFitted, got {err:?}"
-    );
-}
 
 #[test]
 fn test_transform_wrong_feature_count_returns_dimension_mismatch() {
@@ -441,49 +378,6 @@ fn test_transform_wrong_feature_count_returns_dimension_mismatch() {
     assert!(
         matches!(err, Error::DimensionMismatch { .. }),
         "expected DimensionMismatch, got {err:?}"
-    );
-}
-
-#[test]
-fn test_transform_nan_in_input_returns_error() {
-    let x_train = make_small_dataset();
-    let mut kpca = KernelPCA::new(
-        KernelType::RBF {
-            gamma: Gamma::Value(0.5),
-        },
-        2,
-    )
-    .unwrap()
-    .with_eigen_solver(EigenSolver::Dense);
-    kpca.fit(&x_train).unwrap();
-
-    let x_bad = array![[f64::NAN, 0.0], [0.0, 1.0]];
-    let err = kpca.transform(&x_bad).unwrap_err();
-    // Both transform-matrix and kernel validation catch NonFinite
-    assert!(
-        matches!(err, Error::NonFinite(_) | Error::DimensionMismatch { .. }),
-        "expected NonFinite (or DimensionMismatch), got {err:?}"
-    );
-}
-
-#[test]
-fn test_transform_empty_input_returns_empty_input() {
-    let x_train = make_small_dataset();
-    let mut kpca = KernelPCA::new(
-        KernelType::RBF {
-            gamma: Gamma::Value(0.5),
-        },
-        2,
-    )
-    .unwrap()
-    .with_eigen_solver(EigenSolver::Dense);
-    kpca.fit(&x_train).unwrap();
-
-    let x_empty: Array2<f64> = Array2::zeros((0, 2));
-    let err = kpca.transform(&x_empty).unwrap_err();
-    assert!(
-        matches!(err, Error::EmptyInput(_)),
-        "expected EmptyInput, got {err:?}"
     );
 }
 
@@ -835,16 +729,6 @@ fn test_save_load_round_trip() {
 
     // Clean up
     let _ = std::fs::remove_file(path);
-}
-
-#[test]
-fn test_load_from_nonexistent_path_returns_io_error() {
-    let err =
-        KernelPCA::load_from_path("/tmp/rustyml_this_path_does_not_exist_42.bin").unwrap_err();
-    assert!(
-        matches!(err, Error::Io(_)),
-        "expected Io error, got {err:?}"
-    );
 }
 
 // Single-feature (1-D) data

@@ -109,32 +109,6 @@ fn default_model_has_correct_params() {
 
 // Fit validation error paths
 
-/// Empty input data returns EmptyInput
-#[test]
-fn fit_empty_x_returns_empty_input() {
-    let mut model = LogisticRegression::default();
-    let x: Array2<f64> = Array2::zeros((0, 2));
-    let y: Array1<f64> = Array1::zeros(0);
-    assert!(
-        matches!(model.fit(&x, &y), Err(Error::EmptyInput(_))),
-        "expected EmptyInput"
-    );
-}
-
-/// Non-finite values in x (NaN / +Inf) each return NonFinite
-#[test]
-fn fit_non_finite_in_x_returns_non_finite() {
-    for sentinel in [f64::NAN, f64::INFINITY] {
-        let mut model = LogisticRegression::default();
-        let x = array![[1.0, sentinel], [2.0, 3.0]];
-        let y = array![0.0, 1.0];
-        assert!(
-            matches!(model.fit(&x, &y), Err(Error::NonFinite(_))),
-            "expected NonFinite for x containing {sentinel:?}"
-        );
-    }
-}
-
 /// Mismatched x rows (3) and y length (2) returns DimensionMismatch
 #[test]
 fn fit_xy_dimension_mismatch_returns_dimension_mismatch() {
@@ -167,28 +141,6 @@ fn fit_non_binary_label_returns_invalid_input() {
 
 // Predict / predict_proba error paths
 
-/// predict on an unfitted model returns NotFitted
-#[test]
-fn predict_before_fit_returns_not_fitted() {
-    let model = LogisticRegression::default();
-    let x = array![[1.0, 2.0]];
-    assert!(
-        matches!(model.predict(&x), Err(Error::NotFitted(_))),
-        "expected NotFitted"
-    );
-}
-
-/// predict_proba on an unfitted model returns NotFitted
-#[test]
-fn predict_proba_before_fit_returns_not_fitted() {
-    let model = LogisticRegression::default();
-    let x = array![[1.0, 2.0]];
-    assert!(
-        matches!(model.predict_proba(&x), Err(Error::NotFitted(_))),
-        "expected NotFitted"
-    );
-}
-
 /// predict with wrong feature count (trained on 2, called with 3) returns DimensionMismatch
 #[test]
 fn predict_wrong_feature_count_returns_dimension_mismatch() {
@@ -204,21 +156,6 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
             Err(Error::DimensionMismatch { .. })
         ),
         "expected DimensionMismatch"
-    );
-}
-
-/// predict with NaN input returns NonFinite
-#[test]
-fn predict_nan_input_returns_non_finite() {
-    let mut model = LogisticRegression::new(true, 0.1, 500, 1e-6).expect("valid params");
-    let x_train = array![[0.0], [10.0]];
-    let y_train = array![0.0, 1.0];
-    model.fit(&x_train, &y_train).expect("fit should succeed");
-
-    let x_nan = array![[f64::NAN]];
-    assert!(
-        matches!(model.predict(&x_nan), Err(Error::NonFinite(_))),
-        "expected NonFinite"
     );
 }
 
