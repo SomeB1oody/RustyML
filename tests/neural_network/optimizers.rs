@@ -6,8 +6,8 @@
 //!   explicitly.
 //! - End-to-end convergence: each optimizer drives a single Dense layer's MSE loss strictly
 //!   down over a fixed number of epochs on a fixed, seeded regression problem.
-//! - Multi-layer convergence: a 2-Dense-layer net with Adam verifies per-layer state buffers
-//!   are allocated correctly (both layers updated, loss falls).
+//! - Multi-layer convergence: each optimizer lowers the loss of a 2-Dense-layer net, and a
+//!   second run of the same length does not raise it again.
 //!
 //! Gradient correctness lives in `gradient_check.rs`.
 
@@ -272,274 +272,132 @@ fn identity_dense_initial_mse_is_1_875() {
     assert_abs_diff_eq!(mse, 1.875_f32, epsilon = 1e-5);
 }
 
-// End-to-end convergence: each optimizer drives loss down over 20 epochs
+// End-to-end convergence: every optimizer lowers the loss
 
+/// Every optimizer lowers the MSE of 1 Dense layer from the known start of 1.875
+///
+/// Plain SGD converges only below lr = 2 / lambda_max(Hessian), about 2 / 5.5, or about 0.36
+/// here. A rate of 0.5 diverges. The SGD entries therefore use 0.1 and 0.05
 #[test]
-fn sgd_single_layer_loss_decreases_over_20_epochs() {
-    let (x, y) = regression_data();
-    let initial_mse = 1.875_f32;
+fn every_optimizer_lowers_single_layer_loss() {
+    fn loss_falls(optimizer: &str, opt: impl Optimizer + 'static, epochs: u32) {
+        let (x, y) = regression_data();
+        let mut model = SequentialBuilder::new()
+            .add(identity_dense())
+            .build(&Shape::known(x.shape()))
+            .unwrap();
+        model.compile(opt, MeanSquaredError::new());
 
-    // Plain SGD converges only below lr = 2 / lambda_max(Hessian), about 2 / 5.5, or about 0.36
-    // here. A rate of 0.5 diverges. This test uses 0.1, which lowers the loss steadily.
-    let mut model = SequentialBuilder::new()
-        .add(identity_dense())
-        .build(&Shape::known(x.shape()))
-        .unwrap();
-    model.compile(
-        SGD::new(0.1, 0.0, false, 0.0).unwrap(),
-        MeanSquaredError::new(),
+        let mse_before = eval_mse(&model, &x, &y);
+        assert!(
+            (mse_before - 1.875).abs() <= 1e-5,
+            "{optimizer}: the start loss must be 1.875, got {mse_before}"
+        );
+
+        model.fit(&x, &y, epochs).unwrap();
+
+        let mse_after = eval_mse(&model, &x, &y);
+        assert!(
+            mse_after < mse_before,
+            "{optimizer}: loss must fall over {epochs} epochs; before={mse_before}, after={mse_after}"
+        );
+    }
+
+    loss_falls("SGD", SGD::new(0.1, 0.0, false, 0.0).unwrap(), 20);
+    loss_falls(
+        "SGD with Nesterov momentum",
+        SGD::new(0.05, 0.9, true, 0.0).unwrap(),
+        5,
     );
-
-    let mse_before = eval_mse(&model, &x, &y);
-    assert_abs_diff_eq!(mse_before, initial_mse, epsilon = 1e-5);
-
-    model.fit(&x, &y, 20).unwrap();
-
-    let mse_after = eval_mse(&model, &x, &y);
-    assert!(
-        mse_after < mse_before,
-        "SGD: loss should decrease; before={mse_before}, after={mse_after}"
+    loss_falls("Adam", Adam::new(0.1, 0.9, 0.999, 1e-8, 0.0).unwrap(), 20);
+    loss_falls(
+        "AdamW",
+        AdamW::new(0.1, 0.9, 0.999, 1e-8, 0.01).unwrap(),
+        20,
     );
+    loss_falls("RMSprop", RMSprop::new(0.1, 0.9, 1e-8, 0.0).unwrap(), 20);
+    loss_falls("AdaGrad", AdaGrad::new(0.5, 1e-8, 0.0).unwrap(), 20);
 }
 
+/// Every optimizer lowers the MSE of a 2-layer net (1->4->1), and a second run of the same
+/// length does not raise it again
+///
+/// Each optimizer gets its own number of epochs. Some entries must also get the loss below a
+/// fixed bound
 #[test]
-fn adam_single_layer_loss_decreases_over_20_epochs() {
-    let (x, y) = regression_data();
-    let initial_mse = 1.875_f32;
-
-    let mut model = SequentialBuilder::new()
-        .add(identity_dense())
-        .build(&Shape::known(x.shape()))
-        .unwrap();
-    model.compile(
-        Adam::new(0.1, 0.9, 0.999, 1e-8, 0.0).unwrap(),
-        MeanSquaredError::new(),
-    );
-
-    let mse_before = eval_mse(&model, &x, &y);
-    assert_abs_diff_eq!(mse_before, initial_mse, epsilon = 1e-5);
-
-    model.fit(&x, &y, 20).unwrap();
-
-    let mse_after = eval_mse(&model, &x, &y);
-    assert!(
-        mse_after < mse_before,
-        "Adam: loss should decrease; before={mse_before}, after={mse_after}"
-    );
-}
-
-#[test]
-fn rmsprop_single_layer_loss_decreases_over_20_epochs() {
-    let (x, y) = regression_data();
-    let initial_mse = 1.875_f32;
-
-    let mut model = SequentialBuilder::new()
-        .add(identity_dense())
-        .build(&Shape::known(x.shape()))
-        .unwrap();
-    model.compile(
-        RMSprop::new(0.1, 0.9, 1e-8, 0.0).unwrap(),
-        MeanSquaredError::new(),
-    );
-
-    let mse_before = eval_mse(&model, &x, &y);
-    assert_abs_diff_eq!(mse_before, initial_mse, epsilon = 1e-5);
-
-    model.fit(&x, &y, 20).unwrap();
-
-    let mse_after = eval_mse(&model, &x, &y);
-    assert!(
-        mse_after < mse_before,
-        "RMSprop: loss should decrease; before={mse_before}, after={mse_after}"
-    );
-}
-
-#[test]
-fn adagrad_single_layer_loss_decreases_over_20_epochs() {
-    let (x, y) = regression_data();
-    let initial_mse = 1.875_f32;
-
-    let mut model = SequentialBuilder::new()
-        .add(identity_dense())
-        .build(&Shape::known(x.shape()))
-        .unwrap();
-    model.compile(
-        AdaGrad::new(0.5, 1e-8, 0.0).unwrap(),
-        MeanSquaredError::new(),
-    );
-
-    let mse_before = eval_mse(&model, &x, &y);
-    assert_abs_diff_eq!(mse_before, initial_mse, epsilon = 1e-5);
-
-    model.fit(&x, &y, 20).unwrap();
-
-    let mse_after = eval_mse(&model, &x, &y);
-    assert!(
-        mse_after < mse_before,
-        "AdaGrad: loss should decrease; before={mse_before}, after={mse_after}"
-    );
-}
-
-// Multi-layer convergence with Adam (verifies per-layer state-buffer allocation)
-
-/// Adam on Dense(1->4) -> Dense(4->1) allocates moment buffers for both layers. Loss falls:
-/// below the initial value after 20 epochs, and not above the 20-epoch value after 40
-#[test]
-fn adam_two_layer_loss_decreases_and_buffers_allocated_correctly() {
-    let (x, y) = regression_data();
-
-    // Seed the dense layers and the fit-time shuffle so the test is deterministic
-    // and never flakes on a pathological Xavier init
-    const SEED: u64 = 0;
-    let build_model = || -> Sequential {
+fn every_optimizer_lowers_two_layer_loss() {
+    fn loss_falls(
+        optimizer: &str,
+        opt: impl Optimizer + 'static,
+        epochs: u32,
+        converge_below: Option<f32>,
+    ) {
+        // Seed the dense layers and the fit-time shuffle. A bad Xavier init then cannot make
+        // the test fail at random
+        const SEED: u64 = 0;
+        let (x, y) = regression_data();
         let layer1 = Dense::new(4, Linear::new())
             .unwrap()
             .with_random_state(SEED);
         let layer2 = Dense::new(1, Linear::new())
             .unwrap()
             .with_random_state(SEED);
-
         let mut model = SequentialBuilder::new_with_seed(SEED)
             .add(layer1)
             .add(layer2)
             .build(&Shape::known(x.shape()))
             .unwrap();
-        model.compile(
-            Adam::new(0.05, 0.9, 0.999, 1e-8, 0.0).unwrap(),
-            MeanSquaredError::new(),
+        model.compile(opt, MeanSquaredError::new());
+
+        let mse_before = eval_mse(&model, &x, &y);
+        model.fit(&x, &y, epochs).unwrap();
+        let mse_after = eval_mse(&model, &x, &y);
+        assert!(
+            mse_after < mse_before,
+            "{optimizer} 2-layer: loss must fall over {epochs} epochs; before={mse_before}, after={mse_after}"
         );
-        model
-    };
+        if let Some(bound) = converge_below {
+            assert!(
+                mse_after < bound,
+                "{optimizer} 2-layer: loss must get below {bound}; after={mse_after}"
+            );
+        }
 
-    let mut model = build_model();
-    let mse_initial = eval_mse(&model, &x, &y);
+        // The tolerance lets the loss stay on a plateau
+        model.fit(&x, &y, epochs).unwrap();
+        let mse_after_more = eval_mse(&model, &x, &y);
+        assert!(
+            mse_after_more <= mse_after + 1e-4,
+            "{optimizer} 2-layer: loss after {} epochs ({mse_after_more}) must not be greater than after {epochs} ({mse_after})",
+            2 * epochs
+        );
+    }
 
-    model.fit(&x, &y, 20).unwrap();
-    let mse_after_20 = eval_mse(&model, &x, &y);
-
-    // 20 more epochs (total 40)
-    model.fit(&x, &y, 20).unwrap();
-    let mse_after_40 = eval_mse(&model, &x, &y);
-
-    assert!(
-        mse_after_20 < mse_initial,
-        "Adam 2-layer: loss after 20 epochs ({mse_after_20}) should be < initial ({mse_initial})"
-    );
-
-    // Small tolerance rather than strict inequality, to absorb occasional plateaus
-    assert!(
-        mse_after_40 <= mse_after_20 + 1e-4,
-        "Adam 2-layer: loss after 40 epochs ({mse_after_40}) should not be greater than after 20 ({mse_after_20})"
-    );
-}
-
-// Multi-layer convergence: 1 test per remaining optimizer
-
-/// SGD on a 2-layer net (1->4->1): loss falls and converges below 0.1 over 50 epochs
-#[test]
-fn sgd_two_layer_loss_decreases() {
-    const SEED: u64 = 0;
-    let (x, y) = regression_data();
-
-    let layer1 = Dense::new(4, Linear::new())
-        .unwrap()
-        .with_random_state(SEED);
-    let layer2 = Dense::new(1, Linear::new())
-        .unwrap()
-        .with_random_state(SEED);
-
-    let mut model = SequentialBuilder::new()
-        .add(layer1)
-        .add(layer2)
-        .build(&Shape::known(x.shape()))
-        .unwrap();
-    model.compile(
+    loss_falls(
+        "SGD",
         SGD::new(0.05, 0.0, false, 0.0).unwrap(),
-        MeanSquaredError::new(),
+        50,
+        Some(0.1),
     );
-
-    let mse_before = eval_mse(&model, &x, &y);
-    model.fit(&x, &y, 50).unwrap();
-    let mse_after = eval_mse(&model, &x, &y);
-
-    assert!(
-        mse_after < mse_before,
-        "SGD 2-layer: loss should decrease; before={mse_before}, after={mse_after}"
+    loss_falls(
+        "Adam",
+        Adam::new(0.05, 0.9, 0.999, 1e-8, 0.0).unwrap(),
+        20,
+        None,
     );
-    assert!(
-        mse_after < 0.1,
-        "SGD 2-layer: loss should converge near 0; after={mse_after}"
+    loss_falls(
+        "AdamW",
+        AdamW::new(0.05, 0.9, 0.999, 1e-8, 0.01).unwrap(),
+        20,
+        None,
     );
-}
-
-/// RMSprop on a 2-layer net (1->4->1): loss falls and converges below 0.1 over 150 epochs
-#[test]
-fn rmsprop_two_layer_loss_decreases() {
-    const SEED: u64 = 0;
-    let (x, y) = regression_data();
-
-    let layer1 = Dense::new(4, Linear::new())
-        .unwrap()
-        .with_random_state(SEED);
-    let layer2 = Dense::new(1, Linear::new())
-        .unwrap()
-        .with_random_state(SEED);
-
-    let mut model = SequentialBuilder::new()
-        .add(layer1)
-        .add(layer2)
-        .build(&Shape::known(x.shape()))
-        .unwrap();
-    model.compile(
+    loss_falls(
+        "RMSprop",
         RMSprop::new(0.01, 0.9, 1e-8, 0.0).unwrap(),
-        MeanSquaredError::new(),
+        150,
+        Some(0.1),
     );
-
-    let mse_before = eval_mse(&model, &x, &y);
-    model.fit(&x, &y, 150).unwrap();
-    let mse_after = eval_mse(&model, &x, &y);
-
-    assert!(
-        mse_after < mse_before,
-        "RMSprop 2-layer: loss should decrease; before={mse_before}, after={mse_after}"
-    );
-    assert!(
-        mse_after < 0.1,
-        "RMSprop 2-layer: loss should converge near 0; after={mse_after}"
-    );
-}
-
-/// AdaGrad on a 2-layer net (1->4->1): loss falls over 30 epochs
-#[test]
-fn adagrad_two_layer_loss_decreases() {
-    const SEED: u64 = 0;
-    let (x, y) = regression_data();
-
-    let layer1 = Dense::new(4, Linear::new())
-        .unwrap()
-        .with_random_state(SEED);
-    let layer2 = Dense::new(1, Linear::new())
-        .unwrap()
-        .with_random_state(SEED);
-
-    let mut model = SequentialBuilder::new()
-        .add(layer1)
-        .add(layer2)
-        .build(&Shape::known(&[1, 1]))
-        .unwrap();
-    model.compile(
-        AdaGrad::new(0.5, 1e-8, 0.0).unwrap(),
-        MeanSquaredError::new(),
-    );
-
-    let mse_before = eval_mse(&model, &x, &y);
-    model.fit(&x, &y, 30).unwrap();
-    let mse_after = eval_mse(&model, &x, &y);
-
-    assert!(
-        mse_after < mse_before,
-        "AdaGrad 2-layer: loss should decrease; before={mse_before}, after={mse_after}"
-    );
+    loss_falls("AdaGrad", AdaGrad::new(0.5, 1e-8, 0.0).unwrap(), 30, None);
 }
 
 // Numerical value: SGD 1-step weight update on known weights
@@ -953,28 +811,6 @@ fn adam_l2_and_adamw_decoupled_differ_with_weight_decay() {
     }
 }
 
-#[test]
-fn adamw_single_layer_loss_decreases_over_20_epochs() {
-    let (x, y) = regression_data();
-
-    let mut model = SequentialBuilder::new()
-        .add(identity_dense())
-        .build(&Shape::known(x.shape()))
-        .unwrap();
-    model.compile(
-        AdamW::new(0.1, 0.9, 0.999, 1e-8, 0.01).unwrap(),
-        MeanSquaredError::new(),
-    );
-
-    let mse_before = eval_mse(&model, &x, &y);
-    model.fit(&x, &y, 20).unwrap();
-    let mse_after = eval_mse(&model, &x, &y);
-    assert!(
-        mse_after < mse_before,
-        "AdamW: loss should decrease; before={mse_before}, after={mse_after}"
-    );
-}
-
 /// AdamW routes through the same validators as Adam: rejects out-of-range betas or negative
 /// weight_decay, accepts valid hyperparameters
 #[test]
@@ -993,26 +829,6 @@ fn adamw_validates_hyperparameters() {
             .unwrap()
             .with_global_clipnorm(1.0)
             .is_ok()
-    );
-}
-
-#[test]
-fn sgd_momentum_loss_decreases() {
-    let (x, y) = regression_data();
-    let mut model = SequentialBuilder::new()
-        .add(identity_dense())
-        .build(&Shape::known(x.shape()))
-        .unwrap();
-    model.compile(
-        SGD::new(0.05, 0.9, true, 0.0).unwrap(),
-        MeanSquaredError::new(),
-    );
-    let before = eval_mse(&model, &x, &y);
-    model.fit(&x, &y, 5).unwrap();
-    let after = eval_mse(&model, &x, &y);
-    assert!(
-        after < before,
-        "SGD+momentum should reduce loss; before={before}, after={after}"
     );
 }
 
@@ -1531,42 +1347,25 @@ fn scope_must_separate_2_same_shape_layers<O: Optimizer>(make: impl Fn() -> O, o
     );
 }
 
-/// SGD momentum buffers must belong to 1 layer each
+/// Every optimizer keeps the per-parameter state of 2 same-shape layers apart
+///
+/// SGD holds momentum buffers, Adam and AdamW hold moment buffers, RMSprop holds caches, and
+/// AdaGrad holds accumulators. Each of these must belong to 1 layer only
 #[test]
-fn sgd_scope_must_separate_2_same_shape_layers() {
+fn every_optimizer_must_separate_2_same_shape_layers() {
     scope_must_separate_2_same_shape_layers(|| SGD::new(0.1, 0.9, false, 0.0).unwrap(), "SGD");
-}
-
-/// Adam moment buffers must belong to 1 layer each
-#[test]
-fn adam_scope_must_separate_2_same_shape_layers() {
     scope_must_separate_2_same_shape_layers(
         || Adam::new(0.05, 0.9, 0.999, 1e-8, 0.0).unwrap(),
         "Adam",
     );
-}
-
-/// AdamW moment buffers must belong to 1 layer each
-#[test]
-fn adamw_scope_must_separate_2_same_shape_layers() {
     scope_must_separate_2_same_shape_layers(
         || AdamW::new(0.05, 0.9, 0.999, 1e-8, 0.01).unwrap(),
         "AdamW",
     );
-}
-
-/// RMSprop caches must belong to 1 layer each
-#[test]
-fn rmsprop_scope_must_separate_2_same_shape_layers() {
     scope_must_separate_2_same_shape_layers(
         || RMSprop::new(0.05, 0.9, 1e-8, 0.0).unwrap(),
         "RMSprop",
     );
-}
-
-/// AdaGrad accumulators must belong to 1 layer each
-#[test]
-fn adagrad_scope_must_separate_2_same_shape_layers() {
     scope_must_separate_2_same_shape_layers(|| AdaGrad::new(0.1, 1e-8, 0.0).unwrap(), "AdaGrad");
 }
 
