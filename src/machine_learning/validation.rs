@@ -255,6 +255,35 @@ where
     Ok(())
 }
 
+/// Validates 1 sample before a single-sample prediction
+///
+/// This is the single-sample form of [`validate_predict_input`]. A slice holds exactly 1
+/// sample, so no empty-dataset check applies. A slice of length 0 is a dimension mismatch
+///
+/// # Parameters
+///
+/// - `sample` - The feature values of 1 sample
+/// - `expected_features` - The feature count of the fitted model
+///
+/// # Errors
+///
+/// - [`Error::DimensionMismatch`] - If `sample` holds another feature count than the model
+/// - [`Error::NonFinite`] - If `sample` contains a NaN or an infinite value
+pub(super) fn validate_predict_sample(
+    sample: &[f64],
+    expected_features: usize,
+) -> Result<(), Error> {
+    if sample.len() != expected_features {
+        return Err(Error::dimension_mismatch(expected_features, sample.len()));
+    }
+
+    if sample.iter().any(|val| !val.is_finite()) {
+        return Err(Error::non_finite("input data"));
+    }
+
+    Ok(())
+}
+
 /// Returns an error if `x` contains no elements
 ///
 /// # Errors
