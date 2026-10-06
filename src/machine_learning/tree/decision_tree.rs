@@ -7,7 +7,7 @@
 use crate::error::Error;
 use crate::machine_learning::TreeError;
 use crate::machine_learning::validation::{
-    check_is_fitted, preliminary_check, validate_predict_input,
+    check_is_fitted, preliminary_check, validate_predict_input, validate_predict_sample,
 };
 use crate::parallel_gates::{sort_scan_min_elems, tree_traversal_min_visits};
 use crate::{Deserialize, Serialize};
@@ -1218,15 +1218,14 @@ impl DecisionTree {
     ///
     /// - `Error::NotFitted` - If the model has not been trained yet
     /// - `Error::DimensionMismatch` - If the feature dimension mismatches
+    /// - `Error::NonFinite` - If `x` contains a NaN or an infinite value
     /// - `Error::Tree` - If the tree structure is broken
     pub fn predict_one(&self, x: &[f64]) -> Result<f64, Error> {
         if self.root.is_none() {
             return Err(Error::not_fitted("DecisionTree"));
         }
 
-        if x.len() != self.n_features {
-            return Err(Error::dimension_mismatch(self.n_features, x.len()));
-        }
+        validate_predict_sample(x, self.n_features)?;
 
         self.traverse_tree(self.root.as_ref().unwrap(), x)
     }
@@ -1435,6 +1434,7 @@ impl DecisionTree {
     ///
     /// - `Error::Tree` - If called on a regression tree, or if the tree structure is broken
     /// - `Error::DimensionMismatch` - If the feature dimension mismatches
+    /// - `Error::NonFinite` - If `x` contains a NaN or an infinite value
     /// - `Error::NotFitted` - If the model has not been trained yet
     pub fn predict_proba_one(&self, x: &[f64]) -> Result<Vec<f64>, Error> {
         if !self.is_classifier {
@@ -1445,9 +1445,7 @@ impl DecisionTree {
             return Err(Error::not_fitted("DecisionTree"));
         }
 
-        if x.len() != self.n_features {
-            return Err(Error::dimension_mismatch(self.n_features, x.len()));
-        }
+        validate_predict_sample(x, self.n_features)?;
 
         self.get_probabilities(self.root.as_ref().unwrap(), x)
     }

@@ -10,7 +10,7 @@
 
 use crate::error::Error;
 use crate::machine_learning::validation::{
-    check_is_fitted, preliminary_check, validate_predict_input,
+    check_is_fitted, preliminary_check, validate_predict_input, validate_predict_sample,
 };
 use crate::parallel_gates::tree_traversal_min_visits;
 use crate::{Deserialize, Serialize};
@@ -528,17 +528,15 @@ impl IsolationForest {
     ///
     /// # Errors
     ///
-    /// Returns `Error` if:
-    /// - Model has not been fitted
-    /// - Sample feature dimension does not match training data
+    /// - `Error::NotFitted` - If the model has not been fitted
+    /// - `Error::DimensionMismatch` - If `sample` holds another feature count than the training data
+    /// - `Error::NonFinite` - If `sample` contains a NaN or an infinite value
     pub fn score_sample(&self, sample: &[f64]) -> Result<f64, Error> {
         if self.trees.is_none() {
             return Err(Error::not_fitted("IsolationForest"));
         }
 
-        if sample.len() != self.n_features {
-            return Err(Error::dimension_mismatch(self.n_features, sample.len()));
-        }
+        validate_predict_sample(sample, self.n_features)?;
 
         let trees = self.trees.as_ref().unwrap();
 

@@ -22,6 +22,12 @@ use crate::neural_network::layers::validation::{
 use crate::neural_network::traits::{LayerBase, ParamRef, UnaryLayer};
 use crate::neural_network::{Ctx, Shape, Tensor};
 
+/// The lowest input rank that the layer accepts
+///
+/// The statistics of a channel fold over the spatial axes alone. A rank-2 input has no spatial
+/// axis, so each statistic would hold 1 element and the output would always equal `beta`
+const MIN_RANK: usize = 3;
+
 /// Instance Normalization layer for neural networks
 ///
 /// Normalizes over the spatial axes, with 1 mean and 1 variance per sample and per channel. It
@@ -244,15 +250,14 @@ impl LayerBase for InstanceNormalization {
 impl UnaryLayer for InstanceNormalization {
     /// Allocates the per-channel arrays from the trailing axis of the input
     ///
-    /// The channel axis is the last axis. An input of rank 1 has no channel axis, so the
-    /// arrays hold 1 element that every position shares
+    /// The channel axis is the last axis. The build refuses an input of a rank below
+    /// [`MIN_RANK`]
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "InstanceNormalization", input)? else {
             return Ok(());
         };
-        input.check_min_rank("InstanceNormalization", 1)?;
+        input.check_min_rank("InstanceNormalization", MIN_RANK)?;
         let channels = match built.axes()[built.rank() - 1] {
-            _ if built.rank() == 1 => 1,
             Some(extent) => extent,
             None => {
                 return Err(Error::invalid_input(format!(
@@ -269,7 +274,7 @@ impl UnaryLayer for InstanceNormalization {
 
     fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         validate_built_input(&self.built, "InstanceNormalization", input.shape())?;
-        validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;
+        validate_min_input_ndim(input.ndim(), MIN_RANK, "InstanceNormalization")?;
         // 1 group per channel makes group normalization equal to instance normalization
         let num_channels = input.shape()[input.ndim() - 1];
 
@@ -320,5 +325,5 @@ impl UnaryLayer for InstanceNormalization {
         Ok(grad_input)
     }
 
-    normalization_layer_output_shape_function!("InstanceNormalization");
+    normalization_layer_output_shape_function!("InstanceNormalization", MIN_RANK);
 }

@@ -19,6 +19,12 @@ use crate::neural_network::layers::validation::{
 use crate::neural_network::traits::{LayerBase, ParamRef, UnaryLayer};
 use crate::neural_network::{Ctx, Shape, Tensor};
 
+/// The lowest input rank that the layer accepts
+///
+/// The batch axis comes first and the channel axis comes last, so a rank-2 input has no
+/// spatial axis. Each group then folds its statistics over its own channels alone
+const MIN_RANK: usize = 2;
+
 /// Group Normalization layer for neural networks
 ///
 /// Splits the channel axis into `num_groups` groups. For each sample, it computes 1 mean and
@@ -245,15 +251,14 @@ impl LayerBase for GroupNormalization {
 impl UnaryLayer for GroupNormalization {
     /// Allocates the per-channel arrays from the trailing axis of the input
     ///
-    /// The channel axis is the last axis. An input of rank 1 has no channel axis, so the
-    /// arrays hold 1 element that every position shares
+    /// The channel axis is the last axis. The build refuses an input of a rank below
+    /// [`MIN_RANK`]
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "GroupNormalization", input)? else {
             return Ok(());
         };
-        input.check_min_rank("GroupNormalization", 1)?;
+        input.check_min_rank("GroupNormalization", MIN_RANK)?;
         let channels = match built.axes()[built.rank() - 1] {
-            _ if built.rank() == 1 => 1,
             Some(extent) => extent,
             None => {
                 return Err(Error::invalid_input(format!(
@@ -271,7 +276,7 @@ impl UnaryLayer for GroupNormalization {
 
     fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         validate_built_input(&self.built, "GroupNormalization", input.shape())?;
-        validate_min_input_ndim(input.ndim(), 3, "Group normalization")?;
+        validate_min_input_ndim(input.ndim(), MIN_RANK, "GroupNormalization")?;
 
         validate_num_groups(input.shape()[input.ndim() - 1], self.num_groups)?;
 
@@ -324,5 +329,5 @@ impl UnaryLayer for GroupNormalization {
         Ok(grad_input)
     }
 
-    normalization_layer_output_shape_function!("GroupNormalization");
+    normalization_layer_output_shape_function!("GroupNormalization", MIN_RANK);
 }

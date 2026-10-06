@@ -470,15 +470,17 @@ pub use unit_normalization::{UnitNormalization, UnitNormalizationAxis};
 /// Common implementation of the pure output-shape method of a normalization layer
 ///
 /// A normalization layer changes values and not extents, so its output shape repeats its input
-/// shape. The macro takes the layer name, which reaches the error messages, and generates a
-/// `compute_output_shape` function that returns the input shape unchanged
+/// shape. The macro takes the layer name, which reaches the error messages, and the lowest
+/// input rank that the layer accepts. The build and the forward pass of the layer must refuse
+/// the same ranks. The macro generates a `compute_output_shape` function that returns the
+/// input shape unchanged
 macro_rules! normalization_layer_output_shape_function {
-    ($layer:literal) => {
+    ($layer:literal, $min_rank:expr) => {
         fn compute_output_shape(
             &self,
             input: &$crate::neural_network::Shape,
         ) -> Result<$crate::neural_network::Shape, $crate::error::Error> {
-            input.check_min_rank($layer, 1)?;
+            input.check_min_rank($layer, $min_rank)?;
             Ok(input.clone())
         }
     };

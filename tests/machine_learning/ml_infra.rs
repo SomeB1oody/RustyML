@@ -260,6 +260,9 @@ type FitCall = fn(&mut Models, &Array2<f64>, &Array1<f64>) -> Result<(), Error>;
 /// Calls a method on 1 estimator in `Models` and returns the number of output rows.
 type MethodCall = fn(&Models, &Array2<f64>) -> Result<usize, Error>;
 
+/// Calls a method on 1 estimator in `Models` with the features of 1 sample.
+type SampleCall = fn(&Models, &[f64]) -> Result<(), Error>;
+
 /// Lists the fit method of each estimator, with the model name.
 ///
 /// `KNN` and `LDA` take `i32` labels, so their calls convert the labels.
@@ -371,6 +374,21 @@ fn matrix_method_calls() -> Vec<(&'static str, &'static str, MethodCall)> {
     ]
 }
 
+/// Lists each method that takes the features of 1 sample, with the model and method names.
+fn sample_method_calls() -> Vec<(&'static str, &'static str, SampleCall)> {
+    vec![
+        ("DecisionTree", "predict_one", |m, x| {
+            m.decision_tree.predict_one(x).map(|_| ())
+        }),
+        ("DecisionTree", "predict_proba_one", |m, x| {
+            m.decision_tree.predict_proba_one(x).map(|_| ())
+        }),
+        ("IsolationForest", "score_sample", |m, x| {
+            m.isolation_forest.score_sample(x).map(|_| ())
+        }),
+    ]
+}
+
 /// Records the result of 1 call in a form that `assert_eq!` can compare.
 #[derive(Debug, PartialEq)]
 enum Outcome {
@@ -410,28 +428,16 @@ fn methods_before_fit_return_not_fitted() {
         .into_iter()
         .map(|(model, method, call)| (model, method, call(&models, &x)))
         .collect();
-    calls.extend([
-        (
-            "DecisionTree",
-            "predict_one",
-            models.decision_tree.predict_one(&row).map(|_| 1),
-        ),
-        (
-            "DecisionTree",
-            "predict_proba_one",
-            models.decision_tree.predict_proba_one(&row).map(|_| 1),
-        ),
-        (
-            "DecisionTree",
-            "generate_tree_structure",
-            models.decision_tree.generate_tree_structure().map(|_| 1),
-        ),
-        (
-            "IsolationForest",
-            "score_sample",
-            models.isolation_forest.score_sample(&row).map(|_| 1),
-        ),
-    ]);
+    calls.extend(
+        sample_method_calls()
+            .into_iter()
+            .map(|(model, method, call)| (model, method, call(&models, &row).map(|_| 1))),
+    );
+    calls.push((
+        "DecisionTree",
+        "generate_tree_structure",
+        models.decision_tree.generate_tree_structure().map(|_| 1),
+    ));
 
     for (model, method, result) in calls {
         assert_eq!(
@@ -503,6 +509,29 @@ fn fitted_methods_on_non_finite_input_return_non_finite() {
                 Outcome::NonFinite,
                 "{model}::{method} with {sentinel:?} in the input"
             );
+        }
+    }
+}
+
+/// After fit, each single-sample method returns `NonFinite` when the sample contains NaN, +inf,
+/// or -inf.
+///
+/// The test puts the value at each feature position. A tree routes the sample by 1 feature at
+/// each node, so a check of 1 position alone could pass by chance.
+#[test]
+fn fitted_sample_methods_on_non_finite_input_return_non_finite() {
+    let models = Models::fitted();
+    for sentinel in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for position in 0..2 {
+            let mut sample = [1.0, 2.0];
+            sample[position] = sentinel;
+            for (model, method, call) in sample_method_calls() {
+                assert_eq!(
+                    Outcome::from(call(&models, &sample).map(|_| 1)),
+                    Outcome::NonFinite,
+                    "{model}::{method} with {sentinel:?} at feature {position}"
+                );
+            }
         }
     }
 }
