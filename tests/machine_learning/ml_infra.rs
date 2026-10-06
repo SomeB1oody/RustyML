@@ -484,20 +484,14 @@ fn fit_on_non_finite_input_returns_non_finite() {
 }
 
 /// After fit, each method returns `EmptyInput` for a matrix with 0 rows.
-///
-/// `DBSCAN::predict` is the exception: it returns an empty array.
 #[test]
-fn fitted_methods_on_empty_input() {
+fn fitted_methods_on_empty_input_return_empty_input() {
     let models = Models::fitted();
     let x: Array2<f64> = Array2::zeros((0, 2));
     for (model, method, call) in matrix_method_calls() {
-        let expected = match (model, method) {
-            ("DBSCAN", "predict") => Outcome::Rows(0),
-            _ => Outcome::EmptyInput,
-        };
         assert_eq!(
             Outcome::from(call(&models, &x)),
-            expected,
+            Outcome::EmptyInput,
             "{model}::{method} on a 0-row matrix"
         );
     }

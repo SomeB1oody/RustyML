@@ -90,16 +90,23 @@ fn constructor_default_values() {
 
 // predict() after fit: empty input and error paths
 
-/// predict on empty new_data returns Ok with an empty array
+/// predict refuses a 0-row matrix, also when its feature count differs from the model
+///
+/// A 0-row matrix of 3 features against a model of 2 features must not return `Ok`. The
+/// row check and the feature check run before any work, so neither one can be skipped
 #[test]
-fn predict_empty_new_data_returns_empty_array() {
-    let train = two_blobs_noise();
+fn predict_on_a_0_row_matrix_returns_empty_input() {
+    let train = two_blobs_noise(); // 2 features
     let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&train).unwrap();
 
-    let empty: Array2<f64> = Array2::zeros((0, 2));
-    let preds = m.predict(&empty).expect("expected Ok for empty new_data");
-    assert_eq!(preds.len(), 0);
+    for features in [2, 3] {
+        let empty: Array2<f64> = Array2::zeros((0, features));
+        assert!(
+            matches!(m.predict(&empty), Err(Error::EmptyInput(_))),
+            "expected EmptyInput for a 0x{features} matrix"
+        );
+    }
 }
 
 /// predict with wrong number of features returns DimensionMismatch
