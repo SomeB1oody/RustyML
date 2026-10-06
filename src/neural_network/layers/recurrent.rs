@@ -13,7 +13,9 @@
 //! This module also provides 2 shared helpers. A numerically stable sigmoid serves the GRU and
 //! LSTM gates, and 1 index map serves the `go_backwards` option of all 3 layers. All 3 layers
 //! draw their recurrent kernels from
-//! [`Initializer::Orthogonal`](crate::neural_network::Initializer::Orthogonal).
+//! [`Initializer::Orthogonal`].
+//!
+//! [`Initializer::Orthogonal`]: crate::neural_network::Initializer::Orthogonal
 
 use ndarray::Array2;
 

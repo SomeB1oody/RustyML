@@ -1,27 +1,38 @@
 //! Core traits for the neural network module: layers, losses, and optimizers, plus the
 //! address and view types that connect them.
 //!
-//! [`LayerBase`](crate::neural_network::traits::LayerBase) holds what every layer has regardless of
+//! [`LayerBase`] holds what every layer has regardless of
 //! its input count: its type name, its arrays, its sublayers, and its build state.
-//! [`UnaryLayer`](crate::neural_network::traits::UnaryLayer) adds the forward and backward pass for
+//! [`UnaryLayer`] adds the forward and backward pass for
 //! a layer with 1 input, and a blanket implementation gives it the general
-//! [`Layer`](crate::neural_network::traits::Layer) interface that a model holds every layer
-//! through. Implement [`Layer`](crate::neural_network::traits::Layer) directly only for a layer
+//! [`Layer`] interface that a model holds every layer
+//! through. Implement [`Layer`] directly only for a layer
 //! with several inputs, such as a merge layer.
 //!
-//! [`ParamId`](crate::neural_network::traits::ParamId) names the address of 1 parameter tensor:
-//! the [`LayerPath`](crate::neural_network::LayerPath) of the layer that holds it, plus the name
+//! [`ParamId`] names the address of 1 parameter tensor:
+//! the [`LayerPath`] of the layer that holds it, plus the name
 //! the layer gives the tensor.
-//! [`ParamRef`](crate::neural_network::traits::ParamRef),
-//! [`WeightRef`](crate::neural_network::traits::WeightRef), and
-//! [`WeightMut`](crate::neural_network::traits::WeightMut) are the borrowed views that a layer
+//! [`ParamRef`],
+//! [`WeightRef`], and
+//! [`WeightMut`] are the borrowed views that a layer
 //! exposes under that name, for an optimizer to update or a checkpoint to read and write.
 //! `check_addresses` and `check_every_gradient_is_claimed` are the build-time and pass-time
 //! checks that keep every address unique and every gradient reachable.
 //!
-//! [`Loss`](crate::neural_network::traits::Loss) computes a scalar loss and its gradient.
-//! [`Optimizer`](crate::neural_network::traits::Optimizer) reads the gradient store and updates the
-//! parameters of a layer, keyed on [`ParamId`](crate::neural_network::traits::ParamId).
+//! [`Loss`] computes a scalar loss and its gradient.
+//! [`Optimizer`] reads the gradient store and updates the
+//! parameters of a layer, keyed on [`ParamId`].
+//!
+//! [`LayerPath`]: crate::neural_network::LayerPath
+//! [`LayerBase`]: crate::neural_network::traits::LayerBase
+//! [`UnaryLayer`]: crate::neural_network::traits::UnaryLayer
+//! [`Layer`]: crate::neural_network::traits::Layer
+//! [`ParamId`]: crate::neural_network::traits::ParamId
+//! [`ParamRef`]: crate::neural_network::traits::ParamRef
+//! [`WeightRef`]: crate::neural_network::traits::WeightRef
+//! [`WeightMut`]: crate::neural_network::traits::WeightMut
+//! [`Loss`]: crate::neural_network::traits::Loss
+//! [`Optimizer`]: crate::neural_network::traits::Optimizer
 
 use crate::error::Error;
 use crate::neural_network::Shape;

@@ -1,52 +1,70 @@
 //! Error types for RustyML
 //!
-//! Every fallible operation in the crate returns [`RustymlResult<T>`](crate::error::RustymlResult),
-//! an alias for `std::result::Result<T, Error>`. [`Error`](crate::error::Error) is the single,
+//! Every fallible operation in the crate returns [`RustymlResult<T>`],
+//! an alias for `std::result::Result<T, Error>`. [`Error`] is the single,
 //! unified error type.
 //!
 //! `Error` aggregates 2 domain-specific error enums: `NnError` (from `neural_network`) and
 //! `TreeError` (from `machine_learning`). It also wraps the shared
-//! [`IoError`](crate::error::IoError). Callers can `match` precisely, since a shared variant never
+//! [`IoError`]. Callers can `match` precisely, since a shared variant never
 //! carries a concern specific to one part of the crate
 //!
 //! # Categories
 //!
-//! - **Input validation**: [`Error::EmptyInput`](crate::error::Error::EmptyInput),
-//!   [`Error::DimensionMismatch`](crate::error::Error::DimensionMismatch),
-//!   [`Error::ShapeMismatch`](crate::error::Error::ShapeMismatch),
-//!   [`Error::NonFinite`](crate::error::Error::NonFinite),
-//!   [`Error::InvalidParameter`](crate::error::Error::InvalidParameter),
-//!   [`Error::InvalidInput`](crate::error::Error::InvalidInput)
-//! - **Model state**: [`Error::NotFitted`](crate::error::Error::NotFitted), and the neural-network
+//! - **Input validation**: [`Error::EmptyInput`],
+//!   [`Error::DimensionMismatch`],
+//!   [`Error::ShapeMismatch`],
+//!   [`Error::NonFinite`],
+//!   [`Error::InvalidParameter`],
+//!   [`Error::InvalidInput`]
+//! - **Model state**: [`Error::NotFitted`], and the neural-network
 //!   states in `NnError`
-//! - **Numerics / computation**: [`Error::NotConverged`](crate::error::Error::NotConverged),
-//!   [`Error::Computation`](crate::error::Error::Computation)
+//! - **Numerics / computation**: [`Error::NotConverged`],
+//!   [`Error::Computation`]
 //! - **Domain-specific**: `Error::NeuralNetwork` (wrapping `neural_network`'s `NnError`) and
 //!   `Error::Tree` (wrapping `machine_learning`'s `TreeError`)
-//! - **I/O and serialization**: [`Error::Io`](crate::error::Error::Io)
+//! - **I/O and serialization**: [`Error::Io`]
 //!
 //! # Conventions
 //!
 //! - A non-finite **hyperparameter** from the user is an
-//!   [`Error::InvalidParameter`](crate::error::Error::InvalidParameter) (the reason names
+//!   [`Error::InvalidParameter`] (the reason names
 //!   finiteness). A non-finite value from the **data or a computation** is an
-//!   [`Error::NonFinite`](crate::error::Error::NonFinite)
-//! - [`Error::DimensionMismatch`](crate::error::Error::DimensionMismatch) compares scalar counts
-//!   (e.g. number of features). Use [`Error::ShapeMismatch`](crate::error::Error::ShapeMismatch)
+//!   [`Error::NonFinite`]
+//! - [`Error::DimensionMismatch`] compares scalar counts
+//!   (e.g. number of features). Use [`Error::ShapeMismatch`]
 //!   when whole tensor shapes differ
 //!
 //! # Constructing errors
 //!
 //! Prefer the smart constructors
-//! ([`Error::dimension_mismatch`](crate::error::Error::dimension_mismatch),
-//! [`Error::invalid_parameter`](crate::error::Error::invalid_parameter), and so on) over building
+//! ([`Error::dimension_mismatch`],
+//! [`Error::invalid_parameter`], and so on) over building
 //! variants by hand. They accept flexible argument types and keep the wording consistent across the
 //! crate. To attach context to a foreign error while preserving its source chain, use
-//! [`Context::context`](crate::error::Context::context) /
-//! [`Context::with_context`](crate::error::Context::with_context)
+//! [`Context::context`] /
+//! [`Context::with_context`]
 //!
-//! [`Error`](crate::error::Error) is `#[non_exhaustive]`. Match with a trailing `_` arm to stay
+//! [`Error`] is `#[non_exhaustive]`. Match with a trailing `_` arm to stay
 //! forward-compatible
+//!
+//! [`RustymlResult<T>`]: crate::error::RustymlResult
+//! [`Error`]: crate::error::Error
+//! [`IoError`]: crate::error::IoError
+//! [`Error::EmptyInput`]: crate::error::Error::EmptyInput
+//! [`Error::DimensionMismatch`]: crate::error::Error::DimensionMismatch
+//! [`Error::ShapeMismatch`]: crate::error::Error::ShapeMismatch
+//! [`Error::NonFinite`]: crate::error::Error::NonFinite
+//! [`Error::InvalidParameter`]: crate::error::Error::InvalidParameter
+//! [`Error::InvalidInput`]: crate::error::Error::InvalidInput
+//! [`Error::NotFitted`]: crate::error::Error::NotFitted
+//! [`Error::NotConverged`]: crate::error::Error::NotConverged
+//! [`Error::Computation`]: crate::error::Error::Computation
+//! [`Error::Io`]: crate::error::Error::Io
+//! [`Error::dimension_mismatch`]: crate::error::Error::dimension_mismatch
+//! [`Error::invalid_parameter`]: crate::error::Error::invalid_parameter
+//! [`Context::context`]: crate::error::Context::context
+//! [`Context::with_context`]: crate::error::Context::with_context
 
 /// The unified error type for all fallible RustyML operations
 ///

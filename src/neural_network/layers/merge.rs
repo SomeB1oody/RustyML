@@ -3,8 +3,8 @@
 //! [`Add`], [`Subtract`], [`Multiply`], [`Average`], [`Maximum`], and [`Minimum`] reduce their
 //! inputs element by element. [`Concatenate`] joins its inputs along 1 axis. No layer of the
 //! family holds a trainable array, and each of them implements
-//! [`Layer`](crate::neural_network::traits::Layer) by hand.
-//! [`UnaryLayer`](crate::neural_network::traits::UnaryLayer) takes 1 input alone, so no layer
+//! [`Layer`] by hand.
+//! [`UnaryLayer`] takes 1 input alone, so no layer
 //! of this family can implement it
 //!
 //! Each layer records `built: Option<Vec<Shape>>`, which holds 1 shape per input. The layer
@@ -44,6 +44,9 @@
 //!   shape algebra of the 6 elementwise layers.
 //! - [`Concatenate`] takes the first macro alone, and it calls
 //!   `validation::start_build_many` from its own `build_many`
+//!
+//! [`Layer`]: crate::neural_network::traits::Layer
+//! [`UnaryLayer`]: crate::neural_network::traits::UnaryLayer
 
 use crate::error::{Context, Error};
 use crate::neural_network::layers::validation::start_build_many;

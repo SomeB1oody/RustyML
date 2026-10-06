@@ -14,11 +14,11 @@
 //!   constant bias)
 //!
 //! # Classification metrics
-//! - [`ConfusionMatrix`](crate::metrics::ConfusionMatrix): binary TP/FP/TN/FN with derived
+//! - [`ConfusionMatrix`]: binary TP/FP/TN/FN with derived
 //!   accuracy, precision, recall, specificity, F1, error rate, balanced accuracy, and MCC
-//! - [`MulticlassConfusionMatrix`](crate::metrics::MulticlassConfusionMatrix): KxK matrix with
+//! - [`MulticlassConfusionMatrix`]: KxK matrix with
 //!   per-class precision/recall/F1/support and macro/micro/weighted aggregation via
-//!   [`Average`](crate::metrics::Average)
+//!   [`Average`]
 //! - **accuracy**, **roc_auc**, **log_loss**, **cohen_kappa**, **top_k_accuracy**,
 //!   **average_precision**, and the **roc_curve** / **precision_recall_curve** threshold sweeps
 //!
@@ -65,6 +65,10 @@
 //! let scores = array![0.1, 0.4, 0.35, 0.8];
 //! let auc = roc_auc(&labels.view(), &scores.view());
 //! ```
+//!
+//! [`ConfusionMatrix`]: crate::metrics::ConfusionMatrix
+//! [`MulticlassConfusionMatrix`]: crate::metrics::MulticlassConfusionMatrix
+//! [`Average`]: crate::metrics::Average
 
 /// Classification metrics: confusion matrices, accuracy, ROC/PR curves, log loss,
 /// and Cohen's kappa.

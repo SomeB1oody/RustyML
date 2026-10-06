@@ -3,9 +3,11 @@
 //! Provides [`RobustScaler`], which centers on the median and divides by the interquartile
 //! range instead of using the mean and standard deviation. Both statistics are order-based, so
 //! a handful of extreme values moves them barely at all. A single outlier can drag
-//! [`StandardScaler`](super::StandardScaler)'s mean and inflate its standard deviation. An
-//! outlier can also stretch [`MinMaxScaler`](super::MinMaxScaler)'s denominator until every
-//! other sample is squeezed into a sliver of the range
+//! [`StandardScaler`]'s mean and inflate its standard deviation. An outlier can also stretch
+//! [`MinMaxScaler`]'s denominator until every other sample is squeezed into a sliver of the range
+//!
+//! [`StandardScaler`]: super::StandardScaler
+//! [`MinMaxScaler`]: super::MinMaxScaler
 
 use super::{
     column_quantiles, fitted, for_each_row, handle_zero_scale, validate_matrix,

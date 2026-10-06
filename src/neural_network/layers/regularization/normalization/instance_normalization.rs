@@ -250,8 +250,7 @@ impl LayerBase for InstanceNormalization {
 impl UnaryLayer for InstanceNormalization {
     /// Allocates the per-channel arrays from the trailing axis of the input
     ///
-    /// The channel axis is the last axis. The build refuses an input of a rank below
-    /// [`MIN_RANK`]
+    /// The channel axis is the last axis. The build refuses an input of a rank below 3
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "InstanceNormalization", input)? else {
             return Ok(());

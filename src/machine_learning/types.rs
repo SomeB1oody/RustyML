@@ -1,13 +1,12 @@
 //! Configuration enums shared across the machine-learning estimators
 //!
 //! - The linear models and the linear SVM use [`RegularizationType`]
-//! - [`SVC`](crate::machine_learning::svm::svc::SVC) and
-//!   [`KernelPCA`](crate::machine_learning::decomposition::kernel_pca::KernelPCA) both use
-//!   [`Gamma`] and [`KernelType`]
+//! - [`SVC`] and [`KernelPCA`] both use [`Gamma`] and [`KernelType`]
+//! Each kernel carries its own evaluation logic (`compute` / `compute_matrix`) as inherent methods.
+//! Consumers share this single implementation instead of re-matching the enum in every model
 //!
-//! Each kernel carries its own evaluation logic (`compute` / `compute_matrix`) as inherent
-//! methods. Consumers share this single implementation instead of re-matching the enum in
-//! every model
+//! [`SVC`]: crate::machine_learning::svm::svc::SVC
+//! [`KernelPCA`]: crate::machine_learning::decomposition::kernel_pca::KernelPCA
 
 use crate::math::squared_euclidean_distance_row;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, exp_map_f64_parallel_threshold};

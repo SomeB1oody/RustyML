@@ -5,17 +5,21 @@
 //! from run to run and with the thread count. The helpers here fix the grouping instead. The
 //! input is cut into fixed-size blocks. Each block folds serially, and rayon's indexed
 //! `collect` gathers the per-block results in block order before they merge sequentially. The
-//! grouping depends only on [`DET_REDUCE_BLOCK`](crate::math::reduction::DET_REDUCE_BLOCK),
+//! grouping depends only on [`DET_REDUCE_BLOCK`],
 //! never on scheduling or the `parallel` flag. Re-running on the same machine reproduces the
 //! result, though not necessarily bit-for-bit. The flag is a performance hint that only decides
 //! whether the blocks run on rayon or in sequence. A caller that pairs these helpers with some
 //! other serial kernel below a size threshold makes that switch part of its own reproducibility
 //! surface.
 //!
-//! [`det_reduce`](crate::math::reduction::det_reduce) folds a slice.
-//! [`det_reduce_range`](crate::math::reduction::det_reduce_range) folds fixed blocks of an
+//! [`det_reduce`] folds a slice.
+//! [`det_reduce_range`] folds fixed blocks of an
 //! index range instead, for reductions that read several arrays at once or accumulate
 //! something richer than a scalar.
+//!
+//! [`DET_REDUCE_BLOCK`]: crate::math::reduction::DET_REDUCE_BLOCK
+//! [`det_reduce`]: crate::math::reduction::det_reduce
+//! [`det_reduce_range`]: crate::math::reduction::det_reduce_range
 
 use rayon::prelude::{IntoParallelIterator, ParallelIterator, ParallelSlice};
 use std::ops::Range;

@@ -2,9 +2,12 @@
 //!
 //! [`NnError`] enumerates the failures specific to the neural-network framework (layer state,
 //! weight shapes, model compilation). Callers receive it through the crate-wide
-//! [`Error::NeuralNetwork`](crate::error::Error::NeuralNetwork) variant, into which it
+//! [`Error::NeuralNetwork`] variant, into which it
 //! converts via `?` (a `#[from]` bridge). See [`crate::error`] for the unified
-//! [`Error`](crate::error::Error) that aggregates the per-domain error enums
+//! [`Error`] that aggregates the per-domain error enums
+//!
+//! [`Error::NeuralNetwork`]: crate::error::Error::NeuralNetwork
+//! [`Error`]: crate::error::Error
 
 use crate::error::Error;
 

@@ -251,8 +251,7 @@ impl LayerBase for GroupNormalization {
 impl UnaryLayer for GroupNormalization {
     /// Allocates the per-channel arrays from the trailing axis of the input
     ///
-    /// The channel axis is the last axis. The build refuses an input of a rank below
-    /// [`MIN_RANK`]
+    /// The channel axis is the last axis. The build refuses an input of a rank below 2
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
         let Some(built) = start_build(&self.built, "GroupNormalization", input)? else {
             return Ok(());

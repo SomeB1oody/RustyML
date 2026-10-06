@@ -3,10 +3,12 @@
 //! [`MaxPooling1D`] slides a window along the length axis of a `[batch, length, channels]` tensor
 //! and keeps the largest element of each window. [`MaxPooling1D::new`] sets the stride to
 //! `pool_size` and the padding to
-//! [`PaddingType::Valid`](crate::neural_network::layers::convolution::PaddingType).
+//! [`PaddingType::Valid`].
 //! [`MaxPooling1D::with_stride`] and [`MaxPooling1D::with_padding`] override those defaults. The
 //! forward pass records the arg-max of every window. The backward pass then routes each output
 //! gradient back to the input element that produced it.
+//!
+//! [`PaddingType::Valid`]: crate::neural_network::layers::convolution::PaddingType
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

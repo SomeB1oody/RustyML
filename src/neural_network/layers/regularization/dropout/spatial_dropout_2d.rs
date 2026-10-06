@@ -2,13 +2,15 @@
 //! channels)` inputs
 //!
 //! [`SpatialDropout2D`] holds the drop rate, the shape recorded by
-//! [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build), and the random number
+//! [`UnaryLayer::build`], and the random number
 //! generator that draws the per-channel mask. [`SpatialDropout2D::with_random_state`] reseeds that
 //! generator for reproducible masks.
 //!
 //! The forward pass samples 1 keep/drop value per `(batch, channel)` pair, scales the kept
 //! channels by `1 / (1 - rate)` with `spatial_dropout_scale`, and parks the small mask for
 //! `spatial_dropout_backward` to reuse on the backward pass.
+//!
+//! [`UnaryLayer::build`]: crate::neural_network::traits::UnaryLayer::build
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

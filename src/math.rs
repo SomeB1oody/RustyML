@@ -1,10 +1,10 @@
 //! Shared low-level numeric primitives used across estimators and metrics
 //!
-//! - [`matmul`](crate::math::matmul) provides `gemmkit`-backed matrix products with automatic
+//! - [`matmul`] provides `gemmkit`-backed matrix products with automatic
 //!   parallelism
-//! - [`reduction`](crate::math::reduction) provides deterministic blocked parallel reductions
-//! - [`distance`](crate::math::distance) holds the pairwise distance primitives and the
-//!   [`DistanceCalculationMetric`](crate::math::DistanceCalculationMetric) dispatcher
+//! - [`reduction`] provides deterministic blocked parallel reductions
+//! - [`distance`] holds the pairwise distance primitives and the
+//!   [`DistanceCalculationMetric`] dispatcher
 //!
 //! It also hosts the tunable exp-reduction parallel gate used by the logistic-regression
 //! log-loss.
@@ -29,6 +29,11 @@
 //! let sq = squared_euclidean_distance_row(&v1, &v2);
 //! let d = DistanceCalculationMetric::Euclidean.distance(v1.view(), v2.view());
 //! ```
+//!
+//! [`matmul`]: crate::math::matmul
+//! [`reduction`]: crate::math::reduction
+//! [`distance`]: crate::math::distance
+//! [`DistanceCalculationMetric`]: crate::math::DistanceCalculationMetric
 
 /// `gemmkit`-backed matrix products with automatic parallelism.
 pub mod matmul;

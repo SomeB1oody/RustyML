@@ -2,8 +2,10 @@
 //!
 //! Re-exports the 1D, 2D, and 3D convolution layers, their transposed counterparts, and the
 //! depthwise and separable convolution layers in 1D and 2D. Defines
-//! [`PaddingType`](crate::neural_network::layers::convolution::PaddingType), which controls spatial
-//! padding, and re-exports [`ConvPadding`], which adds the causal rule that only [`Conv1D`] accepts
+//! [`PaddingType`], which controls spatial padding, and re-exports [`ConvPadding`], which adds the
+//! causal rule that only [`Conv1D`] accepts
+//!
+//! [`PaddingType`]: crate::neural_network::layers::convolution::PaddingType
 
 /// Padding method used by convolutional and pooling layers
 ///

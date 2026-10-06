@@ -1,11 +1,15 @@
 //! Per-sample unit-norm scaling behind the fit/transform estimator pattern
 //!
 //! Provides [`Normalizer`], the `fit`/`transform` face of the stateless
-//! [`normalize`](crate::utils::normalize::normalize) function restricted to rows. It is the one
+//! [`normalize`] function restricted to rows. It is the one
 //! transformer in this module that learns nothing statistical, since a sample's norm comes
-//! from that sample alone. It still takes part in the same [`Fit`](crate::traits::Fit) and
-//! [`Transform`](crate::traits::Transform) contract as the per-feature scalers. It also pins
+//! from that sample alone. It still takes part in the same [`Fit`] and
+//! [`Transform`] contract as the per-feature scalers. It also pins
 //! the feature count, so a mis-shaped batch is an error rather than a silent wrong answer
+//!
+//! [`normalize`]: crate::utils::normalize::normalize
+//! [`Fit`]: crate::traits::Fit
+//! [`Transform`]: crate::traits::Transform
 
 use super::{validate_matrix, validate_transform_matrix};
 use crate::error::Error;

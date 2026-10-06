@@ -3,7 +3,9 @@
 //! [`Cropping3D`] removes planes from the depth axis, the height axis, and the width axis of a
 //! `[batch, depth, height, width, channels]` tensor. It holds no parameter. The forward pass and
 //! the backward pass both run through `pad_crop_engine`, which also backs this layer's inverse,
-//! [`ZeroPadding3D`](crate::neural_network::layers::border::ZeroPadding3D).
+//! [`ZeroPadding3D`].
+//!
+//! [`ZeroPadding3D`]: crate::neural_network::layers::border::ZeroPadding3D
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

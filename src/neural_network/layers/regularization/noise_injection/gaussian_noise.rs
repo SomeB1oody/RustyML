@@ -1,10 +1,12 @@
 //! Gaussian noise regularization layer that injects zero-mean normal noise during training
 //!
 //! [`GaussianNoise`] holds the standard deviation, the shape recorded by
-//! [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build), and the random number
+//! [`UnaryLayer::build`], and the random number
 //! generator that draws the noise. The forward pass adds `N(0, stddev^2)` noise to the input. The
 //! backward pass passes the gradient through unchanged, because the noise does not depend on the
 //! input value.
+//!
+//! [`UnaryLayer::build`]: crate::neural_network::traits::UnaryLayer::build
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

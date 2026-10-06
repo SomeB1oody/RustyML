@@ -1,8 +1,10 @@
 //! RMSprop (Root Mean Square Propagation) optimizer
 //!
 //! Holds the [`RMSprop`] struct, its constructor, its [`RMSprop::with_global_clipnorm`] builder
-//! method, and its [`Optimizer`](crate::neural_network::traits::Optimizer) implementation. Weight
+//! method, and its [`Optimizer`] implementation. Weight
 //! decay is decoupled (AdamW-style), and gradient clipping stays off until a caller opts in
+//!
+//! [`Optimizer`]: crate::neural_network::traits::Optimizer
 
 use crate::error::Error;
 use crate::neural_network::LayerPath;

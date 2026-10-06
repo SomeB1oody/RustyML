@@ -3,8 +3,10 @@
 //! Each optimizer's per-parameter math lives here as a single function. Every function operates
 //! on a mutable `f32` parameter slice, a gradient slice, and any needed optimizer state slices.
 //! Every layer exposes its parameters as flat slices through
-//! [`LayerBase::parameters_mut`](crate::neural_network::traits::LayerBase::parameters_mut).
+//! [`LayerBase::parameters_mut`].
 //! These kernels work for any parameter shape
+//!
+//! [`LayerBase::parameters_mut`]: crate::neural_network::traits::LayerBase::parameters_mut
 
 use crate::parallel_gates::fused_slice_parallel_threshold;
 use rayon::prelude::*;

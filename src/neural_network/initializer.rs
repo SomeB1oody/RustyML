@@ -1,7 +1,7 @@
 //! Weight initializers: the value that decides how a layer draws a new array
 //!
 //! [`Initializer`] is a closed enum, in the same shape as the
-//! [`Activation`](crate::neural_network::layers::Activation) enum. It is `Copy`, it compares by
+//! [`Activation`] enum. It is `Copy`, it compares by
 //! value, and it serializes, so a layer holds it by value and a checkpoint can record it.
 //!
 //! 13 functions of the module draw a weight array, and all 13 draw through this type. 14 of
@@ -20,16 +20,21 @@
 //! # The draw order is part of the contract
 //!
 //! 5 layers thread 1 generator through more than 1 draw.
-//! [`SeparableConv1D`](crate::neural_network::layers::SeparableConv1D) and
-//! [`SeparableConv2D`](crate::neural_network::layers::SeparableConv2D) draw the depthwise kernel
+//! [`SeparableConv1D`] and
+//! [`SeparableConv2D`] draw the depthwise kernel
 //! first and the pointwise kernel second.
-//! [`FusedGates`](crate::neural_network::layers::recurrent::gate::FusedGates) draws the fused
+//! [`FusedGates`] draws the fused
 //! input kernel first and then 1 orthogonal block per gate, in gate order, for the 3 recurrent
 //! layers.
 //!
 //! 1 generator gives 1 stream, and each draw takes the next values of that stream. A different
 //! order changes every value from the second draw onward. Keep the draws of 1 layer in 1
 //! function, against 1 generator.
+//!
+//! [`Activation`]: crate::neural_network::layers::Activation
+//! [`SeparableConv1D`]: crate::neural_network::layers::SeparableConv1D
+//! [`SeparableConv2D`]: crate::neural_network::layers::SeparableConv2D
+//! [`FusedGates`]: crate::neural_network::layers::recurrent::gate::FusedGates
 
 use crate::{Deserialize, Serialize};
 use ndarray::{Array, Array2, Dimension, ShapeBuilder};

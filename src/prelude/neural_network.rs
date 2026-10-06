@@ -3,9 +3,12 @@
 //!
 //! `Average` is the 1 name that 2 categories of the crate give to an item. This module gives
 //! the merge layer that averages its inputs, and the metrics category gives the averaging mode
-//! of the classification scores. The root of [`prelude`](crate::prelude) keeps the averaging
+//! of the classification scores. The root of [`prelude`] keeps the averaging
 //! mode, so a caller that wants the layer through `use rustyml::prelude::*` names it
-//! [`layers::Average`](crate::neural_network::layers::Average)
+//! [`layers::Average`]
+//!
+//! [`prelude`]: crate::prelude
+//! [`layers::Average`]: crate::neural_network::layers::Average
 
 pub use crate::neural_network::Ctx;
 pub use crate::neural_network::Shape;
