@@ -653,7 +653,7 @@ impl UnaryLayer for BatchNormalization {
         Ok(grad_input)
     }
 
-    normalization_layer_output_shape_function!("BatchNormalization");
+    normalization_layer_output_shape_function!("BatchNormalization", 1);
 }
 
 /// Unit tests for the batch-normalization layer and its column-fold kernels

@@ -914,7 +914,7 @@ impl UnaryLayer for LayerNormalization {
         }
     }
 
-    normalization_layer_output_shape_function!("LayerNormalization");
+    normalization_layer_output_shape_function!("LayerNormalization", 1);
 }
 
 impl LayerNormalization {

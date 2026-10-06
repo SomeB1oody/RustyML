@@ -36,6 +36,7 @@ use rustyml::neural_network::layers::regularization::Dropout;
 use rustyml::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization;
 use rustyml::neural_network::layers::regularization::normalization::group_normalization::GroupNormalization;
 use rustyml::neural_network::layers::regularization::normalization::instance_normalization::InstanceNormalization;
+use rustyml::neural_network::layers::regularization::normalization::layer_normalization::LayerNormalization;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
@@ -851,7 +852,7 @@ fn load_partial_reports_applied_missing_and_unused() {
     let saved = SequentialBuilder::new()
         .add(Dense::new(3, Linear::new()).unwrap())
         .add(Dense::new(4, Linear::new()).unwrap())
-        .add(InstanceNormalization::new(1e-5).unwrap())
+        .add(LayerNormalization::new(1e-5).unwrap())
         .add(Dense::new(1, Linear::new()).unwrap())
         .build(&Shape::known(&[1, 2]))
         .unwrap();
@@ -870,8 +871,8 @@ fn load_partial_reports_applied_missing_and_unused() {
         report.missing,
         vec!["1.kernel", "1.bias", "2.gamma", "2.beta"]
     );
-    // Layer 2 of the file names the same 2 arrays at the same extent, and its layer type
-    // differs, so neither side reaches the other
+    // Layer 2 of the file names the same 2 arrays, and its layer type differs, so neither side
+    // reaches the other
     assert_eq!(
         report.unused,
         vec![

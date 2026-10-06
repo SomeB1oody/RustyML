@@ -27,6 +27,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - **Behavior change: the model build checks the whole layer tree.** It refuses 2 arrays or 2 sublayers of 1 layer with 1 name. It also refuses an empty name, a name that holds a `.`, 2 sublayer rosters that disagree, 1 layer at 2 nodes of 1 tree, and a path more than 64 sublayers deep. A roster that lists its own layer therefore gives an error, not a stack overflow. The message names the layer path.
 - **Fix: `Sequential::weight` and `Graph::weight` accept 1 spelling per model position.** A path such as `00.kernel` or `+0.kernel` reaches no array.
 - **Fix: `DecisionTree::predict_one`, `DecisionTree::predict_proba_one`, and `IsolationForest::score_sample` return `Error::NonFinite` for a NaN or an infinite value.** Before, these single-sample methods checked only the length. A NaN then took the right branch at each split, and the method returned a normal-looking result. The matrix methods already refused such a value.
+- **Fix: `GroupNormalization` and `InstanceNormalization` refuse the same ranks in `compute_output_shape`, in the build, and in the forward pass.** Before, the build accepted rank 1 and rank 2, and the forward pass refused both, so a model built and then failed on its first batch. `GroupNormalization` now accepts rank 2 and higher. At rank 2 each group folds over its own channels alone. `InstanceNormalization` accepts rank 3 and higher, because at rank 2 its output would always equal `beta`.
 
 ## [v0.16.0] - 2026-08-23
 ### Added
