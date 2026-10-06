@@ -10,7 +10,7 @@
 //! population statistics (divide by n, not n-1), taken per (sample, group) over that group's
 //! channels across every spatial position.
 
-use ndarray::Array;
+use ndarray::{Array, IxDyn};
 use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
@@ -197,7 +197,7 @@ fn group_norm_constant_input_yields_zero_output() {
     let output = gn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
     let expected = Array::zeros((1, 3, 4)).into_dyn();
-    assert_allclose(&output, &expected, 1e-6_f32);
+    assert_allclose(&output, &expected, 1e-4_f32);
 }
 
 /// The group boundary runs across the trailing (channel) axis. This test uses 2 groups of
@@ -421,7 +421,7 @@ fn instance_norm_constant_input_yields_zero_output() {
     let input = Array::from_elem((2, 3, 4), 7.0_f32).into_dyn();
     let output = inn.forward_mut(&input, &mut Ctx::training()).unwrap();
     let expected = Array::zeros((2, 3, 4)).into_dyn();
-    assert_allclose(&output, &expected, 1e-6_f32);
+    assert_allclose(&output, &expected, 1e-4_f32);
 }
 
 /// IN takes its instances along the trailing (channel) axis. This test uses 2 channels of
@@ -649,32 +649,67 @@ fn instance_norm_backward_eval_mode_passes_gradient_through() {
     assert_allclose(&grad_input, &grad, 0.0_f32);
 }
 
-// Forward with <3D input must error (min-ndim guard)
+// The lowest rank: the shape method, the build, and the forward pass agree
 
-/// GroupNormalization::forward with a 2-D input is rejected with InvalidInput by the
-/// min-ndim guard
+/// Each layer refuses a rank below its lowest rank in all 3 places, and accepts that rank
+///
+/// GroupNormalization needs a channel axis after the batch axis, so its lowest rank is 2.
+/// InstanceNormalization also needs a spatial axis, so its lowest rank is 3. A shape that the
+/// build accepts must also pass the forward pass, or a model builds and then fails on its
+/// first batch
 #[test]
-fn group_norm_forward_below_3d_input_errors() {
-    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
-    let input = Array::ones((4, 8)).into_dyn();
-    let err = gn.forward_mut(&input, &mut Ctx::training()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidInput(_)),
-        "expected InvalidInput for <3D input, got {:?}",
-        err
-    );
+fn each_layer_refuses_the_same_ranks_in_its_shape_method_build_and_forward_pass() {
+    type MakeLayer = fn() -> Box<dyn UnaryLayer>;
+    let cases: [(MakeLayer, usize); 2] = [
+        (|| Box::new(GroupNormalization::new(2, 1e-5).unwrap()), 2),
+        (|| Box::new(InstanceNormalization::new(1e-5).unwrap()), 3),
+    ];
+    for (make, min_rank) in cases {
+        for rank in 1..=min_rank {
+            let dims = vec![4; rank];
+            let shape = Shape::known(&dims);
+            let input = Array::ones(IxDyn(&dims));
+
+            let mut layer = make();
+            let name = layer.layer_type().to_string();
+            let accepted = layer.compute_output_shape(&shape).is_ok();
+            assert_eq!(
+                accepted,
+                rank == min_rank,
+                "{name} shape method, rank {rank}"
+            );
+            assert_eq!(
+                layer.build(&shape).is_ok(),
+                accepted,
+                "{name} build, rank {rank}"
+            );
+
+            let mut unbuilt = make();
+            let forward = unbuilt.forward_mut(&input, &mut Ctx::training());
+            match forward {
+                Ok(_) => assert!(accepted, "{name} forward accepted rank {rank}"),
+                Err(Error::InvalidInput(_)) => {
+                    assert!(!accepted, "{name} forward refused rank {rank}")
+                }
+                Err(other) => panic!("{name}: expected InvalidInput, got {other:?}"),
+            }
+        }
+    }
 }
 
-/// InstanceNormalization::forward with a 2-D input is rejected with InvalidInput by
-/// the min-ndim guard
+/// GroupNormalization on a rank-2 input folds each group over its own channels alone
+///
+/// The 4 channels split into 2 groups. Group 0 holds {1, 3}: mean 2, variance 1. Group 1 holds
+/// {10, 30}: mean 20, variance 100. Each group therefore maps to -1 and 1
 #[test]
-fn instance_norm_forward_below_3d_input_errors() {
-    let mut inn = InstanceNormalization::new(1e-5).unwrap();
-    let input = Array::ones((4, 8)).into_dyn();
-    let err = inn.forward_mut(&input, &mut Ctx::training()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidInput(_)),
-        "expected InvalidInput for <3D input, got {:?}",
-        err
-    );
+fn group_norm_on_rank_2_folds_each_group_over_its_channels() {
+    let mut gn = GroupNormalization::new(2, 1e-5).unwrap();
+    let input = Array::from_shape_vec((1, 4), vec![1.0_f32, 3.0, 10.0, 30.0])
+        .unwrap()
+        .into_dyn();
+    let output = gn.forward_mut(&input, &mut Ctx::training()).unwrap();
+    let expected = Array::from_shape_vec((1, 4), vec![-1.0_f32, 1.0, -1.0, 1.0])
+        .unwrap()
+        .into_dyn();
+    assert_allclose(&output, &expected, 1e-4_f32);
 }

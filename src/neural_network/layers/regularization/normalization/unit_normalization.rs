@@ -556,5 +556,5 @@ impl UnaryLayer for UnitNormalization {
         Ok(grad_input)
     }
 
-    normalization_layer_output_shape_function!("UnitNormalization");
+    normalization_layer_output_shape_function!("UnitNormalization", 1);
 }
