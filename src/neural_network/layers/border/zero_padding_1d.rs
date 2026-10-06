@@ -3,7 +3,9 @@
 //! [`ZeroPadding1D`] adds zero steps to the step axis of a `[batch, steps, features]` tensor. It
 //! holds no parameter. The forward pass and the backward pass both run through
 //! `pad_crop_engine`, which also backs this layer's inverse,
-//! [`Cropping1D`](crate::neural_network::layers::border::Cropping1D).
+//! [`Cropping1D`].
+//!
+//! [`Cropping1D`]: crate::neural_network::layers::border::Cropping1D
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

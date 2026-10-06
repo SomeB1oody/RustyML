@@ -1,7 +1,7 @@
 //! The per-pass context that carries the values a forward pass and its backward pass share
 //!
 //! A layer computes. It does not remember.
-//! [`UnaryLayer::forward`](crate::neural_network::traits::UnaryLayer::forward) takes `&self`,
+//! [`UnaryLayer::forward`] takes `&self`,
 //! so the values that only exist between a forward pass and its backward pass have no place
 //! inside the layer. [`Ctx`] is that place. 1 context serves 1 pass, and it holds 4 channels:
 //!
@@ -18,7 +18,7 @@
 //! # Sublayers
 //!
 //! A layer can hold other layers. See
-//! [`LayerBase`](crate::neural_network::traits::LayerBase) for that contract. A layer calls
+//! [`LayerBase`] for that contract. A layer calls
 //! each of its sublayers inside [`Ctx::sublayer`]. The call appends 1 frame to the current
 //! [`LayerPath`] for the time of the closure. It removes the frame when the closure returns,
 //! and also when the closure panics. Each channel then keys on the full path:
@@ -34,7 +34,9 @@
 //! each record against the layer tree, so a call under the name of another sublayer stops the
 //! step.
 //!
+//! [`LayerBase`]: crate::neural_network::traits::LayerBase
 //! [`ParamId`]: crate::neural_network::traits::ParamId
+//! [`UnaryLayer::forward`]: crate::neural_network::traits::UnaryLayer::forward
 
 use crate::error::Error;
 use crate::neural_network::Tensor;

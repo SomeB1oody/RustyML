@@ -18,16 +18,17 @@
 //!
 //! [`Normalizer`] is the odd one out. It rescales samples (rows), not features (columns), so
 //! it learns nothing beyond the feature count. It exists so row normalization uses the same
-//! [`Fit`](crate::traits::Fit) and [`Transform`](crate::traits::Transform) contract as the
-//! rest. The other 4 are per-feature and stateful in the full sense. All but
-//! [`RobustScaler`] also support `partial_fit`. Their statistics merge exactly across batches,
-//! but quantiles do not.
+//! [`Fit`] and [`Transform`] contract as the rest. The other 4 are per-feature and stateful in the
+//! full sense. All but [`RobustScaler`] also support `partial_fit`. Their statistics merge exactly
+//! across batches, but quantiles do not.
 //!
 //! Every scaler here is 2-D and per-feature, exactly like scikit-learn's. The free functions
 //! handle row-wise or whole-array standardization, and N-D arrays.
 //!
 //! [`standardize`]: crate::utils::standardize::standardize
 //! [`normalize`]: crate::utils::normalize::normalize
+//! [`Fit`]: crate::traits::Fit
+//! [`Transform`]: crate::traits::Transform
 
 use crate::error::Error;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, scan_f64_parallel_min_elems};

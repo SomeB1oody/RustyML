@@ -1,12 +1,14 @@
 //! Standardization that remembers its training statistics
 //!
 //! Provides [`StandardScaler`], the fit and transform counterpart to the stateless
-//! [`standardize`](crate::utils::standardize::standardize) function. It learns the per-feature
+//! [`standardize`] function. It learns the per-feature
 //! mean and standard deviation once, on the training matrix. It reuses those frozen numbers
 //! for every later batch: the test split, a validation fold, or a single sample arriving at
 //! inference time. This is the scikit-learn `StandardScaler` contract, and it keeps a
 //! train-test boundary honest. Rescaling a test set by its own column statistics applies a
 //! different linear map than the one the model was trained under
+//!
+//! [`standardize`]: crate::utils::standardize::standardize
 
 use super::{fitted, for_each_row, validate_matrix, validate_transform_matrix};
 use crate::error::Error;

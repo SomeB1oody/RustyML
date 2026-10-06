@@ -1,9 +1,9 @@
 //! A model whose layers form a directed graph, rather than a chain
 //!
-//! [`Sequential`](crate::neural_network::sequential::Sequential) gives every layer exactly 1
+//! [`Sequential`] gives every layer exactly 1
 //! input, and that input is the output of the layer before it. A residual connection, a model
 //! with 2 towers, a shared encoder, and any model with several inlets or several outlets need
-//! more than a chain. [`Graph`](crate::neural_network::graph::Graph) is that model
+//! more than a chain. [`Graph`] is that model
 //!
 //! A graph holds a layer arena and a node list. A node is a call of 1 layer on the outputs of
 //! other nodes, so several nodes can call 1 layer. That is what weight sharing is: 1 set of
@@ -37,6 +37,9 @@
 //! let prediction = model.predict(&[&inputs]).unwrap();
 //! assert_eq!(prediction[0].shape(), &[4, 2]);
 //! ```
+//!
+//! [`Sequential`]: crate::neural_network::sequential::Sequential
+//! [`Graph`]: crate::neural_network::graph::Graph
 
 use crate::error::Error;
 use crate::neural_network::NnError;

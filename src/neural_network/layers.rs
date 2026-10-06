@@ -2,7 +2,7 @@
 //!
 //! Declares every layer submodule and glob-re-exports the public layer types. It also defines
 //! the infrastructure shared across the subsystem. The
-//! [`ParamCounts`](crate::neural_network::layers::ParamCounts) report says how many parameter
+//! [`ParamCounts`] report says how many parameter
 //! elements a layer holds, split into trainable and non-trainable.
 //!
 //! 5 macros remove the boilerplate that a layer would otherwise repeat by hand.
@@ -21,29 +21,49 @@
 //! The submodules fall into a few categories:
 //!
 //! - Core layers (re-exported):
-//!   - [`activation`](crate::neural_network::layers::activation)
-//!   - [`border`](crate::neural_network::layers::border)
-//!   - [`convolution`](crate::neural_network::layers::convolution)
-//!   - [`dense`](crate::neural_network::layers::dense)
-//!   - [`embedding`](crate::neural_network::layers::embedding)
-//!   - [`flatten`](crate::neural_network::layers::flatten)
-//!   - [`identity`](crate::neural_network::layers::identity)
-//!   - [`merge`](crate::neural_network::layers::merge)
-//!   - [`permute`](crate::neural_network::layers::permute)
-//!   - [`pooling`](crate::neural_network::layers::pooling)
-//!   - [`recurrent`](crate::neural_network::layers::recurrent)
-//!   - [`regularization`](crate::neural_network::layers::regularization)
-//!   - [`repeat_vector`](crate::neural_network::layers::repeat_vector)
-//!   - [`rescaling`](crate::neural_network::layers::rescaling)
-//!   - [`reshape`](crate::neural_network::layers::reshape)
-//!   - [`reverse`](crate::neural_network::layers::reverse)
-//!   - [`upsampling`](crate::neural_network::layers::upsampling)
+//!   - [`activation`]
+//!   - [`border`]
+//!   - [`convolution`]
+//!   - [`dense`]
+//!   - [`embedding`]
+//!   - [`flatten`]
+//!   - [`identity`]
+//!   - [`merge`]
+//!   - [`permute`]
+//!   - [`pooling`]
+//!   - [`recurrent`]
+//!   - [`regularization`]
+//!   - [`repeat_vector`]
+//!   - [`rescaling`]
+//!   - [`reshape`]
+//!   - [`reverse`]
+//!   - [`upsampling`]
 //! - Shared (private) helpers: `conv_op_helpers` (the depthwise convolution kernel, shared by
 //!   the depthwise and separable convolution layers) and `shape_helpers` (pooling/convolution
 //!   output-shape calculators)
 //! - Validation: `validation` (shared input/weight checks)
-//! - Serialization: [`checkpoint`](crate::neural_network::layers::checkpoint)
+//! - Serialization: [`checkpoint`]
 //!   (the named on-disk format, and the load that applies it)
+//!
+//! [`ParamCounts`]: crate::neural_network::layers::ParamCounts
+//! [`activation`]: crate::neural_network::layers::activation
+//! [`border`]: crate::neural_network::layers::border
+//! [`convolution`]: crate::neural_network::layers::convolution
+//! [`dense`]: crate::neural_network::layers::dense
+//! [`embedding`]: crate::neural_network::layers::embedding
+//! [`flatten`]: crate::neural_network::layers::flatten
+//! [`identity`]: crate::neural_network::layers::identity
+//! [`merge`]: crate::neural_network::layers::merge
+//! [`permute`]: crate::neural_network::layers::permute
+//! [`pooling`]: crate::neural_network::layers::pooling
+//! [`recurrent`]: crate::neural_network::layers::recurrent
+//! [`regularization`]: crate::neural_network::layers::regularization
+//! [`repeat_vector`]: crate::neural_network::layers::repeat_vector
+//! [`rescaling`]: crate::neural_network::layers::rescaling
+//! [`reshape`]: crate::neural_network::layers::reshape
+//! [`reverse`]: crate::neural_network::layers::reverse
+//! [`upsampling`]: crate::neural_network::layers::upsampling
+//! [`checkpoint`]: crate::neural_network::layers::checkpoint
 
 /// How many parameter elements a layer holds, split by whether training updates them
 ///

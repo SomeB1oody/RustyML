@@ -1,11 +1,14 @@
 //! Gaussian Dropout layer that applies multiplicative Gaussian noise during training
 //!
 //! [`GaussianDropout`] holds the drop rate, the shape recorded by
-//! [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build), and the random number
+//! [`UnaryLayer::build`], and the random number
 //! generator that draws the noise. The forward pass multiplies the input by `N(1, rate / (1 -
 //! rate))` noise. The backward pass reuses the exact draw parked in the
-//! [`Ctx`](crate::neural_network::Ctx) cache, since the multiplier does not depend on the input
+//! [`Ctx`] cache, since the multiplier does not depend on the input
 //! value.
+//!
+//! [`UnaryLayer::build`]: crate::neural_network::traits::UnaryLayer::build
+//! [`Ctx`]: crate::neural_network::Ctx
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

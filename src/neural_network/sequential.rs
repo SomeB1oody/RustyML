@@ -4,9 +4,9 @@
 //!
 //! # 2 types, and only 1 of them trains
 //!
-//! [`SequentialBuilder`](crate::neural_network::sequential::SequentialBuilder) collects
-//! layers. [`Sequential`](crate::neural_network::sequential::Sequential) is a built model.
-//! [`SequentialBuilder::build`](crate::neural_network::sequential::SequentialBuilder::build) is
+//! [`SequentialBuilder`] collects
+//! layers. [`Sequential`] is a built model.
+//! [`SequentialBuilder::build`] is
 //! the only way to reach a built model, and it takes the
 //! shape of the input. It walks the stack once, gives every layer the shape that reaches it,
 //! and threads each output shape into the next layer
@@ -15,10 +15,16 @@
 //! methods of the built model alone. Training a model that was never built is therefore a
 //! compile error, and no run-time state says whether a model is ready
 //!
-//! [`History`](crate::neural_network::sequential::History) is what `fit` and
+//! [`History`] is what `fit` and
 //! `fit_with_batches` give back: 1 loss value per epoch, in epoch order.
 //! `save_to_path` and `load_from_path` read and write every array of the model, in the
-//! format that [`checkpoint`](crate::neural_network::layers::checkpoint) defines
+//! format that [`checkpoint`] defines
+//!
+//! [`SequentialBuilder`]: crate::neural_network::sequential::SequentialBuilder
+//! [`Sequential`]: crate::neural_network::sequential::Sequential
+//! [`SequentialBuilder::build`]: crate::neural_network::sequential::SequentialBuilder::build
+//! [`History`]: crate::neural_network::sequential::History
+//! [`checkpoint`]: crate::neural_network::layers::checkpoint
 
 use super::traits::{Layer, Loss, Optimizer, check_addresses, check_every_gradient_is_claimed};
 use crate::error::{Error, IoError};

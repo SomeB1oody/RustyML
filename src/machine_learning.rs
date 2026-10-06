@@ -2,18 +2,18 @@
 //! reduction, and anomaly detection
 //!
 //! This module groups models by algorithm family into submodules:
-//! [`clustering`](crate::machine_learning::clustering),
-//! [`decomposition`](crate::machine_learning::decomposition),
-//! [`linear_model`](crate::machine_learning::linear_model),
-//! [`manifold`](crate::machine_learning::manifold), [`svm`](crate::machine_learning::svm),
-//! [`tree`](crate::machine_learning::tree), [`neighbors`](crate::machine_learning::neighbors),
-//! [`discriminant_analysis`](crate::machine_learning::discriminant_analysis), and
-//! [`ensemble`](crate::machine_learning::ensemble). This module also re-exports every estimator,
+//! [`clustering`],
+//! [`decomposition`],
+//! [`linear_model`],
+//! [`manifold`], [`svm`],
+//! [`tree`], [`neighbors`],
+//! [`discriminant_analysis`], and
+//! [`ensemble`]. This module also re-exports every estimator,
 //! so it is reachable directly as `machine_learning::<Model>`. Supervised and unsupervised
-//! estimators implement the shared [`Fit`](crate::traits::Fit) /
-//! [`Predict`](crate::traits::Predict) traits. The dimensionality-reduction
-//! transformers implement [`Transform`](crate::traits::Transform) /
-//! [`FitTransform`](crate::traits::FitTransform).
+//! estimators implement the shared [`Fit`] /
+//! [`Predict`] traits. The dimensionality-reduction
+//! transformers implement [`Transform`] /
+//! [`FitTransform`].
 //!
 //! # Supervised learning
 //!
@@ -47,12 +47,12 @@
 //!
 //! # Shared types
 //!
-//! - [`DistanceCalculationMetric`](crate::math::DistanceCalculationMetric):
+//! - [`DistanceCalculationMetric`]:
 //!   Euclidean/Manhattan/Minkowski dispatcher, re-exported from [`crate::math`]
-//! - [`RegularizationType`](crate::machine_learning::types::RegularizationType): L1 / L2
+//! - [`RegularizationType`]: L1 / L2
 //!   regularization
-//! - [`KernelType`](crate::machine_learning::types::KernelType) /
-//!   [`Gamma`](crate::machine_learning::types::Gamma): kernel selection and coefficient
+//! - [`KernelType`] /
+//!   [`Gamma`]: kernel selection and coefficient
 //!
 //! # Examples
 //!
@@ -65,6 +65,24 @@
 //! let y = array![6.0, 9.0, 12.0];
 //! model.fit(&x, &y).unwrap();
 //! ```
+//!
+//! [`clustering`]: crate::machine_learning::clustering
+//! [`decomposition`]: crate::machine_learning::decomposition
+//! [`linear_model`]: crate::machine_learning::linear_model
+//! [`manifold`]: crate::machine_learning::manifold
+//! [`svm`]: crate::machine_learning::svm
+//! [`tree`]: crate::machine_learning::tree
+//! [`neighbors`]: crate::machine_learning::neighbors
+//! [`discriminant_analysis`]: crate::machine_learning::discriminant_analysis
+//! [`ensemble`]: crate::machine_learning::ensemble
+//! [`Fit`]: crate::traits::Fit
+//! [`Predict`]: crate::traits::Predict
+//! [`Transform`]: crate::traits::Transform
+//! [`FitTransform`]: crate::traits::FitTransform
+//! [`DistanceCalculationMetric`]: crate::math::DistanceCalculationMetric
+//! [`RegularizationType`]: crate::machine_learning::types::RegularizationType
+//! [`KernelType`]: crate::machine_learning::types::KernelType
+//! [`Gamma`]: crate::machine_learning::types::Gamma
 
 pub use crate::math::DistanceCalculationMetric;
 /// The crate-wide estimator traits, re-exported here for convenience. Their canonical

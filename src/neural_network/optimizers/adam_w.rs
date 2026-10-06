@@ -1,9 +1,11 @@
 //! AdamW optimizer: Adam with decoupled weight decay
 //!
 //! Holds the [`AdamW`] struct, its constructor, its [`AdamW::with_global_clipnorm`] builder method,
-//! and its [`Optimizer`](crate::neural_network::traits::Optimizer) implementation. The moment math
-//! and the update loop live in the private `AdamCore` type, shared with
-//! [`Adam`](crate::neural_network::optimizers::Adam)
+//! and its [`Optimizer`] implementation. The moment math and the update loop live in the private
+//! `AdamCore` type, shared with [`Adam`]
+//!
+//! [`Optimizer`]: crate::neural_network::traits::Optimizer
+//! [`Adam`]: crate::neural_network::optimizers::Adam
 
 use crate::error::Error;
 use crate::neural_network::LayerPath;

@@ -2,8 +2,10 @@
 //!
 //! Provides [`LinearSVC`], a hinge-loss classifier trained with stochastic gradient
 //! descent and L1 or L2 regularization, along with the
-//! [`RegularizationType`](crate::machine_learning::RegularizationType) enum that
+//! [`RegularizationType`] enum that
 //! selects the penalty
+//!
+//! [`RegularizationType`]: crate::machine_learning::RegularizationType
 
 use crate::error::Error;
 pub use crate::machine_learning::RegularizationType;

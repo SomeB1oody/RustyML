@@ -48,9 +48,11 @@
 //!
 //! The backward pass parallelizes over batch items. It reduces their weight and bias partials in
 //! batch order, so rerunning on the same machine gives the same result. Both GEMMs route through
-//! the crate's [`dot_par`](crate::math::matmul::dot_par). The per-item GEMMs stay parallel while
+//! the crate's [`dot_par`]. The per-item GEMMs stay parallel while
 //! the batch fan is too short to fill the thread pool. They switch to serial once the batch alone
 //! fills the pool, so a batch task does not fork rayon again inside its own GEMM
+//!
+//! [`dot_par`]: crate::math::matmul::dot_par
 
 use super::PaddingType;
 use super::validation::validate_valid_kernel_fits;

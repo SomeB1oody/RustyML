@@ -3,19 +3,19 @@
 //! These traits give the otherwise independent estimators a single uniform contract
 //! so that generic code can train, transform, and run predictions over any of them:
 //!
-//! - [`Fit`](crate::traits::Fit) - train a model from input data (`(&X, &Y)` for supervised
-//!   models, `&X` for unsupervised ones)
-//! - [`Predict`](crate::traits::Predict) - run inference on a fitted model, with the output
-//!   type chosen by each model (labels, probabilities, cluster ids, anomaly scores, ...)
-//! - [`Transform`](crate::traits::Transform) - project new data through a fitted transformer
-//!   (`PCA`, `KernelPCA`, `StandardScaler`)
-//! - [`FitTransform`](crate::traits::FitTransform) - fit and transform the training data in
-//!   one call (`PCA`, `KernelPCA`, `TSNE`, `StandardScaler`)
+//! - [`Fit`] - train a model from input data (`(&X, &Y)` for supervised models, `&X` for
+//!   unsupervised ones)
+//! - [`Predict`] - run inference on a fitted model, with the output type chosen by each model
+//!   (labels, probabilities, cluster ids, anomaly scores, ...)
+//! - [`Transform`] - project new data through a fitted transformer (`PCA`, `KernelPCA`,
+//!   `StandardScaler`)
+//! - [`FitTransform`] - fit and transform the training data in one call (`PCA`, `KernelPCA`,
+//!   `TSNE`, `StandardScaler`)
 //!
 //! The traits live at the crate root because implementors span features: the
-//! estimators in [`machine_learning`](crate::machine_learning) and the preprocessing
-//! transformers in [`utils`](crate::utils). Each module also re-exports them
-//! (`machine_learning::Fit`, `utils::Fit`), and both preludes bring them into scope
+//! estimators in [`machine_learning`] and the preprocessing transformers in [`utils`]. Each module
+//! also re-exports them (`machine_learning::Fit`, `utils::Fit`), and both preludes bring them into
+//! scope
 //!
 //! Every implementor also exposes the same operations as inherent methods
 //! (`model.fit(..)`, `model.predict(..)`). The trait implementations forward to them.
@@ -44,6 +44,13 @@
 //! // Call it with any estimator that fits the bounds, e.g.:
 //! // let preds = train_and_predict(&mut LinearRegression::default(), &x, &y);
 //! ```
+//!
+//! [`Fit`]: crate::traits::Fit
+//! [`Predict`]: crate::traits::Predict
+//! [`Transform`]: crate::traits::Transform
+//! [`FitTransform`]: crate::traits::FitTransform
+//! [`machine_learning`]: crate::machine_learning
+//! [`utils`]: crate::utils
 
 use crate::error::Error;
 #[cfg(feature = "machine_learning")]

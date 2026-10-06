@@ -4,7 +4,7 @@
 //! `<layer path>.<name>`: the [`LayerPath`] of the layer that holds the array, and the name that
 //! the layer gives the array. A layer at model position 2 gives the path `2.kernel`. A sublayer
 //! `forward` of that layer gives the path `2.forward.kernel`. It is the same pair that
-//! [`ParamId`](crate::neural_network::traits::ParamId) uses for optimizer state, so 1 address
+//! [`ParamId`] uses for optimizer state, so 1 address
 //! serves the training loop and the file alike
 //!
 //! # What a file holds
@@ -42,6 +42,7 @@
 //! [`apply`]: crate::neural_network::layers::checkpoint::apply
 //! [`apply_partial`]: crate::neural_network::layers::checkpoint::apply_partial
 //! [`BatchNormalization`]: crate::neural_network::layers::BatchNormalization
+//! [`ParamId`]: crate::neural_network::traits::ParamId
 
 use crate::error::{Error, IoError};
 use crate::neural_network::Shape;

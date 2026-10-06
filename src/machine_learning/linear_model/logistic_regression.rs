@@ -2,12 +2,14 @@
 //!
 //! Provides the [`LogisticRegression`] model, trained by full-batch gradient descent on the
 //! logistic loss, with optional L1 or L2 regularization. Fitting never panics: every precondition
-//! failure and numerical issue during training surfaces as an [`Error`](crate::error::Error) from
+//! failure and numerical issue during training surfaces as an [`Error`] from
 //! [`LogisticRegression::fit`].
 //!
 //! Also provides the [`generate_polynomial_features`] helper, which expands a feature
 //! matrix into its polynomial combinations up to a chosen degree. Use it to fit a
 //! non-linear decision boundary with the same linear model.
+//!
+//! [`Error`]: crate::error::Error
 
 use crate::error::Error;
 pub use crate::machine_learning::RegularizationType;

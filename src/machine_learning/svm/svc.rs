@@ -2,10 +2,12 @@
 //!
 //! Provides the [`SVC`] binary classifier, trained with the Sequential Minimal
 //! Optimization (SMO) algorithm, and the kernel types re-exported as
-//! [`KernelType`](crate::machine_learning::KernelType)
+//! [`KernelType`]
 //!
 //! Labels are `{0.0, 1.0}` on the public API, matching the crate's other binary
 //! classifiers. Only `fit` uses the internal +/-1 encoding that the SMO dual needs
+//!
+//! [`KernelType`]: crate::machine_learning::KernelType
 
 use crate::error::Error;
 use crate::machine_learning::parallel::map_collect;

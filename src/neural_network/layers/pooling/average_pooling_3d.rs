@@ -3,10 +3,12 @@
 //! [`AveragePooling3D`] slides a window across the depth, height, and width axes of a `[batch,
 //! depth, height, width, channels]` tensor. The layer replaces each window with the mean of its
 //! elements. [`AveragePooling3D::new`] sets the strides to `pool_size` and the padding to
-//! [`PaddingType::Valid`](crate::neural_network::layers::convolution::PaddingType).
+//! [`PaddingType::Valid`].
 //! [`AveragePooling3D::with_strides`] and [`AveragePooling3D::with_padding`] override those
 //! defaults. The backward pass spreads each output gradient evenly over the in-bounds elements of
 //! its window. The forward pass therefore caches only the input shape it must restore.
+//!
+//! [`PaddingType::Valid`]: crate::neural_network::layers::convolution::PaddingType
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;

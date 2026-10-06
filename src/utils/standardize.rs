@@ -5,9 +5,10 @@
 //!
 //! This is the one-shot form. Every call recomputes the statistics from the array it is
 //! handed. When the same statistics must apply to more than one batch, use
-//! [`StandardScaler`](crate::utils::StandardScaler) instead. Examples include a test split
-//! scaled by the training mean, or a single sample at inference time. It stores the
-//! statistics at fit time
+//! [`StandardScaler`] instead. Examples include a test split scaled by the training mean, or a
+//! single sample at inference time. It stores the statistics at fit time
+//!
+//! [`StandardScaler`]: crate::utils::StandardScaler
 
 use crate::error::Error;
 use crate::math::reduction::det_reduce;

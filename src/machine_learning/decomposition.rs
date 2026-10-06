@@ -4,9 +4,11 @@
 //! `sklearn.decomposition`: [`PCA`] for linear dimensionality reduction and
 //! [`KernelPCA`] for its nonlinear, kernelized counterpart. Both learn their
 //! components from a feature matrix at `fit` time and project new data through
-//! `transform`. Both implement the shared [`Fit`](crate::traits::Fit),
-//! [`Transform`](crate::traits::Transform), and
-//! [`FitTransform`](crate::traits::FitTransform) traits
+//! `transform`. Both implement the shared [`Fit`], [`Transform`], and [`FitTransform`] traits
+//!
+//! [`Fit`]: crate::traits::Fit
+//! [`Transform`]: crate::traits::Transform
+//! [`FitTransform`]: crate::traits::FitTransform
 
 pub use crate::machine_learning::{Gamma, KernelType};
 

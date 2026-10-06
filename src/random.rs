@@ -6,7 +6,7 @@
 //! entry point for:
 //!
 //! - neural-network components: weight initialization, dropout/noise masks, and the
-//!   [`Sequential`](crate::neural_network::sequential::Sequential) minibatch shuffle
+//!   [`Sequential`] minibatch shuffle
 //! - machine-learning estimators: k-means, SVC/LinearSVC, MeanShift, Isolation Forest, and others
 //! - utilities: `train_test_split`, t-SNE
 //!
@@ -48,6 +48,8 @@
 //!
 //! General rule: route a draw through this module only when an unseeded call would make a
 //! pseudo-random choice that changes the result
+//!
+//! [`Sequential`]: crate::neural_network::sequential::Sequential
 
 use ndarray_rand::rand::{RngCore, SeedableRng, rng, rngs::StdRng};
 use std::cell::RefCell;

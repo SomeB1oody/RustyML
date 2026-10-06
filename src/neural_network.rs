@@ -2,33 +2,24 @@
 //! that tie them together
 //!
 //! The module builds, trains, and runs neural networks.
-//! Layers, optimizers, and losses live in the [`layers`](crate::neural_network::layers),
-//! [`optimizers`](crate::neural_network::optimizers), and
-//! [`losses`](crate::neural_network::losses) submodules.
-//! [`Sequential`](crate::neural_network::sequential::Sequential) stacks layers into a
-//! chain, and [`Graph`](crate::neural_network::graph::Graph) wires them into a directed graph.
-//! The shared interfaces live in [`traits`](crate::neural_network::traits).
-//! Every tensor in the framework is a [`Tensor`](crate::neural_network::Tensor), an `f32`
-//! n-dimensional array
+//! Layers, optimizers, and losses live in the [`layers`], [`optimizers`], and [`losses`]
+//! submodules. [`Sequential`] stacks layers into a chain, and [`Graph`] wires them into a directed
+//! graph. The shared interfaces live in [`traits`]. Every tensor in the framework is a [`Tensor`],
+//! an `f32` n-dimensional array
 //!
 //! A layer computes, and it holds no cache and no gradient.
-//! [`forward`](crate::neural_network::traits::UnaryLayer::forward) and
-//! [`backward`](crate::neural_network::traits::UnaryLayer::backward) take `&self` and a
-//! [`Ctx`](crate::neural_network::Ctx). The context carries the training flag, the caches of the
-//! pass, every parameter gradient, and the non-trainable state that a training pass changes.
-//! [`Ctx::training`](crate::neural_network::Ctx::training) and
-//! [`Ctx::inference`](crate::neural_network::Ctx::inference) pick the mode. A built model is
-//! therefore `Send` and `Sync`, and several threads can run inference against 1 model
+//! [`forward`] and [`backward`] take `&self` and a [`Ctx`]. The context carries the training flag,
+//! the caches of the pass, every parameter gradient, and the non-trainable state that a training
+//! pass changes. [`Ctx::training`] and [`Ctx::inference`] pick the mode. A built model is therefore
+//! `Send` and `Sync`, and several threads can run inference against 1 model
 //!
 //! A layer can hold other layers, which are its sublayers.
-//! [`LayerBase::sublayers`](crate::neural_network::traits::LayerBase::sublayers) lists them by
-//! name, and the layer calls each sublayer inside
-//! [`Ctx::sublayer`](crate::neural_network::Ctx::sublayer). A
-//! [`LayerPath`](crate::neural_network::LayerPath) addresses each layer of that tree. The path
-//! `2.forward` is the sublayer `forward` of the layer at model position 2. The gradient store,
-//! the optimizer state, the state channel, and the checkpoint all key on this path. 2 sublayers
-//! of 1 type therefore never share 1 address. A checkpoint path is the layer path and the name of
-//! the array, such as `2.forward.kernel`
+//! [`LayerBase::sublayers`] lists them by name, and the layer calls each sublayer inside
+//! [`Ctx::sublayer`]. A [`LayerPath`] addresses each layer of that tree. The path `2.forward` is
+//! the sublayer `forward` of the layer at model position 2. The gradient store, the optimizer
+//! state, the state channel, and the checkpoint all key on this path. 2 sublayers of 1 type
+//! therefore never share 1 address. A checkpoint path is the layer path and the name of the array,
+//! such as `2.forward.kernel`
 //!
 //! # Core components
 //!
@@ -58,12 +49,10 @@
 //! - **Merge**: `Add`, `Subtract`, `Multiply`, `Average`, `Maximum`, and `Minimum` reduce several
 //!   inputs element by element, and `Concatenate` joins them along 1 axis. Each layer takes
 //!   several inputs and gives 1 output, so a graph model joins its branches with them.
-//!   [`Concatenate::new`](crate::neural_network::layers::Concatenate::new) never fails, and its
-//!   axis counts against the full rank. The axis 0 therefore joins the batch axis, and a
-//!   negative axis counts back from the end.
-//!   [`Average`](crate::neural_network::layers::Average) is the 1 name that 2 categories of the
-//!   crate give to an item. The root of [`prelude`](crate::prelude) keeps the averaging mode of
-//!   the classification scores, so a caller that wants the layer must write
+//!   [`Concatenate::new`] never fails, and its axis counts against the full rank. The axis 0
+//!   therefore joins the batch axis, and a negative axis counts back from the end. [`Average`] is
+//!   the 1 name that 2 categories of the crate give to an item. The root of [`prelude`] keeps the
+//!   averaging mode of the classification scores, so a caller that wants the layer must write
 //!   `prelude::neural_network::Average` or `neural_network::layers::Average`
 //!
 //! ## Optimizers
@@ -79,29 +68,25 @@
 //! - **CategoricalCrossEntropy** / **SparseCategoricalCrossEntropy**: multi-class classification
 //!
 //! ## Shapes
-//! - [`Shape`](crate::neural_network::Shape): the shape of a tensor as a layer describes it,
-//!   with a free axis for an extent that no configuration fixes. Every layer maps an input
-//!   shape to an output shape through
-//!   [`compute_output_shape`](crate::neural_network::traits::UnaryLayer::compute_output_shape),
-//!   which reads the layer configuration alone and answers before any tensor exists
+//! - [`Shape`]: the shape of a tensor as a layer describes it, with a free axis for an extent that
+//!   no configuration fixes. Every layer maps an input shape to an output shape through
+//!   [`compute_output_shape`], which reads the layer configuration alone and answers before any
+//!   tensor exists
 //!
 //! ## Weight initialization
-//! - [`Initializer`](crate::neural_network::Initializer): how a layer draws the starting values
-//!   of a weight array. Every drawn array of the module comes from this closed set of 3 rules.
-//!   The layer supplies the [`Fans`](crate::neural_network::Fans) pair, because a kernel shape
-//!   alone cannot tell a plain convolution from a transposed one
+//! - [`Initializer`]: how a layer draws the starting values of a weight array. Every drawn array of
+//!   the module comes from this closed set of 3 rules. The layer supplies the [`Fans`] pair,
+//!   because a kernel shape alone cannot tell a plain convolution from a transposed one
 //!
 //! ## Models
-//! - [`Sequential`](crate::neural_network::sequential::Sequential): a linear stack of layers with
-//!   an integrated training loop, prediction, and weight save and load. `fit` and
-//!   `fit_with_batches` return a [`History`](crate::neural_network::sequential::History) with 1
-//!   loss value per epoch. Both build on the public `train_batch` step. `evaluate` scores a model
-//!   without training it
-//! - [`Graph`](crate::neural_network::graph::Graph): a directed graph of layers, with the same
-//!   training loop, prediction, and weight save and load. It takes several inlets and gives
-//!   several outlets, and it holds a layer arena. Several nodes can call 1 layer of that arena.
-//!   Those nodes then share 1 set of arrays, and the sum of their gradients updates that set.
-//!   [`GraphBuilder`](crate::neural_network::graph::GraphBuilder) is the only way to reach one
+//! - [`Sequential`]: a linear stack of layers with an integrated training loop, prediction, and
+//!   weight save and load. `fit` and `fit_with_batches` return a [`History`] with 1 loss value per
+//!   epoch. Both build on the public `train_batch` step. `evaluate` scores a model without training
+//!   it
+//! - [`Graph`]: a directed graph of layers, with the same training loop, prediction, and weight
+//!   save and load. It takes several inlets and gives several outlets, and it holds a layer arena.
+//!   Several nodes can call 1 layer of that arena. Those nodes then share 1 set of arrays, and the
+//!   sum of their gradients updates that set. [`GraphBuilder`] is the only way to reach one
 //!
 //! # Examples
 //!
@@ -176,6 +161,31 @@
 //! let predictions = model.predict(&[&left, &right]).unwrap();
 //! assert_eq!(predictions[0].shape(), &[4, 2]);
 //! ```
+//!
+//! [`layers`]: crate::neural_network::layers
+//! [`optimizers`]: crate::neural_network::optimizers
+//! [`losses`]: crate::neural_network::losses
+//! [`Sequential`]: crate::neural_network::sequential::Sequential
+//! [`Graph`]: crate::neural_network::graph::Graph
+//! [`traits`]: crate::neural_network::traits
+//! [`Tensor`]: crate::neural_network::Tensor
+//! [`forward`]: crate::neural_network::traits::UnaryLayer::forward
+//! [`backward`]: crate::neural_network::traits::UnaryLayer::backward
+//! [`Ctx`]: crate::neural_network::Ctx
+//! [`Ctx::training`]: crate::neural_network::Ctx::training
+//! [`Ctx::inference`]: crate::neural_network::Ctx::inference
+//! [`LayerBase::sublayers`]: crate::neural_network::traits::LayerBase::sublayers
+//! [`Ctx::sublayer`]: crate::neural_network::Ctx::sublayer
+//! [`LayerPath`]: crate::neural_network::LayerPath
+//! [`Concatenate::new`]: crate::neural_network::layers::Concatenate::new
+//! [`Average`]: crate::neural_network::layers::Average
+//! [`prelude`]: crate::prelude
+//! [`Shape`]: crate::neural_network::Shape
+//! [`compute_output_shape`]: crate::neural_network::traits::UnaryLayer::compute_output_shape
+//! [`Initializer`]: crate::neural_network::Initializer
+//! [`Fans`]: crate::neural_network::Fans
+//! [`History`]: crate::neural_network::sequential::History
+//! [`GraphBuilder`]: crate::neural_network::graph::GraphBuilder
 
 use ndarray::ArrayD;
 
@@ -184,7 +194,7 @@ pub type Tensor = ArrayD<f32>;
 
 /// The per-pass context that carries caches, gradients and state between layers
 pub mod ctx;
-/// Neural-network error type, aggregated into the crate-wide [`Error`](crate::error::Error)
+/// Neural-network error type, aggregated into the crate-wide `Error`
 pub mod error;
 /// A model whose layers form a directed graph, rather than a chain
 pub mod graph;
