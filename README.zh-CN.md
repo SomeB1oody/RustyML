@@ -8,7 +8,6 @@
 [![edition](https://img.shields.io/badge/edition-2024-orange)](https://doc.rust-lang.org/edition-guide/)
 [![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)
 [![crates.io](https://img.shields.io/crates/v/rustyml.svg)](https://crates.io/crates/rustyml)
-
 [![ci](https://img.shields.io/github/actions/workflow/status/SomeB1oody/RustyML/ci.yml?branch=master&label=ci)](https://github.com/SomeB1oody/RustyML/actions/workflows/ci.yml)
 
 > 阅读 **[RustyML 使用指南](https://someb1oody.github.io/RustyML/zh-Hans/)**，获取 RustyML 的详细文档与教程。
