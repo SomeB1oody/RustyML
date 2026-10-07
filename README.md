@@ -9,10 +9,7 @@ A machine learning and deep learning library written in **pure Rust**.
 [![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)
 [![crates.io](https://img.shields.io/crates/v/rustyml.svg)](https://crates.io/crates/rustyml)
 
-[![fmt](https://img.shields.io/github/actions/workflow/status/SomeB1oody/RustyML/fmt.yml?branch=master&label=fmt)](https://github.com/SomeB1oody/RustyML/actions/workflows/fmt.yml)
-[![clippy](https://img.shields.io/github/actions/workflow/status/SomeB1oody/RustyML/clippy.yml?branch=master&label=clippy)](https://github.com/SomeB1oody/RustyML/actions/workflows/clippy.yml)
-[![test](https://img.shields.io/github/actions/workflow/status/SomeB1oody/RustyML/test.yml?branch=master&label=test)](https://github.com/SomeB1oody/RustyML/actions/workflows/test.yml)
-[![doc](https://img.shields.io/github/actions/workflow/status/SomeB1oody/RustyML/doc.yml?branch=master&label=doc)](https://github.com/SomeB1oody/RustyML/actions/workflows/doc.yml)
+[![ci](https://img.shields.io/github/actions/workflow/status/SomeB1oody/RustyML/ci.yml?branch=master&label=ci)](https://github.com/SomeB1oody/RustyML/actions/workflows/ci.yml)
 
 > Read **[RustyML User Guide](https://someb1oody.github.io/RustyML/en/)** for detailed documentation and tutorials of RustyML.
 
