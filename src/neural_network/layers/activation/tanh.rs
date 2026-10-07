@@ -6,7 +6,7 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::activation::{Activation, ActivationCache, ActivationInput};
 use crate::neural_network::layers::validation::start_build;
 use crate::neural_network::layers::{
     built_layer_shape_functions, no_trainable_parameters_layer_functions,
@@ -103,22 +103,21 @@ impl UnaryLayer for Tanh {
         // Large-magnitude inputs saturate toward -1/+1 by construction
         let output = Activation::Tanh.forward(input)?;
 
+        // The backward pass reads the output, so the cache holds a copy of it
         if ctx.is_training() {
-            ctx.push_cache("Tanh", output.clone());
+            ctx.push_cache(
+                "Tanh",
+                ActivationCache::new(ActivationInput::Output, output.clone()),
+            );
         }
 
         Ok(output)
     }
 
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        let output: Tensor = ctx.pop_cache("Tanh")?;
-
-        // Tanh preserves shape, so gradient must match the cached output
-        if grad_output.shape() != output.shape() {
-            return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
-        }
+        let cache: ActivationCache = ctx.pop_cache("Tanh")?;
 
         // Tanh derivative is 1 - tanh(x)^2
-        Activation::Tanh.backward(&output, grad_output)
+        Activation::Tanh.backward(&cache, grad_output)
     }
 }

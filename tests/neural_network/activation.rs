@@ -13,6 +13,8 @@
 //!     constructor and in a trainable layer that embeds the activation
 //!   - Default() equals the layer's own default value, and a standalone layer equals the
 //!     matching Activation variant
+//!   - GELU, SiLU, and Mish: the layer equals the enum, the backward pass matches the analytic
+//!     derivative, the GELU flag selects the form, and the training pass parks 1 cache
 
 // The pinned float32 values in this file are reference values. Keep them as written, so a
 // reader can compare them to the reference output character by character.
@@ -26,18 +28,21 @@ use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::Activation;
 use rustyml::neural_network::layers::activation::elu::ELU;
 use rustyml::neural_network::layers::activation::exponential::Exponential;
+use rustyml::neural_network::layers::activation::gelu::GELU;
 use rustyml::neural_network::layers::activation::hard_sigmoid::HardSigmoid;
 use rustyml::neural_network::layers::activation::leaky_relu::LeakyReLU;
 use rustyml::neural_network::layers::activation::linear::Linear;
+use rustyml::neural_network::layers::activation::mish::Mish;
 use rustyml::neural_network::layers::activation::relu::ReLU;
 use rustyml::neural_network::layers::activation::selu::SELU;
 use rustyml::neural_network::layers::activation::sigmoid::Sigmoid;
+use rustyml::neural_network::layers::activation::silu::SiLU;
 use rustyml::neural_network::layers::activation::softmax::Softmax;
 use rustyml::neural_network::layers::activation::softplus::Softplus;
 use rustyml::neural_network::layers::activation::softsign::Softsign;
 use rustyml::neural_network::layers::activation::tanh::Tanh;
 use rustyml::neural_network::layers::dense::Dense;
-use rustyml::neural_network::traits::{Layer, UnaryLayer};
+use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
 
 use crate::common::{GateGuard, assert_allclose};
 
@@ -1465,11 +1470,13 @@ fn softmax_axis_0_of_a_rank_2_input_matches_the_reference() {
 /// runs before that, so a caller that pairs the wrong tensors gets `Error::ShapeMismatch`
 #[test]
 fn softmax_non_final_axis_backward_rejects_a_mismatched_grad_output() {
-    let activated = Array::from_elem((2, 3, 4), 0.25_f32).into_dyn();
+    let activation = Activation::Softmax { axis: 1 };
+    let input = Array::from_elem((2, 3, 4), 0.25_f32).into_dyn();
+    let (_, cache) = activation.forward_train(input).expect("forward");
     let grad_output = Array::from_elem((2, 3, 5), 1.0_f32).into_dyn();
 
     // Axis 1 is not the last axis, so this call takes the lane path
-    let result = Activation::Softmax { axis: 1 }.backward(&activated, &grad_output);
+    let result = activation.backward(&cache, &grad_output);
     match result {
         Err(Error::ShapeMismatch { expected, found }) => {
             assert_eq!(expected, vec![2, 3, 4]);
@@ -1477,4 +1484,230 @@ fn softmax_non_final_axis_backward_rejects_a_mismatched_grad_output() {
         }
         other => panic!("expected ShapeMismatch, got {other:?}"),
     }
+}
+
+// GELU, SiLU, and Mish layers.
+//
+// The derivative of each of these layers has no closed form in the output, so each layer
+// caches its input. The pinned values come from the definitions, evaluated in f64.
+
+/// The inputs that the GELU, SiLU, and Mish tests share
+const PRE_ACTIVATION_PROBES: [f32; 7] = [-3.0, -1.0, -0.5, 0.0, 0.5, 1.0, 3.0];
+
+/// An upstream gradient with a different value and sign at each probe
+const PRE_ACTIVATION_GRAD: [f32; 7] = [0.5, -2.0, 1.0, 3.0, -1.0, 0.25, 2.0];
+
+/// Each of the 3 layers, with the enum variant that it wraps and its derivative at each probe
+fn pre_activation_layers() -> Vec<(Box<dyn UnaryLayer>, Activation, [f32; 7])> {
+    vec![
+        (
+            Box::new(GELU::new()),
+            Activation::GELU { approximate: false },
+            [
+                -0.0119456472,
+                -0.0833154706,
+                0.132504875,
+                0.5,
+                0.867495125,
+                1.08331547,
+                1.01194565,
+            ],
+        ),
+        (
+            Box::new(GELU::new().with_approximate(true)),
+            Activation::GELU { approximate: true },
+            [
+                -0.0115841666,
+                -0.0829640838,
+                0.132630096,
+                0.5,
+                0.867369904,
+                1.08296408,
+                1.01158417,
+            ],
+        ),
+        (
+            Box::new(SiLU::new()),
+            Activation::SiLU,
+            [
+                -0.088104106,
+                0.0723294881,
+                0.260038813,
+                0.5,
+                0.739961187,
+                0.927670512,
+                1.08810411,
+            ],
+        ),
+        (
+            Box::new(Mish::new()),
+            Activation::Mish,
+            [
+                -0.0933931145,
+                0.0592167559,
+                0.289510678,
+                0.6,
+                0.886424375,
+                1.04903622,
+                1.02110691,
+            ],
+        ),
+    ]
+}
+
+/// Each layer gives the output of its enum variant bit for bit, in both modes
+#[test]
+fn pre_activation_layers_match_the_activation_enum() {
+    let input = tensor2(1, 7, PRE_ACTIVATION_PROBES.to_vec());
+    for (mut layer, activation, _) in pre_activation_layers() {
+        let enum_out = activation.forward(&input).expect("enum forward");
+        for mut ctx in [Ctx::training(), Ctx::inference()] {
+            let layer_out = layer.forward_mut(&input, &mut ctx).expect("layer forward");
+            assert_eq!(layer_out, enum_out, "{activation:?}");
+        }
+    }
+}
+
+/// The backward pass of each layer is the upstream gradient times the analytic derivative
+#[test]
+fn pre_activation_layers_backward_matches_the_analytic_derivative() {
+    let input = tensor2(1, 7, PRE_ACTIVATION_PROBES.to_vec());
+    let grad_output = tensor2(1, 7, PRE_ACTIVATION_GRAD.to_vec());
+    for (mut layer, activation, derivative) in pre_activation_layers() {
+        let mut ctx = Ctx::training();
+        layer.forward_mut(&input, &mut ctx).expect("forward");
+        let grad_in = layer.backward(&grad_output, &mut ctx).expect("backward");
+
+        let expected: Vec<f32> = derivative
+            .iter()
+            .zip(PRE_ACTIVATION_GRAD.iter())
+            .map(|(d, g)| d * g)
+            .collect();
+        for ((&got, &want), x) in grad_in.iter().zip(&expected).zip(PRE_ACTIVATION_PROBES) {
+            assert!(
+                (got - want).abs() <= 1e-6,
+                "{activation:?} at x = {x}: got {got}, want {want}"
+            );
+        }
+    }
+}
+
+/// The training pass of each layer parks exactly 1 cache, and the backward pass takes it back
+#[test]
+fn pre_activation_layers_park_1_cache() {
+    let input = tensor2(1, 7, PRE_ACTIVATION_PROBES.to_vec());
+    let grad_output = tensor2(1, 7, PRE_ACTIVATION_GRAD.to_vec());
+    for (mut layer, activation, _) in pre_activation_layers() {
+        let mut ctx = Ctx::training();
+        layer.forward_mut(&input, &mut ctx).expect("forward");
+        assert_eq!(ctx.pending_caches(), 1, "{activation:?}");
+        layer.backward(&grad_output, &mut ctx).expect("backward");
+        assert_eq!(ctx.pending_caches(), 0, "{activation:?}");
+    }
+}
+
+/// Each layer refuses an upstream gradient of another shape
+#[test]
+fn pre_activation_layers_reject_a_mismatched_grad_output() {
+    let input = tensor2(1, 7, PRE_ACTIVATION_PROBES.to_vec());
+    let grad_output = tensor2(7, 1, PRE_ACTIVATION_GRAD.to_vec());
+    for (mut layer, activation, _) in pre_activation_layers() {
+        let mut ctx = Ctx::training();
+        layer.forward_mut(&input, &mut ctx).expect("forward");
+        let result = layer.backward(&grad_output, &mut ctx);
+        assert!(
+            matches!(result, Err(Error::ShapeMismatch { .. })),
+            "{activation:?}: expected ShapeMismatch, got {result:?}"
+        );
+    }
+}
+
+/// Each layer rejects an empty input
+#[test]
+fn pre_activation_layers_reject_empty_input() {
+    let input = Array2::<f32>::zeros((0, 3)).into_dyn();
+    for (mut layer, activation, _) in pre_activation_layers() {
+        let result = layer.forward_mut(&input, &mut Ctx::training());
+        assert!(
+            matches!(result, Err(Error::EmptyInput(_))),
+            "{activation:?}: expected EmptyInput, got {result:?}"
+        );
+    }
+}
+
+/// The GELU flag selects the form, and the 2 forms differ on known values
+///
+/// The exact form gives `Phi(x)` scaled by `x`. The tanh approximation differs from it by up
+/// to about 4.1e-4 on these probes
+#[test]
+fn gelu_approximate_flag_selects_the_form() {
+    let input = tensor2(1, 7, PRE_ACTIVATION_PROBES.to_vec());
+    let exact = GELU::new()
+        .forward_mut(&input, &mut Ctx::inference())
+        .expect("exact forward");
+    let approximate = GELU::new()
+        .with_approximate(true)
+        .forward_mut(&input, &mut Ctx::inference())
+        .expect("approximate forward");
+
+    let expected_exact = [
+        -0.00404969409_f32,
+        -0.158655254,
+        -0.154268769,
+        0.0,
+        0.345731231,
+        0.841344746,
+        2.99595031,
+    ];
+    let expected_approximate = [
+        -0.00363739208_f32,
+        -0.158808009,
+        -0.15428599,
+        0.0,
+        0.34571401,
+        0.841191991,
+        2.99636261,
+    ];
+    assert_allclose(&exact, &tensor2(1, 7, expected_exact.to_vec()), 1e-6_f32);
+    assert_allclose(
+        &approximate,
+        &tensor2(1, 7, expected_approximate.to_vec()),
+        1e-6_f32,
+    );
+    assert_abs_diff_eq!(
+        exact[[0, 0]] - approximate[[0, 0]],
+        -4.1230201e-4,
+        epsilon = 1e-6
+    );
+
+    // The builder also selects the exact form back
+    let reset = GELU::new()
+        .with_approximate(true)
+        .with_approximate(false)
+        .forward_mut(&input, &mut Ctx::inference())
+        .expect("reset forward");
+    assert_eq!(reset, exact);
+}
+
+/// Default() of each layer equals new()
+#[test]
+fn pre_activation_layers_default_matches_new() {
+    let input = tensor2(1, 7, PRE_ACTIVATION_PROBES.to_vec());
+    let run = |layer: &mut dyn UnaryLayer| {
+        layer
+            .forward_mut(&input, &mut Ctx::inference())
+            .expect("forward")
+    };
+    assert_eq!(run(&mut GELU::default()), run(&mut GELU::new()));
+    assert_eq!(run(&mut SiLU::default()), run(&mut SiLU::new()));
+    assert_eq!(run(&mut Mish::default()), run(&mut Mish::new()));
+}
+
+/// The layer type names the layer, and the GELU flag does not change it
+#[test]
+fn pre_activation_layers_report_their_type() {
+    assert_eq!(GELU::new().layer_type(), "GELU");
+    assert_eq!(GELU::new().with_approximate(true).layer_type(), "GELU");
+    assert_eq!(SiLU::new().layer_type(), "SiLU");
+    assert_eq!(Mish::new().layer_type(), "Mish");
 }

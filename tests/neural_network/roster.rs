@@ -17,7 +17,7 @@ use rustyml::neural_network::{Shape, Tensor};
 ///
 /// The tests that walk the roster compare their count of distinct layer types to this number.
 /// A layer type that the roster skips, or holds twice, therefore fails each of these tests
-pub const LAYER_TYPE_COUNT: usize = 74;
+pub const LAYER_TYPE_COUNT: usize = 77;
 
 /// The values that a sample input holds
 #[derive(Clone, Copy, Debug)]
@@ -153,6 +153,9 @@ pub fn visit_every_layer(visitor: &mut impl LayerVisitor) {
     visitor.visit(unary(&flat, "(None, 4)"), &Sigmoid::new);
     visitor.visit(unary(&flat, "(None, 4)"), &Tanh::new);
     visitor.visit(unary(&flat, "(None, 4)"), &Softmax::new);
+    visitor.visit(unary(&flat, "(None, 4)"), &GELU::new);
+    visitor.visit(unary(&flat, "(None, 4)"), &SiLU::new);
+    visitor.visit(unary(&flat, "(None, 4)"), &Mish::new);
     visitor.visit(unary(&flat, "(None, 4)"), &|| PReLU::new(0.25).unwrap());
 
     // Convolution

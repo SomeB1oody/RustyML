@@ -1,22 +1,24 @@
 //! Long Short-Term Memory (LSTM) recurrent layer with input, forget, cell, and output gates
 //!
 //! `LstmCell` implements `RnnCell` with the arithmetic of 1 LSTM timestep. The record-slot
-//! constants below it name, in order, the 5 values that `step` parks for `step_backward` to read
-//! back. [`LSTM`] is the public layer. It holds an `Rnn` over `LstmCell` and forwards every
+//! constants below it name, in order, the 4 or 5 values that `step` parks for `step_backward` to
+//! read back. [`LSTM`] is the public layer. It holds an `Rnn` over `LstmCell` and forwards every
 //! trait method to it, adding only the constructors and the weight setters that a caller uses
 //! directly.
 
 use crate::error::Error;
-use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::activation::{Activation, ActivationInput};
 use crate::neural_network::layers::recurrent::apply_sigmoid;
-use crate::neural_network::layers::recurrent::cell::{RecurrentGroup, RnnCell};
+use crate::neural_network::layers::recurrent::cell::{
+    RecurrentGroup, RnnCell, activate, activation_backward, into_2d, record_cache, recorded_output,
+};
 use crate::neural_network::layers::recurrent::gate::FusedGates;
 use crate::neural_network::layers::recurrent::rnn::{Rnn, recurrent_layer_traits};
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{LayerBase, UnaryLayer};
 use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Bias, Parallelism};
-use ndarray::{Array2, ArrayView2, Axis, Ix2, concatenate, s};
+use ndarray::{Array2, ArrayView2, Axis, concatenate, s};
 
 /// The arithmetic of 1 timestep of an [`LSTM`]
 ///
@@ -29,31 +31,42 @@ use ndarray::{Array2, ArrayView2, Axis, Ix2, concatenate, s};
 ///
 /// # Notes
 ///
-/// The record of 1 step holds 5 arrays, in this order: the activated cell state, then the input,
-/// forget, candidate and output gate activations. The cell state that enters a step is not a
-/// record, because [`Rnn`] already carries it as state slot 1.
+/// The record of 1 step holds these arrays, in this order:
+///
+/// 1. The input-gate activation.
+/// 2. The forget-gate activation.
+/// 3. The tensor that the backward pass of the candidate activation reads. This is the
+///    candidate for an [`ActivationInput::Output`] activation, and the candidate
+///    pre-activation for an [`ActivationInput::PreActivation`] activation.
+/// 4. The output-gate activation.
+/// 5. The activated cell state, only for an [`ActivationInput::Output`] activation.
+///
+/// The backward pass of a [`ActivationInput::PreActivation`] activation of the cell state reads
+/// the cell state itself. [`Rnn`] already carries the cell state as state slot 1, so the record
+/// holds no copy of it. The cell state that enters a step is not a record for the same reason.
 #[derive(Debug)]
 pub(crate) struct LstmCell {
     /// Activation applied to the candidate and to the cell state each timestep
     activation: Activation,
 }
 
-/// Record slot of the activated cell state
-const CELL_ACTIVATED: usize = 0;
 /// Record slot of the input-gate activation
-const INPUT_GATE: usize = 1;
+const INPUT_GATE: usize = 0;
 /// Record slot of the forget-gate activation
-const FORGET_GATE: usize = 2;
-/// Record slot of the candidate activation
-const CANDIDATE: usize = 3;
+const FORGET_GATE: usize = 1;
+/// Record slot of the candidate, or of the candidate pre-activation, as [`Activation::saves`]
+/// names
+const CANDIDATE: usize = 2;
 /// Record slot of the output-gate activation
-const OUTPUT_GATE: usize = 4;
+const OUTPUT_GATE: usize = 3;
+/// Record slot of the activated cell state. Only an [`ActivationInput::Output`] activation
+/// fills it
+const CELL_ACTIVATED: usize = 4;
 
 impl RnnCell for LstmCell {
     const CELL_TYPE: &'static str = "LSTM";
     const GATE_BIASES: &'static [f32] = &[0.0, 1.0, 0.0, 0.0];
     const STATE_COUNT: usize = 2;
-    const RECORD_SLOTS: usize = 5;
     const RECURRENT_GROUPS: &'static [RecurrentGroup] = &[RecurrentGroup {
         first: 0,
         count: 4,
@@ -62,6 +75,13 @@ impl RnnCell for LstmCell {
 
     fn new(activation: Activation) -> Self {
         Self { activation }
+    }
+
+    fn record_slots(&self) -> usize {
+        match self.activation.saves() {
+            ActivationInput::Output => 5,
+            ActivationInput::PreActivation => 4,
+        }
     }
 
     fn step(
@@ -94,27 +114,28 @@ impl RnnCell for LstmCell {
         // Gates use the recurrent activation (sigmoid). The candidate uses `act`.
         let i_t = apply_sigmoid(z_all.slice(s![.., 0..u]).to_owned());
         let f_t = apply_sigmoid(z_all.slice(s![.., u..2 * u]).to_owned());
-        let g_t = act
-            .forward(&z_all.slice(s![.., 2 * u..3 * u]).to_owned().into_dyn())?
-            .into_dimensionality::<Ix2>()
-            .unwrap();
+        let g = activate(
+            &act,
+            z_all.slice(s![.., 2 * u..3 * u]).to_owned(),
+            record.is_some(),
+        )?;
         let o_t = apply_sigmoid(z_all.slice(s![.., 3 * u..4 * u]).to_owned());
 
         // Update cell state, then apply the configurable activation to it
-        let c_t = &f_t * &state[1] + &i_t * &g_t;
-        let c_t_activated = act
-            .forward(&c_t.clone().into_dyn())?
-            .into_dimensionality::<Ix2>()
-            .unwrap();
+        let c_t = (&f_t * &state[1] + &i_t * &g.output).into_dyn();
+        let c_t_activated = into_2d(act.forward(&c_t)?);
+        let c_t = into_2d(c_t);
 
         let h_t = &o_t * &c_t_activated;
 
         if let Some(record) = record {
-            record.push(c_t_activated);
             record.push(i_t);
             record.push(f_t);
-            record.push(g_t);
+            record.push(g.into_record());
             record.push(o_t);
+            if act.saves() == ActivationInput::Output {
+                record.push(c_t_activated);
+            }
         }
         state[0] = h_t;
         state[1] = c_t;
@@ -125,37 +146,40 @@ impl RnnCell for LstmCell {
         &self,
         gates: &FusedGates,
         state_prev: &[Array2<f32>],
-        _state_next: &[Array2<f32>],
+        state_next: &[Array2<f32>],
         record: &[Array2<f32>],
         grad_state: &mut [Array2<f32>],
     ) -> Result<Array2<f32>, Error> {
         let u = gates.units();
         let act = self.activation;
         let c_prev = &state_prev[1];
-        let c_t_activated = &record[CELL_ACTIVATED];
         let i_t = &record[INPUT_GATE];
         let f_t = &record[FORGET_GATE];
-        let g_t = &record[CANDIDATE];
         let o_t = &record[OUTPUT_GATE];
         let batch = o_t.shape()[0];
 
+        // The backward pass of the cell-state activation reads the recorded activated cell
+        // state, or the cell state that leaves the step, as `Activation::saves` names
+        let cell_saved = match act.saves() {
+            ActivationInput::Output => &record[CELL_ACTIVATED],
+            ActivationInput::PreActivation => &state_next[1],
+        };
+        let cell_cache = record_cache(&act, cell_saved);
+        let c_t_activated = recorded_output(&act, &cell_cache, cell_saved)?;
+        let candidate_cache = record_cache(&act, &record[CANDIDATE]);
+        let g_t = recorded_output(&act, &candidate_cache, &record[CANDIDATE])?;
+
         // Gradient through h_t = o_t * activation(c_t)
-        let grad_o_t = &grad_state[0] * c_t_activated;
+        let grad_o_t = &grad_state[0] * &*c_t_activated;
         // dL/dc_t += activation'(c_t) * (grad_h * o_t), via the activation backward. The cell
         // state carries its own gradient across the steps, so this accumulates
-        let grad_cell_act = act
-            .backward(
-                &c_t_activated.clone().into_dyn(),
-                &(&grad_state[0] * o_t).into_dyn(),
-            )?
-            .into_dimensionality::<Ix2>()
-            .unwrap();
+        let grad_cell_act = activation_backward(&act, &cell_cache, &grad_state[0] * o_t)?;
         grad_state[1] += &grad_cell_act;
 
         // Gradient through c_t = f_t * c_prev + i_t * g_t. Every term reads the accumulated
         // cell gradient, so the write of the carried gradient comes last
         let grad_f_t = &grad_state[1] * c_prev;
-        let grad_i_t = &grad_state[1] * g_t;
+        let grad_i_t = &grad_state[1] * &*g_t;
         let grad_g_t = &grad_state[1] * i_t;
         let grad_c_prev = &grad_state[1] * f_t;
 
@@ -163,10 +187,7 @@ impl RnnCell for LstmCell {
         let grad_o_raw = &grad_o_t * o_t * &(1.0 - o_t);
         let grad_f_raw = &grad_f_t * f_t * &(1.0 - f_t);
         let grad_i_raw = &grad_i_t * i_t * &(1.0 - i_t);
-        let grad_g_raw = act
-            .backward(&g_t.clone().into_dyn(), &grad_g_t.into_dyn())?
-            .into_dimensionality::<Ix2>()
-            .unwrap();
+        let grad_g_raw = activation_backward(&act, &candidate_cache, grad_g_t)?;
 
         // Assemble the fused dz for this timestep, blocks [i | f | g | o]
         let mut dz_t = Array2::<f32>::zeros((batch, 4 * u));

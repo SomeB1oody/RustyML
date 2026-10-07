@@ -8,7 +8,7 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::activation::{Activation, ActivationCache};
 use crate::neural_network::layers::conv_op_helpers::{
     DepthwiseGeometry, depthwise_backward, depthwise_forward,
 };
@@ -559,8 +559,8 @@ struct SeparableConv2DCache {
     input: Tensor,
     /// The output of the depthwise stage, which the pointwise backward pass reads
     depthwise_output: Tensor,
-    /// The activated output, to backpropagate through the activation
-    output: Tensor,
+    /// The tensor that the activation backward pass reads, as [`Activation::saves`] names
+    activation: ActivationCache,
 }
 
 impl LayerBase for SeparableConv2D {
@@ -649,27 +649,28 @@ impl UnaryLayer for SeparableConv2D {
         let depthwise_output = self.depthwise_convolve(input);
         let output = self.pointwise_convolve(&depthwise_output);
 
-        let activated = self.activation.forward(&output.into_dyn())?;
+        if !ctx.is_training() {
+            return self.activation.forward(&output.into_dyn());
+        }
+        let (activated, activation) = self.activation.forward_train(output.into_dyn())?;
 
         // Park only after a successful pass, so a rejected input leaves no partial state. The
-        // depthwise output reaches the backward pass alone
-        if ctx.is_training() {
-            ctx.push_cache(
-                "SeparableConv2D",
-                SeparableConv2DCache {
-                    input: input.clone(),
-                    depthwise_output,
-                    output: activated.clone(),
-                },
-            );
-        }
+        // depthwise output moves into the cache with no copy
+        ctx.push_cache(
+            "SeparableConv2D",
+            SeparableConv2DCache {
+                input: input.clone(),
+                depthwise_output,
+                activation,
+            },
+        );
         Ok(activated)
     }
 
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let cache: SeparableConv2DCache = ctx.pop_cache("SeparableConv2D")?;
 
-        let grad_upstream = self.activation.backward(&cache.output, grad_output)?;
+        let grad_upstream = self.activation.backward(&cache.activation, grad_output)?;
 
         let input = &cache.input;
         let depthwise_output = &cache.depthwise_output;

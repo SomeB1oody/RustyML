@@ -896,7 +896,16 @@ fn flag_weights(n_gates: usize) -> (Array2<f32>, Array2<f32>, Array2<f32>) {
 
 /// Builds the flag-test SimpleRNN with fixed weights
 fn flag_simple_rnn(return_sequences: bool, go_backwards: bool) -> SimpleRNN {
-    let mut layer = SimpleRNN::new(2, Tanh::new())
+    flag_simple_rnn_with(Activation::Tanh, return_sequences, go_backwards)
+}
+
+/// Builds the flag-test SimpleRNN with fixed weights and the given activation
+fn flag_simple_rnn_with(
+    activation: Activation,
+    return_sequences: bool,
+    go_backwards: bool,
+) -> SimpleRNN {
+    let mut layer = SimpleRNN::new(2, activation)
         .unwrap()
         .with_return_sequences(return_sequences)
         .with_go_backwards(go_backwards);
@@ -908,7 +917,12 @@ fn flag_simple_rnn(return_sequences: bool, go_backwards: bool) -> SimpleRNN {
 
 /// Builds the flag-test LSTM with fixed weights
 fn flag_lstm(return_sequences: bool, go_backwards: bool) -> LSTM {
-    let mut layer = LSTM::new(2, Tanh::new())
+    flag_lstm_with(Activation::Tanh, return_sequences, go_backwards)
+}
+
+/// Builds the flag-test LSTM with fixed weights and the given activation
+fn flag_lstm_with(activation: Activation, return_sequences: bool, go_backwards: bool) -> LSTM {
+    let mut layer = LSTM::new(2, activation)
         .unwrap()
         .with_return_sequences(return_sequences)
         .with_go_backwards(go_backwards);
@@ -920,7 +934,12 @@ fn flag_lstm(return_sequences: bool, go_backwards: bool) -> LSTM {
 
 /// Builds the flag-test GRU with fixed weights
 fn flag_gru(return_sequences: bool, go_backwards: bool) -> GRU {
-    let mut layer = GRU::new(2, Tanh::new())
+    flag_gru_with(Activation::Tanh, return_sequences, go_backwards)
+}
+
+/// Builds the flag-test GRU with fixed weights and the given activation
+fn flag_gru_with(activation: Activation, return_sequences: bool, go_backwards: bool) -> GRU {
+    let mut layer = GRU::new(2, activation)
         .unwrap()
         .with_return_sequences(return_sequences)
         .with_go_backwards(go_backwards);
@@ -1341,6 +1360,86 @@ fn gru_gradients_match_finite_difference_for_every_flag_combination() {
         for go_backwards in [false, true] {
             check_flag_input_gradient(&mut flag_gru(return_sequences, go_backwards), &x, 3e-2);
             check_flag_weight_gradients(&mut flag_gru(return_sequences, go_backwards), &x, 3e-2);
+        }
+    }
+}
+
+/// The activations whose backward pass reads the pre-activation and not the output
+///
+/// A cell keeps a different record for these activations. The LSTM also reads its cell state
+/// from the state that leaves the step, and not from the record.
+const PRE_ACTIVATION_ACTIVATIONS: [Activation; 4] = [
+    Activation::GELU { approximate: false },
+    Activation::GELU { approximate: true },
+    Activation::SiLU,
+    Activation::Mish,
+];
+
+/// Every gradient of each cell matches a finite difference for each activation that saves its
+/// pre-activation, for all 4 flag combinations
+///
+/// The upstream gradient varies along the time axis, so a record of the wrong step or of the
+/// wrong slot cannot hide behind a constant gradient.
+#[test]
+fn pre_activation_activations_match_finite_difference_for_every_flag_combination() {
+    let x = flag_input();
+    for activation in PRE_ACTIVATION_ACTIVATIONS {
+        for return_sequences in [false, true] {
+            for go_backwards in [false, true] {
+                let flags = (activation, return_sequences, go_backwards);
+                check_flag_input_gradient(
+                    &mut flag_simple_rnn_with(flags.0, flags.1, flags.2),
+                    &x,
+                    3e-2,
+                );
+                check_flag_weight_gradients(
+                    &mut flag_simple_rnn_with(flags.0, flags.1, flags.2),
+                    &x,
+                    3e-2,
+                );
+                check_flag_input_gradient(&mut flag_lstm_with(flags.0, flags.1, flags.2), &x, 3e-2);
+                check_flag_weight_gradients(
+                    &mut flag_lstm_with(flags.0, flags.1, flags.2),
+                    &x,
+                    3e-2,
+                );
+                check_flag_input_gradient(&mut flag_gru_with(flags.0, flags.1, flags.2), &x, 3e-2);
+                check_flag_weight_gradients(
+                    &mut flag_gru_with(flags.0, flags.1, flags.2),
+                    &x,
+                    3e-2,
+                );
+            }
+        }
+    }
+}
+
+/// A training forward pass gives the same output as an inference forward pass, for each cell
+/// and each activation that saves its pre-activation
+///
+/// A training pass keeps the pre-activation in the record. An inference pass keeps nothing. Both
+/// passes must apply the same activation to the same pre-activation.
+#[test]
+fn pre_activation_training_forward_equals_inference_forward() {
+    let x = flag_input();
+    for activation in PRE_ACTIVATION_ACTIVATIONS {
+        for return_sequences in [false, true] {
+            let layers: [Box<dyn UnaryLayer>; 3] = [
+                Box::new(flag_simple_rnn_with(activation, return_sequences, false)),
+                Box::new(flag_lstm_with(activation, return_sequences, false)),
+                Box::new(flag_gru_with(activation, return_sequences, false)),
+            ];
+            for layer in layers {
+                let mut ctx = Ctx::training();
+                let trained = layer.forward(&x, &mut ctx).unwrap();
+                let inferred = layer.forward(&x, &mut Ctx::inference()).unwrap();
+                assert_eq!(
+                    trained,
+                    inferred,
+                    "{activation:?}: the 2 passes of {} differ",
+                    layer.layer_type()
+                );
+            }
         }
     }
 }

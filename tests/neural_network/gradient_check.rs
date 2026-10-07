@@ -16,17 +16,21 @@
 //! gradient back per input.
 
 use approx::assert_abs_diff_eq;
-use ndarray::Array;
+use ndarray::{Array, Axis};
 use rustyml::neural_network::Ctx;
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
+use rustyml::neural_network::layers::Activation;
 use rustyml::neural_network::layers::activation::elu::ELU;
 use rustyml::neural_network::layers::activation::exponential::Exponential;
+use rustyml::neural_network::layers::activation::gelu::GELU;
 use rustyml::neural_network::layers::activation::hard_sigmoid::HardSigmoid;
 use rustyml::neural_network::layers::activation::leaky_relu::LeakyReLU;
 use rustyml::neural_network::layers::activation::linear::Linear;
+use rustyml::neural_network::layers::activation::mish::Mish;
 use rustyml::neural_network::layers::activation::p_relu::PReLU;
 use rustyml::neural_network::layers::activation::selu::SELU;
+use rustyml::neural_network::layers::activation::silu::SiLU;
 use rustyml::neural_network::layers::activation::softmax::Softmax;
 use rustyml::neural_network::layers::activation::softplus::Softplus;
 use rustyml::neural_network::layers::activation::softsign::Softsign;
@@ -1728,4 +1732,224 @@ fn reverse_input_gradient_matches_finite_difference() {
         let mut layer = Reverse::new(axis);
         check_input_gradient(&mut layer, &x, 1e-3, 2e-3);
     }
+}
+
+// GELU, SiLU and Mish in their host layers. GELU, SiLU and Mish save the pre-activation
+// `z`, and the backward pass of each host reads it through the activation cache. Each test
+// below runs 1 activation through a table of the 14 host layers. A host must pass the input
+// check and the weight check. Each check uses the weighted loss, so a wrong scale at 1 output
+// position can not cancel against another position.
+//
+// The derivative of these 3 activations is not a function of the output alone. Most of the
+// difference is in the negative region. Thus every fixture must put pre-activations on both
+// sides of 0. The parameters get a fixed signed pattern, and each check first asserts that the
+// pre-activation of the host is negative at some position and positive at another.
+
+/// Builds 1 host layer around the activation
+type HostBuilder = fn(Activation) -> Box<dyn UnaryLayer>;
+
+/// A host layer and the input that its checks use
+struct Host {
+    name: &'static str,
+    build: HostBuilder,
+    input: Tensor,
+    /// `true` for a recurrent host. It returns the full sequence, `[batch, steps, units]`
+    recurrent: bool,
+}
+
+/// A tensor of signed values in [-0.9, 0.9] that do not increase monotonically along any axis
+fn signed(shape: &[usize]) -> Tensor {
+    let n: usize = shape.iter().product();
+    let data: Vec<f32> = (0..n)
+        .map(|k| 0.9 * (((k * 7 + 3) % 19) as f32 / 9.0 - 1.0))
+        .collect();
+    Array::from_shape_vec(shape.to_vec(), data).unwrap()
+}
+
+/// Writes a fixed signed pattern in [-0.6, 0.6] into every parameter of the layer
+///
+/// The pattern replaces the random initial values. Thus the sign checks on the
+/// pre-activation give the same result on each run.
+fn fill_parameters(layer: &mut dyn UnaryLayer) {
+    for (p, param) in layer.parameters_mut().into_iter().enumerate() {
+        for (k, value) in param.value.iter_mut().enumerate() {
+            *value = 0.6 * (((k * 5 + p * 3 + 1) % 13) as f32 / 6.0 - 1.0);
+        }
+    }
+}
+
+/// Builds the host around the activation, runs 1 inference pass to build the parameters, and
+/// writes the fixed pattern into them
+fn prepared_host(host: &Host, activation: Activation) -> Box<dyn UnaryLayer> {
+    let mut layer = (host.build)(activation);
+    layer
+        .forward_mut(&host.input, &mut Ctx::inference())
+        .unwrap();
+    fill_parameters(layer.as_mut());
+    layer
+}
+
+/// Asserts that the pre-activation of the host has values on both sides of 0
+///
+/// The `Linear` twin of the host has the same parameters. For a feed-forward host, the output
+/// of the twin is the pre-activation of the host at every position.
+///
+/// A recurrent host starts from a zero state. At the first step, the twin gives a value with the
+/// same sign as the pre-activation `z` that the activation reads, and a magnitude that is not
+/// larger. SimpleRNN gives `z`. LSTM gives `o * i * z`, and GRU gives 1 gate times `z`. Each
+/// gate is in (0, 1). Thus the sign check on the first step is exact. The check skips the later
+/// steps, because there the activation also feeds the state.
+fn assert_pre_activation_straddles_zero(host: &Host) {
+    let twin = prepared_host(host, Activation::Linear);
+    let out = twin.forward(&host.input, &mut Ctx::inference()).unwrap();
+    let z = if host.recurrent {
+        out.index_axis(Axis(1), 0).to_owned()
+    } else {
+        out
+    };
+    let min = z.iter().cloned().fold(f32::INFINITY, f32::min);
+    let max = z.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    assert!(
+        min < -0.1 && max > 0.1,
+        "{}: the pre-activation must have values on both sides of 0, found [{min}, {max}]",
+        host.name
+    );
+}
+
+/// The 14 host layers that take an `Activation`, each with a small input
+fn hosts() -> Vec<Host> {
+    vec![
+        Host {
+            name: "Dense",
+            build: |a| Box::new(Dense::new(3, a).unwrap()),
+            input: signed(&[4, 3]),
+            recurrent: false,
+        },
+        Host {
+            name: "Conv1D",
+            build: |a| Box::new(Conv1D::new(2, 2, 1, a).unwrap()),
+            input: signed(&[1, 5, 2]),
+            recurrent: false,
+        },
+        Host {
+            name: "Conv2D",
+            build: |a| Box::new(Conv2D::new(2, (2, 2), (1, 1), a).unwrap()),
+            input: signed(&[1, 4, 4, 1]),
+            recurrent: false,
+        },
+        Host {
+            name: "Conv3D",
+            build: |a| Box::new(Conv3D::new(2, (2, 2, 2), (1, 1, 1), a).unwrap()),
+            input: signed(&[1, 3, 3, 3, 1]),
+            recurrent: false,
+        },
+        Host {
+            name: "Conv1DTranspose",
+            build: |a| Box::new(Conv1DTranspose::new(2, 3, 2, a).unwrap()),
+            input: signed(&[1, 4, 2]),
+            recurrent: false,
+        },
+        Host {
+            name: "Conv2DTranspose",
+            build: |a| Box::new(Conv2DTranspose::new(2, (2, 2), (1, 1), a).unwrap()),
+            input: signed(&[1, 3, 3, 2]),
+            recurrent: false,
+        },
+        Host {
+            name: "Conv3DTranspose",
+            build: |a| Box::new(Conv3DTranspose::new(2, (2, 2, 2), (1, 1, 1), a).unwrap()),
+            input: signed(&[1, 2, 2, 2, 1]),
+            recurrent: false,
+        },
+        Host {
+            name: "DepthwiseConv1D",
+            build: |a| Box::new(DepthwiseConv1D::new(3, 1, a).unwrap()),
+            input: signed(&[1, 8, 2]),
+            recurrent: false,
+        },
+        Host {
+            name: "DepthwiseConv2D",
+            build: |a| Box::new(DepthwiseConv2D::new((2, 2), (1, 1), a).unwrap()),
+            input: signed(&[1, 4, 4, 2]),
+            recurrent: false,
+        },
+        Host {
+            name: "SeparableConv1D",
+            build: |a| Box::new(SeparableConv1D::new(3, 3, 1, 1, a).unwrap()),
+            input: signed(&[1, 8, 2]),
+            recurrent: false,
+        },
+        Host {
+            name: "SeparableConv2D",
+            build: |a| Box::new(SeparableConv2D::new(2, (2, 2), (1, 1), 1, a).unwrap()),
+            input: signed(&[1, 4, 4, 2]),
+            recurrent: false,
+        },
+        Host {
+            name: "SimpleRNN",
+            build: |a| Box::new(SimpleRNN::new(3, a).unwrap().with_return_sequences(true)),
+            input: signed(&[2, 3, 2]),
+            recurrent: true,
+        },
+        Host {
+            name: "LSTM",
+            build: |a| Box::new(LSTM::new(3, a).unwrap().with_return_sequences(true)),
+            input: signed(&[2, 3, 2]),
+            recurrent: true,
+        },
+        Host {
+            name: "GRU",
+            build: |a| Box::new(GRU::new(3, a).unwrap().with_return_sequences(true)),
+            input: signed(&[2, 3, 2]),
+            recurrent: true,
+        },
+    ]
+}
+
+/// Runs the input check and the weight check of every host with the activation, and the input
+/// check of the standalone layer of the same activation
+fn check_pre_activation_hosts(activation: Activation, standalone: &mut dyn UnaryLayer) {
+    let table = hosts();
+    assert_eq!(table.len(), 14, "the table must cover every host layer");
+    for host in &table {
+        assert_pre_activation_straddles_zero(host);
+
+        let mut layer = prepared_host(host, activation);
+        check_input_gradient_weighted(layer.as_mut(), &host.input, 1e-3, 1e-2);
+
+        let mut layer = prepared_host(host, activation);
+        check_weight_gradient_weighted(layer.as_mut(), &host.input, 1e-3, 1e-2);
+    }
+
+    // The standalone layer has no parameters. Its input covers both sides of 0 directly.
+    let x = Array::from_shape_vec(
+        (2, 5),
+        vec![-3.1, -2.2, -1.5, -0.9, -0.35, 0.3, 0.8, 1.4, 2.1, 2.9],
+    )
+    .unwrap()
+    .into_dyn();
+    check_input_gradient_weighted(standalone, &x, 1e-3, 1e-2);
+}
+
+#[test]
+fn gelu_exact_hosts_match_finite_difference() {
+    check_pre_activation_hosts(Activation::GELU { approximate: false }, &mut GELU::new());
+}
+
+#[test]
+fn gelu_tanh_approximation_hosts_match_finite_difference() {
+    check_pre_activation_hosts(
+        Activation::GELU { approximate: true },
+        &mut GELU::new().with_approximate(true),
+    );
+}
+
+#[test]
+fn silu_hosts_match_finite_difference() {
+    check_pre_activation_hosts(Activation::SiLU, &mut SiLU::new());
+}
+
+#[test]
+fn mish_hosts_match_finite_difference() {
+    check_pre_activation_hosts(Activation::Mish, &mut Mish::new());
 }

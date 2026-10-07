@@ -13,9 +13,10 @@
 //! implementations, so the shape of the protocol can change with no effect on any public name.
 
 use crate::error::Error;
-use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::activation::{Activation, ActivationCache, ActivationInput};
 use crate::neural_network::layers::recurrent::gate::FusedGates;
-use ndarray::{Array2, ArrayView2};
+use ndarray::{Array2, ArrayView2, Ix2};
+use std::borrow::Cow;
 
 /// 1 group of gate blocks, and the array that their recurrent projection consumed
 ///
@@ -68,12 +69,6 @@ pub(crate) trait RnnCell: std::fmt::Debug + Send + Sync + 'static {
     /// carries the cell state at slot 1.
     const STATE_COUNT: usize;
 
-    /// Number of arrays that the cell parks per timestep for its own backward pass
-    ///
-    /// A value that the base already keeps does not belong here. The hidden state of every step
-    /// is 1 such value, and [`RnnCell::step_backward`] receives it directly.
-    const RECORD_SLOTS: usize;
-
     /// The map from a group of gate blocks to the array that the group projected
     ///
     /// The groups must partition `0..GATE_BIASES.len()`. [`Rnn::build`](super::rnn::Rnn) asserts
@@ -91,11 +86,23 @@ pub(crate) trait RnnCell: std::fmt::Debug + Send + Sync + 'static {
     /// - `Self` - The cell
     fn new(activation: Activation) -> Self;
 
+    /// Number of arrays that the cell parks per timestep for its own backward pass
+    ///
+    /// A value that the base already keeps does not belong here. The state of every step is 1
+    /// such value, and [`RnnCell::step_backward`] receives it directly. The count can depend on
+    /// the activation, because [`Activation::saves`] names the tensor that its backward pass
+    /// reads.
+    ///
+    /// # Returns
+    ///
+    /// - `usize` - Number of arrays per timestep
+    fn record_slots(&self) -> usize;
+
     /// Runs 1 timestep
     ///
     /// The cell reads `state`, computes the state that leaves the step, and writes it back into
     /// `state`. A training pass also gives a `record` buffer, and the cell appends exactly
-    /// [`RnnCell::RECORD_SLOTS`] arrays to it. An inference pass gives `None` and the cell parks
+    /// [`RnnCell::record_slots`] arrays to it. An inference pass gives `None` and the cell parks
     /// nothing.
     ///
     /// # Parameters
@@ -132,7 +139,7 @@ pub(crate) trait RnnCell: std::fmt::Debug + Send + Sync + 'static {
     /// - `gates` - The fused weights of the layer
     /// - `state_prev` - The state entering the step
     /// - `state_next` - The state leaving the step
-    /// - `record` - The [`RnnCell::RECORD_SLOTS`] arrays that this step parked
+    /// - `record` - The [`RnnCell::record_slots`] arrays that this step parked
     /// - `grad_state` - The gradient of the state, which the cell carries back 1 step
     ///
     /// # Returns
@@ -151,4 +158,143 @@ pub(crate) trait RnnCell: std::fmt::Debug + Send + Sync + 'static {
         record: &[Array2<f32>],
         grad_state: &mut [Array2<f32>],
     ) -> Result<Array2<f32>, Error>;
+}
+
+/// The result of 1 activation inside a cell step
+///
+/// `output` is the activated tensor that the step uses. [`Activated::into_record`] gives the
+/// tensor that the backward pass of the activation reads.
+#[derive(Debug)]
+pub(super) struct Activated {
+    /// The activated tensor
+    pub output: Array2<f32>,
+    /// The pre-activation, which only a training pass of a
+    /// [`ActivationInput::PreActivation`] activation keeps
+    pub pre_activation: Option<Array2<f32>>,
+}
+
+impl Activated {
+    /// Gives the tensor that the backward pass of the activation reads
+    ///
+    /// # Returns
+    ///
+    /// - `Array2<f32>` - The pre-activation when the step kept it, otherwise the output
+    pub fn into_record(self) -> Array2<f32> {
+        self.pre_activation.unwrap_or(self.output)
+    }
+}
+
+/// Applies the activation of a cell to a pre-activation
+///
+/// A training pass of an [`ActivationInput::PreActivation`] activation keeps `z`. Every other
+/// pass drops `z`. No pass copies the output.
+///
+/// # Parameters
+///
+/// - `activation` - Activation of the cell
+/// - `z` - The pre-activation
+/// - `training` - True when the step parks a record
+///
+/// # Returns
+///
+/// - `Result<Activated, Error>` - The output, and the pre-activation when the step keeps it
+///
+/// # Errors
+///
+/// - [`Error::InvalidInput`] - If the activation refuses its input
+pub(super) fn activate(
+    activation: &Activation,
+    z: Array2<f32>,
+    training: bool,
+) -> Result<Activated, Error> {
+    if training && activation.saves() == ActivationInput::PreActivation {
+        let (output, cache) = activation.forward_train(z.into_dyn())?;
+        return Ok(Activated {
+            output: into_2d(output),
+            pre_activation: Some(into_2d(cache.into_tensor())),
+        });
+    }
+    Ok(Activated {
+        output: into_2d(activation.forward(&z.into_dyn())?),
+        pre_activation: None,
+    })
+}
+
+/// Builds the activation cache from 1 record
+///
+/// # Parameters
+///
+/// - `activation` - Activation of the cell
+/// - `record` - The tensor that [`Activated::into_record`] gave
+///
+/// # Returns
+///
+/// - `ActivationCache` - A cache that holds a copy of `record`
+pub(super) fn record_cache(activation: &Activation, record: &Array2<f32>) -> ActivationCache {
+    ActivationCache::new(activation.saves(), record.clone().into_dyn())
+}
+
+/// Gives the activated output that 1 record stands for
+///
+/// An [`ActivationInput::Output`] record is the output, and the function borrows it. An
+/// [`ActivationInput::PreActivation`] record is `z`, and the function runs the forward pass
+/// again.
+///
+/// # Parameters
+///
+/// - `activation` - Activation of the cell
+/// - `cache` - The cache that [`record_cache`] built from `record`
+/// - `record` - The tensor that [`Activated::into_record`] gave
+///
+/// # Returns
+///
+/// - `Result<Cow<'a, Array2<f32>>, Error>` - The activated output
+///
+/// # Errors
+///
+/// - [`Error::InvalidInput`] - If the activation refuses the cache
+pub(super) fn recorded_output<'a>(
+    activation: &Activation,
+    cache: &ActivationCache,
+    record: &'a Array2<f32>,
+) -> Result<Cow<'a, Array2<f32>>, Error> {
+    match activation.saves() {
+        ActivationInput::Output => Ok(Cow::Borrowed(record)),
+        ActivationInput::PreActivation => Ok(Cow::Owned(into_2d(activation.output_of(cache)?))),
+    }
+}
+
+/// Runs the backward pass of the activation of a cell
+///
+/// # Parameters
+///
+/// - `activation` - Activation of the cell
+/// - `cache` - The cache that [`record_cache`] built
+/// - `grad_output` - The gradient of the activated output
+///
+/// # Returns
+///
+/// - `Result<Array2<f32>, Error>` - The gradient of the pre-activation
+///
+/// # Errors
+///
+/// - [`Error::InvalidInput`] - If the activation refuses the cache
+/// - [`Error::ShapeMismatch`] - If `grad_output` and the cache differ in shape
+pub(super) fn activation_backward(
+    activation: &Activation,
+    cache: &ActivationCache,
+    grad_output: Array2<f32>,
+) -> Result<Array2<f32>, Error> {
+    Ok(into_2d(
+        activation.backward(cache, &grad_output.into_dyn())?,
+    ))
+}
+
+/// Converts a tensor that an activation gave back to 2 dimensions
+///
+/// An activation keeps the shape of its input, and every cell gives it a 2D input
+pub(super) fn into_2d(tensor: crate::neural_network::Tensor) -> Array2<f32> {
+    tensor
+        .into_dimensionality::<Ix2>()
+        .expect("an activation keeps the 2D shape of its input")
 }

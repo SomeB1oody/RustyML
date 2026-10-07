@@ -6,7 +6,7 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::activation::{Activation, ActivationCache, ActivationInput};
 use crate::neural_network::layers::validation::start_build;
 use crate::neural_network::layers::{
     built_layer_shape_functions, no_trainable_parameters_layer_functions,
@@ -104,22 +104,21 @@ impl UnaryLayer for Softsign {
 
         let output = Activation::Softsign.forward(input)?;
 
+        // The backward pass reads the output, so the cache holds a copy of it
         if ctx.is_training() {
-            ctx.push_cache("Softsign", output.clone());
+            ctx.push_cache(
+                "Softsign",
+                ActivationCache::new(ActivationInput::Output, output.clone()),
+            );
         }
 
         Ok(output)
     }
 
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        let output: Tensor = ctx.pop_cache("Softsign")?;
-
-        // Softsign preserves shape, so gradient must match the cached output
-        if grad_output.shape() != output.shape() {
-            return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
-        }
+        let cache: ActivationCache = ctx.pop_cache("Softsign")?;
 
         // Softsign derivative is 1 / (1 + |x|)^2
-        Activation::Softsign.backward(&output, grad_output)
+        Activation::Softsign.backward(&cache, grad_output)
     }
 }

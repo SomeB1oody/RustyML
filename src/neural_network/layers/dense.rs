@@ -2,7 +2,7 @@
 
 use crate::error::{Context, Error};
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::activation::{Activation, ActivationCache, ActivationInput};
 use crate::neural_network::layers::validation::{
     start_build, validate_optional_weight, validate_weight_shape,
 };
@@ -293,16 +293,15 @@ impl Dense {
             .context("Failed to fold the leading axes of a Dense tensor")
     }
 
-    /// The layer's full forward transform, `activation(input * weights + bias)`, which
-    /// [`UnaryLayer::forward`] runs
+    /// The linear transform `input * weights + bias`, with `ReLU` fused into it
     ///
     /// The bias add rides the GEMM epilogue, so the pre-activation is written exactly once,
     /// with no separate broadcast add of the bias. The bias is the per-column addend, so it
     /// lowers to [`Bias::PerCol`]
     ///
-    /// The activation stays a fused epilogue only for `ReLU` ([`FusedActivation::Relu`]).
-    /// `Linear` needs no separate pass, since it changes nothing. Every other activation runs
-    /// as a separate [`Activation::forward`] pass
+    /// For `ReLU` the epilogue also applies the activation ([`FusedActivation::Relu`]), and the
+    /// result is the activated output. For every other activation the result is the
+    /// pre-activation `z`, and the caller applies the activation (see [`Dense::fuses`])
     ///
     /// A fused `f32` epilogue matches the unfused product plus scalar activation bit for bit,
     /// with 1 exception. gemmkit's fused `Relu` maps `NaN` to `0.0`, while this crate's
@@ -310,9 +309,10 @@ impl Dense {
     /// and the cached-output ReLU derivative then treats the resulting `0.0` as a dead unit
     ///
     /// The input arrives folded, and the result goes back to the rank of `input_shape`. A
-    /// fold keeps each last-axis lane whole, so the activation gives the same result on the
-    /// folded matrix as on the restored tensor. This holds for `Softmax` because an embedded
-    /// `Softmax` must carry the last axis. [`Activation::validate`] rejects any other axis
+    /// fold keeps each last-axis lane whole. An activation that the caller applies to the
+    /// restored tensor therefore gives the same result as on the folded matrix. This holds for
+    /// `Softmax` because an embedded `Softmax` must carry the last axis.
+    /// [`Activation::validate`] rejects any other axis
     ///
     /// # Parameters
     ///
@@ -322,8 +322,9 @@ impl Dense {
     ///
     /// # Returns
     ///
-    /// - `Result<Tensor, Error>` - Activated output. It has the shape of `input_shape` with
-    ///   the last axis replaced by `output_dim`
+    /// - `Result<Tensor, Error>` - The activated output for `ReLU` and `Linear`, and the
+    ///   pre-activation for every other activation. It has the shape of `input_shape` with the
+    ///   last axis replaced by `output_dim`
     ///
     /// # Panics
     ///
@@ -333,8 +334,7 @@ impl Dense {
     ///
     /// # Errors
     ///
-    /// - `Error::Computation` - Softmax failed to reshape the fused pre-activation, or the
-    ///   result failed to go back to the rank of `input_shape`
+    /// - `Error::Computation` - The result failed to go back to the rank of `input_shape`
     fn project(&self, input: &ArrayView2<'_, f32>, input_shape: &[usize]) -> Result<Tensor, Error> {
         // A bias-free layer passes no epilogue at all, so the product is exactly the product.
         // A zero addend would give the same value for every input except a negative zero
@@ -359,20 +359,27 @@ impl Dense {
             Parallelism::Rayon(0),
         );
 
-        let output = output.into_dyn();
-        let activated = match self.activation {
-            Activation::Linear | Activation::ReLU => output,
-            _ => self.activation.forward(&output)?,
-        };
-
-        // The fused product writes C order, and so does every activation, so this call only
-        // relabels the axes. It never copies
+        // The fused product writes C order, so this call only relabels the axes. It never
+        // copies
         let mut output_shape = input_shape.to_vec();
         let last_axis = output_shape.len() - 1;
         output_shape[last_axis] = self.output_dim;
-        activated
+        output
+            .into_dyn()
             .into_shape_with_order(output_shape)
             .context("Failed to restore the rank of the Dense output")
+    }
+
+    /// Whether [`Dense::project`] already gives the activated output
+    ///
+    /// `ReLU` runs in the GEMM epilogue, and `Linear` changes nothing. Every other activation
+    /// needs a separate pass
+    ///
+    /// # Returns
+    ///
+    /// - `bool` - `true` for `ReLU` and `Linear`
+    fn fuses(&self) -> bool {
+        matches!(self.activation, Activation::Linear | Activation::ReLU)
     }
 }
 
@@ -382,8 +389,8 @@ struct DenseCache {
     input: Array2<f32>,
     /// Shape of the tensor the forward pass received, to restore the rank of the gradient
     input_shape: Vec<usize>,
-    /// The activated output, to backpropagate through the activation
-    output: Tensor,
+    /// The tensor that the backward pass of the activation reads
+    activation: ActivationCache,
 }
 
 impl LayerBase for Dense {
@@ -462,23 +469,41 @@ impl UnaryLayer for Dense {
     ///
     /// The input has rank 2 or more. The leading axes fold into 1 row axis, so every rank uses
     /// the same 1 matrix product for the same row count
+    ///
+    /// In training, the layer caches 1 activation tensor. GELU, SiLU, and Mish read the
+    /// pre-activation, and the layer moves it into the cache with no copy. Every other
+    /// activation reads the output, and the layer caches a copy of the output. Inference
+    /// caches nothing and copies nothing
     fn forward(&self, input: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         if self.built.is_none() {
             return Err(Error::not_built("Dense"));
         }
         let input_2d = Self::fold(input, self.input_dim, "input")?;
-        let output = self.project(&input_2d.view(), input.shape())?;
+        let projected = self.project(&input_2d.view(), input.shape())?;
 
-        if ctx.is_training() {
-            ctx.push_cache(
-                "Dense",
-                DenseCache {
-                    input: input_2d.into_owned(),
-                    input_shape: input.shape().to_vec(),
-                    output: output.clone(),
-                },
-            );
+        if !ctx.is_training() {
+            if self.fuses() {
+                return Ok(projected);
+            }
+            return self.activation.forward(&projected);
         }
+
+        // A fused activation leaves no pre-activation. `ReLU` and `Linear` both read the
+        // output, so a copy of the output is a valid cache for them
+        let (output, activation) = if self.fuses() {
+            let cache = ActivationCache::new(ActivationInput::Output, projected.clone());
+            (projected, cache)
+        } else {
+            self.activation.forward_train(projected)?
+        };
+        ctx.push_cache(
+            "Dense",
+            DenseCache {
+                input: input_2d.into_owned(),
+                input_shape: input.shape().to_vec(),
+                activation,
+            },
+        );
 
         Ok(output)
     }
@@ -486,13 +511,13 @@ impl UnaryLayer for Dense {
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let cache: DenseCache = ctx.pop_cache("Dense")?;
 
-        if grad_output.shape() != cache.output.shape() {
+        if grad_output.shape() != cache.activation.shape() {
             return Err(Error::shape_mismatch(
-                cache.output.shape(),
+                cache.activation.shape(),
                 grad_output.shape(),
             ));
         }
-        let grad_upstream = self.activation.backward(&cache.output, grad_output)?;
+        let grad_upstream = self.activation.backward(&cache.activation, grad_output)?;
 
         // Fold the upstream gradient to [rows, output_dim]. Both operands of the weight
         // gradient are then 2D, and the bias gradient sums over 1 row axis that already

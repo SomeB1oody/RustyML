@@ -7,7 +7,9 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::{Activation, DEFAULT_SOFTMAX_AXIS};
+use crate::neural_network::layers::activation::{
+    Activation, ActivationCache, ActivationInput, DEFAULT_SOFTMAX_AXIS,
+};
 use crate::neural_network::layers::validation::start_build;
 use crate::neural_network::layers::{
     built_layer_shape_functions, no_trainable_parameters_layer_functions,
@@ -146,21 +148,20 @@ impl UnaryLayer for Softmax {
         // The axis resolves against the rank of this input, and an out-of-range axis fails here
         let output = Activation::Softmax { axis: self.axis }.forward(input)?;
 
+        // The backward pass reads the output, so the cache holds a copy of it
         if ctx.is_training() {
-            ctx.push_cache("Softmax", output.clone());
+            ctx.push_cache(
+                "Softmax",
+                ActivationCache::new(ActivationInput::Output, output.clone()),
+            );
         }
 
         Ok(output)
     }
 
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        let output: Tensor = ctx.pop_cache("Softmax")?;
+        let cache: ActivationCache = ctx.pop_cache("Softmax")?;
 
-        // Softmax preserves shape, so the gradient must match the cached output
-        if grad_output.shape() != output.shape() {
-            return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
-        }
-
-        Activation::Softmax { axis: self.axis }.backward(&output, grad_output)
+        Activation::Softmax { axis: self.axis }.backward(&cache, grad_output)
     }
 }

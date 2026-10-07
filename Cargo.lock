@@ -833,6 +833,7 @@ dependencies = [
  "criterion",
  "gemmkit-ndarray",
  "indicatif",
+ "libm",
  "nalgebra",
  "ndarray",
  "ndarray-rand",

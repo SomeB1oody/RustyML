@@ -6,7 +6,7 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::activation::{Activation, ActivationCache, ActivationInput};
 use crate::neural_network::layers::validation::start_build;
 use crate::neural_network::layers::{
     built_layer_shape_functions, no_trainable_parameters_layer_functions,
@@ -105,22 +105,21 @@ impl UnaryLayer for HardSigmoid {
 
         let output = Activation::HardSigmoid.forward(input)?;
 
+        // The backward pass reads the output, so the cache holds a copy of it
         if ctx.is_training() {
-            ctx.push_cache("HardSigmoid", output.clone());
+            ctx.push_cache(
+                "HardSigmoid",
+                ActivationCache::new(ActivationInput::Output, output.clone()),
+            );
         }
 
         Ok(output)
     }
 
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        let output: Tensor = ctx.pop_cache("HardSigmoid")?;
-
-        // Hard sigmoid preserves shape, so gradient must match the cached output
-        if grad_output.shape() != output.shape() {
-            return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
-        }
+        let cache: ActivationCache = ctx.pop_cache("HardSigmoid")?;
 
         // Hard sigmoid derivative is 1/6 on the linear segment, and 0 on both saturated ends
-        Activation::HardSigmoid.backward(&output, grad_output)
+        Activation::HardSigmoid.backward(&cache, grad_output)
     }
 }
