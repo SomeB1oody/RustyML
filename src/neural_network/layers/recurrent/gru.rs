@@ -9,14 +9,16 @@
 use crate::error::Error;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::recurrent::apply_sigmoid;
-use crate::neural_network::layers::recurrent::cell::{RecurrentGroup, RnnCell};
+use crate::neural_network::layers::recurrent::cell::{
+    RecurrentGroup, RnnCell, activate, activation_backward, record_cache, recorded_output,
+};
 use crate::neural_network::layers::recurrent::gate::FusedGates;
 use crate::neural_network::layers::recurrent::rnn::{Rnn, recurrent_layer_traits};
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{LayerBase, UnaryLayer};
 use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Bias, Parallelism};
-use ndarray::{Array2, ArrayView2, Axis, Ix2, concatenate, s};
+use ndarray::{Array2, ArrayView2, Axis, concatenate, s};
 
 /// The arithmetic of 1 timestep of a [`GRU`]
 ///
@@ -28,8 +30,14 @@ use ndarray::{Array2, ArrayView2, Axis, Ix2, concatenate, s};
 /// # Notes
 ///
 /// The record of 1 step holds 4 arrays, in this order: the reset gate, the update gate, the
-/// candidate, and `r_t .* h_prev`. The recurrent-kernel gradient of the candidate block needs
-/// `r_t .* h_prev` as its operand, so the cell records it.
+/// candidate tensor, and `r_t .* h_prev`. The candidate tensor is what the backward pass of the
+/// activation reads, as [`Activation::saves`] names. That is the candidate for an
+/// [`ActivationInput::Output`] activation, and the candidate pre-activation for an
+/// [`ActivationInput::PreActivation`] activation. The recurrent-kernel gradient of the candidate
+/// block needs `r_t .* h_prev` as its operand, so the cell records it.
+///
+/// [`ActivationInput::Output`]: crate::neural_network::layers::activation::ActivationInput::Output
+/// [`ActivationInput::PreActivation`]: crate::neural_network::layers::activation::ActivationInput::PreActivation
 #[derive(Debug)]
 pub(crate) struct GruCell {
     /// Activation applied to the candidate hidden state each timestep
@@ -40,7 +48,8 @@ pub(crate) struct GruCell {
 const RESET_GATE: usize = 0;
 /// Record slot of the update-gate activation
 const UPDATE_GATE: usize = 1;
-/// Record slot of the candidate hidden state
+/// Record slot of the candidate hidden state, or of its pre-activation, as [`Activation::saves`]
+/// names
 const CANDIDATE: usize = 2;
 /// Record slot of `r_t .* h_prev`, which the recurrent kernel's candidate block projects
 const RESET_HIDDEN: usize = 3;
@@ -49,7 +58,6 @@ impl RnnCell for GruCell {
     const CELL_TYPE: &'static str = "GRU";
     const GATE_BIASES: &'static [f32] = &[0.0, 0.0, 0.0];
     const STATE_COUNT: usize = 1;
-    const RECORD_SLOTS: usize = 4;
     const RECURRENT_GROUPS: &'static [RecurrentGroup] = &[
         RecurrentGroup {
             first: 0,
@@ -65,6 +73,10 @@ impl RnnCell for GruCell {
 
     fn new(activation: Activation) -> Self {
         Self { activation }
+    }
+
+    fn record_slots(&self) -> usize {
+        4
     }
 
     fn step(
@@ -114,17 +126,14 @@ impl RnnCell for GruCell {
             None,
             Parallelism::Rayon(0),
         );
-        let h_candidate = act
-            .forward(&h_candidate.into_dyn())?
-            .into_dimensionality::<Ix2>()
-            .unwrap();
+        let h_candidate = activate(&act, h_candidate, record.is_some())?;
 
-        let h_t = &z_t * h_prev + &(1.0 - &z_t) * &h_candidate;
+        let h_t = &z_t * h_prev + &(1.0 - &z_t) * &h_candidate.output;
 
         if let Some(record) = record {
             record.push(r_t);
             record.push(z_t);
-            record.push(h_candidate);
+            record.push(h_candidate.into_record());
             record.push(r_h);
         }
         state[0] = h_t;
@@ -144,22 +153,17 @@ impl RnnCell for GruCell {
         let h_prev = &state_prev[0];
         let r_t = &record[RESET_GATE];
         let z_t = &record[UPDATE_GATE];
-        let h_candidate = &record[CANDIDATE];
+        let candidate_cache = record_cache(&act, &record[CANDIDATE]);
+        let h_candidate = recorded_output(&act, &candidate_cache, &record[CANDIDATE])?;
         let batch = h_prev.shape()[0];
 
         // Gradient through h_t = z_t .* h_{t-1} + (1 - z_t) .* h_candidate
-        let grad_z_t = &grad_state[0] * (h_prev - h_candidate);
+        let grad_z_t = &grad_state[0] * (h_prev - &*h_candidate);
         let grad_h_candidate = &grad_state[0] * &(1.0 - z_t);
         let grad_h_prev_from_update = &grad_state[0] * z_t;
 
         // Gradient through h_candidate = activation(...), via the activation backward
-        let grad_h_candidate_raw = act
-            .backward(
-                &h_candidate.clone().into_dyn(),
-                &grad_h_candidate.into_dyn(),
-            )?
-            .into_dimensionality::<Ix2>()
-            .unwrap();
+        let grad_h_candidate_raw = activation_backward(&act, &candidate_cache, grad_h_candidate)?;
 
         // Gradient through r_h = r_t .* h_{t-1} (1 recurrent product shared by both terms)
         let grad_rh = dot(

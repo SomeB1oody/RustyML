@@ -22,8 +22,11 @@ use ndarray::Array;
 use rustyml::error::{Error, IoError};
 use rustyml::neural_network::Shape;
 use rustyml::neural_network::Tensor;
+use rustyml::neural_network::layers::activation::gelu::GELU;
 use rustyml::neural_network::layers::activation::linear::Linear;
+use rustyml::neural_network::layers::activation::mish::Mish;
 use rustyml::neural_network::layers::activation::p_relu::PReLU;
+use rustyml::neural_network::layers::activation::silu::SiLU;
 use rustyml::neural_network::layers::checkpoint::{
     LayerCheckpoint, MODEL_FORMAT_VERSION, MODEL_MAGIC, ModelCheckpoint, WeightRecord,
 };
@@ -529,6 +532,49 @@ fn mixed_model_trained_round_trip() {
     let fresh = round_trip(&model, make_arch, tmp.path());
     let after = fresh.predict(&x).unwrap();
     assert_allclose(&after, &before, 1e-6_f32);
+}
+
+// A trained model with GELU, SiLU, and Mish between its Dense layers round-trips.
+// The 3 activation layers hold no array, so the Dense weights carry the whole model. The fit
+// runs the backward pass of each activation layer, so a broken cache fails here.
+#[test]
+fn pre_activation_layers_trained_round_trip() {
+    let tmp = TempFile::new("pre_activation_trained");
+
+    let make_arch = || {
+        SequentialBuilder::new()
+            .add(Dense::new(4, Linear::new()).unwrap())
+            .add(GELU::new().with_approximate(true))
+            .add(Dense::new(4, Linear::new()).unwrap())
+            .add(SiLU::new())
+            .add(Dense::new(4, Linear::new()).unwrap())
+            .add(Mish::new())
+            .add(Dense::new(2, Linear::new()).unwrap())
+            .add(GELU::new())
+            .build(&Shape::known(&[2, 3]))
+            .unwrap()
+    };
+
+    let mut model = make_arch();
+    model.compile(
+        SGD::new(0.05, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
+
+    let x: Tensor = Array::from_shape_vec((2, 3), vec![0.5f32, -1.0, 1.5, -0.5, 1.0, -1.5])
+        .unwrap()
+        .into_dyn();
+    let y: Tensor = Array::from_shape_vec((2, 2), vec![1.0f32, 0.0, 0.0, 1.0])
+        .unwrap()
+        .into_dyn();
+    let untrained = model.predict(&x).unwrap();
+    model.fit(&x, &y, 5).unwrap();
+
+    let before = model.predict(&x).unwrap();
+    assert_ne!(before, untrained, "the fit did not change the model");
+    let fresh = round_trip(&model, make_arch, tmp.path());
+    let after = fresh.predict(&x).unwrap();
+    assert_eq!(after, before);
 }
 
 // Error paths

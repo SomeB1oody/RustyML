@@ -56,7 +56,7 @@ pub(crate) struct Rnn<C: RnnCell> {
 /// What the forward pass parks for its backward pass
 ///
 /// The 2 record vectors are flat. The state of processing step `k` sits at
-/// `k * STATE_COUNT`, and the values that step `k` parked start at `k * RECORD_SLOTS`.
+/// `k * STATE_COUNT`, and the values that step `k` parked start at `k * record_slots`.
 ///
 /// The cell type is part of the cache type, so a cache of 1 recurrent layer cannot decode as the
 /// cache of another. The layer name that [`Ctx::push_cache`] records is the second guard.
@@ -279,8 +279,9 @@ impl<C: RnnCell> UnaryLayer for Rnn<C> {
         } else {
             0
         });
+        let record_slots = self.cell.record_slots();
         let mut records = Vec::with_capacity(if training {
-            timesteps * C::RECORD_SLOTS
+            timesteps * record_slots
         } else {
             0
         });
@@ -295,8 +296,8 @@ impl<C: RnnCell> UnaryLayer for Rnn<C> {
             self.cell
                 .step(&self.gates, xw.index_axis(Axis(1), t), &mut state, record)?;
             debug_assert!(
-                !training || records.len() == (k + 1) * C::RECORD_SLOTS,
-                "{} parked a number of values that RECORD_SLOTS does not name",
+                !training || records.len() == (k + 1) * record_slots,
+                "{} parked a number of values that record_slots does not name",
                 C::CELL_TYPE
             );
             if let Some(seq) = sequence.as_mut() {
@@ -346,6 +347,7 @@ impl<C: RnnCell> UnaryLayer for Rnn<C> {
         let feat = x3.shape()[2];
         let units = self.units;
         let width = C::GATE_BIASES.len() * units;
+        let record_slots = self.cell.record_slots();
 
         // With `return_sequences`, every step also takes a direct contribution from `grad_seq`.
         // Only the hidden state takes it. Every other state is reachable through the hidden
@@ -376,7 +378,7 @@ impl<C: RnnCell> UnaryLayer for Rnn<C> {
                 &self.gates,
                 &states[k * C::STATE_COUNT..(k + 1) * C::STATE_COUNT],
                 &states[(k + 1) * C::STATE_COUNT..(k + 2) * C::STATE_COUNT],
-                &records[k * C::RECORD_SLOTS..(k + 1) * C::RECORD_SLOTS],
+                &records[k * record_slots..(k + 1) * record_slots],
                 &mut grad_state,
             )?;
             // The reductions below pair this step's gate gradients with the input row they came
@@ -410,7 +412,7 @@ impl<C: RnnCell> UnaryLayer for Rnn<C> {
             for k in 0..timesteps {
                 let operand = match group.operand {
                     None => &states[k * C::STATE_COUNT],
-                    Some(slot) => &records[k * C::RECORD_SLOTS + slot],
+                    Some(slot) => &records[k * record_slots + slot],
                 };
                 operand3
                     .index_axis_mut(Axis(1), input_step(k, timesteps, self.go_backwards))

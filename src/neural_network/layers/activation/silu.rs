@@ -1,12 +1,12 @@
-//! ReLU activation layer
+//! SiLU (Sigmoid Linear Unit) activation layer, also named Swish
 //!
-//! The `ReLU` struct holds only the shape recorded at build time, because the layer takes no
-//! parameter. `UnaryLayer::forward` computes `Activation::ReLU` and caches the output during
+//! The `SiLU` struct holds only the shape recorded at build time, because the layer takes no
+//! parameter. `UnaryLayer::forward` computes `Activation::SiLU` and caches the input during
 //! training. `UnaryLayer::backward` reads that cache to compute the gradient
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::{Activation, ActivationCache, ActivationInput};
+use crate::neural_network::layers::activation::{Activation, ActivationCache};
 use crate::neural_network::layers::validation::start_build;
 use crate::neural_network::layers::{
     built_layer_shape_functions, no_trainable_parameters_layer_functions,
@@ -14,20 +14,24 @@ use crate::neural_network::layers::{
 use crate::neural_network::traits::{LayerBase, UnaryLayer};
 use crate::neural_network::{Ctx, Shape, Tensor};
 
-/// ReLU (Rectified Linear Unit) activation layer
+/// SiLU (Sigmoid Linear Unit) activation layer
 ///
-/// Applies `max(0, x)` elementwise to the input tensor, keeping the original shape.
+/// Applies `x * sigmoid(x)` elementwise to the input tensor, keeping the original shape.
 /// Common inputs include 2D tensors for dense layers and 4D tensors for convolutional layers
 ///
-/// [`Activation::ReLU`] provides the activation math. This layer only adds boundary
-/// validation and the caching needed for backpropagation
+/// Elfwing et al. (2018) introduced this activation, and Ramachandran et al. (2017) named it
+/// Swish. The output is smooth and not monotonic. Its minimum is about -0.2785 at x = -1.2785
+///
+/// [`Activation::SiLU`] provides the activation math. This layer only adds boundary
+/// validation and the caching needed for backpropagation. The derivative has no closed form in
+/// the output, so the layer caches the input
 ///
 /// # Examples
 ///
 /// ```rust
 /// use rustyml::neural_network::Shape;
 /// use rustyml::neural_network::sequential::SequentialBuilder;
-/// use rustyml::neural_network::layers::activation::relu::ReLU;
+/// use rustyml::neural_network::layers::activation::silu::SiLU;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::MeanSquaredError;
 /// use ndarray::Array2;
@@ -37,9 +41,9 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///     .unwrap()
 ///     .into_dyn();
 ///
-/// // Build a model with ReLU activation
+/// // Build a model with SiLU activation
 /// let mut model = SequentialBuilder::new()
-///     .add(ReLU::new())
+///     .add(SiLU::new())
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
@@ -47,34 +51,34 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// // Forward propagation
 /// let output = model.predict(&x);
 ///
-/// // Output will be: [[0.0, 2.0, 0.0], [4.0, 0.0, 6.0]]
+/// // Output will be: [[-0.26894143, 1.761594, -0.14227763], [3.928055, -0.033464253, 5.9851646]]
 /// ```
 #[derive(Debug)]
-pub struct ReLU {
+pub struct SiLU {
     /// Shape the layer was built for, batch axis first. `None` before the build
     built: Option<Shape>,
 }
 
-impl ReLU {
-    /// Creates a new ReLU activation layer
+impl SiLU {
+    /// Creates a new SiLU activation layer
     ///
     /// # Returns
     ///
-    /// - `Self` - A new `ReLU` layer
+    /// - `Self` - A new `SiLU` layer
     pub fn new() -> Self {
-        ReLU { built: None }
+        SiLU { built: None }
     }
 }
 
-impl Default for ReLU {
+impl Default for SiLU {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LayerBase for ReLU {
+impl LayerBase for SiLU {
     fn layer_type(&self) -> &str {
-        "ReLU"
+        "SiLU"
     }
 
     built_layer_shape_functions!();
@@ -82,10 +86,10 @@ impl LayerBase for ReLU {
     no_trainable_parameters_layer_functions!();
 }
 
-impl UnaryLayer for ReLU {
+impl UnaryLayer for SiLU {
     /// Records the shape the layer serves. The layer holds no array, so nothing is allocated
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
-        let Some(built) = start_build(&self.built, "ReLU", input)? else {
+        let Some(built) = start_build(&self.built, "SiLU", input)? else {
             return Ok(());
         };
         self.compute_output_shape(&built)?;
@@ -98,23 +102,21 @@ impl UnaryLayer for ReLU {
             return Err(Error::empty_input("input tensor"));
         }
 
-        let output = Activation::ReLU.forward(input)?;
-
-        // The backward pass reads the output, so the cache holds a copy of it
-        if ctx.is_training() {
-            ctx.push_cache(
-                "ReLU",
-                ActivationCache::new(ActivationInput::Output, output.clone()),
-            );
+        if !ctx.is_training() {
+            return Activation::SiLU.forward(input);
         }
+
+        // The backward pass reads the input, so the cache holds a copy of it
+        let (output, cache) = Activation::SiLU.forward_train(input.clone())?;
+        ctx.push_cache("SiLU", cache);
 
         Ok(output)
     }
 
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        let cache: ActivationCache = ctx.pop_cache("ReLU")?;
+        let cache: ActivationCache = ctx.pop_cache("SiLU")?;
 
-        // ReLU derivative is 1 for x > 0, and 0 for x <= 0
-        Activation::ReLU.backward(&cache, grad_output)
+        // SiLU derivative is sigmoid(x) * (1 + x * (1 - sigmoid(x)))
+        Activation::SiLU.backward(&cache, grad_output)
     }
 }

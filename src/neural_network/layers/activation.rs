@@ -3,7 +3,7 @@
 //! Defines the [`Activation`] enum, the single source of truth for each activation's forward
 //! transform and derivative. The thin layer wrappers delegate their math to it: [`Linear`],
 //! [`ReLU`], [`LeakyReLU`], [`ELU`], [`SELU`], [`Sigmoid`], [`HardSigmoid`], [`Tanh`],
-//! [`Softplus`], [`Softsign`], [`Exponential`], and [`Softmax`]
+//! [`Softplus`], [`Softsign`], [`Exponential`], [`Softmax`], [`GELU`], [`SiLU`], and [`Mish`]
 //!
 //! [`PReLU`] stands apart. Its negative-side slope is a trainable array, so it holds its own
 //! math and its own weights instead of delegating to the enum
@@ -19,12 +19,16 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 pub mod elu;
 /// Exponential activation layer
 pub mod exponential;
+/// GELU (Gaussian Error Linear Unit) activation layer
+pub mod gelu;
 /// Hard sigmoid activation layer, a piecewise-linear approximation of the logistic sigmoid
 pub mod hard_sigmoid;
 /// Leaky ReLU activation layer
 pub mod leaky_relu;
 /// Linear (Identity) activation layer
 pub mod linear;
+/// Mish activation layer
+pub mod mish;
 /// PReLU activation layer, whose negative-side slope is a trainable parameter
 pub mod p_relu;
 /// ReLU (Rectified Linear Unit) activation layer
@@ -33,6 +37,8 @@ pub mod relu;
 pub mod selu;
 /// Sigmoid activation layer
 pub mod sigmoid;
+/// SiLU (Sigmoid Linear Unit) activation layer, also named Swish
+pub mod silu;
 /// Softmax activation layer
 pub mod softmax;
 /// Softplus activation layer
@@ -44,13 +50,16 @@ pub mod tanh;
 
 pub use elu::ELU;
 pub use exponential::Exponential;
+pub use gelu::GELU;
 pub use hard_sigmoid::HardSigmoid;
 pub use leaky_relu::LeakyReLU;
 pub use linear::Linear;
+pub use mish::Mish;
 pub use p_relu::PReLU;
 pub use relu::ReLU;
 pub use selu::SELU;
 pub use sigmoid::Sigmoid;
+pub use silu::SiLU;
 pub use softmax::Softmax;
 pub use softplus::Softplus;
 pub use softsign::Softsign;
@@ -78,6 +87,15 @@ const SELU_SCALE_ALPHA: f32 = SELU_SCALE * SELU_ALPHA;
 /// The slope of the hard sigmoid's linear segment, `1/6`
 const HARD_SIGMOID_SLOPE: f32 = 1.0 / 6.0;
 
+/// The scale `sqrt(2 / pi)` of the tanh approximation of GELU
+const GELU_TANH_SCALE: f32 = 0.797_884_6;
+
+/// The cubic coefficient of the tanh approximation of GELU, from Hendrycks and Gimpel (2016)
+const GELU_TANH_CUBIC: f32 = 0.044_715;
+
+/// The density scale `1 / sqrt(2 * pi)` of the standard normal distribution
+const NORMAL_DENSITY_SCALE: f32 = 0.398_942_3;
+
 /// The default softmax axis, the last axis of the input
 ///
 /// A negative axis counts back from the end, so `-1` holds for every rank
@@ -96,15 +114,13 @@ pub const DEFAULT_SOFTMAX_AXIS: i32 = -1;
 ///
 /// # Notes
 ///
-/// [`Activation::backward`] receives the *activated output* `a`, never the pre-activation `z`.
-/// Every variant's derivative is therefore expressed through `a` alone, and a host layer caches
-/// 1 tensor rather than 2. This is the output-only derivative contract that every variant below
-/// follows.
+/// The backward pass of each variant reads 1 tensor. [`Activation::saves`] names it: the
+/// activated output `a`, or the pre-activation `z`. A host layer therefore caches 1 tensor, not
+/// 2. [`Activation::forward_train`] returns that tensor in an [`ActivationCache`], and
+/// [`Activation::backward`] refuses a cache that holds the other tensor.
 ///
-/// The contract admits every activation whose derivative has a closed form in `a`, which covers
-/// the full family below. It excludes GELU, SiLU (Swish), and Mish, whose `a = z * g(z)` shape
-/// has no closed-form inverse. Supporting them needs a wider contract that also hands the
-/// backward pass the pre-activation.
+/// A variant reads `a` when its derivative has a closed form in `a`. GELU, SiLU, and Mish have
+/// the shape `a = z * g(z)`, which has no closed-form inverse, so these 3 variants read `z`.
 ///
 /// The 2 saturating variants pay a small accuracy cost for the contract. `ELU` recovers its
 /// negative branch as `a + alpha`, and `SELU` recovers its negative branch as
@@ -168,6 +184,220 @@ pub enum Activation {
     HardSigmoid,
     /// Exponential, `e^x`
     Exponential,
+    /// Gaussian error linear unit, `x * Phi(x)`, where `Phi` is the standard normal
+    /// cumulative distribution function, from Hendrycks and Gimpel (2016)
+    GELU {
+        /// When `true`, the variant uses the tanh approximation
+        /// `x * sigmoid(2 * sqrt(2 / pi) * (x + 0.044715 * x^3))`. When `false`, it uses the
+        /// exact `Phi`. The layer form defaults to `false`
+        approximate: bool,
+    },
+    /// Sigmoid linear unit, `x * sigmoid(x)`, also named Swish
+    SiLU,
+    /// Mish, `x * tanh(softplus(x))`, from Misra (2019)
+    Mish,
+}
+
+/// The tensor that the backward pass of an [`Activation`] reads
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivationInput {
+    /// The activated output `a`
+    Output,
+    /// The pre-activation `z`
+    PreActivation,
+}
+
+/// The tensor that a training forward pass saves for the backward pass of an [`Activation`]
+///
+/// [`Activation::forward_train`] makes the cache. The cache records which tensor it holds,
+/// and [`Activation::backward`] refuses a cache that holds the other tensor
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActivationCache {
+    /// The tensor that the cache holds
+    holds: ActivationInput,
+    /// The saved tensor
+    tensor: Tensor,
+}
+
+impl ActivationCache {
+    /// Wraps a tensor that a host layer saved without [`Activation::forward_train`]
+    ///
+    /// A host layer that fuses an activation into a matrix product gets the output from the
+    /// product. It wraps that output here as an [`ActivationInput::Output`] cache
+    ///
+    /// # Parameters
+    ///
+    /// - `holds` - The tensor that `tensor` is
+    /// - `tensor` - The saved tensor
+    ///
+    /// # Returns
+    ///
+    /// - `ActivationCache` - The cache
+    pub(crate) fn new(holds: ActivationInput, tensor: Tensor) -> Self {
+        Self { holds, tensor }
+    }
+
+    /// The tensor that the cache holds
+    ///
+    /// # Returns
+    ///
+    /// - `ActivationInput` - [`ActivationInput::Output`] or [`ActivationInput::PreActivation`]
+    pub fn holds(&self) -> ActivationInput {
+        self.holds
+    }
+
+    /// The saved tensor
+    ///
+    /// # Returns
+    ///
+    /// - `&Tensor` - The activated output or the pre-activation, as [`ActivationCache::holds`]
+    ///   names
+    pub fn tensor(&self) -> &Tensor {
+        &self.tensor
+    }
+
+    /// The shape of the saved tensor, which is also the shape of the activated output
+    ///
+    /// # Returns
+    ///
+    /// - `&[usize]` - The shape
+    pub fn shape(&self) -> &[usize] {
+        self.tensor.shape()
+    }
+
+    /// Gives back the saved tensor
+    ///
+    /// # Returns
+    ///
+    /// - `Tensor` - The activated output or the pre-activation, as [`ActivationCache::holds`]
+    ///   names
+    pub fn into_tensor(self) -> Tensor {
+        self.tensor
+    }
+}
+
+/// Logistic sigmoid of 1 value
+#[inline]
+fn sigmoid(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
+}
+
+/// Softplus of 1 value, `ln(1 + e^x)`
+///
+/// Above 0 the function factors `e^x` out of the logarithm. This keeps both tails in range.
+/// The direct form overflows for a large `x`, and it loses every digit for a small `x`
+#[inline]
+fn softplus(x: f32) -> f32 {
+    if x > 0.0 {
+        x + (-x).exp().ln_1p()
+    } else {
+        x.exp().ln_1p()
+    }
+}
+
+/// Exact GELU of 1 value, `x * Phi(x)`
+///
+/// `Phi(x) = erfc(-x / sqrt(2)) / 2`. The complementary error function keeps the relative
+/// precision of `Phi` in the negative tail, where `1 + erf` would cancel to 0
+#[inline]
+fn gelu_exact(x: f32) -> f32 {
+    x * 0.5 * libm::erfcf(-x * std::f32::consts::FRAC_1_SQRT_2)
+}
+
+/// Derivative of the exact GELU at `x`, `Phi(x) + x * phi(x)`
+#[inline]
+fn gelu_exact_grad(x: f32) -> f32 {
+    let cdf = 0.5 * libm::erfcf(-x * std::f32::consts::FRAC_1_SQRT_2);
+    let pdf = NORMAL_DENSITY_SCALE * (-0.5 * x * x).exp();
+    cdf + x * pdf
+}
+
+/// The sigmoid argument `2 * sqrt(2 / pi) * (x + 0.044715 * x^3)` of the tanh approximation
+///
+/// `1 + tanh(u) = 2 * sigmoid(2 * u)`. The sigmoid form does not cancel in the negative tail
+#[inline]
+fn gelu_tanh_argument(x: f32) -> f32 {
+    2.0 * GELU_TANH_SCALE * (x + GELU_TANH_CUBIC * x * x * x)
+}
+
+/// Tanh approximation of GELU at `x`
+#[inline]
+fn gelu_tanh(x: f32) -> f32 {
+    x * sigmoid(gelu_tanh_argument(x))
+}
+
+/// Derivative of the tanh approximation of GELU at `x`
+#[inline]
+///
+/// Where the sigmoid saturates, `s * (1 - s)` is 0 and the derivative is `s`. The function
+/// returns `s` there, because `x * x` overflows to infinity for `|x|` above about 1.8e19, and
+/// `0 * infinity` is NaN
+fn gelu_tanh_grad(x: f32) -> f32 {
+    let s = sigmoid(gelu_tanh_argument(x));
+    let slope = s * (1.0 - s);
+    if slope == 0.0 {
+        return s;
+    }
+    let argument_grad = 2.0 * GELU_TANH_SCALE * (1.0 + 3.0 * GELU_TANH_CUBIC * x * x);
+    s + x * slope * argument_grad
+}
+
+/// SiLU of 1 value, `x * sigmoid(x)`
+#[inline]
+fn silu(x: f32) -> f32 {
+    x * sigmoid(x)
+}
+
+/// Derivative of SiLU at `x`, `sigmoid(x) * (1 + x * (1 - sigmoid(x)))`
+#[inline]
+fn silu_grad(x: f32) -> f32 {
+    let s = sigmoid(x);
+    s * (1.0 + x * (1.0 - s))
+}
+
+/// Mish of 1 value, `x * tanh(softplus(x))`
+#[inline]
+fn mish(x: f32) -> f32 {
+    x * softplus(x).tanh()
+}
+
+/// Derivative of Mish at `x`, `t + x * (1 - t^2) * sigmoid(x)` with `t = tanh(softplus(x))`
+#[inline]
+fn mish_grad(x: f32) -> f32 {
+    let t = softplus(x).tanh();
+    t + x * (1.0 - t * t) * sigmoid(x)
+}
+
+/// Applies an element-wise map, in parallel when the tensor reaches `threshold` elements
+fn map_elements(z: &Tensor, threshold: usize, f: impl Fn(f32) -> f32 + Sync + Send) -> Tensor {
+    if z.len() >= threshold {
+        Zip::from(z).par_map_collect(|&x| f(x))
+    } else {
+        z.mapv(f)
+    }
+}
+
+/// Multiplies each upstream gradient by the derivative at the matching pre-activation
+///
+/// # Errors
+///
+/// - `Error::ShapeMismatch` - `grad_output` and `z` differ in shape
+fn scale_by_derivative(
+    z: &Tensor,
+    grad_output: &Tensor,
+    derivative: impl Fn(f32) -> f32 + Sync + Send,
+) -> Result<Tensor, Error> {
+    if grad_output.shape() != z.shape() {
+        return Err(Error::shape_mismatch(z.shape(), grad_output.shape()));
+    }
+    let mut grad = grad_output.clone();
+    let scale = |g: &mut f32, &x: &f32| *g *= derivative(x);
+    if z.len() >= exp_map_parallel_threshold() {
+        Zip::from(&mut grad).and(z).par_for_each(scale);
+    } else {
+        Zip::from(&mut grad).and(z).for_each(scale);
+    }
+    Ok(grad)
 }
 
 impl Activation {
@@ -252,23 +482,7 @@ impl Activation {
                 };
                 Ok(out)
             }
-            Activation::Softplus => {
-                // Factoring `e^x` out of the logarithm above 0 keeps both tails in range.
-                // The direct form overflows for large x, and loses every digit for small x
-                let softplus = |x: f32| {
-                    if x > 0.0 {
-                        x + (-x).exp().ln_1p()
-                    } else {
-                        x.exp().ln_1p()
-                    }
-                };
-                let out = if z.len() >= exp_map_parallel_threshold() {
-                    Zip::from(z).par_map_collect(|&x| softplus(x))
-                } else {
-                    z.mapv(softplus)
-                };
-                Ok(out)
-            }
+            Activation::Softplus => Ok(map_elements(z, exp_map_parallel_threshold(), softplus)),
             Activation::Softsign => {
                 let softsign = |x: f32| x / (1.0 + x.abs());
                 let out = if z.len() >= cheap_map_parallel_threshold() {
@@ -296,32 +510,133 @@ impl Activation {
                 };
                 Ok(out)
             }
+            Activation::GELU { approximate: false } => {
+                Ok(map_elements(z, exp_map_parallel_threshold(), gelu_exact))
+            }
+            Activation::GELU { approximate: true } => {
+                Ok(map_elements(z, exp_map_parallel_threshold(), gelu_tanh))
+            }
+            Activation::SiLU => Ok(map_elements(z, exp_map_parallel_threshold(), silu)),
+            Activation::Mish => Ok(map_elements(z, exp_map_parallel_threshold(), mish)),
         }
     }
 
-    /// Computes the gradient with respect to the pre-activation input
+    /// The tensor that the backward pass of this activation reads
     ///
-    /// Every supported activation's derivative is expressible in terms of its own
-    /// output, so this takes the cached activated tensor rather than the original input
+    /// # Returns
+    ///
+    /// - `ActivationInput` - [`ActivationInput::PreActivation`] for GELU, SiLU, and Mish, and
+    ///   [`ActivationInput::Output`] for every other variant
+    pub fn saves(&self) -> ActivationInput {
+        match self {
+            Activation::GELU { .. } | Activation::SiLU | Activation::Mish => {
+                ActivationInput::PreActivation
+            }
+            _ => ActivationInput::Output,
+        }
+    }
+
+    /// Applies the activation and saves the tensor that the backward pass reads
+    ///
+    /// The cache holds a copy of the output, or `z` itself, as [`Activation::saves`] names
+    ///
+    /// # Parameters
+    ///
+    /// - `z` - Pre-activation tensor (the linear output of the host layer)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<(Tensor, ActivationCache), Error>` - The activated tensor, and the cache for
+    ///   [`Activation::backward`]
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - The Softmax axis resolves outside the rank of `z`
+    /// - `Error::Computation` - Softmax failed to reshape the input
+    pub fn forward_train(&self, z: Tensor) -> Result<(Tensor, ActivationCache), Error> {
+        let output = self.forward(&z)?;
+        let cache = match self.saves() {
+            ActivationInput::Output => {
+                ActivationCache::new(ActivationInput::Output, output.clone())
+            }
+            ActivationInput::PreActivation => {
+                ActivationCache::new(ActivationInput::PreActivation, z)
+            }
+        };
+        Ok((output, cache))
+    }
+
+    /// The activated output that a cache stands for
+    ///
+    /// An [`ActivationInput::Output`] cache gives a copy of its tensor. An
+    /// [`ActivationInput::PreActivation`] cache gives the forward pass of its tensor
+    ///
+    /// # Parameters
+    ///
+    /// - `cache` - A cache that [`Activation::forward_train`] of this activation made
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Tensor, Error>` - The activated output
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - The cache holds another tensor than [`Activation::saves`]
+    ///   names, or the Softmax axis resolves outside the rank of the tensor
+    /// - `Error::Computation` - Softmax failed to reshape the tensor
+    pub fn output_of(&self, cache: &ActivationCache) -> Result<Tensor, Error> {
+        self.check_cache(cache)?;
+        match cache.holds {
+            ActivationInput::Output => Ok(cache.tensor.clone()),
+            ActivationInput::PreActivation => self.forward(&cache.tensor),
+        }
+    }
+
+    /// Refuses a cache that holds another tensor than this activation reads
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidInput` - The cache holds another tensor than [`Activation::saves`]
+    ///   names
+    fn check_cache(&self, cache: &ActivationCache) -> Result<(), Error> {
+        if cache.holds != self.saves() {
+            return Err(Error::invalid_input(format!(
+                "{self:?} reads {:?}, but the cache holds {:?}",
+                self.saves(),
+                cache.holds
+            )));
+        }
+        Ok(())
+    }
+
+    /// Computes the gradient with respect to the pre-activation input
     ///
     /// This is pure math with no clamping or NaN/Inf sanitization
     ///
     /// # Parameters
     ///
-    /// - `activated` - The activated output `a` produced by [`forward`](Activation::forward)
+    /// - `cache` - The cache that [`Activation::forward_train`] of this activation made
     /// - `grad_output` - Upstream gradient `dL/da`
     ///
     /// # Returns
     ///
-    /// - `Result<Tensor, Error>` - The gradient `dL/dz`, same shape as `activated`
+    /// - `Result<Tensor, Error>` - The gradient `dL/dz`, with the shape of the cached tensor
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - The Softmax axis resolves outside the rank of `activated`
-    /// - `Error::ShapeMismatch` - Softmax received a `grad_output` whose shape differs from
-    ///   the shape of `activated`
+    /// - `Error::InvalidInput` - The cache holds another tensor than [`Activation::saves`]
+    ///   names, or the Softmax axis resolves outside the rank of the cached tensor
+    /// - `Error::ShapeMismatch` - `grad_output` and the cached tensor differ in shape
     /// - `Error::Computation` - Softmax failed to reshape the tensors
-    pub fn backward(&self, activated: &Tensor, grad_output: &Tensor) -> Result<Tensor, Error> {
+    pub fn backward(&self, cache: &ActivationCache, grad_output: &Tensor) -> Result<Tensor, Error> {
+        self.check_cache(cache)?;
+        let activated = &cache.tensor;
+        if grad_output.shape() != activated.shape() {
+            return Err(Error::shape_mismatch(
+                activated.shape(),
+                grad_output.shape(),
+            ));
+        }
         match self {
             Activation::Linear => Ok(grad_output.clone()),
             Activation::ReLU => {
@@ -492,6 +807,14 @@ impl Activation {
                 }
                 Ok(grad)
             }
+            Activation::GELU { approximate: false } => {
+                scale_by_derivative(activated, grad_output, gelu_exact_grad)
+            }
+            Activation::GELU { approximate: true } => {
+                scale_by_derivative(activated, grad_output, gelu_tanh_grad)
+            }
+            Activation::SiLU => scale_by_derivative(activated, grad_output, silu_grad),
+            Activation::Mish => scale_by_derivative(activated, grad_output, mish_grad),
         }
     }
 
@@ -516,15 +839,13 @@ impl Activation {
     /// restriction is a deliberate simplification, not a limit of the math
     ///
     /// The host layers do not agree on the rank of the tensor they hand to the activation.
-    /// [`Dense`](crate::neural_network::layers::dense::Dense) folds every leading axis of its
-    /// output into 1 row axis, and it applies the activation to that rank-2 matrix. The
-    /// convolution layers do not fold, and they apply the activation to the full output
-    /// tensor. The recurrent layers apply the activation to 1 rank-2 state per timestep
+    /// [`Dense`](crate::neural_network::layers::dense::Dense) and the convolution layers apply
+    /// the activation to the full output tensor. The recurrent layers apply the activation to
+    /// 1 rank-2 state per timestep, and that state has no time axis
     ///
-    /// The axis `-1` names the same lane in all 3 families. Any other axis names a different
-    /// tensor axis in each family. In `Dense` a non-final axis would normalize the folded
-    /// rows, which are not the wanted lanes. A per-host axis rule is deferred, not
-    /// impossible. Use the standalone [`Softmax`] layer for a different axis
+    /// The axis `-1` names the same lane in all of these hosts. Any other axis names a
+    /// different tensor axis in a recurrent layer than in its output. A per-host axis rule is
+    /// deferred, not impossible. Use the standalone [`Softmax`] layer for a different axis
     ///
     /// # Errors
     ///
@@ -629,6 +950,26 @@ impl From<Exponential> for Activation {
     #[inline]
     fn from(_: Exponential) -> Self {
         Activation::Exponential
+    }
+}
+impl From<GELU> for Activation {
+    #[inline]
+    fn from(layer: GELU) -> Self {
+        Activation::GELU {
+            approximate: layer.approximate,
+        }
+    }
+}
+impl From<SiLU> for Activation {
+    #[inline]
+    fn from(_: SiLU) -> Self {
+        Activation::SiLU
+    }
+}
+impl From<Mish> for Activation {
+    #[inline]
+    fn from(_: Mish) -> Self {
+        Activation::Mish
     }
 }
 
@@ -1102,10 +1443,11 @@ mod tests {
     fn activation_softmax_backward_via_enum() {
         let output = tensor2(1, 3, vec![0.25, 0.25, 0.5]);
         let grad_output = tensor2(1, 3, vec![1.0, 0.0, 0.0]);
+        let cache = ActivationCache::new(ActivationInput::Output, output);
         let grad_input = Activation::Softmax {
             axis: DEFAULT_SOFTMAX_AXIS,
         }
-        .backward(&output, &grad_output)
+        .backward(&cache, &grad_output)
         .expect("Activation::Softmax backward failed");
         let vals = grad_input.as_slice().expect("not contiguous");
         assert_abs_diff_eq!(vals[0], 0.1875_f32, epsilon = 1e-6);
@@ -1141,13 +1483,11 @@ mod tests {
     /// An all-ones upstream gradient makes the backward result the derivative itself
     fn check_against_reference(name: &str, activation: Activation, fwd: &[f32], grad: &[f32]) {
         let input = tensor2(1, PROBES.len(), PROBES.to_vec());
-        let output = activation.forward(&input).expect("forward failed");
+        let (output, cache) = activation.forward_train(input).expect("forward failed");
         assert_pinned(&format!("{name} forward"), &output, fwd);
 
         let ones = tensor2(1, PROBES.len(), vec![1.0; PROBES.len()]);
-        let derivative = activation
-            .backward(&output, &ones)
-            .expect("backward failed");
+        let derivative = activation.backward(&cache, &ones).expect("backward failed");
         assert_pinned(&format!("{name} backward"), &derivative, grad);
     }
 
@@ -1408,10 +1748,10 @@ mod tests {
     #[test]
     fn softplus_backward_keeps_the_far_negative_tail() {
         let input = tensor2(1, 1, vec![-40.0]);
-        let output = Activation::Softplus.forward(&input).expect("forward");
+        let (_, cache) = Activation::Softplus.forward_train(input).expect("forward");
         let ones = tensor2(1, 1, vec![1.0]);
         let derivative = Activation::Softplus
-            .backward(&output, &ones)
+            .backward(&cache, &ones)
             .expect("backward");
 
         let got = derivative.iter().next().copied().expect("1 element");
@@ -1470,12 +1810,320 @@ mod tests {
             Activation::Softsign,
             Activation::HardSigmoid,
             Activation::Exponential,
+            Activation::GELU { approximate: false },
+            Activation::GELU { approximate: true },
+            Activation::SiLU,
+            Activation::Mish,
         ];
         for activation in usable {
             assert!(
                 activation.validate().is_ok(),
                 "{activation:?} must pass validation"
             );
+        }
+    }
+
+    /// Exact GELU. The value at 0 is 0, and the derivative there is `Phi(0) = 0.5`
+    #[test]
+    fn gelu_matches_reference() {
+        check_against_reference(
+            "GELU",
+            Activation::GELU { approximate: false },
+            &[
+                -1.433_257_9e-6,
+                -0.004_049_694,
+                -0.045_500_264,
+                -0.158_655_25,
+                -0.154_268_77,
+                0.0,
+                0.345_731_23,
+                0.841_344_8,
+                1.954_499_7,
+                2.995_950_3,
+                4.999_998_6,
+            ],
+            &[
+                -7.146_946e-6,
+                -0.011_945_647,
+                -0.085_231_8,
+                -0.083_315_47,
+                0.132_504_88,
+                0.5,
+                0.867_495_1,
+                1.083_315_5,
+                1.085_231_8,
+                1.011_945_6,
+                1.000_007_1,
+            ],
+        );
+    }
+
+    /// The tanh approximation of GELU
+    #[test]
+    fn gelu_tanh_matches_reference() {
+        check_against_reference(
+            "GELU(approximate)",
+            Activation::GELU { approximate: true },
+            &[
+                -2.291_796_2e-7,
+                -0.003_637_392,
+                -0.045_402_306,
+                -0.158_808_01,
+                -0.154_286,
+                0.0,
+                0.345_714,
+                0.841_192,
+                1.954_597_7,
+                2.996_362_6,
+                5.0,
+            ],
+            &[
+                -1.546_362e-6,
+                -0.011_584_167,
+                -0.086_099_26,
+                -0.082_964_084,
+                0.132_630_1,
+                0.5,
+                0.867_369_9,
+                1.082_964_1,
+                1.086_099_3,
+                1.011_584_2,
+                1.000_001_5,
+            ],
+        );
+    }
+
+    /// SiLU. The derivative at 0 is `sigmoid(0) = 0.5`
+    #[test]
+    fn silu_matches_reference() {
+        check_against_reference(
+            "SiLU",
+            Activation::SiLU,
+            &[
+                -0.033_464_255,
+                -0.142_277_62,
+                -0.238_405_84,
+                -0.268_941_42,
+                -0.188_770_33,
+                0.0,
+                0.311_229_67,
+                0.731_058_6,
+                1.761_594_2,
+                2.857_722_4,
+                4.966_535_6,
+            ],
+            &[
+                -0.026_547_432,
+                -0.088_104_11,
+                -0.090_784_25,
+                0.072_329_49,
+                0.260_038_8,
+                0.5,
+                0.739_961_2,
+                0.927_670_5,
+                1.090_784_2,
+                1.088_104_1,
+                1.026_547_4,
+            ],
+        );
+    }
+
+    /// Mish. The derivative at 0 is `tanh(ln 2) = 0.6`
+    #[test]
+    fn mish_matches_reference() {
+        check_against_reference(
+            "Mish",
+            Activation::Mish,
+            &[
+                -0.033_576_24,
+                -0.145_647_46,
+                -0.252_501_5,
+                -0.303_401_46,
+                -0.220_743_77,
+                0.0,
+                0.375_245_2,
+                0.865_098_4,
+                1.943_959,
+                2.986_535,
+                4.999_552,
+            ],
+            &[
+                -0.026_747_498,
+                -0.093_393_12,
+                -0.108_355_09,
+                0.059_216_756,
+                0.289_510_68,
+                0.6,
+                0.886_424_4,
+                1.049_036_2,
+                1.069_317_9,
+                1.021_107,
+                1.000_800_2,
+            ],
+        );
+    }
+
+    /// The exact GELU keeps its relative precision in the negative tail
+    ///
+    /// At x = -12 the value is about -2.13e-32. The form `x * (1 + erf(x / sqrt(2))) / 2`
+    /// gives exactly 0, because `erf` rounds to -1 at f32 precision
+    #[test]
+    fn gelu_keeps_the_negative_tail() {
+        let input = tensor2(1, 1, vec![-12.0]);
+        let activation = Activation::GELU { approximate: false };
+        let (output, cache) = activation.forward_train(input).expect("forward");
+        let derivative = activation
+            .backward(&cache, &tensor2(1, 1, vec![1.0]))
+            .expect("backward");
+
+        for (name, got, want) in [
+            ("value", output[[0, 0]], -2.131_778_5e-32_f32),
+            ("derivative", derivative[[0, 0]], -2.557_895_7e-31_f32),
+        ] {
+            assert!(
+                (got - want).abs() <= 1e-4 * want.abs(),
+                "GELU {name} at x = -12: got {got}, want {want}"
+            );
+        }
+    }
+
+    /// The derivative of the tanh approximation stays finite where the sigmoid saturates
+    ///
+    /// At `|x| = 1e30` the term `x * x` overflows to infinity. The derivative is 1 on the
+    /// positive side and 0 on the negative side
+    #[test]
+    fn gelu_tanh_derivative_stays_finite_at_huge_inputs() {
+        let activation = Activation::GELU { approximate: true };
+        let input = tensor2(1, 4, vec![1e30, -1e30, f32::MAX, f32::MIN]);
+        let (_, cache) = activation.forward_train(input).expect("forward");
+        let derivative = activation
+            .backward(&cache, &tensor2(1, 4, vec![1.0; 4]))
+            .expect("backward");
+        let got: Vec<f32> = derivative.iter().copied().collect();
+        assert_eq!(got, vec![1.0, 0.0, 1.0, 0.0]);
+    }
+
+    /// The derivative of each pre-activation variant matches a central difference
+    ///
+    /// The difference runs in f64 over the f32 forward pass, so its error stays far below the
+    /// tolerance
+    #[test]
+    fn pre_activation_variants_match_a_central_difference() {
+        let points: Vec<f32> = (-60..=60).map(|i| i as f32 * 0.125).collect();
+        let step = 1e-2_f32;
+        for activation in [
+            Activation::GELU { approximate: false },
+            Activation::GELU { approximate: true },
+            Activation::SiLU,
+            Activation::Mish,
+        ] {
+            let input = tensor2(1, points.len(), points.clone());
+            let (_, cache) = activation.forward_train(input).expect("forward");
+            let ones = tensor2(1, points.len(), vec![1.0; points.len()]);
+            let derivative = activation.backward(&cache, &ones).expect("backward");
+
+            let shifted = |delta: f32| {
+                let moved = tensor2(1, points.len(), points.iter().map(|x| x + delta).collect());
+                activation.forward(&moved).expect("forward")
+            };
+            let (above, below) = (shifted(step), shifted(-step));
+            for (i, &x) in points.iter().enumerate() {
+                let difference =
+                    (above[[0, i]] as f64 - below[[0, i]] as f64) / (2.0 * step as f64);
+                let got = derivative[[0, i]] as f64;
+                assert!(
+                    (got - difference).abs() <= 1e-3,
+                    "{activation:?} at x = {x}: backward {got}, central difference {difference}"
+                );
+            }
+        }
+    }
+
+    /// Each variant names the tensor that its backward pass reads
+    #[test]
+    fn only_gelu_silu_and_mish_read_the_pre_activation() {
+        for activation in [
+            Activation::GELU { approximate: false },
+            Activation::GELU { approximate: true },
+            Activation::SiLU,
+            Activation::Mish,
+        ] {
+            assert_eq!(activation.saves(), ActivationInput::PreActivation);
+        }
+        for activation in [
+            Activation::Linear,
+            Activation::ReLU,
+            Activation::Sigmoid,
+            Activation::Tanh,
+            Activation::Softmax {
+                axis: DEFAULT_SOFTMAX_AXIS,
+            },
+            Activation::LeakyReLU {
+                negative_slope: 0.3,
+            },
+            Activation::ELU { alpha: 1.0 },
+            Activation::SELU,
+            Activation::Softplus,
+            Activation::Softsign,
+            Activation::HardSigmoid,
+            Activation::Exponential,
+        ] {
+            assert_eq!(activation.saves(), ActivationInput::Output);
+        }
+    }
+
+    /// The backward pass refuses a cache that holds the other tensor
+    ///
+    /// A pre-activation read as an output, or an output read as a pre-activation, gives a
+    /// wrong gradient with no other sign of the fault
+    #[test]
+    fn backward_refuses_a_cache_of_the_other_tensor() {
+        let tensor = tensor2(1, 3, vec![-1.0, 0.0, 1.0]);
+        let ones = tensor2(1, 3, vec![1.0; 3]);
+        let output_cache = ActivationCache::new(ActivationInput::Output, tensor.clone());
+        let input_cache = ActivationCache::new(ActivationInput::PreActivation, tensor);
+
+        for (activation, cache) in [
+            (Activation::SiLU, &output_cache),
+            (Activation::Tanh, &input_cache),
+        ] {
+            assert!(
+                matches!(
+                    activation.backward(cache, &ones),
+                    Err(Error::InvalidInput(_))
+                ),
+                "{activation:?} must refuse a {:?} cache",
+                cache.holds()
+            );
+            assert!(matches!(
+                activation.output_of(cache),
+                Err(Error::InvalidInput(_))
+            ));
+        }
+    }
+
+    /// The backward pass refuses an upstream gradient of another shape, for every variant
+    #[test]
+    fn backward_refuses_a_gradient_of_another_shape() {
+        let ones = tensor2(1, 4, vec![1.0; 4]);
+        for activation in [Activation::ReLU, Activation::Mish] {
+            let (_, cache) = activation
+                .forward_train(tensor2(1, 3, vec![-1.0, 0.0, 1.0]))
+                .expect("forward");
+            assert!(matches!(
+                activation.backward(&cache, &ones),
+                Err(Error::ShapeMismatch { .. })
+            ));
+        }
+    }
+
+    /// `output_of` gives the forward output for both kinds of cache
+    #[test]
+    fn output_of_recovers_the_forward_output() {
+        let input = tensor2(1, 4, vec![-2.0, -0.5, 0.5, 2.0]);
+        for activation in [Activation::Tanh, Activation::GELU { approximate: false }] {
+            let (output, cache) = activation.forward_train(input.clone()).expect("forward");
+            assert_eq!(activation.output_of(&cache).expect("output_of"), output);
         }
     }
 }

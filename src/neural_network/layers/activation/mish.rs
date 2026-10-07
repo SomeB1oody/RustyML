@@ -1,12 +1,12 @@
-//! Sigmoid activation layer
+//! Mish activation layer
 //!
-//! The `Sigmoid` struct holds only the shape recorded at build time, because the layer takes no
-//! parameter. `UnaryLayer::forward` computes `Activation::Sigmoid` and caches the output during
+//! The `Mish` struct holds only the shape recorded at build time, because the layer takes no
+//! parameter. `UnaryLayer::forward` computes `Activation::Mish` and caches the input during
 //! training. `UnaryLayer::backward` reads that cache to compute the gradient
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::{Activation, ActivationCache, ActivationInput};
+use crate::neural_network::layers::activation::{Activation, ActivationCache};
 use crate::neural_network::layers::validation::start_build;
 use crate::neural_network::layers::{
     built_layer_shape_functions, no_trainable_parameters_layer_functions,
@@ -14,21 +14,24 @@ use crate::neural_network::layers::{
 use crate::neural_network::traits::{LayerBase, UnaryLayer};
 use crate::neural_network::{Ctx, Shape, Tensor};
 
-/// Sigmoid activation layer
+/// Mish activation layer
 ///
-/// Applies `1 / (1 + e^(-x))` elementwise to the input tensor, squashing values to (0, 1) and
-/// keeping the original shape. Common inputs include 2D tensors for dense layers and 4D tensors
-/// for convolutional layers
+/// Applies `x * tanh(softplus(x))` elementwise to the input tensor, keeping the original shape.
+/// Common inputs include 2D tensors for dense layers and 4D tensors for convolutional layers
 ///
-/// [`Activation::Sigmoid`] provides the activation math. This layer only adds boundary
-/// validation and the caching needed for backpropagation
+/// Misra (2019) introduced this activation. The output is smooth and not monotonic. Its
+/// minimum is about -0.3088 at x = -1.1924
+///
+/// [`Activation::Mish`] provides the activation math. This layer only adds boundary
+/// validation and the caching needed for backpropagation. The derivative has no closed form in
+/// the output, so the layer caches the input
 ///
 /// # Examples
 ///
 /// ```rust
 /// use rustyml::neural_network::Shape;
 /// use rustyml::neural_network::sequential::SequentialBuilder;
-/// use rustyml::neural_network::layers::activation::sigmoid::Sigmoid;
+/// use rustyml::neural_network::layers::activation::mish::Mish;
 /// use rustyml::neural_network::optimizers::*;
 /// use rustyml::neural_network::losses::MeanSquaredError;
 /// use ndarray::Array2;
@@ -38,9 +41,9 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///     .unwrap()
 ///     .into_dyn();
 ///
-/// // Build a model with Sigmoid activation
+/// // Build a model with Mish activation
 /// let mut model = SequentialBuilder::new()
-///     .add(Sigmoid::new())
+///     .add(Mish::new())
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
@@ -48,34 +51,34 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// // Forward propagation
 /// let output = model.predict(&x);
 ///
-/// // Output will be approximately: [[0.27, 0.88, 0.05], [0.98, 0.007, 0.998]]
+/// // Output will be: [[-0.30340147, 1.943959, -0.14564745], [3.997413, -0.033576235, 5.9999266]]
 /// ```
 #[derive(Debug)]
-pub struct Sigmoid {
+pub struct Mish {
     /// Shape the layer was built for, batch axis first. `None` before the build
     built: Option<Shape>,
 }
 
-impl Sigmoid {
-    /// Creates a new Sigmoid activation layer
+impl Mish {
+    /// Creates a new Mish activation layer
     ///
     /// # Returns
     ///
-    /// - `Self` - A new `Sigmoid` layer
+    /// - `Self` - A new `Mish` layer
     pub fn new() -> Self {
-        Sigmoid { built: None }
+        Mish { built: None }
     }
 }
 
-impl Default for Sigmoid {
+impl Default for Mish {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LayerBase for Sigmoid {
+impl LayerBase for Mish {
     fn layer_type(&self) -> &str {
-        "Sigmoid"
+        "Mish"
     }
 
     built_layer_shape_functions!();
@@ -83,11 +86,10 @@ impl LayerBase for Sigmoid {
     no_trainable_parameters_layer_functions!();
 }
 
-impl UnaryLayer for Sigmoid {
-    /// Records the shape the layer serves. The layer holds no array, so nothing is
-    /// allocated
+impl UnaryLayer for Mish {
+    /// Records the shape the layer serves. The layer holds no array, so nothing is allocated
     fn build(&mut self, input: &Shape) -> Result<(), Error> {
-        let Some(built) = start_build(&self.built, "Sigmoid", input)? else {
+        let Some(built) = start_build(&self.built, "Mish", input)? else {
             return Ok(());
         };
         self.compute_output_shape(&built)?;
@@ -100,24 +102,21 @@ impl UnaryLayer for Sigmoid {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Large-magnitude inputs saturate to 0/1 by construction
-        let output = Activation::Sigmoid.forward(input)?;
-
-        // The backward pass reads the output, so the cache holds a copy of it
-        if ctx.is_training() {
-            ctx.push_cache(
-                "Sigmoid",
-                ActivationCache::new(ActivationInput::Output, output.clone()),
-            );
+        if !ctx.is_training() {
+            return Activation::Mish.forward(input);
         }
+
+        // The backward pass reads the input, so the cache holds a copy of it
+        let (output, cache) = Activation::Mish.forward_train(input.clone())?;
+        ctx.push_cache("Mish", cache);
 
         Ok(output)
     }
 
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        let cache: ActivationCache = ctx.pop_cache("Sigmoid")?;
+        let cache: ActivationCache = ctx.pop_cache("Mish")?;
 
-        // Sigmoid derivative is f(x) * (1 - f(x))
-        Activation::Sigmoid.backward(&cache, grad_output)
+        // Mish derivative is t + x * (1 - t^2) * sigmoid(x), with t = tanh(softplus(x))
+        Activation::Mish.backward(&cache, grad_output)
     }
 }

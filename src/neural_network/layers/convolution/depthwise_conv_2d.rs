@@ -6,7 +6,7 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::activation::{Activation, ActivationCache};
 use crate::neural_network::layers::conv_op_helpers::{
     DepthwiseGeometry, depthwise_backward, depthwise_forward,
 };
@@ -413,10 +413,10 @@ impl DepthwiseConv2D {
         )
     }
 
-    /// Depthwise convolution over a channels-last tensor, followed by the activation
+    /// Depthwise convolution over a channels-last tensor, with no activation
     ///
-    /// The numeric body of [`UnaryLayer::forward`]. A training pass parks the input and the
-    /// output of this call in the context, and an inference pass parks nothing
+    /// The numeric body of [`UnaryLayer::forward`]. The result is the pre-activation `z`.
+    /// [`UnaryLayer::forward`] applies the activation to it
     fn convolve(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_built_input(&self.built, "DepthwiseConv2D", input.shape())?;
         validate_valid_kernel_fits(
@@ -448,7 +448,7 @@ impl DepthwiseConv2D {
             output.as_slice_mut().expect("output is contiguous"),
         );
 
-        self.activation.forward(&output.into_dyn())
+        Ok(output.into_dyn())
     }
 }
 
@@ -456,8 +456,8 @@ impl DepthwiseConv2D {
 struct DepthwiseConv2DCache {
     /// The tensor the forward pass received
     input: Tensor,
-    /// The activated output, to backpropagate through the activation
-    output: Tensor,
+    /// The tensor that the activation backward pass reads, as [`Activation::saves`] names
+    activation: ActivationCache,
 }
 
 impl LayerBase for DepthwiseConv2D {
@@ -525,23 +525,25 @@ impl UnaryLayer for DepthwiseConv2D {
         if !self.is_built() {
             return Err(Error::not_built("DepthwiseConv2D"));
         }
-        let activated = self.convolve(input)?;
-        // Park only after a successful convolution, so a rejected input leaves no partial state
-        if ctx.is_training() {
-            ctx.push_cache(
-                "DepthwiseConv2D",
-                DepthwiseConv2DCache {
-                    input: input.clone(),
-                    output: activated.clone(),
-                },
-            );
+        let z = self.convolve(input)?;
+        if !ctx.is_training() {
+            return self.activation.forward(&z);
         }
+        let (activated, activation) = self.activation.forward_train(z)?;
+        // Park only after a successful forward pass, so a rejected input leaves no partial state
+        ctx.push_cache(
+            "DepthwiseConv2D",
+            DepthwiseConv2DCache {
+                input: input.clone(),
+                activation,
+            },
+        );
         Ok(activated)
     }
 
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let cache: DepthwiseConv2DCache = ctx.pop_cache("DepthwiseConv2D")?;
-        let grad_upstream = self.activation.backward(&cache.output, grad_output)?;
+        let grad_upstream = self.activation.backward(&cache.activation, grad_output)?;
 
         let input = &cache.input;
 

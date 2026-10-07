@@ -7,14 +7,16 @@
 //! weight setters that a caller uses directly.
 
 use crate::error::Error;
-use crate::neural_network::layers::activation::Activation;
-use crate::neural_network::layers::recurrent::cell::{RecurrentGroup, RnnCell};
+use crate::neural_network::layers::activation::{Activation, ActivationInput};
+use crate::neural_network::layers::recurrent::cell::{
+    RecurrentGroup, RnnCell, activate, activation_backward, record_cache,
+};
 use crate::neural_network::layers::recurrent::gate::FusedGates;
 use crate::neural_network::layers::recurrent::rnn::{Rnn, recurrent_layer_traits};
 use crate::neural_network::traits::{LayerBase, UnaryLayer};
 use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Activation as FusedActivation, Bias, Parallelism};
-use ndarray::{Array2, ArrayView2, Ix2};
+use ndarray::{Array2, ArrayView2};
 
 /// The arithmetic of 1 timestep of a [`SimpleRNN`]
 ///
@@ -28,8 +30,13 @@ use ndarray::{Array2, ArrayView2, Ix2};
 /// with 1 exception. The fused `Relu` maps `NaN` to `0`, while the scalar closure of this crate
 /// propagates `NaN` instead.
 ///
-/// The cell parks nothing of its own. The hidden state that leaves a step is the only value that
-/// its backward pass reads, and [`Rnn`] hands that state to every cell.
+/// # Notes
+///
+/// The record of 1 step depends on [`Activation::saves`]. For an
+/// [`ActivationInput::Output`] activation the record is empty. The backward pass reads the
+/// hidden state that leaves the step, which is the activated output, and [`Rnn`] hands that
+/// state to every cell. For an [`ActivationInput::PreActivation`] activation the record holds 1
+/// array, the pre-activation `z` of the step.
 #[derive(Debug)]
 pub(crate) struct SimpleRnnCell {
     /// Activation applied at each timestep of the recurrence
@@ -40,7 +47,6 @@ impl RnnCell for SimpleRnnCell {
     const CELL_TYPE: &'static str = "SimpleRNN";
     const GATE_BIASES: &'static [f32] = &[0.0];
     const STATE_COUNT: usize = 1;
-    const RECORD_SLOTS: usize = 0;
     const RECURRENT_GROUPS: &'static [RecurrentGroup] = &[RecurrentGroup {
         first: 0,
         count: 1,
@@ -51,12 +57,19 @@ impl RnnCell for SimpleRnnCell {
         Self { activation }
     }
 
+    fn record_slots(&self) -> usize {
+        match self.activation.saves() {
+            ActivationInput::Output => 0,
+            ActivationInput::PreActivation => 1,
+        }
+    }
+
     fn step(
         &self,
         gates: &FusedGates,
         xw_t: ArrayView2<'_, f32>,
         state: &mut [Array2<f32>],
-        _record: Option<&mut Vec<Array2<f32>>>,
+        record: Option<&mut Vec<Array2<f32>>>,
     ) -> Result<(), Error> {
         let bias = gates.bias.as_slice().expect("bias must be contiguous");
         // z = x_t @ W + h_{t-1} @ U + b, with `x_t @ W` prefilled as the accumulator
@@ -75,13 +88,17 @@ impl RnnCell for SimpleRnnCell {
             fused_act,
             Parallelism::Rayon(0),
         );
+        // `Linear` and the fused `ReLU` already hold the output in `z`. Both are
+        // `ActivationInput::Output` activations, so the step parks nothing for them
         state[0] = match self.activation {
             Activation::Linear | Activation::ReLU => z,
-            _ => self
-                .activation
-                .forward(&z.into_dyn())?
-                .into_dimensionality::<Ix2>()
-                .unwrap(),
+            _ => {
+                let activated = activate(&self.activation, z, record.is_some())?;
+                if let (Some(record), Some(z)) = (record, activated.pre_activation) {
+                    record.push(z);
+                }
+                activated.output
+            }
         };
         Ok(())
     }
@@ -91,19 +108,18 @@ impl RnnCell for SimpleRnnCell {
         gates: &FusedGates,
         _state_prev: &[Array2<f32>],
         state_next: &[Array2<f32>],
-        _record: &[Array2<f32>],
+        record: &[Array2<f32>],
         grad_state: &mut [Array2<f32>],
     ) -> Result<Array2<f32>, Error> {
-        // The activation backward reads the state that leaves the step, which is what the
-        // activation produced. It also reads the total gradient of that same state.
-        let d_z = {
-            let h_t = state_next[0].clone().into_dyn();
-            let grad_h = grad_state[0].clone().into_dyn();
-            self.activation
-                .backward(&h_t, &grad_h)?
-                .into_dimensionality::<Ix2>()
-                .unwrap()
+        // The activation backward reads the total gradient of the state that leaves the step.
+        // It also reads the hidden state that leaves the step, or the recorded `z`, as
+        // `Activation::saves` names
+        let saved = match self.activation.saves() {
+            ActivationInput::Output => &state_next[0],
+            ActivationInput::PreActivation => &record[0],
         };
+        let cache = record_cache(&self.activation, saved);
+        let d_z = activation_backward(&self.activation, &cache, grad_state[0].clone())?;
         grad_state[0] = dot(&d_z, &gates.recurrent_kernel.t());
         Ok(d_z)
     }

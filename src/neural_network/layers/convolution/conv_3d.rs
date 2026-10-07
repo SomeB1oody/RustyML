@@ -6,7 +6,7 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
-use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::activation::{Activation, ActivationCache};
 use crate::neural_network::layers::convolution::PaddingType;
 use crate::neural_network::layers::convolution::convolution_engine::{
     conv_backward, conv_forward, effective_kernel,
@@ -370,8 +370,8 @@ impl Conv3D {
 struct Conv3DCache {
     /// The input tensor the forward pass received
     input: Tensor,
-    /// The activated output, to backpropagate through the activation
-    output: Tensor,
+    /// The tensor that the backward pass of the activation reads
+    activation: ActivationCache,
 }
 
 impl LayerBase for Conv3D {
@@ -453,17 +453,18 @@ impl UnaryLayer for Conv3D {
             ],
             self.padding.into(),
         )?;
-        let activated = self.activation.forward(&output)?;
-
-        if ctx.is_training() {
-            ctx.push_cache(
-                "Conv3D",
-                Conv3DCache {
-                    input: input.clone(),
-                    output: activated.clone(),
-                },
-            );
+        if !ctx.is_training() {
+            return self.activation.forward(&output);
         }
+
+        let (activated, activation) = self.activation.forward_train(output)?;
+        ctx.push_cache(
+            "Conv3D",
+            Conv3DCache {
+                input: input.clone(),
+                activation,
+            },
+        );
 
         Ok(activated)
     }
@@ -471,7 +472,7 @@ impl UnaryLayer for Conv3D {
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
         let cache: Conv3DCache = ctx.pop_cache("Conv3D")?;
 
-        let grad_upstream = self.activation.backward(&cache.output, grad_output)?;
+        let grad_upstream = self.activation.backward(&cache.activation, grad_output)?;
 
         let grads = conv_backward(
             &grad_upstream,
