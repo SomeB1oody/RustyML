@@ -43,7 +43,7 @@ pub enum Loss {
 /// use ndarray::{Array1, Array2};
 /// use rustyml::machine_learning::*;
 ///
-/// // Create model with custom parameters
+/// // Create model with custom parameters.
 /// let mut model = LinearSVC::new(
 ///     1000,                        // max_iter
 ///     0.001,                       // learning_rate
@@ -69,7 +69,7 @@ pub enum Loss {
 ///
 /// model.fit(&x, &y).unwrap();
 ///
-/// // Make predictions
+/// // Make predictions.
 /// let predictions = model.predict(&x).unwrap();
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -281,7 +281,6 @@ impl LinearSVC {
         (n_samples / 10).clamp(MIN_BATCH_SIZE, MAX_BATCH_SIZE)
     }
 
-    // Getters
     get_field!(get_fit_intercept, fit_intercept, bool);
     get_field!(get_learning_rate, learning_rate, f64);
     get_field!(get_learning_rate_decay, learning_rate_decay, f64);
@@ -545,8 +544,10 @@ impl LinearSVC {
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model has not been trained yet
-    /// - `Error::DimensionMismatch` - If input data is invalid or feature dimension mismatches
+    /// - `Error::NotFitted` - If the model has not been trained.
+    /// - `Error::EmptyInput` - If the feature matrix contains no elements.
+    /// - `Error::DimensionMismatch` - If the feature count differs from training.
+    /// - `Error::NonFinite` - If features or decision values are not finite.
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -558,8 +559,8 @@ impl LinearSVC {
 
     /// Calculates the decision function values for each sample
     ///
-    /// Raw scores represent the distance to the decision hyperplane: positive values
-    /// indicate class 1 and negative values indicate class 0
+    /// Raw scores are `x.dot(weights) + bias`, without normalization by the weight norm.
+    /// Positive scores indicate class 1. Scores at or below 0 indicate class 0.
     ///
     /// # Parameters
     ///
@@ -571,9 +572,10 @@ impl LinearSVC {
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model has not been trained yet
-    /// - `Error::DimensionMismatch` - If input data is invalid or feature dimension mismatches
-    /// - `Error::NonFinite` - If the computation produced NaN or infinite values
+    /// - `Error::NotFitted` - If the model has not been trained.
+    /// - `Error::EmptyInput` - If the feature matrix contains no elements.
+    /// - `Error::DimensionMismatch` - If the feature count differs from training.
+    /// - `Error::NonFinite` - If features or decision values are not finite.
     pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -611,8 +613,9 @@ impl LinearSVC {
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If input data is invalid
-    /// - `Error::NonFinite` - If numerical issues occur during training
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If the input is empty or target lengths differ.
+    /// - `Error::InvalidInput` - If labels contain a value other than 0 or 1.
+    /// - `Error::NonFinite` - If features or numerical results are not finite.
     pub fn fit_predict<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,

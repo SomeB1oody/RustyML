@@ -1,5 +1,6 @@
-//! Prelude re-exports for the `utils` module: preprocessing, dataset splitting, and the
-//! shared estimator traits the preprocessing transformers implement
+//! Preprocessing functions, stateful scalers, and dataset split functions.
+//!
+//! The exports also include the shared estimator traits and axis or norm selectors.
 
 pub use crate::traits::{Fit, FitTransform, Predict, Transform};
 pub use crate::utils::label_encoding::{

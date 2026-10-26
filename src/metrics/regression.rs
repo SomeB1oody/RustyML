@@ -55,8 +55,8 @@ where
 
 /// Calculates the Root Mean Squared Error (RMSE) between ground-truth and predicted values.
 ///
-/// RMSE is the square root of the [`mean_squared_error`], giving an error in the same units as
-/// the original data. Because MSE is non-negative, the square root is always well-defined.
+/// RMSE is the square root of [`mean_squared_error`], in the same units as the original data.
+/// Non-finite input or arithmetic can produce a non-finite result.
 ///
 /// # Parameters
 ///
@@ -149,7 +149,7 @@ where
 /// changes the result.
 ///
 /// When every entry of `y_true` is identical, the score is undefined. By convention, this returns
-/// `1.0` for an exact fit (`SSE == 0`) and `0.0` otherwise, matching scikit-learn's `r2_score`.
+/// `1.0` for an exact fit (`SSE == 0`) and `0.0` otherwise.
 /// The function recognizes the constant case from the values themselves. A target that varies
 /// only slightly (for example `[1e-6, 2e-6, 3e-6]`) is scored normally, not mistaken for a
 /// constant.
@@ -165,10 +165,9 @@ where
 ///
 /// # NaN Handling
 ///
-/// Unlike [`explained_variance_score`], this does **not** skip non-finite samples. `SSE` and
-/// `SST` are plain sums, so a single `NaN`/`inf` in `y_true` or `y_pred` propagates and makes the
-/// result `NaN`. That surfaces bad data rather than hiding it. Prefer it when you want corruption
-/// to be visible. Clean the inputs beforehand if you do not.
+/// This function does not skip non-finite values.
+/// Non-finite arithmetic can return `NaN` or infinity.
+/// A constant target still uses the exact-fit convention described above.
 ///
 /// # Examples
 ///
@@ -205,7 +204,7 @@ where
     // anything else scores 0.0.
     //
     // The check compares the raw values instead of testing `sst == 0.0`. Floating-point sums do
-    // not round-trip every constant. 3 copies of `0.1` leave `sst` at 5.8e-34, not zero.
+    // not round trip every constant. 3 copies of `0.1` leave `sst` at 5.8e-34, not 0.
     // A threshold on `sst` could miss real constants or flag a low-variance target as constant.
     let mut values = y_true.iter();
     let first = *values.next().expect("validate_pair rejects an empty input");
@@ -222,8 +221,8 @@ where
 ///
 /// Uses `1 - Var(y_true - y_pred) / Var(y_true)`. Unlike [`r2_score`], the numerator is the
 /// variance of the residuals rather than their mean square, so a constant prediction bias does
-/// not lower the score. The best possible value is 1.0. When `y_true` has zero variance, the
-/// score is undefined: it returns 1.0 for residuals of zero variance, and 0.0 otherwise.
+/// not lower the score. The best possible value is 1.0. When `y_true` has variance 0, the
+/// score is undefined: it returns 1.0 for residuals of variance 0, and 0.0 otherwise.
 ///
 /// # Parameters
 ///
@@ -236,11 +235,10 @@ where
 ///
 /// # NaN Handling
 ///
-/// This uses a NaN-skipping variance. It **silently skips** non-finite samples and averages over
-/// the finite subset. Unlike [`r2_score`], where a `NaN` propagates to a `NaN` result, a few
-/// `NaN`/`inf` entries here leave a normal-looking score computed from the rest. This is
-/// convenient but can mask corrupt data. Validate the inputs first if a silently dropped sample
-/// would be a problem.
+/// The target variance and residual variance each use their own finite subset.
+/// Their included sample counts can differ.
+/// A constant or empty finite subset has variance 0.
+/// Validate input first if omitted values would make the score unsuitable.
 ///
 /// # Examples
 ///
@@ -250,8 +248,8 @@ where
 ///
 /// let y_true = array![1.0, 2.0, 3.0];
 /// let y_pred = array![2.0, 3.0, 4.0]; // a constant +1 bias
-/// // The residuals are all -1, so their variance is 0 and the score is 1.0, even though the
-/// // predictions are biased (r2_score would be lower here).
+/// // The residuals are all -1, so their variance is 0 and the score is 1.0.
+/// // The constant bias lowers r2_score instead.
 /// assert!((explained_variance_score(&y_true, &y_pred) - 1.0).abs() < 1e-12);
 /// ```
 ///
@@ -275,10 +273,10 @@ where
         .map(|(&t, &p)| t - p)
         .collect();
 
-    // Computes population variance over the finite subset. A constant (or empty) subset has zero
+    // Computes population variance over the finite subset. A constant (or empty) subset has 0
     // spread by definition. The check compares the raw values instead of testing the computed
-    // sum of squares for zero. Floating-point sums do not round-trip every constant (8 copies
-    // of `0.1` do not), so a near-zero threshold could misjudge real data.
+    // sum of squares for 0. Floating-point sums do not round trip every constant (8 copies
+    // of `0.1` do not), so a near 0 threshold could misjudge real data.
     let variance = |v: ArrayView1<f64>| -> f64 {
         let mut sum = 0.0_f64;
         let mut count = 0_usize;
@@ -313,7 +311,7 @@ where
     let true_variance = variance(y_true.view());
 
     // Same convention as [`r2_score`]. A constant `y_true` leaves the ratio undefined: residuals
-    // of zero variance score 1.0, anything else scores 0.0. Both checks use exact comparisons.
+    // of variance 0 score 1.0, anything else scores 0.0. Both checks use exact comparisons.
     if true_variance == 0.0 {
         return if residual_variance == 0.0 { 1.0 } else { 0.0 };
     }
@@ -342,7 +340,7 @@ where
 /// use rustyml::metrics::median_absolute_error;
 ///
 /// let y_true = array![1.0, 2.0, 3.0, 4.0];
-/// let y_pred = array![1.0, 2.0, 3.0, 10.0]; // one large outlier error of 6
+/// let y_pred = array![1.0, 2.0, 3.0, 10.0]; // 1 large outlier error of 6
 /// // Sorted absolute errors are [0, 0, 0, 6]. The median is 0.0, unmoved by the outlier.
 /// assert!((median_absolute_error(&y_true, &y_pred) - 0.0).abs() < 1e-12);
 /// ```
@@ -380,9 +378,9 @@ where
 /// values.
 ///
 /// Uses `mean(|y_true - y_pred| / max(|y_true|, eps))`. The result is a fraction. Multiply by
-/// 100 for a percentage. Each denominator is floored at a tiny epsilon. This keeps a zero true
-/// value from causing a division by zero. The score can still be inflated when the true value
-/// is near zero.
+/// 100 for a percentage. Each denominator is floored at a tiny epsilon. This keeps a true
+/// value of 0 from causing a division by 0. The score can still be inflated when the true value
+/// is near 0.
 ///
 /// # Parameters
 ///

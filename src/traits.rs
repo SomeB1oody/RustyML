@@ -9,7 +9,7 @@
 //!   (labels, probabilities, cluster ids, anomaly scores, ...)
 //! - [`Transform`] - project new data through a fitted transformer (`PCA`, `KernelPCA`,
 //!   `StandardScaler`)
-//! - [`FitTransform`] - fit and transform the training data in one call (`PCA`, `KernelPCA`,
+//! - [`FitTransform`] - fit and transform the training data in 1 call (`PCA`, `KernelPCA`,
 //!   `TSNE`, `StandardScaler`)
 //!
 //! The traits live at the crate root because implementors span features: the
@@ -25,7 +25,7 @@
 //!
 //! # Examples
 //!
-//! This example writes one routine that trains and scores any supervised estimator, without
+//! This example writes 1 routine that trains and scores any supervised estimator, without
 //! naming a concrete model type:
 //!
 //! ```rust
@@ -41,7 +41,7 @@
 //!     model.predict(x).unwrap()
 //! }
 //!
-//! // Call it with any estimator that fits the bounds, e.g.:
+//! // Call it with any estimator that fits the bounds, for example:
 //! // let preds = train_and_predict(&mut LinearRegression::default(), &x, &y);
 //! ```
 //!
@@ -77,6 +77,14 @@ use std::hash::Hash;
 pub trait Fit<D> {
     /// Fits the model to `data`, returning a mutable reference to `self` for chaining
     ///
+    /// # Parameters
+    ///
+    /// - `data` - Training input accepted by the estimator
+    ///
+    /// # Returns
+    ///
+    /// - `Result<&mut Self, Error>` - Operation result on success
+    ///
     /// # Errors
     ///
     /// Returns an [`Error`] if the input is invalid or training fails
@@ -96,6 +104,14 @@ pub trait Predict<X> {
     type Output;
 
     /// Predicts outputs for `input`
+    ///
+    /// # Parameters
+    ///
+    /// - `input` - Input samples accepted by the estimator
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self::Output, Error>` - Operation result on success
     ///
     /// # Errors
     ///
@@ -120,6 +136,14 @@ pub trait Transform<X> {
 
     /// Transforms `input` using the fitted transformer
     ///
+    /// # Parameters
+    ///
+    /// - `input` - Input samples accepted by the transformer
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self::Output, Error>` - Operation result on success
+    ///
     /// # Errors
     ///
     /// Returns an [`Error`] if the transformer is not fitted or the input is invalid
@@ -142,6 +166,14 @@ pub trait FitTransform<D> {
 
     /// Fits the transformer to `data` and returns the transformed `data`
     ///
+    /// # Parameters
+    ///
+    /// - `data` - Training input accepted by the transformer
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self::Output, Error>` - Operation result on success
+    ///
     /// # Errors
     ///
     /// Returns an [`Error`] if the input is invalid or fitting fails
@@ -153,8 +185,6 @@ pub trait FitTransform<D> {
 #[cfg(feature = "machine_learning")]
 mod machine_learning_impls {
     use super::*;
-
-    // Supervised estimators: Fit<(&X, &Y)>
 
     impl<'a, S1, S2> Fit<(&'a ArrayBase<S1, Ix2>, &'a ArrayBase<S2, Ix1>)> for LinearRegression
     where
@@ -255,8 +285,6 @@ mod machine_learning_impls {
         }
     }
 
-    // Unsupervised estimators: Fit<&X>
-
     impl<'a, S> Fit<&'a ArrayBase<S, Ix2>> for KMeans
     where
         S: Data<Elem = f64>,
@@ -310,8 +338,6 @@ mod machine_learning_impls {
             self.fit(data)
         }
     }
-
-    // Predict<&X>
 
     impl<'a, S> Predict<&'a ArrayBase<S, Ix2>> for LinearRegression
     where
@@ -424,8 +450,6 @@ mod machine_learning_impls {
         }
     }
 
-    // Transformers: Transform<&X>
-
     impl<'a, S> Transform<&'a ArrayBase<S, Ix2>> for PCA
     where
         S: Data<Elem = f64>,
@@ -445,8 +469,6 @@ mod machine_learning_impls {
             self.transform(input)
         }
     }
-
-    // Transformers: FitTransform<&X>
 
     impl<'a, S> FitTransform<&'a ArrayBase<S, Ix2>> for PCA
     where

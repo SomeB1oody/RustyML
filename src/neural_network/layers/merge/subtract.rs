@@ -1,6 +1,6 @@
 //! The merge layer that subtracts its second input from its first
 //!
-//! [`Subtract`] is the 1 merge layer with a fixed arity: it takes exactly 2 inputs and gives
+//! [`Subtract`] is the only merge layer with a fixed arity: it takes exactly 2 inputs and gives
 //! `a - b`. `SubtractCache` holds the 2 input shapes and the output shape that the backward
 //! pass needs to route the gradient and its negation back to each input. The `tests` module
 //! checks the subtraction, the 2 gradients, the broadcast, and the refusals of the layer.
@@ -17,7 +17,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// Subtracts the second input of the layer from the first, element by element
 ///
 /// The output is `a - b`, where `a` is the first input and `b` is the second. The layer takes
-/// exactly 2 inputs, and it gives 1 output. It is the 1 layer of the merge family with a fixed
+/// exactly 2 inputs, and it gives 1 output. It is the only layer of the merge family with a fixed
 /// input count. A difference of 3 or more terms has no single meaning. A caller that offers
 /// another count gets a refusal that names the count it offered
 ///
@@ -44,7 +44,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::layers::Subtract;
 /// use rustyml::neural_network::traits::Layer;
 ///
-/// // 2 samples of 3 features each, and 1 value to remove from each sample
+/// // 2 samples of 3 features each, and 1 value to remove from each sample.
 /// let a = Array::from_shape_vec((2, 3), vec![5.0, 6.0, 7.0, 8.0, 9.0, 10.0])
 ///     .unwrap()
 ///     .into_dyn();
@@ -54,19 +54,19 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// let mut ctx = Ctx::training();
 /// let output = layer.forward_many_mut(&[&a, &b], &mut ctx).unwrap();
 ///
-/// // The second input broadcasts over axis 1, and the layer subtracts it
+/// // The second input broadcasts over axis 1, and the layer subtracts it.
 /// assert_eq!(output.shape(), &[2, 3]);
 /// assert_eq!(output[[0, 0]], 4.0);
 /// assert_eq!(output[[1, 2]], 8.0);
 ///
-/// // The 2 gradients come back at the shapes of the 2 inputs
+/// // The 2 gradients come back at the shapes of the 2 inputs.
 /// let grads = layer
 ///     .backward_many(&Array::ones(output.raw_dim()), &mut ctx)
 ///     .unwrap();
 /// assert_eq!(grads[0].shape(), &[2, 3]);
 /// assert_eq!(grads[1].shape(), &[2, 1]);
 ///
-/// // The second input enters with a minus sign, and its 3 positions sum back into 1
+/// // The second input enters with a minus sign, and its 3 positions sum back into 1.
 /// assert_eq!(grads[1][[0, 0]], -3.0);
 /// ```
 #[derive(Debug, Default)]
@@ -167,6 +167,7 @@ impl Layer for Subtract {
 }
 
 /// Unit tests of the forward values, the 2 gradients, the broadcast, and the refusals
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,8 +275,8 @@ mod tests {
             .forward_many_mut(&[&first, &second], &mut ctx)
             .unwrap();
 
-        // Sample 0 removes the row (1, 2, 3) from both of its 2 rows, and sample 1 removes the
-        // row (4, 5, 6) from both of its own
+        // Sample 0 subtracts (1, 2, 3) from each row. Sample 1 subtracts (4, 5, 6) from each
+        // row
         assert_eq!(
             output,
             tensor(

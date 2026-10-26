@@ -1,7 +1,7 @@
 //! Integration tests for `Sequential`: add/compile/fit/predict/summary plus error paths.
 //!
-//! Every test derives its expected value from a mathematical definition or a hand calculation.
-//! No test derives it by running the layer and recording the output.
+//! Expected values come from formulas, hand calculations, and Keras reference runs.
+//! The tests also check training history, batched loss, model shapes, and validation errors.
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, IxDyn};
@@ -18,8 +18,6 @@ use rustyml::neural_network::traits::Loss;
 use rustyml::neural_network::traits::{LayerBase, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
-// helpers
-
 /// Build a 2-D Tensor from row-major data
 fn t2(rows: usize, cols: usize, data: Vec<f32>) -> Tensor {
     Array2::from_shape_vec((rows, cols), data)
@@ -27,9 +25,7 @@ fn t2(rows: usize, cols: usize, data: Vec<f32>) -> Tensor {
         .into_dyn()
 }
 
-// predict: forward values with known weights
-
-/// Dense(2->2, Linear) with identity weights and zero bias returns the input unchanged
+/// Dense(2->2, Linear) with identity weights and 0 bias returns the input unchanged
 #[test]
 fn test_predict_identity_weights_linear_dense() {
     let mut dense = Dense::new(2, Activation::Linear).unwrap();
@@ -125,11 +121,11 @@ fn test_predict_two_layer_stack() {
     let x = t2(1, 3, vec![5.0, 7.0, 99.0]);
     let out = model.predict(&x).unwrap();
 
-    // Layer 1 zeroes the third feature, giving [5, 7]. Layer 2 sums them, giving 12.
+    // Layer 1 omits the third feature, giving [5, 7]. Layer 2 sums them, giving 12.
     assert_abs_diff_eq!(out[[0, 0]], 12.0_f32, epsilon = 1e-5);
 }
 
-/// Dense(1->3, Softmax) on a zero pre-activation yields the uniform distribution [1/3, 1/3, 1/3]
+/// Dense(1->3, Softmax) on a 0 pre-activation yields the uniform distribution [1/3, 1/3, 1/3]
 #[test]
 fn test_predict_dense_softmax_equal_input() {
     let mut dense = Dense::new(3, Activation::Softmax { axis: -1 }).unwrap();
@@ -157,7 +153,7 @@ fn test_predict_dense_softmax_equal_input() {
     assert_abs_diff_eq!(sum, 1.0_f32, epsilon = 1e-6);
 }
 
-/// Dense(1->3, Softmax) with all-zero weights ignores the input and stays uniform
+/// Dense(1->3, Softmax) with all-0 weights ignores the input and stays uniform
 #[test]
 fn test_predict_dense_softmax_known_probs() {
     let mut dense = Dense::new(3, Activation::Softmax { axis: -1 }).unwrap();
@@ -180,8 +176,6 @@ fn test_predict_dense_softmax_known_probs() {
     assert_abs_diff_eq!(out[[0, 2]], third, epsilon = 1e-5);
 }
 
-// predict: determinism (2 consecutive calls identical)
-
 /// 2 back-to-back predict() calls on the same input produce identical tensors
 #[test]
 fn test_predict_is_deterministic() {
@@ -202,8 +196,6 @@ fn test_predict_is_deterministic() {
     crate::common::assert_allclose(&out1, &out2, 0.0_f32);
 }
 
-// summary smoke-test
-
 /// `summary()` does not panic on a built 2-layer model
 #[test]
 fn test_summary_does_not_panic() {
@@ -214,8 +206,6 @@ fn test_summary_does_not_panic() {
         .unwrap();
     model.summary();
 }
-
-// error paths
 
 /// `fit` on an uncompiled model returns `NotCompiled`
 #[test]
@@ -368,8 +358,6 @@ fn test_fit_with_batches_batch_size_exceeds_samples_returns_invalid_parameter() 
     );
 }
 
-// epochs=0 leaves the model unchanged
-
 #[test]
 fn test_fit_zero_epochs_unchanged_weights() {
     let mut dense = Dense::new(1, Activation::Linear).unwrap();
@@ -396,8 +384,6 @@ fn test_fit_zero_epochs_unchanged_weights() {
     // weight unchanged -> 3.0 * 2.0 + 0.0 = 6.0
     assert_abs_diff_eq!(out[[0, 0]], 6.0_f32, epsilon = 1e-5);
 }
-
-// end-to-end convergence: y = 2x + 1
 
 /// Dense(1->1, Linear) + SGD + MSE converges on y = 2x+1, predicting ~7 at x=3 after 300 epochs
 #[test]
@@ -456,10 +442,10 @@ fn test_convergence_linear_regression_with_batches() {
     assert_abs_diff_eq!(pred[[0, 0]], 5.0_f32, epsilon = 1.0);
 }
 
-// end-to-end convergence: 2-class softmax + Adam + CategoricalCrossEntropy
-
-/// Dense(2->8, Tanh) -> Dense(8->2, Softmax) with Adam + cross-entropy assigns >0.7 probability
-/// to the correct class for a separable 2-class task after 600 epochs
+/// A 2-layer classifier learns the separable 2-class task after 600 epochs.
+///
+/// The model uses Dense(2->8, Tanh), Dense(8->2, Softmax), Adam, and cross-entropy. It assigns
+/// probability above 0.7 to each correct class.
 #[test]
 fn test_convergence_2class_softmax_adam() {
     // 8 training samples (4 per class), well separated
@@ -527,8 +513,6 @@ fn test_convergence_2class_softmax_adam() {
     );
 }
 
-// predict determinism after training
-
 /// 2 predict() calls after training return byte-identical tensors
 #[test]
 fn test_predict_deterministic_after_training() {
@@ -551,8 +535,6 @@ fn test_predict_deterministic_after_training() {
     let p2 = model.predict(&x_test).unwrap();
     crate::common::assert_allclose(&p1, &p2, 0.0_f32);
 }
-
-// fit returns a History of per-epoch losses
 
 /// fit() records exactly 1 loss per epoch, in epoch order, and training drives them down
 #[test]
@@ -637,9 +619,8 @@ fn test_fit_history_records_the_pre_update_loss() {
 /// dataset-wide mean per-sample loss, matching Keras and identical across shuffles.
 #[test]
 fn test_fit_with_batches_weights_batches_by_sample_count() {
-    // Batches of 2 leave 1 sample alone in the trailing batch. A plain mean over the 3 batches
-    // equals the weighted mean S/5 only when that lone sample's loss also equals S/5, which the
-    // assertion below rules out for every sample.
+    // Batches of 2 leave 1 sample in the last batch. An unweighted batch mean equals S/5 only
+    // if that sample also has loss S/5. The assertions exclude this equality for every sample.
     let x = t2(5, 1, vec![1.0, 1.0, 1.0, 1.0, 1.0]);
     let y = t2(5, 1, vec![0.0, 1.0, 4.0, 9.0, 100.0]);
 
@@ -692,8 +673,6 @@ fn test_fit_with_batches_weights_batches_by_sample_count() {
     }
 }
 
-// multi-batch convergence with fit_with_batches, full validation
-
 /// fit_with_batches with batch_size == n_samples behaves like full-batch fit, converging to
 /// y = 2x+1
 #[test]
@@ -718,8 +697,6 @@ fn test_fit_with_batches_full_batch_equivalent() {
     // true value: 2*4 + 1 = 9
     assert_abs_diff_eq!(pred[[0, 0]], 9.0_f32, epsilon = 1.0);
 }
-
-// train_batch: the public single-step primitive
 
 /// `fit` is exactly a loop over `train_batch`: the same data through either path leaves the same
 /// weights, and the history holds precisely the per-step losses
@@ -807,8 +784,6 @@ fn test_train_batch_on_uncompiled_model_is_an_error() {
         "expected NotCompiled"
     );
 }
-
-// evaluate: scoring without training
 
 /// `evaluate` is `predict` scored with the compiled loss, and leaves the model untouched
 #[test]
@@ -926,8 +901,6 @@ fn test_rank_zero_inputs_are_rejected() {
     ));
 }
 
-// learning rate: readable, not just writable
-
 /// The model reports the optimizer's current rate, so a schedule can derive the next step from
 /// it. An uncompiled model has no rate to report.
 #[test]
@@ -1018,13 +991,10 @@ fn test_batch_losses_and_epoch_mean_match_keras() {
     assert_abs_diff_eq!(model.evaluate(&x, &y).unwrap(), 9.242_0_f32, epsilon = 1e-4);
 }
 
-// The build step
-
-/// A stack whose shapes do not agree is refused, and the refusal names the position of the
-/// layer and its type
+/// A build rejects incompatible shapes and names the layer position and type.
 ///
-/// The build walks the stack once, threads the output shape of each layer into the next, and
-/// stops at the first layer that cannot take what reaches it
+/// The build passes each output shape to the next layer. It stops at the first layer that
+/// rejects its input shape.
 #[test]
 fn the_build_refuses_a_stack_whose_shapes_do_not_agree_and_names_the_layer() {
     // Layer 0 gives a rank-2 output, and layer 1 needs rank 4

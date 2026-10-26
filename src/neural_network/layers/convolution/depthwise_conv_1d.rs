@@ -26,8 +26,8 @@ use ndarray::{Array1, Array3};
 
 /// A 1D depthwise convolutional layer
 ///
-/// Applies its own kernel to each input channel of a sequence. This lowers the parameter count
-/// and the computation compared to a standard convolution. It still extracts features along the
+/// Applies its own kernel to each input channel of a sequence. This can reduce the parameter count
+/// and the work compared to a standard convolution. It still extracts features along the
 /// length axis per channel. Input shape is \[batch_size, length, channels\] and output shape is
 /// \[batch_size, out_length, channels * depth_multiplier\]. No kernel mixes channels
 ///
@@ -48,10 +48,10 @@ use ndarray::{Array1, Array3};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array3;
 ///
-/// // Input data shape: [batch_size, length, channels]
+/// // Input data shape: [batch_size, length, channels].
 /// let input = Array3::<f32>::ones((2, 10, 4)).into_dyn();
 ///
-/// // DepthwiseConv1D with ReLU. The build draws the weights
+/// // DepthwiseConv1D with ReLU. The build draws the weights.
 /// let depthwise_layer = DepthwiseConv1D::new(
 ///     3,                       // kernel_size
 ///     1,                       // stride
@@ -68,7 +68,7 @@ use ndarray::{Array1, Array3};
 ///
 /// let output = model.predict(&input).unwrap();
 ///
-/// // Input [2, 10, 4] with kernel 3, stride 1, and Valid padding gives output [2, 8, 4]
+/// // Input [2, 10, 4] with kernel 3, stride 1, and Valid padding gives output [2, 8, 4].
 /// assert_eq!(output.shape(), &[2, 8, 4]);
 /// ```
 #[derive(Debug)]
@@ -91,9 +91,8 @@ pub struct DepthwiseConv1D {
     weights: Array3<f32>,
     /// 1D bias vector with shape \[channels * depth_multiplier\]
     ///
-    /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
-    /// The forward pass adds nothing, `weights` hides the array, and `parameters` never yields
-    /// it, so a bias-free layer holds it and no more
+    /// The array stays allocated when `use_bias` is false. The forward pass and weight rosters
+    /// exclude it.
     bias: Array1<f32>,
     /// Activation applied to the convolution output
     activation: Activation,
@@ -116,8 +115,7 @@ impl DepthwiseConv1D {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A new `DepthwiseConv1D` instance with Xavier-initialized
-    ///   weights, or an error
+    /// - `Result<Self, Error>` - A new unbuilt `DepthwiseConv1D` layer, or an error
     ///
     /// # Notes
     ///
@@ -239,11 +237,12 @@ impl DepthwiseConv1D {
         Ok(self)
     }
 
-    /// Sets the seed for the depthwise weights and re-initializes them deterministically
+    /// Sets the depthwise weight seed and redraws weights if the layer has a build
     ///
     /// By default, the layer seeds weights from the global seed or entropy (see
-    /// [`crate::random`]). This re-runs Xavier/Glorot uniform initialization with `random_state`.
-    /// Call it before you assign custom weights or start training. The bias stays zero-initialized
+    /// [`crate::random`]). For a built layer, this repeats Xavier/Glorot uniform initialization with `random_state`.
+    /// Call it before you assign custom weights or start training. A built layer also resets
+    /// its bias to 0
     ///
     /// # Parameters
     ///
@@ -263,9 +262,9 @@ impl DepthwiseConv1D {
     /// Xavier/Glorot uniform initialization of the \[kernel_size, channels, depth_multiplier\]
     /// tensor
     ///
-    /// The depth multiplier takes the place of the filter count in the fan pair, so `fan_in`
-    /// counts every input channel although a depthwise unit reads only 1 of them. See
-    /// [`Fans::conv`]
+    /// The depth multiplier replaces the filter count in the fan pair. Thus, `fan_in` counts
+    /// every input channel although each depthwise unit reads only 1 channel. See
+    /// [`Fans::conv`].
     fn draw_parameters(&mut self) {
         let mut rng = crate::random::make_rng(self.random_state);
         // The depth multiplier takes the place of the filter count. See `Fans::conv`
@@ -301,10 +300,9 @@ impl DepthwiseConv1D {
 
     /// Sets whether the layer adds a bias to the convolution output (defaults to `true`)
     ///
-    /// With `use_bias` set to false the layer holds the kernel alone: `param_count` counts the
-    /// kernel alone, `parameters` yields the kernel alone, and a checkpoint of the layer holds
-    /// 1 array under the path `<position>.kernel`. A checkpoint written by a layer that has a
-    /// bias therefore fails to load into a layer that has none, and the refusal names the path
+    /// With `use_bias` set to false, the weight roster contains only the kernel. `param_count` counts it,
+    /// and `parameters` yields it. A checkpoint holds 1 array under `<position>.kernel`. A
+    /// checkpoint with bias cannot load into a layer without bias. The error names the path.
     ///
     /// # Parameters
     ///
@@ -326,6 +324,10 @@ impl DepthwiseConv1D {
     ///   \[kernel_size, channels, depth_multiplier\]
     /// - `bias` - 1D bias vector with shape \[channels * depth_multiplier\], or `None`
     ///   for a layer built with [`with_use_bias(false)`](Self::with_use_bias)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - Success after the weights are set
     ///
     /// # Errors
     ///
@@ -539,8 +541,7 @@ impl UnaryLayer for DepthwiseConv1D {
                 .expect("weight gradient shape matches weights")
                 .into_dyn(),
         )?;
-        // A bias-free layer writes no bias gradient, so the store holds none and no
-        // optimizer state is ever keyed on a bias that the layer does not hold
+        // A layer without bias has no stored bias gradient or bias optimizer state.
         if self.use_bias {
             ctx.add_grad("bias", Array1::from_vec(grads.bias).into_dyn())?;
         }
@@ -581,7 +582,7 @@ mod tests {
 
     /// Channels never mix. The values match a hand-worked cross-correlation
     ///
-    /// Channel 0 carries 1..5 against an all-ones kernel. Channel 1 carries all ones against an
+    /// Channel 0 carries 1..5 against an all-ones kernel. Channel 1 carries all 1 against an
     /// all-twos kernel. Channel 1's output is therefore the same constant at every position,
     /// while channel 0's output varies. This only holds if the 2 kernels stay on their own
     /// channels
@@ -589,11 +590,11 @@ mod tests {
     fn depthwise_1d_forward_keeps_channels_separate_hand_derived() {
         let mut layer = DepthwiseConv1D::new(2, 1, Linear::new()).unwrap();
         layer.build(&Shape::known(&[1, 5, 2])).unwrap();
-        // [k, C, dm] with dm == 1: channel 0 all ones, channel 1 all twos
+        // [k, C, dm] with dm == 1: channel 0 all 1, channel 1 all 2
         let weights = Array3::from_shape_vec((2, 2, 1), vec![1.0, 2.0, 1.0, 2.0]).unwrap();
         layer.set_weights(weights, Array1::zeros(2)).unwrap();
 
-        // [1, 5, 2]: channel 0 is 1..5, channel 1 is all ones
+        // [1, 5, 2]: channel 0 is 1..5, channel 1 is all 1
         let input = ArrayD::from_shape_vec(
             ndarray::IxDyn(&[1, 5, 2]),
             vec![1.0, 1.0, 2.0, 1.0, 3.0, 1.0, 4.0, 1.0, 5.0, 1.0],

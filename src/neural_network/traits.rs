@@ -53,14 +53,14 @@ use std::fmt;
 /// it. Neither half moves while the model trains. An optimizer can therefore key its
 /// per-parameter state on the pair and reach the same buffer on every step
 ///
-/// The layer half is a [`LayerPath`]: the position of the layer in the model that drives the
-/// update, and the sublayer names down to the layer that holds the tensor.
+/// The layer half is a [`LayerPath`]. It holds the model position and the sublayer names that
+/// lead to the tensor.
 /// [`Sequential`](crate::neural_network::sequential::Sequential) gives each layer its index,
 /// counted from the input. A caller that drives 1 layer directly takes position 0
 ///
 /// The name is the `&'static str` that [`LayerBase::parameters_mut`] puts in the
 /// [`ParamRef`]. It follows the layer. A layer that stops yielding 1 of its
-/// tensors, or that starts yielding a new one, moves no other tensor's address
+/// tensors, or yields a new tensor, leaves every other tensor address unchanged
 ///
 /// The text form is the checkpoint path of the tensor, such as `2.kernel` or
 /// `2.forward.kernel`
@@ -137,11 +137,11 @@ impl fmt::Display for ParamId {
 /// wrong number that no later check reports.
 ///
 /// A sublayer name is the address of a sublayer in the same way, and the check holds it to the
-/// same rule. The check also holds the rules that keep the text form of an address readable
-/// in 1 way only, and the rules that keep the 2 sublayer rosters in agreement.
+/// same rule. The check also ensures that each address has 1 text form and that the 2 sublayer rosters
+/// agree.
 ///
-/// A model build calls this once per model position, before the model computes anything, so a
-/// layer that breaks a rule never reaches a training step. The check visits every node of the
+/// A model build checks each position before any computation. A layer that breaks a rule cannot
+/// reach a training step. The check visits every node of the
 /// tree, and it holds each node to these rules:
 ///
 /// 1. No 2 arrays of [`LayerBase::weights`] share a name. The same holds for
@@ -169,16 +169,15 @@ pub(crate) fn check_addresses(scope: usize, layer: &mut dyn LayerBase) -> Result
     let root = LayerPath::root(scope);
     let mut storages: Vec<(LayerIdentity, LayerPath)> = Vec::new();
     check_tree(&*layer, &root, &mut storages)?;
-    // The read roster is a tree now: no node repeats and no path is too deep. The write
-    // rosters must agree with it, and the check of each node runs before the walk goes down
-    // the write roster, so a write roster that lists its own layer stops here as well
+    // The read roster is a tree now: no node repeats and no path is too deep. Check the write roster of each node before its sublayers. A write roster that lists its
+    // own layer fails the agreement check.
     check_tree_mut(layer, &root)
 }
 
 /// The deepest sublayer path that a model build accepts
 ///
 /// No real layer nests this deep. The limit stops a roster that lists its own layer, which
-/// would otherwise recurse until the stack overflows. A zero-sized layer that lists itself
+/// would otherwise recurse until the stack overflows. A layer with size 0 that lists itself
 /// passes the storage check, so the limit is the check that stops it
 const MAX_SUBLAYER_DEPTH: usize = 64;
 
@@ -196,7 +195,7 @@ fn check_tree(
     }
     // A layer is identified by its address and its concrete type. The address alone is not
     // enough: a struct and its first field share 1 address, and both can be nodes of 1 tree.
-    // A zero-sized layer holds no storage, so 2 nodes of it share nothing
+    // A layer with size 0 holds no storage, so 2 nodes of it share nothing
     if std::mem::size_of_val(node) > 0 {
         let storage = identity_of(node);
         if let Some((_, first)) = storages.iter().find(|(seen, _)| *seen == storage) {
@@ -413,7 +412,7 @@ pub(crate) fn check_every_gradient_is_claimed(
 /// [`Grads`] store of the context. The optimizer reads
 /// it back with the [`ParamId`] that this name and the path of the layer build
 ///
-/// Construct one with [`ParamRef::weight`] for a tensor that decoupled weight decay applies to
+/// Use [`ParamRef::weight`] for a tensor that weight decay applies to
 /// (weight matrices, conv/recurrent kernels). Use [`ParamRef::no_decay`] for a tensor it skips
 /// (biases and normalization scale/shift `gamma`/`beta`). The `decays` flag tells the optimizer
 /// which rule applies, so it never has to guess
@@ -427,14 +426,13 @@ pub struct ParamRef<'a> {
     pub name: &'static str,
     /// Mutable view of the parameter's contiguous data that the optimizer updates in place
     pub value: &'a mut [f32],
-    /// Whether decoupled (AdamW/SGDW-style) weight decay applies to this tensor. `true` for
-    /// weight matrices and conv/recurrent kernels, `false` for biases and normalization
-    /// scale/shift (`gamma`/`beta`)
+    /// Whether weight decay applies to this tensor. This flag controls coupled and decoupled
+    /// decay. Biases and normalization scale and shift parameters usually disable decay.
     pub decays: bool,
 }
 
 impl<'a> ParamRef<'a> {
-    /// A weight tensor that decoupled weight decay applies to (dense/conv/recurrent kernels)
+    /// A weight tensor that weight decay applies to, such as a dense or convolution kernel
     ///
     /// # Parameters
     ///
@@ -485,7 +483,7 @@ pub enum WeightKind {
     Trainable,
     /// The layer keeps this array and no optimizer writes it. The running statistics of
     /// [`BatchNormalization`](crate::neural_network::layers::BatchNormalization)
-    /// are the 1 example today
+    /// use this kind
     NonTrainable,
 }
 
@@ -608,9 +606,15 @@ impl<'a> WeightMut<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Arity {
     /// The layer takes exactly this many inputs
-    Exactly(usize),
+    Exactly(
+        /// The exact input count.
+        usize,
+    ),
     /// The layer takes this many inputs or more
-    AtLeast(usize),
+    AtLeast(
+        /// The minimum input count.
+        usize,
+    ),
 }
 
 impl Arity {
@@ -671,9 +675,8 @@ impl Arity {
 /// # A layer that holds other layers
 ///
 /// A layer can hold other layers, which are its sublayers. Each sublayer is a full layer with
-/// its own arrays, its own state, and its own sublayers. The rosters of this trait, such as
-/// [`weights`](LayerBase::weights) and [`parameters_mut`](LayerBase::parameters_mut), give the
-/// arrays of the layer itself and never the arrays of a sublayer. The model visits every
+/// its own arrays, its own state, and its own sublayers. The `weights` and `parameters_mut` rosters describe only the arrays of this layer. They
+/// exclude sublayer arrays. The model visits every
 /// sublayer through [`sublayers`](LayerBase::sublayers) and
 /// [`sublayers_mut`](LayerBase::sublayers_mut), and it gives each 1 its own
 /// [`LayerPath`]. An optimizer, a checkpoint, and the state channel therefore reach every
@@ -765,7 +768,7 @@ impl Arity {
 ///     .build(&Shape::known(&[2, 4]))
 ///     .unwrap();
 ///
-/// // Each sublayer has its own addresses, so the 2 kernels never share 1 gradient
+/// // Each sublayer has its own addresses, so the 2 kernels never share 1 gradient.
 /// assert_eq!(
 ///     model.weight_paths(),
 ///     vec!["0.first.kernel", "0.first.bias", "0.second.kernel", "0.second.bias"]
@@ -987,7 +990,7 @@ pub trait LayerBase: std::any::Any + Send + Sync {
 
 /// A layer that takes 1 input and gives 1 output
 ///
-/// Almost every layer of this crate is one. Implement this trait, and the blanket
+/// Most layers take 1 input. Implement this trait, and the blanket
 /// `impl<T: UnaryLayer> Layer for T` gives the layer the general [`Layer`] interface that a
 /// model holds it through. Implement [`Layer`] itself only for a layer that takes several
 /// inputs, such as a merge layer
@@ -1015,7 +1018,7 @@ pub trait UnaryLayer: LayerBase {
     ///
     /// # Returns
     ///
-    /// - `Tensor` - The layer's output, in the standard memory order
+    /// - `Result<Tensor, Error>` - The layer's output, in the standard memory order
     ///
     /// # Errors
     ///
@@ -1035,21 +1038,14 @@ pub trait UnaryLayer: LayerBase {
     ///
     /// # Returns
     ///
-    /// - `Tensor` - The gradient to pass to the previous layer, in the standard memory order
+    /// - `Result<Tensor, Error>` - The gradient to pass to the previous layer, in the standard memory order
     ///
     /// # Notes
     ///
-    /// Backward is pure math: it does **not** sanitize NaN/Inf (no zeroing, no element-wise
-    /// clamping). The backward pass propagates such values instead of masking them. The forward
-    /// pass masks nothing either: it validates the rank, the shape, and the layer parameters. It
-    /// never reads the input values to reject them. A NaN or an infinity therefore stays in the
-    /// tensor and moves on through every later layer. It shows itself in the output and in a
-    /// non-finite loss. [`Embedding`](crate::neural_network::layers::Embedding) is the 1
-    /// exception, because it reads its input as a table of row indices and rejects a non-finite
-    /// index with `Error::InvalidInput`. To tame large-but-finite gradients, enable
-    /// clip-by-global-norm on the optimizer
-    /// ([`Optimizer::global_clipnorm`]) instead of clamping inside a layer. Global-norm scaling
-    /// preserves gradient direction, unlike per-element clamping
+    /// The interface does not require a finite-value check or a gradient clamp.
+    /// Each layer defines how its operations handle NaN and infinity.
+    /// Embedding layers reject non-finite row indices.
+    /// Use [`Optimizer::global_clipnorm`] to limit a finite global gradient norm before parameter updates.
     ///
     /// # Errors
     ///
@@ -1174,8 +1170,7 @@ pub trait UnaryLayer: LayerBase {
 ///
 /// # Errors
 ///
-/// - `Error::Computation` - If a state value at the path of the layer, or below it, stays in
-///   the context, because no node took it back
+/// - `Error::Computation` - If the layer or a sublayer leaves proposed state in the context.
 fn apply_own_state<L: LayerBase + ?Sized>(layer: &mut L, ctx: &mut Ctx) -> Result<(), Error> {
     let path = ctx.layer_path();
     if ctx.has_state(&path) {
@@ -1224,7 +1219,7 @@ pub trait Layer: LayerBase {
     ///
     /// # Returns
     ///
-    /// - `Tensor` - The layer's output, in the standard memory order
+    /// - `Result<Tensor, Error>` - The layer's output, in the standard memory order
     ///
     /// # Errors
     ///
@@ -1241,7 +1236,7 @@ pub trait Layer: LayerBase {
     ///
     /// # Returns
     ///
-    /// - `Vec<Tensor>` - 1 gradient per input, in the order the forward pass took them
+    /// - `Result<Vec<Tensor>, Error>` - 1 gradient per input, in the order the forward pass took them
     ///
     /// # Errors
     ///
@@ -1361,13 +1356,11 @@ impl<T: UnaryLayer> Layer for T {
 /// # Notes
 ///
 /// Each loss normalizes by what is natural for its family, so the conventions differ on
-/// purpose. `compute_grad` is always exactly the gradient of `compute_loss`. Switching loss
-/// families rescales the gradient magnitude, and thus the effective learning rate:
+/// purpose. Clipped cross-entropy gradients use the clipped probabilities without the
+/// derivative of the clip. Loss families use these normalization rules:
 ///
-/// - [`MeanSquaredError`](crate::neural_network::losses::MeanSquaredError),
-///   [`MeanAbsoluteError`](crate::neural_network::losses::MeanAbsoluteError) and
-///   [`BinaryCrossEntropy`](crate::neural_network::losses::BinaryCrossEntropy) average over
-///   **every element** (`y.len()`), treating each output as an independent target
+/// - Mean squared error, mean absolute error, and binary cross-entropy average over all
+///   elements (`y.len()`). Each output is an independent target.
 /// - [`CategoricalCrossEntropy`](crate::neural_network::losses::CategoricalCrossEntropy) sums
 ///   over the trailing **class** axis and averages over every **prediction site** (the product
 ///   of all leading axes). For a `[batch, classes]` target, that divisor is the batch. For the
@@ -1392,7 +1385,7 @@ pub trait Loss: Send + Sync {
     ///
     /// # Returns
     ///
-    /// - `f32` - The scalar loss value
+    /// - `Result<f32, Error>` - The scalar loss value
     ///
     /// # Errors
     ///
@@ -1409,7 +1402,7 @@ pub trait Loss: Send + Sync {
     ///
     /// # Returns
     ///
-    /// - `Tensor` - Tensor containing the gradient of the loss with respect to predictions
+    /// - `Result<Tensor, Error>` - Tensor containing the gradient of the loss with respect to predictions
     ///
     /// # Errors
     ///
@@ -1425,9 +1418,7 @@ pub trait Optimizer: Send + Sync {
     ///
     /// Called exactly once per batch, before the per-layer [`update`](Optimizer::update) calls.
     /// A step-dependent optimizer advances the counter that its own math reads.
-    /// [`Adam`](crate::neural_network::optimizers::Adam) and
-    /// [`AdamW`](crate::neural_network::optimizers::AdamW) advance the bias-correction timestep
-    /// here, so the correction moves once per batch rather than once per layer. SGD, RMSprop,
+    /// Adam and AdamW advance the bias-correction timestep here, once per batch. SGD, RMSprop,
     /// and AdaGrad hold no such counter and keep the no-op default
     ///
     /// Per-parameter state is keyed by [`ParamId`], the path of the layer plus the name the

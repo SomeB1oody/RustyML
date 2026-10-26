@@ -1,13 +1,12 @@
 //! Error types for RustyML
 //!
-//! Every fallible operation in the crate returns [`RustymlResult<T>`],
-//! an alias for `std::result::Result<T, Error>`. [`Error`] is the single,
-//! unified error type.
+//! [`Error`] holds shared validation, model state, computation, and I/O failures.
+//! [`RustymlResult<T>`] aliases `std::result::Result<T, Error>` for APIs that use this error type.
 //!
 //! `Error` aggregates 2 domain-specific error enums: `NnError` (from `neural_network`) and
 //! `TreeError` (from `machine_learning`). It also wraps the shared
 //! [`IoError`]. Callers can `match` precisely, since a shared variant never
-//! carries a concern specific to one part of the crate
+//! carries a concern specific to 1 part of the crate
 //!
 //! # Categories
 //!
@@ -32,7 +31,7 @@
 //!   finiteness). A non-finite value from the **data or a computation** is an
 //!   [`Error::NonFinite`]
 //! - [`Error::DimensionMismatch`] compares scalar counts
-//!   (e.g. number of features). Use [`Error::ShapeMismatch`]
+//!   (for example number of features). Use [`Error::ShapeMismatch`]
 //!   when whole tensor shapes differ
 //!
 //! # Constructing errors
@@ -74,9 +73,12 @@
 pub enum Error {
     /// An input array, vector, or dataset was empty where data was required
     ///
-    /// The payload describes what was empty (e.g. `"input data"`, `"target vector"`)
+    /// The payload describes what was empty (for example `"input data"`, `"target vector"`)
     #[error("input is empty: {0}")]
-    EmptyInput(String),
+    EmptyInput(
+        /// Name of the empty input.
+        String,
+    ),
 
     /// 2 scalar counts that had to agree did not. Examples: number of features at predict
     /// time versus at fit time, or the length of `x` versus `y`
@@ -88,7 +90,7 @@ pub enum Error {
         found: usize,
     },
 
-    /// 2 whole tensor shapes that had to agree did not (e.g. a gradient's shape versus the
+    /// 2 whole tensor shapes that had to agree did not (for example a gradient's shape versus the
     /// activation it flows into)
     #[error("shape mismatch: expected {expected:?}, found {found:?}")]
     ShapeMismatch {
@@ -103,7 +105,10 @@ pub enum Error {
     /// The payload names where it occurred. For an invalid non-finite *hyperparameter*, use
     /// [`Error::InvalidParameter`] instead
     #[error("non-finite value (NaN or infinity) encountered in {0}")]
-    NonFinite(String),
+    NonFinite(
+        /// Location of the non-finite value.
+        String,
+    ),
 
     /// A user-supplied hyperparameter was out of its valid range
     #[error("invalid parameter `{name}`: {reason}")]
@@ -118,17 +123,26 @@ pub enum Error {
     /// an unexpected tensor rank, malformed labels, or a relational constraint between the data
     /// and the configuration
     #[error("invalid input: {0}")]
-    InvalidInput(String),
+    InvalidInput(
+        /// Input validation message.
+        String,
+    ),
 
     /// A method that requires a trained model was called before the model was fitted
     ///
-    /// The payload is the model's name (e.g. `"KMeans"`)
+    /// The payload is the model's name (for example `"KMeans"`)
     #[error("model `{0}` has not been fitted; call `fit` before this operation")]
-    NotFitted(&'static str),
+    NotFitted(
+        /// Name of the unfitted model.
+        &'static str,
+    ),
 
     /// An iterative algorithm failed to reach its convergence criterion
     #[error("failed to converge: {0}")]
-    NotConverged(String),
+    NotConverged(
+        /// Convergence failure message.
+        String,
+    ),
 
     /// A computation failed for a reason that is not a validation problem (numerical breakdown,
     /// a violated internal invariant, or a wrapped lower-level error)
@@ -139,7 +153,7 @@ pub enum Error {
     Computation {
         /// Human-readable description of what failed
         context: String,
-        /// The underlying error, if this wraps one
+        /// The underlying error, if this wraps 1
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
     },
@@ -147,26 +161,55 @@ pub enum Error {
     /// A neural-network-specific error. See [`NnError`](crate::neural_network::NnError)
     #[cfg(feature = "neural_network")]
     #[error(transparent)]
-    NeuralNetwork(#[from] crate::neural_network::NnError),
+    NeuralNetwork(
+        /// Neural network error.
+        #[from]
+        crate::neural_network::NnError,
+    ),
 
     /// A decision-tree-specific error. See [`TreeError`](crate::machine_learning::TreeError)
     #[cfg(feature = "machine_learning")]
     #[error(transparent)]
-    Tree(#[from] crate::machine_learning::TreeError),
+    Tree(
+        /// Decision tree error.
+        #[from]
+        crate::machine_learning::TreeError,
+    ),
 
     /// An I/O or serialization error. See [`IoError`]
     #[error(transparent)]
-    Io(#[from] IoError),
+    Io(
+        /// I/O or serialization error.
+        #[from]
+        IoError,
+    ),
 }
 
 impl Error {
     /// Builds an [`Error::EmptyInput`] describing what was empty
+    ///
+    /// # Parameters
+    ///
+    /// - `what` - Name of the empty input
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Error with the supplied details
     #[cold]
     pub fn empty_input(what: impl Into<String>) -> Self {
         Self::EmptyInput(what.into())
     }
 
     /// Builds an [`Error::DimensionMismatch`] from the expected and found counts
+    ///
+    /// # Parameters
+    ///
+    /// - `expected` - Required count
+    /// - `found` - Provided count
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Error with the supplied details
     #[cold]
     pub fn dimension_mismatch(expected: usize, found: usize) -> Self {
         Self::DimensionMismatch { expected, found }
@@ -174,7 +217,16 @@ impl Error {
 
     /// Builds an [`Error::ShapeMismatch`] from the expected and found shapes
     ///
-    /// Accepts anything convertible to `Vec<usize>`, including `&[usize]` (e.g. `array.shape()`)
+    /// Accepts anything convertible to `Vec<usize>`, including `&[usize]` (for example `array.shape()`)
+    ///
+    /// # Parameters
+    ///
+    /// - `expected` - Required shape
+    /// - `found` - Provided shape
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Error with the supplied details
     #[cold]
     pub fn shape_mismatch(expected: impl Into<Vec<usize>>, found: impl Into<Vec<usize>>) -> Self {
         Self::ShapeMismatch {
@@ -184,12 +236,29 @@ impl Error {
     }
 
     /// Builds an [`Error::NonFinite`] naming where the non-finite value occurred
+    ///
+    /// # Parameters
+    ///
+    /// - `context` - Location of the non-finite value
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Error with the supplied details
     #[cold]
     pub fn non_finite(context: impl Into<String>) -> Self {
         Self::NonFinite(context.into())
     }
 
     /// Builds an [`Error::InvalidParameter`] from a parameter name and the reason it is invalid
+    ///
+    /// # Parameters
+    ///
+    /// - `name` - Parameter name
+    /// - `reason` - Reason the value is invalid
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Error with the supplied details
     #[cold]
     pub fn invalid_parameter(name: impl Into<String>, reason: impl Into<String>) -> Self {
         Self::InvalidParameter {
@@ -200,18 +269,42 @@ impl Error {
 
     /// Builds an [`Error::InvalidInput`] (the fallback for validation failures without a more
     /// specific variant)
+    ///
+    /// # Parameters
+    ///
+    /// - `msg` - Input validation message
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Error with the supplied details
     #[cold]
     pub fn invalid_input(msg: impl Into<String>) -> Self {
         Self::InvalidInput(msg.into())
     }
 
     /// Builds an [`Error::NotFitted`] for the named model
+    ///
+    /// # Parameters
+    ///
+    /// - `model` - Model name
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Error with the supplied details
     #[cold]
     pub fn not_fitted(model: &'static str) -> Self {
         Self::NotFitted(model)
     }
 
     /// Builds an [`Error::NotConverged`] with a description of the failure
+    ///
+    /// # Parameters
+    ///
+    /// - `msg` - Convergence failure message
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Error with the supplied details
     #[cold]
     pub fn not_converged(msg: impl Into<String>) -> Self {
         Self::NotConverged(msg.into())
@@ -220,6 +313,14 @@ impl Error {
     /// Builds an [`Error::Computation`] with no wrapped source
     ///
     /// To wrap a lower-level error, use [`Context::context`] instead
+    ///
+    /// # Parameters
+    ///
+    /// - `context` - Computation failure message
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Error with the supplied details
     #[cold]
     pub fn computation(context: impl Into<String>) -> Self {
         Self::Computation {
@@ -251,28 +352,41 @@ impl From<postcard::Error> for Error {
 pub enum IoError {
     /// A standard I/O error from a filesystem operation
     #[error("I/O error: {0}")]
-    Std(#[from] std::io::Error),
+    Std(
+        /// Underlying filesystem error.
+        #[from]
+        std::io::Error,
+    ),
 
     /// A binary serialization or deserialization error (postcard format)
     #[error("serialization error: {0}")]
-    Serialization(#[from] postcard::Error),
+    Serialization(
+        /// Underlying binary format error.
+        #[from]
+        postcard::Error,
+    ),
 
-    /// The loaded model does not match the saved model. Causes include a different number of
-    /// layers, a different layer type at some layer path, a different list of sublayers, or a
-    /// weight shape that does not match the target layer
+    /// The loaded model does not match the saved model.
+    /// Layer counts, layer types, sublayer lists, or weight shapes can differ.
     #[error("model structure mismatch: {0}")]
-    ModelStructureMismatch(String),
+    ModelStructureMismatch(
+        /// Model structure mismatch details.
+        String,
+    ),
 
-    /// The file is not a RustyML model file, or its on-disk format version is not the one this
+    /// The file is not a RustyML model file, or its on-disk format version is not the version this
     /// build writes
     ///
     /// Weight containers carry no layout tag of their own. A stale file's shapes can match the
-    /// current model's by coincidence. A square convolution kernel is one example. A `Flatten` ->
+    /// current model's by coincidence. A square convolution kernel is 1 example. A `Flatten` ->
     /// `Dense` pair is another, since its `Dense` weight shape stays the same under either tensor
     /// layout. The format version is the only reliable guard against loading weights laid out for
     /// a previous release
     #[error("unsupported model format: {0}")]
-    UnsupportedModelFormat(String),
+    UnsupportedModelFormat(
+        /// Unsupported format details.
+        String,
+    ),
 }
 
 /// An alias for `Result<T, `[`Error`]`>`
@@ -297,8 +411,20 @@ pub trait Context<T> {
     ///
     /// The `context` argument is evaluated **eagerly**, before the call, on both the `Ok` and
     /// `Err` paths. Use this when the context is a string literal or a value you already hold.
-    /// If producing the message does any work (e.g. `format!`), use
+    /// If producing the message does any work (for example `format!`), use
     /// [`with_context`](Context::with_context) instead, so that work happens only on failure
+    ///
+    /// # Parameters
+    ///
+    /// - `context` - Message attached to a source error
+    ///
+    /// # Returns
+    ///
+    /// - `RustymlResult<T>` - Original value or contextual error
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::Computation`] - The source result contains an error
     fn context(self, context: impl Into<String>) -> RustymlResult<T>;
 
     /// Like [`context`](Context::context), but a closure produces the context **lazily**, running
@@ -306,6 +432,18 @@ pub trait Context<T> {
     ///
     /// Prefer this whenever building the message allocates or computes, typically anything using
     /// `format!`, so the common `Ok` path pays nothing
+    ///
+    /// # Parameters
+    ///
+    /// - `f` - Closure that supplies a message on failure
+    ///
+    /// # Returns
+    ///
+    /// - `RustymlResult<T>` - Original value or contextual error
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::Computation`] - The source result contains an error
     fn with_context<F, S>(self, f: F) -> RustymlResult<T>
     where
         F: FnOnce() -> S,
@@ -507,7 +645,7 @@ mod tests {
         }
     }
 
-    /// `RustymlResult<T>` is a transparent alias for `Result<T, Error>` and is usable as one
+    /// `RustymlResult<T>` is a transparent alias for `Result<T, Error>` and is usable as 1
     #[test]
     fn rustyml_result_is_result_alias() {
         let ok: RustymlResult<i32> = Ok(42);

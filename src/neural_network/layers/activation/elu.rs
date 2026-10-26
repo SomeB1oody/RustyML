@@ -37,22 +37,22 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::MeanSquaredError;
 /// use ndarray::Array2;
 ///
-/// // Create a 2D input tensor
+/// // Create a 2D input tensor.
 /// let x = Array2::from_shape_vec((2, 3), vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0])
 ///     .unwrap()
 ///     .into_dyn();
 ///
-/// // Build a model with ELU activation
+/// // Build a model with ELU activation.
 /// let mut model = SequentialBuilder::new()
 ///     .add(ELU::new(1.0).unwrap())
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Forward propagation
+/// // Forward propagation.
 /// let output = model.predict(&x);
 ///
-/// // Output will be: [[-0.63212055, 2.0, -0.95021296], [4.0, -0.99326205, 6.0]]
+/// // Output will be: [[-0.63212055, 2.0, -0.95021296], [4.0, -0.99326205, 6.0]].
 /// ```
 #[derive(Debug)]
 pub struct ELU {

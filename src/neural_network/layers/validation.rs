@@ -19,9 +19,8 @@ use crate::neural_network::Shape;
 
 /// Validates that a weight array assigned to a layer has the shape the layer expects
 ///
-/// Layers initialize their weight arrays with the correct shape in `new()`, so loaded or
-/// user-supplied weights must match that shape. This turns a silent corruption, or a later
-/// opaque panic deep inside the layer's math, into a clear, recoverable error
+/// Loaded or user-supplied weights must match the shape of the stored array.
+/// This check reports a shape error before the array enters the layer math
 ///
 /// # Parameters
 ///

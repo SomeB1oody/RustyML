@@ -51,11 +51,11 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use ndarray::Array3;
 /// use approx::assert_relative_eq;
 ///
-/// // Create an input tensor: [batch_size, length, channels]
-/// // batch size 2, 8 elements per channel, 3 input channels
+/// // Create an input tensor: [batch_size, length, channels].
+/// // batch size 2, 8 elements per channel, 3 input channels.
 /// let mut input_data = Array3::zeros((2, 8, 3));
 ///
-/// // Set test data to make the max pooling results predictable
+/// // Set test data to make the max pooling results predictable.
 /// for b in 0..2 {
 ///     for c in 0..3 {
 ///         for i in 0..8 {
@@ -66,29 +66,29 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///
 /// let x = input_data.clone().into_dyn();
 ///
-/// // Test MaxPooling1D with a Sequential model
+/// // Test MaxPooling1D with a Sequential model.
 /// let mut model = SequentialBuilder::new()
-///     // stride defaults to pool_size (2) and padding defaults to Valid
+///     // stride defaults to pool_size (2) and padding defaults to Valid.
 ///     .add(MaxPooling1D::new(2))
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Output shape should be [2, 4, 3]
+/// // Output shape should be [2, 4, 3].
 /// let output = model.predict(&x).unwrap();
 /// assert_eq!(output.shape(), &[2, 4, 3]);
 ///
-/// // Verify the pooling results
-/// // Window size 2 and stride 2: each window keeps its maximum element
+/// // Verify the pooling results.
+/// // Window size 2 and stride 2: each window keeps its maximum element.
 /// for b in 0..2 {
 ///     for c in 0..3 {
-///         // 1st window (0, 1): max value 1.0
+///         // 1st window (0, 1): max value 1.0.
 ///        assert_relative_eq!(output[[b, 0, c]], 1.0);
-///         // 2nd window (2, 3): max value 3.0
+///         // 2nd window (2, 3): max value 3.0.
 ///         assert_relative_eq!(output[[b, 1, c]], 3.0);
-///         // 3rd window (4, 5): max value 5.0
+///         // 3rd window (4, 5): max value 5.0.
 ///         assert_relative_eq!(output[[b, 2, c]], 5.0);
-///         // 4th window (6, 7): max value 7.0
+///         // 4th window (6, 7): max value 7.0.
 ///         assert_relative_eq!(output[[b, 3, c]], 7.0);
 ///     }
 /// }
@@ -145,7 +145,7 @@ impl MaxPooling1D {
     ///
     /// # Returns
     ///
-    /// - `Self` - The updated layer
+    /// - `Result<Self, Error>` - The updated layer
     ///
     /// # Errors
     ///

@@ -1,7 +1,7 @@
 //! Integration tests for `LogisticRegression` and `generate_polynomial_features`.
 //!
 //! Label contract: `predict` returns `Array1<f64>` with values in {0.0, 1.0}.
-//! `predict_proba` returns `Array1<f64>` with values in (0.0, 1.0).
+//! `predict_proba` returns `Array1<f64>` with positive-class probabilities in [0.0, 1.0].
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
@@ -13,9 +13,7 @@ use rustyml::metrics::{ConfusionMatrix, accuracy};
 
 use crate::common::assert_allclose;
 
-// Constructor validation
-
-/// `new` rejects each invalid learning rate (zero, negative, NaN, or +Inf) with InvalidParameter
+/// `new` rejects each invalid learning rate (0, negative, NaN, or +Inf) with InvalidParameter
 #[test]
 fn new_invalid_learning_rate_is_invalid() {
     for lr in [0.0, -0.01, f64::NAN, f64::INFINITY] {
@@ -39,7 +37,7 @@ fn new_zero_max_iterations_is_invalid() {
     );
 }
 
-/// `new` rejects a zero or negative tolerance, since tolerance must be strictly positive
+/// `new` rejects a 0 or negative tolerance, since tolerance must be strictly positive
 #[test]
 fn new_invalid_tolerance_is_invalid() {
     for tol in [0.0, -1e-4] {
@@ -107,8 +105,6 @@ fn default_model_has_correct_params() {
     assert!(model.get_weights().is_none());
 }
 
-// Fit validation error paths
-
 /// Mismatched x rows (3) and y length (2) returns DimensionMismatch
 #[test]
 fn fit_xy_dimension_mismatch_returns_dimension_mismatch() {
@@ -139,8 +135,6 @@ fn fit_non_binary_label_returns_invalid_input() {
     }
 }
 
-// Predict / predict_proba error paths
-
 /// predict with wrong feature count (trained on 2, called with 3) returns DimensionMismatch
 #[test]
 fn predict_wrong_feature_count_returns_dimension_mismatch() {
@@ -158,8 +152,6 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
         "expected DimensionMismatch"
     );
 }
-
-// Correctness: linearly separable data
 
 /// On perfectly separable data (class 0 at x1 << 0, class 1 at x1 >> 0), `predict`
 /// classifies every training point correctly
@@ -194,7 +186,7 @@ fn predict_linearly_separable_classifies_correctly() {
     assert_eq!(preds[5], 1.0, "(8,3) should be class 1");
 }
 
-/// predict_proba returns values strictly in (0, 1), with class-0 probabilities < 0.5 and
+/// On this dataset, predict_proba returns values in (0, 1), with class-0 probabilities < 0.5 and
 /// class-1 > 0.5, consistent with predict
 #[test]
 fn predict_proba_range_and_consistency_with_predict() {
@@ -266,8 +258,6 @@ fn fit_predict_agrees_with_fit_then_predict() {
     assert_eq!(labels_fit_predict, labels_separate);
 }
 
-// Label-type interop
-
 /// `predict` output feeds the f64 classification metrics and `fit` directly, with no conversion.
 /// `Array1<f64>` labels make this direct round-trip possible.
 #[test]
@@ -320,8 +310,6 @@ fn fit_accepts_mixed_storage_for_x_and_y() {
     );
 }
 
-// fit_intercept=false
-
 /// Without an intercept, the model has exactly n_features weights (2 features -> 2
 /// weights, no bias column)
 #[test]
@@ -357,8 +345,6 @@ fn fit_with_intercept_weight_count_equals_features_plus_one() {
     );
 }
 
-// n_iter tracking
-
 /// After fitting, n_iter is Some and at least 1
 #[test]
 fn fit_sets_n_iter() {
@@ -373,8 +359,6 @@ fn fit_sets_n_iter() {
     assert!(n >= 1, "n_iter should be at least 1");
     assert!(n <= 500, "n_iter should not exceed max_iter");
 }
-
-// Regularization reduces weight magnitude
 
 /// L2 regularization produces a smaller feature-weight norm than no regularization
 #[test]
@@ -446,8 +430,6 @@ fn l1_regularization_shrinks_weight_norm() {
     );
 }
 
-// Save / load round-trip
-
 /// Save + load produces a model whose predictions are bit-identical to the original
 #[test]
 fn save_load_round_trip_identical_predictions() {
@@ -507,8 +489,6 @@ fn save_load_preserves_hyperparameters() {
         Some(RegularizationType::L1(0.2))
     );
 }
-
-// generate_polynomial_features
 
 /// degree=1 on n features returns x unchanged in shape and values
 #[test]
@@ -616,8 +596,6 @@ fn poly_features_pipeline_makes_circular_data_separable() {
     }
 }
 
-// Determinism (same seed = identical weights)
-
 /// 2 fits with the same hyperparameters on the same data produce bit-identical weights
 /// (gradient descent has no randomness)
 #[test]
@@ -659,7 +637,6 @@ fn deterministic_fit_produces_identical_predictions_on_unseen_data() {
         "both runs must produce identical predictions"
     );
 }
-// In-loop NonFinite guards (huge learning rate on finite data)
 
 /// A huge but finite learning rate on finite, large-magnitude data trips an in-loop
 /// numerical guard in `fit` and returns `Error::NonFinite`
@@ -678,8 +655,6 @@ fn fit_huge_learning_rate_on_finite_data_returns_non_finite() {
         result
     );
 }
-
-// regularization scaling convention (penalty NOT divided by n_samples)
 
 /// The L2 objective is mean log-loss plus (alpha/2)||w||^2. Neither term depends on how many
 /// times each row repeats, so replicating every training row 3 times must not change the fit.

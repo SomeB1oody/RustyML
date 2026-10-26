@@ -1,13 +1,7 @@
-//! Integration tests for cross-cutting ML infrastructure.
+//! Integration tests for shared machine learning infrastructure.
 //!
-//! Covers generic Fit/Predict trait forwarding across every estimator and a save/load
-//! round-trip. Table-driven tests check the shared validation of every estimator: NotFitted
-//! before fit, empty and non-finite input, and a missing file on load.
-//!
-//! Per-type kernel and distance math has unit tests in `src/machine_learning/types.rs`.
-//! The `Error` smart constructors have unit tests in `src/error.rs`. This file does not
-//! repeat those. It covers only the cross-cutting wiring that the per-estimator files
-//! cannot exercise alone.
+//! Checks Fit and Predict trait calls across estimators and a KMeans save/load round trip.
+//! Shared tables check unfitted models, empty or non-finite input, and missing files.
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
@@ -20,8 +14,6 @@ use rustyml::machine_learning::{
     RegularizationType, SVC, SVDSolver, TSNE, TSNEMethod, WeightingStrategy,
 };
 use rustyml::traits::{Fit, Predict};
-
-// Fit and Predict traits used generically
 
 /// Trains a supervised estimator through the `Fit` trait, predicts through the `Predict`
 /// trait, and returns the number of predictions produced.
@@ -110,8 +102,6 @@ fn trait_predictions_match_inherent_method_predictions() {
     assert_abs_diff_eq!(preds_trait[0], 13.0, epsilon = 5e-3);
 }
 
-// save_to_path + load_from_path round-trip
-
 /// Builds 3 tight, well-separated blobs centered at (0,0), (100,0), and (50,100) for the
 /// KMeans save/load round-trip.
 ///
@@ -153,28 +143,39 @@ fn kmeans_save_load_preserves_hyperparameters() {
     let _ = std::fs::remove_file(path);
 }
 
-// Shared validation helpers: one table of models and methods
-
 /// Holds 1 instance of each estimator that keeps a fitted state.
 ///
 /// `TSNE` has no fitted state, so only `fit_calls` uses it.
 struct Models {
+    /// DBSCAN model for shared validation and method checks.
     dbscan: DBSCAN,
+    /// DecisionTree model for shared validation and method checks.
     decision_tree: DecisionTree,
+    /// IsolationForest model for shared validation and method checks.
     isolation_forest: IsolationForest,
+    /// KernelPCA model for shared validation and method checks.
     kernel_pca: KernelPCA,
+    /// KMeans model for shared validation and method checks.
     kmeans: KMeans,
+    /// KNN<i32> model for shared validation and method checks.
     knn: KNN<i32>,
+    /// LDA model for shared validation and method checks.
     lda: LDA,
+    /// LinearRegression model for shared validation and method checks.
     linear_regression: LinearRegression,
+    /// LinearSVC model for shared validation and method checks.
     linear_svc: LinearSVC,
+    /// LogisticRegression model for shared validation and method checks.
     logistic_regression: LogisticRegression,
+    /// MeanShift model for shared validation and method checks.
     mean_shift: MeanShift,
+    /// PCA model for shared validation and method checks.
     pca: PCA,
+    /// SVC model for shared validation and method checks.
     svc: SVC,
 }
 
-/// Builds a `TSNE` with exact optimization and a seeded PCA start.
+/// Builds a `TSNE` with exact optimization, PCA initialization, and a fixed seed.
 fn new_tsne() -> TSNE {
     TSNE::new(2, 2.0, 200.0, 100)
         .unwrap()
@@ -393,15 +394,24 @@ fn sample_method_calls() -> Vec<(&'static str, &'static str, SampleCall)> {
 #[derive(Debug, PartialEq)]
 enum Outcome {
     /// The call succeeded with this number of output rows
-    Rows(usize),
+    Rows(
+        /// Number of output rows.
+        usize,
+    ),
     /// `Error::NotFitted` with this model name
-    NotFitted(&'static str),
+    NotFitted(
+        /// Name of the estimator that lacks fitted state.
+        &'static str,
+    ),
     /// `Error::EmptyInput`
     EmptyInput,
     /// `Error::NonFinite`
     NonFinite,
     /// A different error, kept as its debug text
-    Other(String),
+    Other(
+        /// Debug text for an error outside the shared cases.
+        String,
+    ),
 }
 
 impl From<Result<usize, Error>> for Outcome {
@@ -698,7 +708,7 @@ fn generic_fit_predict_decision_tree_outputs_f64_labels() {
         Predict::predict(&tree, &x_train).expect("predict via Predict trait should succeed");
 
     assert_eq!(preds.len(), 6, "one label per sample");
-    // A single threshold on feature 0 separates the classes, so training error is zero
+    // A single threshold on feature 0 separates the classes, so training error is 0
     for (i, (&p, &t)) in preds.iter().zip(y_train.iter()).enumerate() {
         assert_abs_diff_eq!(p, t, epsilon = 1e-9);
         let _ = i;
@@ -799,8 +809,6 @@ fn generic_fit_predict_svc_outputs_zero_one_labels() {
         );
     }
 }
-
-// Storage-generic relaxation: `x` and `y` may use different storage types
 
 /// Every supervised estimator accepts an owned feature matrix paired with a borrowed label
 /// view, and the reverse pairing of storage types also compiles.

@@ -117,9 +117,8 @@ fn transpose_geometry(
     let out_sp: Vec<usize> = (0..in_sp.len())
         .map(|d| transpose_output_length(in_sp[d], k_dims[d], strides[d], dilation[d], padding))
         .collect();
-    // `conv_geometry` cannot fail here. Its `Valid` branch rejects only an output axis smaller
-    // than the effective (dilated) kernel, and both output-length rules above keep every axis
-    // at least that size
+    // `conv_geometry` cannot fail here. Its `Valid` branch rejects an output axis smaller than
+    // the effective kernel. The `Valid` output rule keeps each axis at least that size.
     let (check_sp, pad_before, padded_sp) =
         conv_geometry(&out_sp, k_dims, strides, dilation, padding.into())?;
     debug_assert_eq!(
@@ -525,9 +524,8 @@ mod tests {
         );
     }
 
-    // conv_transpose_forward: hand-derived values
-    // Checked against numbers worked out by hand from the scatter definition, which catches an
-    // axis-transposition error that a gradient check would miss
+    // Values derived from the scatter definition detect axis swaps that a gradient check can
+    // miss.
 
     /// 1-D, 1 batch item, 2 input positions at 1 channel, a length-2 all-ones kernel, 1 filter,
     /// stride 1, `Valid`. Input `[1, 2]` scatters to `[1, 1+2, 2]`, and the bias lands once per

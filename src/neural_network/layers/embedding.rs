@@ -1,4 +1,7 @@
 //! Embedding layer: a trainable lookup table that turns whole-number indices into dense vectors
+//!
+//! The layer validates and truncates floating-point indices before it selects table rows.
+//! Its backward pass sums row gradients for repeated indices.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -47,13 +50,13 @@ tunable_gate! {
 ///
 /// This is the entry point for text and for any other categorical sequence. A word index enters,
 /// and a learned vector leaves. The layer is the same function as a `Dense` layer without a
-/// bias, applied to a one-hot input. It reads 1 row instead of multiplying by a mostly-zero
+/// bias, applied to a one-hot input. It reads 1 row instead of multiplying by a mostly 0
 /// matrix
 ///
 /// # Notes
 ///
 /// A [`Tensor`] holds `f32`, so the indices arrive as floating-point values. The layer truncates
-/// each value toward zero and then range-checks it. `2.0` and `2.9` both select row 2, and
+/// each value toward 0 and then range-checks it. `2.0` and `2.9` both select row 2, and
 /// `-0.5` selects row 0.
 ///
 /// An index outside `0..input_dim` after truncation is an `Error::InvalidInput`, and so is a
@@ -73,19 +76,19 @@ tunable_gate! {
 /// use rustyml::neural_network::traits::UnaryLayer;
 /// use rustyml::neural_network::Ctx;
 ///
-/// // A batch of 2 sequences of 3 word indices each, drawn from a vocabulary of 10
+/// // A batch of 2 sequences of 3 word indices each, drawn from a vocabulary of 10.
 /// let x = Array2::from_shape_vec((2, 3), vec![1.0, 4.0, 2.0, 7.0, 0.0, 4.0])
 ///     .unwrap()
 ///     .into_dyn();
 /// let y = Array2::zeros((2, 1)).into_dyn();
 ///
-/// // The layer alone turns each of the 6 indices into a 5-element vector
+/// // The layer alone turns each of the 6 indices into a 5-element vector.
 /// let mut lookup = Embedding::new(10, 5).unwrap();
 /// lookup.build(&Shape::known(x.shape())).unwrap();
 /// let vectors = lookup.forward(&x, &mut Ctx::inference()).unwrap();
 /// assert_eq!(vectors.shape(), &[2, 3, 5]);
 ///
-/// // A flatten step then feeds the vectors to a dense head
+/// // A flatten step then feeds the vectors to a dense head.
 /// let mut model = SequentialBuilder::new()
 ///     .add(Embedding::new(10, 5).unwrap())
 ///     .add(Flatten::new())
@@ -237,7 +240,7 @@ impl Embedding {
 
     /// Turns the floating-point input into checked row indices, in output order
     ///
-    /// Truncates each value toward zero, as a cast to a whole number does, and then checks it
+    /// Truncates each value toward 0, as a cast to a whole number does, and then checks it
     /// against the table height
     ///
     /// # Errors

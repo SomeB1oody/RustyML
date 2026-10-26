@@ -21,9 +21,9 @@ use crate::neural_network::traits::{LayerBase, Optimizer};
 /// Its `weight_decay` implements classic coupled L2 regularization. It adds `weight_decay * param`
 /// to the gradient. The penalty then flows through the moment estimates, and the adaptive
 /// `1 / (sqrt(v_hat) + epsilon)` denominator rescales it. For decoupled weight decay, applied
-/// straight to the parameter and generally the better choice with adaptive optimizers, use
+/// directly to the parameter, use
 /// [`AdamW`](crate::neural_network::optimizers::AdamW) instead. With `weight_decay == 0.0` the 2
-/// are identical. As with the other optimizers, weight decay, when non-zero, applies to weight
+/// are identical. As with the other optimizers, weight decay, when other than 0, applies to weight
 /// tensors only, never to biases or normalization scale/shift parameters
 #[derive(Debug)]
 pub struct Adam {
@@ -56,8 +56,9 @@ impl Adam {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - if any hyperparameter is out of range or `weight_decay` is
-    ///   negative or not finite
+    /// - `Error::InvalidParameter` - If the learning rate or epsilon is not positive and finite. Both beta values must be
+    ///   finite in `[0, 1)`.
+    ///   Weight decay must be nonnegative and finite.
     pub fn new(
         learning_rate: f32,
         beta1: f32,
@@ -70,10 +71,10 @@ impl Adam {
         })
     }
 
-    /// Enables clip-by-global-norm gradient clipping (disabled by default)
+    /// Enables a global gradient norm limit (disabled by default)
     ///
-    /// `global_clipnorm` scales every gradient so the global L2 norm never exceeds it, preserving
-    /// the gradient direction
+    /// The training loop scales gradients when their finite global L2 norm exceeds the
+    /// threshold. A non-finite norm leaves gradients unchanged.
     ///
     /// # Parameters
     ///
@@ -83,6 +84,10 @@ impl Adam {
     ///
     /// - `Result<Self, Error>` - the updated optimizer, or an error if `global_clipnorm` is not
     ///   positive and finite
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If the threshold is not positive and finite.
     pub fn with_global_clipnorm(self, global_clipnorm: f32) -> Result<Self, Error> {
         Ok(Self {
             core: self.core.with_global_clipnorm(global_clipnorm)?,

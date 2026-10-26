@@ -27,8 +27,8 @@
 //!    1 gradient.
 //! 2. A state value lands at the path of the sublayer, so the model moves it into that
 //!    sublayer.
-//! 3. A cache lands in its own stack per call and per frame, so the backward pass of 1 sublayer
-//!    never takes the cache of another, whatever order the holding layer uses.
+//! 3. Each call and frame has its own cache stack. A backward pass therefore reads only the
+//! cache of its sublayer.
 //!
 //! A training pass also records the layer of each sublayer call at its path. A model compares
 //! each record against the layer tree, so a call under the name of another sublayer stops the
@@ -134,7 +134,7 @@ pub struct Grads {
 }
 
 impl Grads {
-    /// The gradient of 1 parameter, or `None` when no backward pass gave it one
+    /// The gradient of 1 parameter, or `None` when no backward pass supplied it
     ///
     /// # Parameters
     ///
@@ -247,7 +247,6 @@ impl StateSlot<'_> {
     /// # Parameters
     ///
     /// - `name` - The name the layer gives the value, such as `"moving_mean"`
-    /// - `T` - The type the layer stores the value as
     ///
     /// # Returns
     ///
@@ -297,16 +296,16 @@ impl Drop for FrameGuard<'_> {
 /// let mut layer = Dense::new(3, Activation::ReLU).unwrap();
 /// layer.build(&Shape::known(&[2, 4])).unwrap();
 ///
-/// // A training pass writes a cache, so the backward pass has what it needs
+/// // A training pass writes a cache, so the backward pass has what it needs.
 /// let mut ctx = Ctx::training();
 /// let output = layer.forward(&Array::ones((2, 4)).into_dyn(), &mut ctx).unwrap();
 /// let grad_input = layer.backward(&Array::ones(output.raw_dim()), &mut ctx).unwrap();
 /// assert_eq!(grad_input.shape(), &[2, 4]);
 ///
-/// // The kernel gradient is in the store, and not in the layer
+/// // The kernel gradient is in the store, and not in the layer.
 /// assert!(ctx.grads().get(&ParamId::new(0, "kernel")).is_some());
 ///
-/// // An inference pass writes no cache at all
+/// // An inference pass writes no cache at all.
 /// let mut ctx = Ctx::inference();
 /// layer.forward(&Array::ones((2, 4)).into_dyn(), &mut ctx).unwrap();
 /// assert_eq!(ctx.pending_caches(), 0);
@@ -444,9 +443,8 @@ impl Ctx {
     ///
     /// A layer that calls 1 sublayer several times in 1 pass gives each call its own number.
     /// The backward pass of a call must use the number of its forward pass. Each number has its
-    /// own cache stack, so the backward passes can run in any order. The gradients of all the
-    /// calls sum at the 1 address of the sublayer, and the state of all the calls belongs to
-    /// the 1 sublayer
+    /// own cache stack, so the backward passes can run in any order. The gradients of all calls sum at the sublayer address. Their state also belongs to that
+    /// sublayer.
     ///
     /// # Parameters
     ///
@@ -593,7 +591,10 @@ impl Ctx {
     ///
     /// - `layer` - The type name of the layer that parks the value
     /// - `cache` - The value to park
-    /// - `T` - The type the layer parks and takes back
+    ///
+    /// # Panics
+    ///
+    /// - In debug builds, if the context is in inference mode.
     pub fn push_cache<T: Any + Send + Sync>(&mut self, layer: &'static str, cache: T) {
         debug_assert!(
             self.training,
@@ -615,7 +616,6 @@ impl Ctx {
     /// # Parameters
     ///
     /// - `layer` - The type name of the layer, which must match the name of the push
-    /// - `T` - The type the layer parked
     ///
     /// # Returns
     ///
@@ -670,7 +670,7 @@ impl Ctx {
         self.caches.values().map(Vec::len).sum()
     }
 
-    /// The value this layer holds for the name, when the forward pass already proposed one
+    /// The value that the forward pass proposed for this layer and name
     ///
     /// The address is the current [`layer_path`](Ctx::layer_path) and the name
     ///
@@ -680,7 +680,6 @@ impl Ctx {
     /// # Parameters
     ///
     /// - `name` - The name the layer gives the value
-    /// - `T` - The type the layer stores the value as
     ///
     /// # Returns
     ///
@@ -699,7 +698,6 @@ impl Ctx {
     /// # Parameters
     ///
     /// - `name` - The name the layer gives the value
-    /// - `T` - The type the layer stores the value as
     ///
     /// # Returns
     ///
@@ -723,7 +721,10 @@ impl Ctx {
     ///
     /// - `name` - The name the layer gives the value
     /// - `value` - The new value
-    /// - `T` - The type the layer stores the value as
+    ///
+    /// # Panics
+    ///
+    /// - In debug builds, if the context is in inference mode.
     pub fn set_state<T: Any + Send + Sync>(&mut self, name: &'static str, value: T) {
         debug_assert!(
             self.training,

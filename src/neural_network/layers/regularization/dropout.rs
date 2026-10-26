@@ -75,16 +75,14 @@ fn dropout_backward(
 ///
 /// The mask carries 1 binary keep/drop value per draw. Its shape is the input shape when the
 /// layer samples 1 draw per element. With a `noise_shape`, the mask stays at that smaller
-/// shape, and the layer never builds a full-size copy of it. The broadcast follows the usual
-/// right-aligned rule: a shorter mask lines up against the last axes of `t`, and an axis with
-/// an extent of 1 repeats along the matching axis of `t`
+/// shape, and the layer never builds a full-size copy of it. The mask aligns against the last
+/// axes of `t`. A mask axis of extent 1 repeats along the matching tensor axis
 ///
 /// Callers use this for both the forward output (`t = input`) and the backward input gradient
 /// (`t = grad_output`), because both apply the same elementwise scale
 ///
-/// The result is in C order at every input layout, and it holds `(x * m) * scale` at each
-/// element, the same 2 multiplications in the same order as the explicit
-/// `t * broadcast(mask) * scale` form
+/// The result is in C order for every input layout. Each element uses `(x * m) * scale`, with
+/// the same operation order as `t * broadcast(mask) * scale`
 ///
 /// # Parameters
 ///
@@ -243,6 +241,7 @@ pub use spatial_dropout_2d::SpatialDropout2D;
 pub use spatial_dropout_3d::SpatialDropout3D;
 
 /// Unit tests for `spatial_dropout_scale`
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,14 +1,12 @@
 //! Integration tests for `utils::label_encoding`: one-hot encoding
 //! (`to_categorical`, `to_categorical_with_mapping`) and argmax decode
-//! (`to_sparse_categorical`), covering happy paths, error paths, and round-trips
+//! (`to_sparse_categorical`), with valid inputs, error paths, and round-trips
 
 use ndarray::{arr2, array};
 use rustyml::error::Error;
 use rustyml::utils::{to_categorical, to_categorical_with_mapping, to_sparse_categorical};
 
 use crate::common::assert_allclose;
-
-// to_categorical: basic one-hot encoding
 
 /// Labels [0,1,2,1,0] with num_classes=None infer n_classes=3 and encode to one-hot
 #[test]
@@ -39,7 +37,7 @@ fn to_categorical_single_class() {
     assert_allclose(&result, &expected, 0.0);
 }
 
-/// Explicit num_classes=Some(5) wider than max_label+1=3 zero-pads columns 3 and 4
+/// Explicit num_classes=Some(5) wider than max_label+1=3 fills columns 3 and 4 with 0
 #[test]
 fn to_categorical_explicit_num_classes_wider_with_zero_padding() {
     let labels = array![0i32, 2];
@@ -49,7 +47,7 @@ fn to_categorical_explicit_num_classes_wider_with_zero_padding() {
 
     let expected = arr2(&[[1.0f64, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0, 0.0]]);
     assert_allclose(&result, &expected, 0.0);
-    // Extra columns (indices 3, 4) are zero
+    // Extra columns (indices 3, 4) are 0
     assert_eq!(result[[0, 3]], 0.0);
     assert_eq!(result[[0, 4]], 0.0);
     assert_eq!(result[[1, 3]], 0.0);
@@ -76,8 +74,6 @@ fn to_categorical_empty_labels() {
     assert_eq!(result.len(), 0);
 }
 
-// to_categorical: error paths
-
 /// Negative label -1 produces InvalidInput
 #[test]
 fn to_categorical_negative_label_is_invalid_input() {
@@ -90,8 +86,7 @@ fn to_categorical_negative_label_is_invalid_input() {
     );
 }
 
-/// num_classes smaller than max_label+1 gives InvalidParameter:
-/// Some(2) with max_label=2 (2 < 3) and Some(0) with max_label=1 (0 < 2)
+/// num_classes below max_label+1 returns InvalidParameter. Some(2) fails with max_label=2, and Some(0) fails with max_label=1.
 #[test]
 fn to_categorical_num_classes_too_small_is_invalid_parameter() {
     // (labels, num_classes) pairs where num_classes < max_label + 1
@@ -107,8 +102,6 @@ fn to_categorical_num_classes_too_small_is_invalid_parameter() {
         );
     }
 }
-
-// to_sparse_categorical: argmax decode
 
 /// Argmax of a strict one-hot matrix recovers the integer labels exactly
 #[test]
@@ -128,7 +121,7 @@ fn to_sparse_categorical_soft_probabilities() {
     assert_eq!(labels, expected);
 }
 
-/// Ties resolve to the first index, matching numpy/keras argmax semantics
+/// Ties resolve to the earliest column index.
 #[test]
 fn to_sparse_categorical_tie_breaks_to_first_index() {
     let tied = arr2(&[[0.5f64, 0.5, 0.0], [0.0, 0.5, 0.5]]);
@@ -137,8 +130,6 @@ fn to_sparse_categorical_tie_breaks_to_first_index() {
     assert_eq!(labels[0], 0i32, "tie in row 0 should give index 0 (first)");
     assert_eq!(labels[1], 1i32, "tie in row 1 should give index 1 (first)");
 }
-
-// to_sparse_categorical: error paths
 
 /// A non-finite sentinel (NaN, +Inf, -Inf) in the matrix produces NonFinite
 #[test]
@@ -159,8 +150,6 @@ fn to_sparse_categorical_non_finite_is_non_finite() {
         );
     }
 }
-
-// Round-trip: to_categorical -> to_sparse_categorical
 
 /// Encoding [0,1,2,1,0] then decoding recovers the original labels
 #[test]
@@ -185,8 +174,6 @@ fn round_trip_non_monotone_labels() {
     let recovered = to_sparse_categorical(&one_hot).unwrap();
     assert_eq!(recovered, original);
 }
-
-// to_categorical_with_mapping: non-consecutive / arbitrary labels
 
 /// Non-consecutive integers [10,20,30,20,10] map in first-seen order and encode to one-hot
 #[test]
@@ -264,7 +251,7 @@ fn to_categorical_with_mapping_string_labels() {
     }
 }
 
-/// Explicit num_classes=Some(5) wider than the 2 unique labels gives shape (2, 5) with zero padding
+/// Explicit num_classes=Some(5) wider than the 2 unique labels gives shape (2, 5) with padding with 0
 #[test]
 fn to_categorical_with_mapping_explicit_wider_num_classes() {
     let labels = vec![1i32, 2];
@@ -277,14 +264,12 @@ fn to_categorical_with_mapping_explicit_wider_num_classes() {
     // Active columns
     assert_eq!(matrix[[0, 0]], 1.0);
     assert_eq!(matrix[[1, 1]], 1.0);
-    // Zero-padded columns (indices 2, 3, 4) are all zero
+    // Columns 2, 3, and 4 contain only 0
     for col in 2..5 {
         assert_eq!(matrix[[0, col]], 0.0, "row 0 col {col} must be 0");
         assert_eq!(matrix[[1, col]], 0.0, "row 1 col {col} must be 0");
     }
 }
-
-// to_categorical_with_mapping: round-trip with to_sparse_categorical
 
 /// Encode with mapping, argmax-decode, then re-look-up via inverse map recovers original labels
 #[test]
@@ -306,8 +291,6 @@ fn round_trip_with_mapping() {
     let recovered: Vec<i32> = sparse.iter().map(|&idx| inverse[&(idx as usize)]).collect();
     assert_eq!(recovered, labels, "round-trip must recover original labels");
 }
-
-// to_categorical_with_mapping: error paths
 
 /// num_classes=2 with 3 unique labels gives InvalidParameter
 #[test]
@@ -333,12 +316,10 @@ fn to_categorical_with_mapping_zero_num_classes_non_empty_is_invalid_parameter()
     );
 }
 
-// to_categorical_with_mapping: empty slice
-
 /// Empty slice gives shape (0, 0) and an empty mapping, unlike to_categorical's (0, 1)
 #[test]
 fn to_categorical_with_mapping_empty_slice_is_zero_by_zero() {
-    let labels: Vec<i32> = Vec::new(); // length-0 slice; element type fixes T = i32
+    let labels: Vec<i32> = Vec::new(); // Empty slice with element type i32.
     let (matrix, mapping) = to_categorical_with_mapping(&labels, None).unwrap();
 
     // n_samples=0 and unique_classes=0, so None gives n_classes=0 and shape (0, 0)

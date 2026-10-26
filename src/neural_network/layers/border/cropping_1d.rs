@@ -2,7 +2,7 @@
 //!
 //! [`Cropping1D`] removes steps from the step axis of a `[batch, steps, features]` tensor. It
 //! holds no parameter. The forward pass and the backward pass both run through
-//! `pad_crop_engine`, which also backs this layer's inverse,
+//! `pad_crop_engine`, which also backs the matching border layer,
 //! [`ZeroPadding1D`].
 //!
 //! [`ZeroPadding1D`]: crate::neural_network::layers::border::ZeroPadding1D
@@ -29,8 +29,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// The layer holds no parameter. At least 1 step must remain, so the forward pass fails when
 /// the 2 amounts together reach the extent of the step axis.
 ///
-/// [`ZeroPadding1D`](crate::neural_network::layers::border::ZeroPadding1D) is the inverse
-/// layer, and it is also this layer's backward pass.
+/// [`ZeroPadding1D`](crate::neural_network::layers::border::ZeroPadding1D) supplies the operation for this layer's backward pass.
 ///
 /// # Examples
 ///
@@ -42,7 +41,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array3;
 ///
-/// // A rank-3 input: 2 samples, 6 steps, 3 features
+/// // A rank-3 input: 2 samples, 6 steps, 3 features.
 /// let x = Array3::ones((2, 6, 3)).into_dyn();
 ///
 /// let mut model = SequentialBuilder::new()
@@ -51,12 +50,12 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
 /// let cropped = model.predict(&x).unwrap();
 ///
-/// // 1 step off the front and 2 off the back, so 6 steps become 3
+/// // 1 step off the front and 2 off the back, so 6 steps become 3.
 /// assert_eq!(cropped.shape(), &[2, 3, 3]);
 /// ```
 #[derive(Debug)]

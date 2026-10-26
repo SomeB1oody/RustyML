@@ -23,8 +23,6 @@ use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
 
 use super::common::assert_allclose;
 
-// helpers
-
 /// Build a 3D Tensor from row-major data
 fn t3(a: usize, b: usize, c: usize, data: Vec<f32>) -> Tensor {
     Array3::from_shape_vec((a, b, c), data)
@@ -56,8 +54,6 @@ fn ramp_of(shape: &[usize]) -> Tensor {
     let count: usize = shape.iter().product();
     Tensor::from_shape_vec(IxDyn(shape), ramp(count)).expect("shape/data mismatch")
 }
-
-// Constructor forms: how a plain value expands into per-axis amounts
 
 /// An integer gives the same amount at both ends of the step axis
 #[test]
@@ -167,9 +163,7 @@ fn cropping_3d_triple_gives_one_amount_per_axis() {
     assert_eq!(out.shape(), &[1, 2, 3, 4, 2]);
 }
 
-// Forward values
-
-/// The padded steps hold zeros and the original steps keep their values and their order
+/// The padded steps hold 0s and the original steps keep their values and their order
 #[test]
 fn zero_padding_1d_forward_places_values_and_zeros() {
     let mut pad = ZeroPadding1D::new((1, 2));
@@ -286,9 +280,7 @@ fn predict_matches_forward_and_the_first_pass_builds_the_layer() {
     assert_allclose(&from_predict, &from_forward, 1e-6_f32);
 }
 
-// Backward
-
-/// The backward pass of a zero-padding layer returns the interior of the gradient
+/// The backward pass of a layer that pads with 0 returns the interior of the gradient
 #[test]
 fn zero_padding_2d_backward_returns_interior_of_gradient() {
     let mut pad = ZeroPadding2D::new(1);
@@ -340,9 +332,7 @@ fn pad_then_crop_restores_the_input() {
     assert_allclose(&restored, &x, 1e-6_f32);
 }
 
-// Error paths
-
-/// A zero-padding layer rejects an input whose rank is not the rank it serves
+/// A padding with 0 layer rejects an input whose rank is not the rank it serves
 #[test]
 fn zero_padding_rejects_wrong_rank() {
     let mut pad_1d = ZeroPadding1D::new(1);
@@ -478,8 +468,6 @@ fn border_layers_backward_wrong_grad_shape_returns_err() {
     );
 }
 
-// Layer metadata
-
 /// layer_type names each concrete type in the family
 #[test]
 fn border_layer_types_are_named() {
@@ -533,8 +521,6 @@ fn border_output_shape_after_forward() {
     assert_eq!(crop.output_shape(), "(None, 5, 3)");
 }
 
-// The batch axis is free
-
 /// 1 layer instance serves every batch size, since the batch axis remains untouched
 #[test]
 fn one_instance_serves_every_batch_size() {
@@ -558,8 +544,6 @@ fn one_instance_serves_every_batch_size() {
         );
     }
 }
-
-// Inside a Sequential model
 
 /// A pad, a valid convolution, and a crop stack into a model whose loss stays finite
 #[test]

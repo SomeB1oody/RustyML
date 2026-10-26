@@ -21,8 +21,6 @@ use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
 
 use super::common::assert_allclose;
 
-// helpers
-
 /// Build a 1D Tensor from a value list
 fn t1(data: Vec<f32>) -> Tensor {
     Array::from_vec(data).into_dyn()
@@ -53,8 +51,6 @@ fn t4(a: usize, b: usize, c: usize, d: usize, data: Vec<f32>) -> Tensor {
 fn ramp(count: usize) -> Vec<f32> {
     (0..count).map(|v| v as f32).collect()
 }
-
-// Reshape: forward shapes
 
 /// A rank-2 input splits into a rank-3 output when the target names 2 axes
 #[test]
@@ -128,8 +124,6 @@ fn reshape_forward_rank_1_input_gains_trailing_axis() {
     assert_eq!(out.shape(), &[5, 1]);
 }
 
-// Reshape: values, not just shapes
-
 /// A split from rank 2 to rank 3 keeps the flat element order, so the layer moves no data
 #[test]
 fn reshape_split_keeps_c_order_values() {
@@ -158,8 +152,6 @@ fn reshape_merge_keeps_c_order_values() {
     }
 }
 
-// Reshape: predict
-
 /// A forward pass with an inference context needs no build and no cache. It therefore works on
 /// a layer that never ran a forward pass before
 #[test]
@@ -174,8 +166,6 @@ fn reshape_predict_works_without_forward() {
         assert_abs_diff_eq!(val, i as f32, epsilon = 1e-6);
     }
 }
-
-// Reshape: backward round trip
 
 /// backward restores the input shape and keeps the flat element order of the gradient
 #[test]
@@ -195,8 +185,6 @@ fn reshape_backward_restores_input_shape_and_values() {
         assert_abs_diff_eq!(val, (i as f32) * 2.0, epsilon = 1e-6);
     }
 }
-
-// Reshape: error paths
 
 /// The constructor rejects a target that holds 2 entries of -1
 #[test]
@@ -296,8 +284,6 @@ fn reshape_backward_wrong_grad_shape_returns_err() {
     );
 }
 
-// Reshape: the batch axis is free
-
 /// 1 layer instance serves every batch size, since the batch axis remains untouched
 #[test]
 fn reshape_one_instance_serves_every_batch_size() {
@@ -314,8 +300,6 @@ fn reshape_one_instance_serves_every_batch_size() {
     }
 }
 
-// Reshape: equivalence with Flatten
-
 /// Reshape with a single inferred axis gives the same output as Flatten on a rank-4 input
 #[test]
 fn reshape_single_inferred_axis_equals_flatten() {
@@ -331,9 +315,7 @@ fn reshape_single_inferred_axis_equals_flatten() {
     assert_allclose(&reshaped, &flattened, 1e-6_f32);
 }
 
-// Reshape: parameter count and layer type
-
-/// The layer has no parameters, so param_count is NoTrainable
+/// The layer has no parameters, so `param_count` returns empty counts.
 #[test]
 fn reshape_param_count_is_no_trainable() {
     let r = Reshape::new(vec![2, 2]).unwrap();
@@ -353,8 +335,6 @@ fn reshape_layer_type_is_reshape() {
     let r = Reshape::new(vec![2, 2]).unwrap();
     assert_eq!(r.layer_type(), "Reshape");
 }
-
-// Reshape: output_shape
 
 /// Before any forward pass, a target with no -1 already reports the full output shape
 #[test]
@@ -386,8 +366,6 @@ fn reshape_output_shape_after_forward() {
     r.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(r.output_shape(), "(None, 2, 2)");
 }
-
-// Reshape: inside a Sequential model
 
 /// Reshape feeds a Dense layer, and fit keeps the loss finite across every epoch
 #[test]

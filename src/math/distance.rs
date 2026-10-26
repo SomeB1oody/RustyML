@@ -32,6 +32,10 @@ use ndarray::{ArrayBase, ArrayView1, Data, Ix1, Zip};
 /// // (4-1)^2 + (5-2)^2 + (6-3)^2 = 9 + 9 + 9 = 27
 /// assert!((dist - 27.0).abs() < 1e-10);
 /// ```
+///
+/// # Panics
+///
+/// Panics if the vector lengths differ.
 #[inline]
 pub fn squared_euclidean_distance_row<S1, S2>(
     x1: &ArrayBase<S1, Ix1>,
@@ -73,6 +77,10 @@ where
 /// // |1-4| + |2-6| = 3 + 4 = 7
 /// assert!((distance - 7.0).abs() < 1e-6);
 /// ```
+///
+/// # Panics
+///
+/// Panics if the vector lengths differ.
 #[inline]
 pub fn manhattan_distance_row<S1, S2>(x1: &ArrayBase<S1, Ix1>, x2: &ArrayBase<S2, Ix1>) -> f64
 where
@@ -116,8 +124,8 @@ where
 ///
 /// # Panics
 ///
-/// - Panics when `p` is less than 1.0, or when `p` is NaN. These orders break the triangle
-///   inequality, so they do not give a valid metric.
+/// - Panics when `p` is less than 1.0 or is NaN.
+/// - Panics if the vector lengths differ.
 #[inline]
 pub fn minkowski_distance_row<S1, S2>(
     x1: &ArrayBase<S1, Ix1>,
@@ -172,7 +180,10 @@ pub enum DistanceCalculationMetric {
     Manhattan,
     /// Generalized metric with Euclidean and Manhattan as special cases. The
     /// `f64` is the order parameter `p`.
-    Minkowski(f64),
+    Minkowski(
+        /// Norm order, at least `1.0` for a distance metric.
+        f64,
+    ),
 }
 
 impl DistanceCalculationMetric {
@@ -189,6 +200,11 @@ impl DistanceCalculationMetric {
     /// # Returns
     ///
     /// - `f64` - The distance between `a` and `b` under this metric
+    ///
+    /// # Panics
+    ///
+    /// - Panics if the vector lengths differ.
+    /// - Panics for Minkowski order below 1.0 or equal to NaN.
     #[inline]
     pub fn distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
         match *self {
@@ -198,7 +214,23 @@ impl DistanceCalculationMetric {
         }
     }
 
-    /// Returns whether `distance(a, b) <= threshold` under this metric.
+    /// Tests the comparable distance against the mapped threshold.
+    ///
+    /// The threshold must be nonnegative. This method does not validate Minkowski orders.
+    ///
+    /// # Parameters
+    ///
+    /// - `a` - First vector
+    /// - `b` - Second vector
+    /// - `threshold` - Nonnegative distance limit
+    ///
+    /// # Returns
+    ///
+    /// - `bool` - Whether the comparable distance is at most the comparable limit
+    ///
+    /// # Panics
+    ///
+    /// Panics for unequal vector lengths with Euclidean or Manhattan distance.
     #[inline]
     pub fn within(&self, a: ArrayView1<f64>, b: ArrayView1<f64>, threshold: f64) -> bool {
         self.comparable_distance(a, b) <= self.comparable_scalar(threshold)
@@ -302,7 +334,7 @@ mod tests {
         );
     }
 
-    // Zero distance: identical vectors -> 0
+    // Distance 0: identical vectors -> 0
     #[test]
     fn distance_euclidean_identical_vectors() {
         let metric = DistanceCalculationMetric::Euclidean;

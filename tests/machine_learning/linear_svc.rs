@@ -6,8 +6,6 @@ use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
 use rustyml::machine_learning::{LinearSVC, RegularizationType};
 
-// helper
-
 /// Return (x, y) for a perfectly linearly-separable 2-feature problem split by
 /// the boundary x1=0 (class 0 at negative x1, class 1 at positive x1)
 fn make_separable() -> (Array2<f64>, Array1<f64>) {
@@ -31,8 +29,6 @@ fn fit_separable_model() -> LinearSVC {
     model
 }
 
-// constructor validation
-
 #[test]
 fn new_rejects_max_iter_zero() {
     let result = LinearSVC::new(0, 0.01, RegularizationType::L2(1.0), true, 1e-4);
@@ -44,7 +40,7 @@ fn new_rejects_max_iter_zero() {
 
 #[test]
 fn new_rejects_invalid_learning_rate() {
-    // Each invalid learning_rate (zero / negative / NaN / +Inf) hits the same
+    // Each invalid learning_rate (0 / negative / NaN / +Inf) hits the same
     // guard and must return InvalidParameter.
     for lr in [0.0, -0.001, f64::NAN, f64::INFINITY] {
         let result = LinearSVC::new(100, lr, RegularizationType::L2(1.0), true, 1e-4);
@@ -57,7 +53,7 @@ fn new_rejects_invalid_learning_rate() {
 
 #[test]
 fn new_rejects_invalid_tol() {
-    // Each invalid tol (zero / negative / NaN) hits the same guard and must
+    // Each invalid tol (0 / negative / NaN) hits the same guard and must
     // return InvalidParameter.
     for tol in [0.0, -1e-4, f64::NAN] {
         let result = LinearSVC::new(100, 0.01, RegularizationType::L2(1.0), true, tol);
@@ -124,8 +120,6 @@ fn new_stores_parameters() {
     assert_eq!(model.get_tolerance(), 1e-6);
 }
 
-// fit error paths
-
 #[test]
 fn fit_rejects_empty_y() {
     let x: Array2<f64> = Array2::zeros((3, 2));
@@ -149,8 +143,6 @@ fn fit_rejects_dimension_mismatch_xy() {
         "x/y row count mismatch must return DimensionMismatch"
     );
 }
-
-// predict / decision_function error paths
 
 #[test]
 fn predict_wrong_feature_count_returns_dimension_mismatch() {
@@ -187,8 +179,6 @@ fn decision_function_wrong_feature_count_returns_dimension_mismatch() {
     );
 }
 
-// output label domain: must be exactly 0.0 or 1.0
-
 #[test]
 fn predict_labels_are_in_zero_one_domain() {
     let model = fit_separable_model();
@@ -202,8 +192,7 @@ fn predict_labels_are_in_zero_one_domain() {
     }
 }
 
-// sign-consistency invariant
-// Contract: predict(x)==1.0 iff decision_function(x)>0.0, else predict(x)==0.0
+/// Contract: predict(x)==1.0 iff decision_function(x)>0.0, else predict(x)==0.0
 
 #[test]
 fn sign_consistency_on_training_data() {
@@ -224,7 +213,7 @@ fn sign_consistency_on_training_data() {
 #[test]
 fn sign_consistency_on_new_points() {
     // [+10, 0] should score above 0 (class 1) and [-10, 0] below 0 (class 0).
-    // The test checks the sign invariant, not a hardcoded class, since the axis may flip
+    // The test checks agreement between each decision sign and its predicted class.
     let model = fit_separable_model();
     let x_new = Array2::from_shape_vec((2, 2), vec![10.0, 0.0, -10.0, 0.0]).unwrap();
     let preds = model.predict(&x_new).unwrap();
@@ -238,8 +227,6 @@ fn sign_consistency_on_new_points() {
         );
     }
 }
-
-// correctness on separable data
 
 /// On perfectly linearly-separable data the classifier predicts the true class
 /// for every training sample
@@ -268,8 +255,6 @@ fn fit_predict_agrees_with_fit_then_predict() {
     let preds_b = model_a.predict(&x).unwrap();
     assert_eq!(preds_a, preds_b, "fit_predict and fit→predict must agree");
 }
-
-// getters after fit
 
 #[test]
 fn getters_are_some_after_fit() {
@@ -326,12 +311,10 @@ fn weights_have_correct_dimensionality() {
     );
 }
 
-// fit_intercept = false
-
 /// When fit_intercept=false the bias is never updated and stays 0.0
 #[test]
 fn fit_intercept_false_bias_stays_zero() {
-    // Data centered at origin lets the zero-bias model solve the problem
+    // Data centered at origin lets the model with bias 0 solve the problem
     let (x, y) = make_separable();
     let mut model = LinearSVC::new(5000, 0.01, RegularizationType::L2(0.1), false, 1e-5).unwrap();
     model.fit(&x, &y).unwrap();
@@ -365,8 +348,6 @@ fn fit_intercept_false_decision_function_equals_dot_product() {
     }
 }
 
-// L1 vs L2 penalties produce different weight vectors
-
 /// L1 and L2 penalties with the same lambda on the same data yield different
 /// weight vectors
 #[test]
@@ -387,12 +368,12 @@ fn l1_and_l2_penalties_produce_different_weights() {
     );
 }
 
-/// Strong L1 keeps the irrelevant feature (column 1, all zeros) smaller in
+/// Strong L1 keeps the irrelevant feature (column 1, all 0) smaller in
 /// magnitude than the relevant feature: |w[1]| < |w[0]|
 #[test]
 fn l1_sparsity_irrelevant_feature_closer_to_zero() {
     let (x, y) = make_separable();
-    // x column 1 is all zeros, so a strong L1 penalty shrinks w[1] toward zero
+    // x column 1 is all 0, so a strong L1 penalty shrinks w[1] toward 0
     let mut model =
         LinearSVC::new(10_000, 0.001, RegularizationType::L1(10.0), true, 1e-7).unwrap();
     model.fit(&x, &y).unwrap();
@@ -405,8 +386,6 @@ fn l1_sparsity_irrelevant_feature_closer_to_zero() {
         w[0]
     );
 }
-
-// save / load round-trip
 
 #[test]
 fn save_load_round_trip_yields_identical_predictions() {
@@ -458,8 +437,6 @@ fn save_load_preserves_hyperparameters() {
     let _ = std::fs::remove_file(path);
 }
 
-// correctness invariant: class 1 must be on positive side
-
 /// On separable data, all class 1 samples score positive and all class 0 samples
 /// score negative
 #[test]
@@ -491,8 +468,6 @@ fn class_one_samples_score_positive_class_zero_samples_score_negative() {
     );
 }
 
-// decision_function returns finite values
-
 #[test]
 fn decision_function_returns_finite_values() {
     let model = fit_separable_model();
@@ -502,8 +477,6 @@ fn decision_function_returns_finite_values() {
         assert!(s.is_finite(), "decision_function[{i}] = {s} is not finite");
     }
 }
-
-// reproducibility via random_state
 
 // Training shuffles sample indices each epoch to form minibatches (batch size 32
 // here), so the shuffle order affects the trained weights and the seed matters
@@ -564,7 +537,6 @@ fn different_random_state_changes_result() {
         "different seeds should produce different weights on this dataset"
     );
 }
-// in-training weight-explosion guard (check_weights_validity)
 
 /// A huge but finite learning rate on large-magnitude finite features trips the
 /// in-training weight-explosion guard and surfaces Error::NonFinite
@@ -593,10 +565,8 @@ fn fit_huge_learning_rate_on_large_finite_data_returns_non_finite() {
     );
 }
 
-// decision_function applies a non-zero fitted bias (fit_intercept=true)
-
-/// Origin-shifted separable data forces a non-zero trained bias, so
-/// decision_function(x)[i] must equal x.row(i).dot(weights) + bias from the getters
+/// Shifted data requires a trained bias other than 0.
+/// Decision values must equal x.row(i).dot(weights) + bias from the getters.
 #[test]
 fn decision_function_applies_nonzero_fitted_bias() {
     let x = Array2::from_shape_vec(
@@ -616,7 +586,7 @@ fn decision_function_applies_nonzero_fitted_bias() {
     let weights = model.get_weights().unwrap().clone();
     let bias = model.get_bias().unwrap();
 
-    // The shifted boundary forces a clearly non-zero intercept, which makes the
+    // The shifted boundary forces a clearly intercept other than 0, which makes the
     // identity below a real test that the bias is applied
     assert!(
         bias.abs() > 1e-6,
@@ -636,12 +606,9 @@ fn decision_function_applies_nonzero_fitted_bias() {
     }
 }
 
-// squared-hinge loss option
-
 use rustyml::machine_learning::Loss;
 
-/// 120 deterministic, linearly-separable samples (enough rows that training spans several
-/// minibatches per epoch)
+/// Builds n deterministic, linearly separable samples with 2 features.
 fn make_separable_n(n: usize) -> (Array2<f64>, Array1<f64>) {
     let mut x = Array2::zeros((n, 2));
     let mut y = Array1::zeros(n);
@@ -673,8 +640,8 @@ fn squared_hinge_objective(
     loss / n + 0.5 * lambda * w.dot(w)
 }
 
-/// Reference full-batch GD that minimizes (1/n) sum max(0,1-y*m)^2 + (lambda/2)||w||^2,
-/// using the independently-derived squared-hinge gradient d/dw = -2*max(0,1-y*m)*y*x
+/// Reference full-batch gradient descent minimizes the squared-hinge objective: (1/n) sum max(0,1-y*m)^2 + (lambda/2)||w||^2.
+/// The loss gradient is d/dw = -2*max(0,1-y*m)*y*x.
 fn reference_squared_hinge_svm(
     x: &Array2<f64>,
     y_pm1: &Array1<f64>,

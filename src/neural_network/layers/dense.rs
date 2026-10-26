@@ -1,4 +1,7 @@
 //! Dense (fully connected) layer: a linear transform followed by an optional activation
+//!
+//! The layer stores its kernel, optional bias, activation, and build shape. Training caches
+//! the values needed to compute input and parameter gradients.
 
 use crate::error::{Context, Error};
 use crate::neural_network::layers::ParamCounts;
@@ -41,11 +44,11 @@ use ndarray::{Array, Array2, ArrayView2, Axis, CowArray, Ix2};
 /// use rustyml::neural_network::optimizers::SGD;
 /// use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
 ///
-/// // Create input and target tensors: input dim 4, output dim 3, batch_size 2
+/// // Create input and target tensors: input dim 4, output dim 3, batch_size 2.
 /// let x = Array::ones((2, 4)).into_dyn();
 /// let y = Array::ones((2, 1)).into_dyn();
 ///
-/// // Build the model
+/// // Build the model.
 /// let mut model = SequentialBuilder::new()
 ///     .add(Dense::new(3, Activation::ReLU).unwrap())
 ///     .add(Dense::new(1, Activation::ReLU).unwrap())
@@ -53,13 +56,13 @@ use ndarray::{Array, Array2, ArrayView2, Axis, CowArray, Ix2};
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Print model structure
+/// // Print model structure.
 /// model.summary();
 ///
-/// // Train the model
+/// // Train the model.
 /// model.fit(&x, &y, 3).unwrap();
 ///
-/// // Run forward prediction
+/// // Run forward prediction.
 /// let prediction = model.predict(&x);
 /// println!("Prediction results: {:?}", prediction);
 /// ```
@@ -72,7 +75,7 @@ use ndarray::{Array, Array2, ArrayView2, Axis, CowArray, Ix2};
 /// use rustyml::neural_network::layers::{Activation, Dense};
 /// use rustyml::neural_network::traits::UnaryLayer;
 ///
-/// // 2 sequences of 5 timesteps, and 7 features for each timestep
+/// // 2 sequences of 5 timesteps, and 7 features for each timestep.
 /// let x = Array::ones((2, 5, 7)).into_dyn();
 /// let mut layer = Dense::new(4, Activation::ReLU).unwrap();
 ///
@@ -168,7 +171,7 @@ impl Dense {
     /// By default the draw takes the global seed or entropy (see [`crate::random`]). An unbuilt
     /// layer holds no kernel, so this records the seed and draws nothing. A layer that is
     /// already built draws its kernel again from the new seed, so the order of the 2 calls does
-    /// not matter. The bias stays zero-initialized
+    /// not matter. The bias stays initialized to 0
     ///
     /// # Parameters
     ///
@@ -337,7 +340,7 @@ impl Dense {
     /// - `Error::Computation` - The result failed to go back to the rank of `input_shape`
     fn project(&self, input: &ArrayView2<'_, f32>, input_shape: &[usize]) -> Result<Tensor, Error> {
         // A bias-free layer passes no epilogue at all, so the product is exactly the product.
-        // A zero addend would give the same value for every input except a negative zero
+        // A 0 addend would give the same value for every input except a negative 0
         let bias = self
             .use_bias
             .then(|| self.bias.as_slice().expect("bias must be contiguous"));
@@ -468,7 +471,7 @@ impl UnaryLayer for Dense {
     /// call. See `Dense::project` for the `NaN` handling of the fused `ReLU`
     ///
     /// The input has rank 2 or more. The leading axes fold into 1 row axis, so every rank uses
-    /// the same 1 matrix product for the same row count
+    /// the same matrix product for the same row count
     ///
     /// In training, the layer caches 1 activation tensor. GELU, SiLU, and Mish read the
     /// pre-activation, and the layer moves it into the cache with no copy. Every other

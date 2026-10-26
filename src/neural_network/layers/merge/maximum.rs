@@ -52,7 +52,7 @@ use ndarray::IxDyn;
 /// use rustyml::neural_network::layers::Maximum;
 /// use rustyml::neural_network::traits::Layer;
 ///
-/// // 1 sample of 3 features, from each of 2 branches of a model
+/// // 1 sample of 3 features, from each of 2 branches of a model.
 /// let left = Array::from_shape_vec(IxDyn(&[1, 3]), vec![1.0, 5.0, 3.0]).unwrap();
 /// let right = Array::from_shape_vec(IxDyn(&[1, 3]), vec![4.0, 2.0, 3.0]).unwrap();
 ///
@@ -64,7 +64,7 @@ use ndarray::IxDyn;
 ///     Array::from_shape_vec(IxDyn(&[1, 3]), vec![4.0, 5.0, 3.0]).unwrap()
 /// );
 ///
-/// // The last position holds a tie, and its whole gradient goes to the first input
+/// // The last position holds a tie, and its whole gradient goes to the first input.
 /// let grads = layer
 ///     .backward_many(&Array::ones(output.raw_dim()), &mut ctx)
 ///     .unwrap();
@@ -174,8 +174,7 @@ impl Layer for Maximum {
     /// Routes the gradient of each output position to the input that won it
     ///
     /// The other inputs take 0 at that position. An input that broadcast in the forward pass
-    /// then sums its gradient back to its own shape, so every gradient comes back at the shape
-    /// of its own input
+    /// sums its gradient back to its input shape
     ///
     /// # Errors
     ///
@@ -207,6 +206,7 @@ impl Layer for Maximum {
 }
 
 /// Unit tests of the fold, the gradient routing, the tie rule, and the refusals
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::*;

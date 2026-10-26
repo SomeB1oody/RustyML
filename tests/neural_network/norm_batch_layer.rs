@@ -17,8 +17,6 @@ use rustyml::{error::Error, neural_network::NnError};
 
 use crate::common::assert_allclose;
 
-// Helpers
-
 /// Build a 1-D Tensor (shape [n]) from a flat Vec
 fn tensor1(data: Vec<f32>) -> rustyml::neural_network::Tensor {
     let n = data.len();
@@ -29,10 +27,6 @@ fn tensor1(data: Vec<f32>) -> rustyml::neural_network::Tensor {
 fn tensor2(data: Vec<f32>, rows: usize, cols: usize) -> rustyml::neural_network::Tensor {
     ArrayD::from_shape_vec(vec![rows, cols], data).expect("tensor2: shape/data mismatch")
 }
-
-// BATCH NORMALIZATION
-
-// Constructor validation
 
 /// `BatchNormalization` takes no shape at construction, so build validates the rank instead
 #[test]
@@ -47,7 +41,7 @@ fn bn_build_rejects_empty_input_shape() {
 }
 
 /// BatchNormalization::new returns Err(InvalidParameter) for out-of-range momentum
-/// (>1.0 or <0.0) and for non-positive epsilon (zero or negative)
+/// (>1.0 or <0.0) and for non-positive epsilon (0 or negative)
 #[test]
 fn bn_constructor_rejects_invalid_scalar_params() {
     // (momentum, epsilon, label) rows. Each must yield InvalidParameter.
@@ -73,8 +67,6 @@ fn bn_constructor_accepts_boundary_momentum_values() {
     assert!(BatchNormalization::new(0.0, 1e-5).is_ok());
     assert!(BatchNormalization::new(1.0, 1e-5).is_ok());
 }
-
-// Shape mismatch on forward
 
 /// BatchNormalization forward returns Err(InvalidInput) when the feature axis differs
 /// from the built shape [4, 3]
@@ -103,8 +95,6 @@ fn bn_forward_accepts_different_batch_size() {
         .expect("a smaller batch must be accepted");
     assert_eq!(out.shape(), &[2, 3]);
 }
-
-// Training-mode forward: output has batch-mean ~= 0 and batch-var ~= 1
 
 /// BN training-mode forward yields per-feature batch-mean ~= 0 and batch-var ~= 1
 /// with default gamma=1, beta=0
@@ -141,8 +131,6 @@ fn bn_train_output_has_batch_mean_zero_and_var_one() {
         );
     }
 }
-
-// Training-mode forward: concrete numerical output values
 
 /// BN training-mode forward produces hand-computed normalized values for a 4x1 batch
 #[test]
@@ -323,9 +311,9 @@ fn bn_running_stats_accumulate_over_multiple_forwards() {
     assert_allclose(&output, &expected, 1e-4);
 }
 
-// Uniform batch: BN output is all zeros
+// Uniform batch: BN output is all 0 values
 
-/// When every row of the batch is identical, BN output is all zeros
+/// When every row of the batch is identical, BN output is all 0 values
 #[test]
 fn bn_uniform_batch_output_is_zero() {
     let data = vec![
@@ -368,12 +356,8 @@ fn bn_training_and_eval_modes_produce_different_outputs() {
     );
 }
 
-// LAYER NORMALIZATION
-
-// Constructor validation
-
 /// LayerNormalization::new returns Err(InvalidParameter) for non-positive epsilon
-/// (zero or negative)
+/// (0 or negative)
 #[test]
 fn ln_constructor_rejects_invalid_epsilon() {
     // (epsilon, label) rows. Each must yield InvalidParameter.
@@ -388,7 +372,7 @@ fn ln_constructor_rejects_invalid_epsilon() {
     }
 }
 
-/// LayerNormalization::new with Multiple([]) returns Err(InvalidParameter)
+/// `with_normalized_axis` rejects an empty axis list with `InvalidParameter`.
 #[test]
 fn ln_constructor_rejects_multiple_empty_axes() {
     let result = LayerNormalization::new(1e-5)
@@ -417,7 +401,7 @@ fn ln_constructor_rejects_multiple_out_of_bounds_axis() {
     );
 }
 
-/// LayerNormalization::new with Multiple(axes) rejects a duplicate axis, for example [0, 0]
+/// `with_normalized_axis` rejects duplicate axes, such as [0, 0].
 #[test]
 fn ln_constructor_rejects_multiple_duplicate_axes() {
     let result = LayerNormalization::new(1e-5)
@@ -429,8 +413,6 @@ fn ln_constructor_rejects_multiple_duplicate_axes() {
         result
     );
 }
-
-// Default axis: each sample has mean ~= 0 and variance ~= 1
 
 /// LN Default normalizes along the last dimension, so each row has mean ~= 0 and var ~= 1
 #[test]
@@ -456,8 +438,6 @@ fn ln_default_each_sample_has_mean_zero_and_var_one() {
         );
     }
 }
-
-// Default axis: concrete hand-computed values
 
 /// LN Default produces hand-computed normalized values for 2 rows of 4 features
 #[test]
@@ -489,8 +469,6 @@ fn ln_default_forward_concrete_values() {
     assert_allclose(&output, &expected, 1e-5);
 }
 
-// Custom axis
-
 /// LN Custom(axis=0) normalizes across rows for each column, matching hand-computed values
 #[test]
 fn ln_custom_axis0_concrete_values() {
@@ -521,8 +499,6 @@ fn ln_custom_axis0_concrete_values() {
     assert_allclose(&output, &expected, 1e-5);
 }
 
-// Custom axis: each column has zero mean and unit variance
-
 /// LN Custom(axis=0) on a [5, 3] input gives each output column mean ~= 0 and var ~= 1
 #[test]
 fn ln_custom_axis0_each_column_has_mean_zero_and_var_one() {
@@ -547,8 +523,6 @@ fn ln_custom_axis0_each_column_has_mean_zero_and_var_one() {
         );
     }
 }
-
-// Multiple axes
 
 /// LN Multiple([0, 1]) on a 2D input normalizes all 12 elements jointly, giving the whole
 /// output mean ~= 0 and var ~= 1
@@ -605,9 +579,7 @@ fn ln_multiple_single_axis_on_3d_input() {
     }
 }
 
-// Zero-variance row: epsilon prevents NaN
-
-/// LN Default: a constant row produces finite, all-zero output thanks to epsilon
+/// LN Default: a constant row produces finite, all-0 output thanks to epsilon
 #[test]
 fn ln_default_constant_row_is_finite_and_zero() {
     let data = vec![
@@ -642,8 +614,6 @@ fn ln_default_constant_row_is_finite_and_zero() {
         );
     }
 }
-
-// set_weights: custom gamma/beta applied
 
 /// LN set_weights: custom gamma and beta scale and shift the normalized output
 #[test]
@@ -686,8 +656,6 @@ fn ln_set_weights_rejects_wrong_gamma_shape() {
     );
 }
 
-// Shape-mismatch on LN forward
-
 /// LN forward rejects input whose feature axis ([2, 5]) differs from the built shape [2, 4]
 #[test]
 fn ln_forward_rejects_wrong_input_shape() {
@@ -702,8 +670,6 @@ fn ln_forward_rejects_wrong_input_shape() {
     );
 }
 
-// LN inference mode: the context carries it
-
 /// The context does not change LN forward output (the mode only affects backward)
 #[test]
 fn ln_mode_switch_does_not_change_forward_output() {
@@ -716,8 +682,6 @@ fn ln_mode_switch_does_not_change_forward_output() {
 
     assert_allclose(&out_train, &out_eval, 1e-6);
 }
-
-// LN Multiple axes: forward-time axis validation
 
 /// LN forward with valid Multiple([0, 1]) axes succeeds
 #[test]
@@ -735,8 +699,6 @@ fn ln_multiple_valid_axes_forward_succeeds() {
         result
     );
 }
-
-// LN runtime axis validation on forward / predict
 
 /// LN Custom(axis) with axis >= input.ndim() is rejected at forward time with InvalidParameter
 #[test]
@@ -832,8 +794,6 @@ fn ln_backward_eval_mode_passes_gradient_through() {
     assert_allclose(&grad_input, &grad, 0.0f32);
 }
 
-// BN constructor with 1-D input_shape: scalar-parameter branch
-
 /// BatchNormalization with a 1-D input_shape uses length-1 scalar params and normalizes
 /// every element as its own sample, preserving the input shape
 #[test]
@@ -861,8 +821,8 @@ fn bn_spatial_4d_normalizes_per_channel() {
     // [N=1, H=2, W=2, C=2]
     let mut bn = BatchNormalization::new(0.9, 1e-5).unwrap();
     bn.build(&Shape::known(&[1, 2, 2, 2])).unwrap();
-    // Per-channel (C=2) parameters: gamma[2] + beta[2] = 4 trainable (not 2*C*H*W = 16), plus
-    // the running mean[2] and the running variance[2], which no optimizer updates
+    // The 2 channels have 4 trainable elements: 2 gamma values and 2 beta values. Their running
+    // means and variances add 4 non-trainable elements.
     assert_eq!(bn.param_count(), ParamCounts::new(4, 4));
 
     // Channels-last row-major order is [h, w, c], so each adjacent pair holds a single spatial
@@ -916,9 +876,8 @@ fn bn_spatial_4d_backward_shape() {
 ///
 /// Returns the output, the input gradient, and the flat gamma and beta gradients
 fn bn_run(shape: &[usize], gate: usize) -> (ArrayD<f32>, ArrayD<f32>, Vec<f32>) {
-    // `common::GateGuard` takes the exclusive side of the gate lock, moves every gate, and
-    // puts every one of them back on drop, which includes the path where this run panics. The
-    // lock keeps a sibling test from reading a moved gate
+    // `common::GateGuard` locks the gates for exclusive access and restores every gate when
+    // dropped, even after a panic. The lock prevents other tests from reading changed gates.
     let _guard = crate::common::GateGuard::acquire();
     rustyml::tuning::norm::set_batch_norm(gate);
     rustyml::tuning::norm::set_col_fold(gate);
@@ -959,16 +918,14 @@ fn bn_run(shape: &[usize], gate: usize) -> (ArrayD<f32>, ArrayD<f32>, Vec<f32>) 
     (out, grad_in, grads)
 }
 
-/// Moving the BatchNormalization gates must not change a single bit
+/// Changes to BatchNormalization gates must preserve every output and gradient bit.
 ///
-/// A gate selects an execution strategy and never changes a result, so the serial and the
-/// parallel arm must agree exactly, not merely to a tolerance. The test shape clears the
-/// shipped threshold, so the run exercises the parallel arm
+/// Serial and parallel paths must agree exactly. The test shape exceeds the shipped threshold
+/// and exercises the parallel path.
 #[test]
 fn bn_gate_move_does_not_change_any_bit() {
-    // 11 * 64 * 96 * 5 = 337,920 elements, above the shipped 262,144 gate
-    // The row count 67,584 is not a power of 2, and the channel count divides neither
-    // a power of 2 nor the fold block size
+    // The shape holds 337,920 elements, above the shipped gate of 262,144. Its 67,584 rows are
+    // not a power of 2. The 5 channels divide neither a power of 2 nor the fold block size.
     let shape = [11usize, 64, 96, 5];
     let rows: usize = shape[..shape.len() - 1].iter().product();
     assert!(!rows.is_power_of_two(), "M must not be a power of 2");
@@ -1016,15 +973,11 @@ fn bn_gate_move_does_not_change_any_bit() {
     }
 }
 
-// PARAMETER COUNTS
-
-/// BatchNormalization reports 4 parameter elements per channel, split 2 trainable and 2
-/// non-trainable
+/// BatchNormalization reports 4 parameter elements per channel: 2 trainable and 2
+/// non-trainable.
 ///
-/// `gamma` and `beta` are the trainable half. The running mean and the running variance are the
-/// non-trainable half: the layer keeps them, the training forward pass moves them, and no
-/// optimizer ever updates them. The split matches Keras 3, which reports 4 * C in total and
-/// 2 * C of them as non-trainable
+/// The optimizer updates `gamma` and `beta`. Training forward passes update the running mean
+/// and variance. These statistics account for the 2 non-trainable elements per channel.
 #[test]
 fn bn_param_count_splits_the_trainable_and_the_non_trainable_half() {
     for channels in [1usize, 3, 8] {
@@ -1078,12 +1031,10 @@ fn bn_param_count_counts_the_channel_axis_alone() {
     assert_eq!(scalar.param_count().total(), 4);
 }
 
-/// LayerNormalization holds trainable parameters only, so its non-trainable count is 0
+/// LayerNormalization holds trainable parameters only, so its non-trainable count is 0.
 ///
-/// The layer keeps no running statistic. Nothing of it survives a step without the optimizer,
-/// so the total must equal the trainable count. This is the control for the BatchNormalization
-/// counts above: it shows that a non-zero non-trainable count is a property of the layer, and
-/// not a constant that every layer reports
+/// The layer keeps no running statistics, so its total equals its trainable count. This
+/// contrasts with the non-trainable statistics in BatchNormalization.
 #[test]
 fn ln_param_count_reports_no_non_trainable_parameter() {
     let mut ln = LayerNormalization::new(1e-5).unwrap();

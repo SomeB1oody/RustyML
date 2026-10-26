@@ -24,7 +24,7 @@ use rayon::slice::{ParallelSlice, ParallelSliceMut};
 
 /// Largest scale the layer applies. It equals `1 / epsilon` for a fixed `epsilon` of `1e-12`
 ///
-/// The bound keeps a group of near-zero elements from being scaled up without limit. Written as
+/// The bound keeps a group of elements near 0 from being scaled up without limit. Written as
 /// a literal because `1e12` and `1.0 / 1e-12` round to the same `f32`, which is
 /// `999999995904.0`
 const MAX_SCALE: f32 = 1e12;
@@ -39,10 +39,16 @@ pub enum UnitNormalizationAxis {
     #[default]
     Default,
     /// Normalize along a single named axis, counting from 0 and including the batch axis
-    Custom(usize),
+    Custom(
+        /// Axis index in the full input shape.
+        usize,
+    ),
     /// Normalize jointly over several axes. 1 norm covers the combined elements of those axes,
     /// so the axes need not be next to each other
-    Multiple(Vec<usize>),
+    Multiple(
+        /// Axis indices whose elements share a norm.
+        Vec<usize>,
+    ),
 }
 
 /// Scales each group of elements to an L2 norm of 1
@@ -54,8 +60,8 @@ pub enum UnitNormalizationAxis {
 ///
 /// The scale is `1 / sqrt(sum of squares)`, capped at `1e12`. The cap is `1 / epsilon` for a
 /// fixed `epsilon` of `1e-12`, and it takes over for every group whose norm falls below
-/// `1e-12`. An all-zero group is the limiting case. The cap scales it by `1e12`, and it stays
-/// all zero, rather than dividing by zero
+/// `1e-12`. A group of 0 values is the limiting case. The cap scales it by `1e12`, and it stays
+/// all 0, rather than dividing by 0
 ///
 /// Unlike [`LayerNormalization`](crate::neural_network::layers::LayerNormalization), this layer
 /// subtracts no mean and learns no `gamma` or `beta`. It changes the length of each group and
@@ -77,7 +83,7 @@ pub enum UnitNormalizationAxis {
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array2;
 ///
-/// // A rank-2 input: 2 samples of 3 features each
+/// // A rank-2 input: 2 samples of 3 features each.
 /// let x = Array2::from_shape_vec((2, 3), vec![3.0, 4.0, 0.0, 0.0, 5.0, 12.0])
 ///     .unwrap()
 ///     .into_dyn();
@@ -88,17 +94,17 @@ pub enum UnitNormalizationAxis {
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
 /// let unit = model.predict(&x).unwrap();
 ///
-/// // The 3-4-5 triangle becomes 0.6, 0.8, and the 5-12-13 triangle becomes 5/13, 12/13
+/// // The 3-4-5 triangle becomes 0.6, 0.8, and the 5-12-13 triangle becomes 5/13, 12/13.
 /// assert!((unit[[0, 0]] - 0.6).abs() < 1e-6);
 /// assert!((unit[[0, 1]] - 0.8).abs() < 1e-6);
 /// assert!((unit[[1, 2]] - 12.0 / 13.0).abs() < 1e-6);
 ///
-/// // Every row now has a length of 1
+/// // Every row has a length of 1.
 /// for row in 0..2 {
 ///     let length: f32 = (0..3).map(|c| unit[[row, c]] * unit[[row, c]]).sum();
 ///     assert!((length - 1.0).abs() < 1e-6);
@@ -272,7 +278,7 @@ fn into_group_tensor(values: Vec<f32>, group_shape: &[usize]) -> Tensor {
 /// The scale for a group, and whether its norm or the cap decided it
 ///
 /// The comparison sends a `square_sum` of `NaN` to the norm branch, which carries the `NaN`
-/// into the output. It also sends an infinite reciprocal, which an all-zero group gives, to
+/// into the output. It also sends an infinite reciprocal, which a group of 0 values gives, to
 /// the cap
 fn group_scale(square_sum: f32) -> (f32, f32) {
     let from_norm = 1.0 / square_sum.sqrt();

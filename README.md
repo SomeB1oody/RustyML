@@ -10,23 +10,25 @@ A machine learning and deep learning library written in **pure Rust**.
 [![crates.io](https://img.shields.io/crates/v/rustyml.svg)](https://crates.io/crates/rustyml)
 [![ci](https://img.shields.io/github/actions/workflow/status/SomeB1oody/RustyML/ci.yml?branch=master&label=ci)](https://github.com/SomeB1oody/RustyML/actions/workflows/ci.yml)
 
-> Read **[RustyML User Guide](https://someb1oody.github.io/RustyML/en/)** for detailed documentation and tutorials of RustyML.
+> Read the **[RustyML User Guide](https://someb1oody.github.io/RustyML/en/)** for instructions and examples.
 
 ## Overview
 
-RustyML is a machine learning and deep learning library, built end to end in Rust with no C or
-C++ dependencies. It covers the full workflow: data preprocessing, feature engineering, model
-training, and evaluation. It uses Rust's memory safety, safe concurrency, and zero-cost
-abstractions.
+RustyML provides data preprocessing, machine learning models, neural networks, and evaluation metrics.
+It uses `ndarray` arrays and Rust numeric kernels.
 
-## Highlights
+## Features
 
-- **Pure Rust, no FFI**: memory-safe and portable, with nothing to link against.
-- **Parallelized by default**: heavy kernels use [Rayon](https://github.com/rayon-rs/rayon) for multi-threaded computation.
-- **Algorithm coverage**: classical supervised and unsupervised learning, anomaly detection, and a neural-network framework with a sequential model and a graph model.
-- **Reproducible**: a single `set_global_seed` call makes every randomized component on the calling thread deterministic. A per-component `random_state` covers the rest.
-- **Model persistence**: save and load trained models and network weights as compact binary, using [Serde](https://serde.rs/) and [postcard](https://docs.rs/postcard/).
-- **Evaluation metrics**: regression, classification (binary and multiclass), and clustering, matching scikit-learn conventions.
+- **Parallel kernels**: selected kernels use [Rayon](https://github.com/rayon-rs/rayon). Work thresholds control the choice between serial and parallel paths.
+- **Models**: supervised learning, unsupervised learning, anomaly detection, sequential networks, and graph networks.
+- **Random seeds**: `set_global_seed` sets a seed stream on the calling thread. Local `random_state` values override that stream where supported.
+- **Binary files**: supported models use [Serde](https://serde.rs/) and [postcard](https://docs.rs/postcard/) to save and load fitted state.
+- **Network checkpoints**: save model arrays, then load them into a compatible built model. Checkpoints do not restore the optimizer or loss.
+- **Metrics**: regression, binary classification, multiclass classification, and clustering. Read each metric's input rules and score definition.
+
+Reset the global seed before repeating the same sequence of random operations.
+Other threads have separate seed streams.
+Some decomposition solvers use independent seeds.
 
 ## Installation
 
@@ -38,7 +40,7 @@ rustyml = "*"
 ndarray = "0.17"
 ```
 
-To slim the build, opt out of the default and name what you need:
+Disable default features to select individual modules:
 
 ```toml,ignore
 # Everything (ml, nn, utils, metrics, math)
@@ -65,7 +67,7 @@ use rustyml::prelude::machine_learning::*;
 use ndarray::array;
 
 fn main() {
-    // Train a regularization-free linear regression model
+    // Train a linear regression model without regularization.
     let mut model = LinearRegression::new(true)
         .with_solver(LeastSquaresSolver::GradientDescent { learning_rate: 0.01, max_iter: 1000, tol: 1e-6 }).unwrap();
 
@@ -76,7 +78,7 @@ fn main() {
     let predictions = model.predict(&x).unwrap();
     println!("{:?}", predictions);
 
-    // Persist and reload the trained model
+    // Save and reload the trained model.
     model.save_to_path("linear_regression.bin").unwrap();
     let restored = LinearRegression::load_from_path("linear_regression.bin").unwrap();
 }
@@ -91,9 +93,11 @@ use ndarray::Array;
 fn main() {
     // 32 samples, 784 input features, 10 output classes
     let x = Array::ones((32, 784)).into_dyn();
-    let y = Array::ones((32, 10)).into_dyn();
+    let mut y = Array::zeros((32, 10));
+    y.column_mut(0).fill(1.0);
+    let y = y.into_dyn();
 
-    // The builder collects the layers, and `build` draws every weight from the input shape
+    // Build the layers from the input shape.
     let mut model = SequentialBuilder::new()
         .add(Dense::new(128, Activation::ReLU).unwrap())
         .add(Dense::new(64, Activation::ReLU).unwrap())
@@ -106,30 +110,29 @@ fn main() {
         CategoricalCrossEntropy::new(false),
     );
 
-    model.summary(); // print the architecture
+    model.summary(); // Print the model structure.
 
-    // 1 loss value per epoch, each measured while that epoch ran, not after it
+    // Record 1 loss value during each epoch.
     let history = model.fit(&x, &y, 10).unwrap();
     println!("Per-epoch loss: {:?}", history.loss());
 
-    // Score the weights the model holds now: inference mode, updates nothing
+    // Evaluate the current weights in inference mode.
     println!("Loss after training: {}", model.evaluate(&x, &y).unwrap());
 
     let predictions = model.predict(&x).unwrap();
     println!("Predictions shape: {:?}", predictions.shape());
 
-    // Save the trained weights to a file
+    // Save all model arrays to a file.
     model.save_to_path("model.bin").unwrap();
 }
 ```
 
 ### Graph Models
 
-A sequential model gives every layer 1 input, and that input is the output of the layer before
-it. `GraphBuilder` removes that limit. A node is 1 call of 1 layer on the outputs of other
-nodes. A model can therefore hold several inlets, several outlets, a shared tower, or a
-residual connection. The merge family joins the branches: `Add`, `Subtract`, `Multiply`,
-`Average`, `Maximum`, `Minimum`, and `Concatenate`.
+A sequential model passes each layer's output to the next layer.
+`GraphBuilder` connects layer calls as nodes in a graph.
+A graph can have multiple inputs, multiple outputs, shared layers, and residual connections.
+The merge layers join branches: `Add`, `Subtract`, `Multiply`, `Average`, `Maximum`, `Minimum`, and `Concatenate`.
 
 ```rust
 use rustyml::prelude::neural_network::*;
@@ -168,12 +171,12 @@ use rustyml::metrics::*;
 use ndarray::array;
 
 fn main() {
-    // Arguments are always (y_true, y_pred)
-    // ConfusionMatrix::new takes hard 0.0/1.0 labels (new_with_labels covers other pairs)
+    // Pass the true labels before the predicted labels.
+    // Use hard 0.0/1.0 labels here. Use new_with_labels for other label pairs.
     let y_true = array![1.0, 0.0, 0.0, 1.0, 1.0];
     let y_pred = array![1.0, 0.0, 1.0, 1.0, 0.0];
 
-    // The 2 arguments carry independent storage types, so an owned array and a view mix
+    // The arguments can use an owned array and a view.
     let cm = ConfusionMatrix::new(&y_true, &y_pred.view());
     println!("Accuracy: {:.3}", cm.accuracy());
     println!("F1 score: {:.3}", cm.f1_score());
@@ -182,7 +185,20 @@ fn main() {
 
 ## Modules
 
-See at [docs.rs](https://docs.rs/rustyml/latest/rustyml/index.html#architecture)
+The public modules group the API by task:
+
+- `machine_learning`: estimators for classification, regression, clustering, decomposition, and anomaly detection.
+- `neural_network`: layers, model builders, losses, optimizers, and checkpoints.
+- `utils`: preprocessing, label conversion, scalers, and dataset splits.
+- `metrics`: classification, regression, and clustering scores.
+- `math`: distance functions, matrix operations, and reductions.
+- `error`: shared error types and result aliases.
+- `random`: thread-local seed controls.
+- `traits`: common estimator contracts.
+- `tuning`: runtime thresholds for serial and parallel work.
+- `prelude`: grouped imports for public types and traits.
+
+See the [API reference](https://docs.rs/rustyml/latest/rustyml/).
 
 ## Feature Flags
 
@@ -201,8 +217,7 @@ The crate uses feature flags for modular compilation:
 
 ## Project Status
 
-RustyML is under active development. The API is stabilizing, but breaking changes can still
-appear in minor releases before `1.0.0`.
+RustyML is under active development. Minor releases can change the API before `1.0.0`.
 
 ## Contributing
 

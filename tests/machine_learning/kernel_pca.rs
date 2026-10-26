@@ -1,6 +1,6 @@
 //! Integration tests for `machine_learning::decomposition::kernel_pca`.
 //!
-//! Covers constructor validation, fit/transform error paths, per-kernel happy paths, eigensolver
+//! Covers constructor validation, fit/transform error paths, successful fits for each kernel, eigensolver
 //! agreement, and closed-form kernel value checks. Expected values come from mathematical
 //! definitions, not recorded output.
 
@@ -11,8 +11,6 @@ use rustyml::machine_learning::decomposition::kernel_pca::{EigenSolver, KernelPC
 use rustyml::machine_learning::{Gamma, KernelType};
 
 use crate::common::assert_allclose;
-
-// Local helpers
 
 /// Small deterministic dataset for general fitting tests (8 samples x 2 features)
 fn make_small_dataset() -> Array2<f64> {
@@ -28,8 +26,8 @@ fn make_small_dataset() -> Array2<f64> {
     ]
 }
 
-/// Builds 2 concentric clusters that are radially but not linearly separable: an inner
-/// ring at radius 0.5 (label -1) and an outer ring at radius 3.0 (label +1)
+/// Builds concentric clusters that radial distance can separate. The inner ring has radius 0.5 and label -1.
+/// The outer ring has radius 3.0 and label +1.
 ///
 /// # Returns
 ///
@@ -63,7 +61,7 @@ fn make_radial_clusters(n_inner: usize, n_outer: usize) -> (Array2<f64>, Vec<i32
 /// # Parameters
 ///
 /// - `projections` - projected samples, 1 row per sample
-/// - `labels` - class labels, negative for one class and non-negative for the other
+/// - `labels` - class labels, -1 for the inner ring and +1 for the outer ring
 ///
 /// # Returns
 ///
@@ -108,8 +106,6 @@ fn class_separability(projections: &Array2<f64>, labels: &[i32]) -> f64 {
     }
     total
 }
-
-// Constructor + getter tests
 
 #[test]
 fn test_new_default_values() {
@@ -200,8 +196,6 @@ fn test_new_sigmoid_gamma_zero_accepted() {
     );
 }
 
-// Constructor validation / error paths
-
 #[test]
 fn test_new_n_components_zero_returns_invalid_parameter() {
     let err = KernelPCA::new(KernelType::Linear, 0).unwrap_err();
@@ -213,7 +207,7 @@ fn test_new_n_components_zero_returns_invalid_parameter() {
 
 #[test]
 fn test_new_rbf_invalid_gamma_returns_invalid_parameter() {
-    // RBF rejects zero, negative, and non-finite gamma with InvalidParameter
+    // RBF rejects 0, negative, and non-finite gamma with InvalidParameter
     for gamma in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         let err = KernelPCA::new(
             KernelType::RBF {
@@ -312,8 +306,6 @@ fn test_new_sigmoid_non_finite_param_returns_invalid_parameter() {
     }
 }
 
-// fit error paths
-
 #[test]
 fn test_fit_one_sample_returns_invalid_input() {
     // KernelPCA requires at least 2 samples
@@ -357,8 +349,6 @@ fn test_fit_n_components_greater_than_n_samples_returns_invalid_parameter() {
     );
 }
 
-// transform error paths
-
 #[test]
 fn test_transform_wrong_feature_count_returns_dimension_mismatch() {
     let x_train = make_small_dataset(); // 8 x 2
@@ -380,8 +370,6 @@ fn test_transform_wrong_feature_count_returns_dimension_mismatch() {
         "expected DimensionMismatch, got {err:?}"
     );
 }
-
-// Happy-path fit + transform with each kernel
 
 fn run_fit_transform_shape_check(kernel: KernelType, n_components: usize) {
     let x = make_small_dataset(); // 8 x 2
@@ -457,8 +445,6 @@ fn test_fit_transform_cosine_kernel() {
     run_fit_transform_shape_check(KernelType::Cosine, 2);
 }
 
-// fit_transform(x) equals fit(x) then transform(x): determinism invariant
-
 #[test]
 fn test_fit_transform_equals_fit_then_transform() {
     let x = make_small_dataset();
@@ -483,9 +469,10 @@ fn test_fit_transform_equals_fit_then_transform() {
     assert_allclose(&proj_a, &proj_b, 1e-10);
 }
 
-// Centering invariant: column means of the training projection are about 0
-//
-// K_c = H K H with H = I - (1/n) * 11^T zeroes each row sum, so each projected column mean is 0
+/// Centering invariant: column means of the training projection are about 0
+///
+/// Centered K_c = H K H has row sums of 0, where H = I - (1/n) * 11^T.
+/// Thus each projected training column has mean 0.
 
 #[test]
 fn test_centering_training_output_has_near_zero_column_means() {
@@ -506,8 +493,6 @@ fn test_centering_training_output_has_near_zero_column_means() {
         assert_abs_diff_eq!(mean, 0.0, epsilon = 1e-9);
     }
 }
-
-// Eigenvalues are positive and sorted descending after fit
 
 #[test]
 fn test_eigenvalues_are_positive_after_fit() {
@@ -542,6 +527,7 @@ fn test_eigenvalues_are_positive_after_fit() {
 // EigenSolver variants agree: Dense, Lanczos, and PowerIteration yield the same dominant
 // eigenvalue and projections, up to a global sign flip on each column
 
+/// Computes the Euclidean norm of each matrix column.
 fn abs_col_norms(m: &Array2<f64>) -> Array1<f64> {
     Array1::from_iter((0..m.ncols()).map(|j| m.column(j).mapv(|v| v * v).sum().sqrt()))
 }
@@ -646,8 +632,6 @@ fn test_all_three_solvers_produce_finite_shapes() {
     }
 }
 
-// Determinism: calling fit+transform twice gives bit-identical results
-
 #[test]
 fn test_determinism_dense_solver() {
     let x = make_small_dataset();
@@ -668,8 +652,8 @@ fn test_determinism_dense_solver() {
     assert_allclose(&proj1, &proj2, 0.0);
 }
 
-// RBF separates radial clusters better than Linear. An inner ring (r=0.5) and outer ring
-// (r=3.0) are radially but not linearly separable, so RBF separability must exceed Linear
+/// RBF separates radial clusters better than Linear. An inner ring (r=0.5) and outer ring
+/// (r=3.0) are radially but not linearly separable, so RBF separability must exceed Linear
 
 #[test]
 fn test_rbf_separates_radial_clusters_better_than_linear() {
@@ -703,8 +687,6 @@ fn test_rbf_separates_radial_clusters_better_than_linear() {
     );
 }
 
-// Save / load round-trip
-
 #[test]
 fn test_save_load_round_trip() {
     let x = make_small_dataset();
@@ -731,8 +713,6 @@ fn test_save_load_round_trip() {
     let _ = std::fs::remove_file(path);
 }
 
-// Single-feature (1-D) data
-
 #[test]
 fn test_single_feature_data_fits_and_transforms() {
     // 4 points in 1 feature form a 4x4 kernel matrix. Centering still applies
@@ -751,8 +731,6 @@ fn test_single_feature_data_fits_and_transforms() {
         assert!(v.is_finite());
     }
 }
-
-// Larger-sample correctness check
 
 #[test]
 fn test_parallel_path_n_samples_200() {
@@ -779,8 +757,6 @@ fn test_parallel_path_n_samples_200() {
         assert!(v.is_finite(), "non-finite value in parallel path output");
     }
 }
-
-// Numerical spot-checks: closed-form kernel values via the public KernelType::compute
 
 #[test]
 fn test_rbf_kernel_known_value() {
@@ -843,8 +819,6 @@ fn test_sigmoid_kernel_known_value() {
     assert_abs_diff_eq!(actual, expected, epsilon = 1e-12);
 }
 
-// n_components == n_samples boundary: exactly equal should succeed
-
 #[test]
 fn test_n_components_equals_n_samples_boundary() {
     // With 4 samples, n_components=4 is accepted since n_components <= n_samples
@@ -864,15 +838,13 @@ fn test_n_components_equals_n_samples_boundary() {
             assert_eq!(proj.shape(), [4, 4]);
         }
         Err(Error::Computation { .. }) => {
-            // Acceptable: near-zero eigenvalues for this small symmetric dataset
+            // Acceptable: eigenvalues near 0 for this small symmetric dataset
         }
         Err(e) => {
             panic!("unexpected error for n_components==n_samples: {e:?}");
         }
     }
 }
-
-// 2-sample minimum boundary: exactly 2 samples is valid
 
 #[test]
 fn test_two_samples_is_valid() {
@@ -894,9 +866,8 @@ fn test_two_samples_is_valid() {
         Err(e) => panic!("unexpected error for 2-sample fit: {e:?}"),
     }
 }
-// An indefinite Sigmoid kernel yields a non-positive eigenvalue in its centered Gram matrix.
-// KernelPCA tolerates this: the fit succeeds, and projection zeroes that component rather than
-// failing the whole fit
+/// An indefinite Sigmoid kernel yields a non-positive eigenvalue in its centered Gram matrix.
+/// Fit succeeds, and transform sets that component to 0.
 #[test]
 fn test_fit_indefinite_kernel_negative_eigenvalue_is_tolerated() {
     let x = array![[1.0], [4.0]]; // 2 samples, 1 feature

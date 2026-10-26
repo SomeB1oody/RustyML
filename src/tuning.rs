@@ -1,35 +1,8 @@
-//! Runtime overrides for the crate's parallel and serial gate thresholds
+//! Runtime overrides for parallel work thresholds and output tiling limits.
 //!
-//! Every parallelized kernel picks serial execution or rayon, and for GEMM picks a parallel
-//! strategy, by comparing a work estimate against a calibrated threshold. This module overrides
-//! the defaults at runtime, without a recompile, to match a different machine's core count,
-//! cache size, or memory bandwidth. The defaults come from calibration on an AMD Ryzen 9 9950X
-//! with 16 cores, 32 threads, and 64 MiB of L3 in 2 instances, which is 32 MiB per die.
-//!
-//! # What a gate does and does not change
-//!
-//! A gate only picks an execution strategy. It never changes what the code computes. The
-//! elementwise and reduction gates give the same result serial or parallel. The matrix-product
-//! scheduling lives in the `gemmkit` backend (see the `matmul` submodule). Its results reproduce
-//! on the same machine for a fixed configuration regardless of worker count. The `matmul` gates
-//! kept here only shape caller-side tiling. Retuning a gate does not change any result.
-//!
-//! # Storage vs. API
-//!
-//! The default and the atomic backing store for each gate live next to the code they govern.
-//! This module is the discoverable public entry point that forwards to those per-site setters.
-//! Each setter makes a single relaxed atomic store. Each getter makes a single relaxed load on
-//! the kernel's hot path.
-//!
-//! # Examples
-//!
-//! ```ignore
-//! // Retune the GEMM serial/parallel work gate for a machine with fewer, faster cores
-//! // (a gemmkit knob, forwarded through the `backend` alias)
-//! rustyml::tuning::matmul::backend::set_parallel_threshold(2_000_000);
-//! // Match the tiled-product policy to the L3 1 core of this machine reaches
-//! rustyml::tuning::matmul::set_cache_resident_max_bytes(16 * 1024 * 1024);
-//! ```
+//! Setters and getters forward to atomic values near the kernels they control.
+//! Backend matrix-product settings are available through the `matmul::backend` export.
+//! Each threshold uses the work units described by its functions.
 
 /// Generates a `set_*` / `get_*` forwarding pair that calls a per-site gate's `pub(crate)`
 /// setter and getter.
@@ -45,17 +18,17 @@
 /// fwd!(
 ///     set_chunk_elems => b::set_gemm_chunk_elems,
 ///     get_chunk_elems => b::gemm_chunk_elems,
-///     "the element budget for one row-chunk of a tiled product"
+///     "the element budget for 1 row-chunk of a tiled product"
 /// );
 /// ```
 ///
 /// expands to:
 ///
 /// ```ignore
-/// /// Sets the element budget for one row-chunk of a tiled product
+/// /// Sets the element budget for 1 row-chunk of a tiled product
 /// pub fn set_chunk_elems(value: usize) { b::set_gemm_chunk_elems(value); }
 ///
-/// /// Returns the current element budget for one row-chunk of a tiled product
+/// /// Returns the current element budget for 1 row-chunk of a tiled product
 /// pub fn get_chunk_elems() -> usize { b::gemm_chunk_elems() }
 /// ```
 ///
@@ -63,10 +36,18 @@
 macro_rules! fwd {
     ($set:ident => $bset:path, $get:ident => $bget:path, $what:expr) => {
         #[doc = concat!("Sets ", $what)]
+        ///
+        /// # Parameters
+        ///
+        /// - `value` - Work threshold or size limit in the units described above
         pub fn $set(value: usize) {
             $bset(value);
         }
         #[doc = concat!("Returns the current ", $what)]
+        ///
+        /// # Returns
+        ///
+        /// - `usize` - Current threshold or size limit in the units described above
         #[inline]
         pub fn $get() -> usize {
             $bget()
@@ -74,34 +55,17 @@ macro_rules! fwd {
     };
 }
 
-/// Tiling policy for the matrix-product callers, plus the `backend` alias to gemmkit's own
-/// tuning surface (see [`crate::math::matmul`]).
+/// Matrix-product output tiling limits and backend tuning exports.
 ///
-/// The GEMM/GEMV serial-vs-parallel crossovers, worker ramps, and kernel blocking live in the
-/// [`gemmkit`](https://docs.rs/gemmkit) backend. Retune them one of 3 ways.
-///
-/// - **Env profile** (no recompile): every backend knob is a `GEMMKIT_*` environment variable,
-///   read once per process. Run `cargo install gemmkit-tune`, then `gemmkit-tune` on the target
-///   machine, to sweep them and emit a ready-to-source profile.
-/// - **Programmatically**: through the `backend` alias, for example
-///   `tuning::matmul::backend::set_parallel_threshold(..)`. An in-code setter beats the env var.
-/// - **Per call**: not exposed publicly. The estimators pass the backend's automatic
-///   parallelism, or force serial inside an already-parallel region, at each call site.
-///
-/// What remains here is the caller-side tiling policy. `chunk_elems` sizes the row-chunks of a
-/// tiled product. `cache_resident_max_bytes` picks a GEMV-swarm or a tiled GEMM. Set it to the
-/// L3 that 1 core of the machine reaches directly.
+/// The chunk budget controls output rows per product tile.
+/// The cache size threshold selects a repeated vector product or tiled matrix product at estimator call sites.
 #[cfg(feature = "math")]
 pub mod matmul {
     use crate::math::matmul as b;
 
-    /// gemmkit's own tuning module, forwarded through the adapter so backend knobs are reachable
-    /// without a direct `gemmkit` dependency. Every `GEMMKIT_*` env var has a `set_*`/getter pair
-    /// here.
+    /// Backend settings from the same adapter used by the numeric kernels.
     ///
-    /// The path goes through `gemmkit_ndarray` on purpose. The knobs are process-global atomics,
-    /// so a setter called on a separately resolved second `gemmkit` would write a copy that the
-    /// adapter in use never reads.
+    /// This export ensures that setters reach the backend instance used for products.
     pub use gemmkit_ndarray::tuning as backend;
 
     fwd!(

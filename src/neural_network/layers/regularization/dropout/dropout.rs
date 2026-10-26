@@ -7,9 +7,8 @@
 //! [`Dropout::with_noise_shape`] shares 1 draw across a chosen axis instead, and
 //! [`Dropout::with_random_state`] reseeds the generator for reproducible masks.
 //!
-//! The forward pass samples a keep/drop mask at the resolved noise shape, scales the kept elements
-//! by `1 / (1 - rate)`, and parks the mask in the [`Ctx`] cache for
-//! `dropout_backward` to reuse on the backward pass.
+//! The forward pass samples a keep/drop mask at the resolved noise shape and scales kept
+//! elements by `1 / (1 - rate)`. The [`Ctx`] cache stores the mask for `dropout_backward`.
 //!
 //! [`UnaryLayer::build`]: crate::neural_network::traits::UnaryLayer::build
 //! [`Ctx`]: crate::neural_network::Ctx
@@ -42,15 +41,16 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 ///
 /// # Shape freedom
 ///
-/// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of any
-/// shape at rank 1 or higher, and 1 layer serves a rank-2 batch of feature vectors and a rank-4
-/// batch of images alike. [`UnaryLayer::build`] records the shape it is given, and
-/// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape) reports it, but no
-/// later input is checked against it. The 2 noise layers,
+/// The layer owns no array and reads no extent of its input. It accepts any tensor of rank 1 or
+/// higher. The same layer can serve feature vectors and images. [`UnaryLayer::build`] records
+/// the input shape. [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape)
+/// reports that shape, but later inputs need not match it.
+///
+/// The 2 noise layers,
 /// [`GaussianNoise`](crate::neural_network::layers::GaussianNoise) and
-/// [`GaussianDropout`](crate::neural_network::layers::GaussianDropout), take the same freedom. The
-/// 3 spatial dropout layers do not, because each of them reads a channel axis at a fixed position
-/// and needs the rank that puts it there
+/// [`GaussianDropout`](crate::neural_network::layers::GaussianDropout), take the same freedom.
+/// Each spatial dropout layer requires a fixed rank because it reads the channel axis at a
+/// fixed position
 ///
 /// # Examples
 ///
@@ -60,12 +60,12 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// use rustyml::neural_network::Ctx;
 /// use ndarray::Array2;
 ///
-/// // Create a Dropout layer with 50% dropout rate
+/// // Create a Dropout layer with 50% dropout rate.
 /// let mut dropout = Dropout::new(0.5).unwrap();
 ///
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
-/// // During training, about 50% of values are set to 0
+/// // During training, about 50% of values are set to 0.
 /// let mut ctx = Ctx::training();
 /// let output = dropout.forward_mut(&input, &mut ctx).unwrap();
 /// ```
@@ -180,13 +180,13 @@ impl Dropout {
     /// Resolves the configured noise shape against the shape of an actual input
     ///
     /// Without a `noise_shape` the answer is the input shape itself, which gives 1 draw per
-    /// input element. With one, the vector lines up against the last axes of the input, and
-    /// each entry becomes the input extent (`None`), 1, or the input extent again
+    /// input element. With a noise shape, the vector aligns against the last input axes. Each
+    /// entry selects the input extent or 1
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If the noise shape has a higher rank than the input, or if
-    ///   an entry is neither 1 nor the extent of the input on its axis
+    /// - `Error::InvalidParameter` - If the noise shape rank exceeds the input rank. Also
+    ///   returned when an entry is neither 1 nor its input extent
     fn resolve_noise_shape(&self, input_shape: &[usize]) -> Result<Vec<usize>, Error> {
         let Some(noise_shape) = &self.noise_shape else {
             return Ok(input_shape.to_vec());
@@ -242,8 +242,8 @@ impl LayerBase for Dropout {
     /// Takes back the random stream that the forward pass advanced
     ///
     /// The stream is the only state of the layer that a forward pass changes. A training pass
-    /// leaves the advanced stream in the context, and this moves it into the layer, so the next
-    /// pass draws the values that follow
+    /// leaves the advanced stream in the context. This method moves it into the layer so the
+    /// next pass continues the stream
     fn apply_state(&mut self, state: &mut StateSlot<'_>) {
         if let Some(rng) = state.take::<StdRng>("rng") {
             self.rng = rng;

@@ -1,10 +1,7 @@
-//! Range scaling that remembers its training minimum and maximum
+//! Feature range scaling with stored training extrema.
 //!
-//! Provides [`MinMaxScaler`], which maps each feature onto a fixed interval (`[0, 1]` by
-//! default) using the extrema learned at fit time. Unlike a z-score it makes no distributional
-//! assumption. It is the transform to reach for when a downstream component needs bounded
-//! inputs. Examples include an image-style pipeline or an activation with a limited useful
-//! domain
+//! [`MinMaxScaler`] derives an affine map from each training feature's minimum and maximum.
+//! Optional clipping limits transformed values to the target range.
 
 use super::{
     column_min_max, fitted, for_each_row, handle_zero_scale, validate_matrix,
@@ -14,25 +11,15 @@ use crate::error::Error;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
 
-/// Scales features onto a fixed range, learned from the training extrema
+/// Maps features with an affine transform derived from training extrema.
 ///
-/// Rows are samples and columns are features. [`fit`](Self::fit) records each feature's minimum
-/// and maximum. [`transform`](Self::transform) maps them onto `feature_range` (default
-/// `[0.0, 1.0]`) with the affine map
+/// Rows are samples and columns are features.
+/// Each feature uses `(x - data_min) / divisor * (range_max - range_min) + range_min`.
+/// The divisor is the training range, or `1.0` when that range is near 0.
+/// Thus a constant training feature maps to the lower target bound.
 ///
-/// ```text
-/// x_std    = (x - data_min) / (data_max - data_min)
-/// x_scaled = x_std * (range_max - range_min) + range_min
-/// ```
-///
-/// A feature with no spread at all (`data_max == data_min`) would otherwise divide by zero.
-/// The scaler forces its divisor to `1.0` instead, so the column lands flat on `range_min`
-/// rather than producing `NaN`. This mirrors scikit-learn's `MinMaxScaler`, including the
-/// `clip` option
-///
-/// Values outside the training extrema land outside `feature_range`. It shows that a later
-/// batch left the range the model was trained on. Enable [`with_clip`](Self::with_clip) when
-/// a downstream component genuinely requires bounded input
+/// Later values can exceed the target range.
+/// Enable [`with_clip`](Self::with_clip) to clamp transformed values to the target bounds.
 ///
 /// # Examples
 ///
@@ -56,13 +43,13 @@ pub struct MinMaxScaler {
     feature_range: (f64, f64),
     /// Whether [`transform`](Self::transform) clamps its output to `feature_range`
     clip: bool,
-    /// Per-feature minimum seen during fitting (scikit-learn's `data_min_`)
+    /// Per-feature minimum seen during fitting
     data_min: Option<Array1<f64>>,
-    /// Per-feature maximum seen during fitting (scikit-learn's `data_max_`)
+    /// Per-feature maximum seen during fitting
     data_max: Option<Array1<f64>>,
-    /// Per-feature multiplier applied by `transform` (scikit-learn's `scale_`)
+    /// Per-feature multiplier applied by `transform`
     scale: Option<Array1<f64>>,
-    /// Per-feature offset applied by `transform` (scikit-learn's `min_`)
+    /// Per-feature offset applied by `transform`
     min: Option<Array1<f64>>,
     /// Number of samples folded into the extrema so far (`n_samples_seen_`)
     n_samples_seen: usize,
@@ -70,6 +57,14 @@ pub struct MinMaxScaler {
 
 impl Default for MinMaxScaler {
     /// Creates a scaler onto `[0.0, 1.0]`, equivalent to [`MinMaxScaler::new`]
+    ///
+    /// # Default Values
+    ///
+    /// Range `(0.0, 1.0)`, clipping disabled, no fitted statistics
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Unfitted scaler with the default options
     fn default() -> Self {
         Self::new()
     }
@@ -146,7 +141,6 @@ impl MinMaxScaler {
         self
     }
 
-    // Getters
     get_field!(get_feature_range, feature_range, (f64, f64));
     get_field!(get_clip, clip, bool);
     get_field!(get_n_samples_seen, n_samples_seen, usize);
@@ -155,7 +149,7 @@ impl MinMaxScaler {
     get_field_as_ref!(get_scale, scale, Option<&Array1<f64>>);
     get_field_as_ref!(get_min, min, Option<&Array1<f64>>);
 
-    /// Gets the per-feature spread seen during fitting (scikit-learn's `data_range_`)
+    /// Gets the per-feature spread seen during fitting
     ///
     /// # Returns
     ///
@@ -167,7 +161,7 @@ impl MinMaxScaler {
         }
     }
 
-    /// Gets the number of features the scaler was fitted on (scikit-learn's `n_features_in_`)
+    /// Gets the number of features the scaler was fitted on
     ///
     /// # Returns
     ///
@@ -198,7 +192,7 @@ impl MinMaxScaler {
     ///
     /// # Performance
     ///
-    /// One min/max pass per feature, parallelized across features above the calibrated scan
+    /// 1 min/max pass per feature, parallelized across features above the calibrated scan
     /// gate (see `crate::parallel_gates`), so the extrema never depend on the thread count
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
@@ -281,12 +275,12 @@ impl MinMaxScaler {
     ///
     /// - [`Error::NotFitted`] - If the scaler has not been fitted
     /// - [`Error::EmptyInput`] - If `x` has no rows or no columns
-    /// - [`Error::DimensionMismatch`] - If `x`'s feature count differs from the fitted one
+    /// - [`Error::DimensionMismatch`] - If `x`'s feature count differs from the fitted 1
     /// - [`Error::NonFinite`] - If `x` contains NaN or infinite values
     ///
     /// # Performance
     ///
-    /// One fused pass per row (multiply and add together), parallelized across rows above the
+    /// 1 fused pass per row (multiply and add together), parallelized across rows above the
     /// calibrated cheap-map gate (see `crate::parallel_gates`)
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
@@ -341,9 +335,10 @@ impl MinMaxScaler {
 
     /// Maps scaled data back to the original feature space
     ///
-    /// Applies `(x - min) / scale`, the exact inverse of [`transform`](Self::transform). This
-    /// holds as long as clipping did not discard information and the feature had a real spread
-    /// at fit time. A flat feature comes back as its training minimum
+    /// Applies `(x - min) / scale` with the stored affine parameters.
+    /// Clipping can discard values that this operation cannot recover.
+    /// Constant training features still use a multiplier other than 0.
+    /// Floating-point arithmetic can introduce rounding error.
     ///
     /// # Parameters
     ///
@@ -357,7 +352,7 @@ impl MinMaxScaler {
     ///
     /// - [`Error::NotFitted`] - If the scaler has not been fitted
     /// - [`Error::EmptyInput`] - If `x` has no rows or no columns
-    /// - [`Error::DimensionMismatch`] - If `x`'s feature count differs from the fitted one
+    /// - [`Error::DimensionMismatch`] - If `x`'s feature count differs from the fitted 1
     /// - [`Error::NonFinite`] - If `x` contains NaN or infinite values
     pub fn inverse_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
@@ -406,6 +401,7 @@ impl MinMaxScaler {
     }
 }
 
+/// Unit tests for scaler statistics and transforms.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -466,7 +462,7 @@ mod tests {
         assert_eq!(clipped.transform(&array![[-3.0]]).unwrap(), array![[0.0]]);
     }
 
-    /// A constant feature lands flat on the low end of the range instead of dividing by zero
+    /// A constant feature lands flat on the low end of the range instead of dividing by 0
     #[test]
     fn constant_feature_maps_to_range_start() {
         let x = array![[3.0, 1.0], [3.0, 3.0]];
@@ -497,7 +493,7 @@ mod tests {
         assert_eq!(incremental.get_n_samples_seen(), 3);
     }
 
-    /// `inverse_transform` round-trips back to the original values
+    /// `inverse_transform` round trips back to the original values
     #[test]
     fn inverse_transform_round_trips() {
         let x = array![[1.0, -5.0], [2.0, 7.5], [3.0, 0.5]];

@@ -544,10 +544,8 @@ pub(crate) fn global_grad_norm(layers: &mut [Box<dyn Layer>], grads: &Grads) -> 
 /// hold there
 ///
 /// [`Ctx::sublayer`] records the layer that each call reaches. The check resolves each recorded
-/// path through [`LayerBase::sublayers`] and compares the 2 layers by identity. A holding layer
-/// that calls sublayer `b` under the name of sublayer `a` would otherwise give `a` the
-/// gradients, the cache, and the state of `b`, and no other check would see it when the 2
-/// sublayers have the same type and shape
+/// path through [`LayerBase::sublayers`] and compares the 2 layers by identity. A call of sublayer `b` under the name `a` would give `a` the data of `b`. Equal types and
+/// shapes would hide this error from other checks.
 ///
 /// # Parameters
 ///
@@ -560,8 +558,8 @@ pub(crate) fn global_grad_norm(layers: &mut [Box<dyn Layer>], grads: &Grads) -> 
 ///
 /// # Errors
 ///
-/// - `Error::Computation` - If 1 path received 2 different layers, if a path names no
-///   sublayer of the tree, or if a path reached another layer than the tree holds there
+/// - `Error::Computation` - If a path calls different layers, names no sublayer, or reaches a
+///   layer outside its roster entry.
 pub(crate) fn check_sublayer_calls(layers: &[Box<dyn Layer>], ctx: &Ctx) -> Result<(), Error> {
     let (calls, conflicts) = ctx.sublayer_calls();
     if let Some(conflict) = conflicts.first() {

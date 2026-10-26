@@ -119,10 +119,7 @@ impl DiscriminantSolver {
     /// to the discriminant directions `w = W v`. This is the correct generalized-eigenvector
     /// solution
     ///
-    /// Taking singular vectors of the non-symmetric `S_w^{-1} S_b` is not equivalent. Its left
-    /// singular vectors are not the discriminant axes. The result does not depend on the
-    /// `DiscriminantSolver`, which governs only the linear-scoring path behind `predict`,
-    /// `decision_function`, and `predict_proba`
+    /// The projection does not depend on `DiscriminantSolver`, which selects only the class scoring method.
     fn project(
         cov: &Array2<f64>,
         sb: &Array2<f64>,
@@ -163,10 +160,7 @@ impl DiscriminantSolver {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Selects the top components, keeping each axis at the scale the whitening produced.
-        // That scale gives the projected data unit within-class covariance, the convention
-        // scikit-learn's `scalings_` follows. Rescaling the columns to unit L2 norm would undo
-        // the whitening and put the projection on a different scale
+        // Keep the scale of each axis produced by the whitening transform.
         let selected: Vec<usize> = order.iter().take(n_components).copied().collect();
 
         // The degenerate check must be relative. These norms scale like the inverse square root
@@ -200,11 +194,8 @@ impl DiscriminantSolver {
 
 /// Solves `min ||a x - b||_2` with the iterative LSQR method of Paige and Saunders
 ///
-/// `a` is the regularized within-class covariance, symmetric and positive definite, so the
-/// iteration converges quickly. `b` is the right-hand side vector. The method runs a
-/// Golub-Kahan bidiagonalization with a running Givens rotation. It never forms an explicit
-/// inverse. `max_iter` caps the iteration count. `tol` is the relative residual threshold that
-/// stops the iteration early
+/// The method uses Golub-Kahan bidiagonalization and Givens rotations without an explicit inverse.
+/// `max_iter` limits the steps. `tol` sets the relative residual threshold.
 fn lsqr_solve(a: &Array2<f64>, b: ArrayView1<f64>, max_iter: usize, tol: f64) -> Array1<f64> {
     let n = a.ncols();
     let mut x = Array1::<f64>::zeros(n);
@@ -319,7 +310,10 @@ pub enum Shrinkage {
     /// Ledoit-Wolf shrinkage intensity, estimated automatically from the training data
     Auto,
     /// Explicit shrinkage factor in the range `[0, 1]`
-    Manual(f64),
+    Manual(
+        /// Shrinkage coefficient in `[0, 1]`.
+        f64,
+    ),
 }
 
 /// Linear Discriminant Analysis (LDA) model
@@ -363,8 +357,7 @@ pub struct LDA {
     priors: Option<Array1<f64>>,
     /// Mean vectors for each class
     means: Option<Array2<f64>>,
-    /// Mean of the whole training matrix, scikit-learn's `xbar_`. [`LDA::transform`] subtracts it
-    /// before projecting, which puts the projected coordinates on scikit-learn's scale
+    /// Arithmetic feature means of the training matrix. [`LDA::transform`] subtracts these values before projection.
     ///
     /// Stored as the arithmetic row mean. That equals the prior-weighted average of the class
     /// means (`priors . means`), because the priors always equal `n_class / n_samples`
@@ -387,6 +380,17 @@ pub struct LDA {
 /// - `solver` - `DiscriminantSolver::SVD`
 /// - `shrinkage` - `None`
 impl Default for LDA {
+    /// Creates an LDA model with default settings.
+    ///
+    /// # Default Values
+    ///
+    /// - `n_components` - Maximum valid component count, resolved at fit time.
+    /// - `solver` - `DiscriminantSolver::SVD`.
+    /// - `shrinkage` - `None`.
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - An instance with default settings.
     fn default() -> Self {
         LDA {
             n_components: None,
@@ -425,7 +429,7 @@ impl LDA {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `n_components` is zero
+    /// - `Error::InvalidParameter` - If `n_components` is 0
     pub fn new(n_components: usize) -> Result<Self, Error> {
         if n_components == 0 {
             return Err(Error::invalid_parameter(
@@ -513,9 +517,11 @@ impl LDA {
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs
-    ///   are empty, the shapes do not match, or values are not valid
-    /// - `Error::Computation` - If numerical computation fails during fitting
+    /// - `Error::EmptyInput` - If the feature matrix has no rows or feature columns.
+    /// - `Error::DimensionMismatch` - If the label count differs from the sample count.
+    /// - `Error::NonFinite` - If input features contain a non-finite value.
+    /// - `Error::InvalidInput` - If class counts or the requested component count are not valid.
+    /// - `Error::Computation` - If covariance, scoring, or projection computation fails.
     ///
     /// # Performance
     ///
@@ -543,7 +549,7 @@ impl LDA {
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
-        // Decide execution mode from sample count
+        // Choose the execution mode from the sample and feature counts
         let use_parallel = n_samples.saturating_mul(n_features) >= scan_f64_parallel_min_elems();
 
         #[cfg(feature = "show_progress")]
@@ -760,9 +766,10 @@ impl LDA {
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model has not been fitted
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs
-    ///   are empty, the shapes do not match, or values are not valid
+    /// - `Error::NotFitted` - If the model has no fitted scoring or projection state.
+    /// - `Error::EmptyInput` - If the input contains no elements.
+    /// - `Error::DimensionMismatch` - If the feature count differs from training.
+    /// - `Error::NonFinite` - If input features contain a non-finite value.
     ///
     /// # Performance
     ///
@@ -863,7 +870,7 @@ impl LDA {
         let n_features = coefficients.ncols();
         crate::machine_learning::validation::validate_predict_input(x, n_features)?;
 
-        // Computes `x . coefficients^T` plus the per-class intercept in one pass. The intercept
+        // Computes `x . coefficients^T` plus the per-class intercept in 1 pass. The intercept
         // is constant down each column of the score matrix, so it rides the GEMM's fused
         // epilogue instead of a second broadcast sweep. The fused epilogue equals the product
         // followed by the same scalar add. `beta = 0` means the write never reads the freshly
@@ -903,9 +910,10 @@ impl LDA {
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model has not been fitted
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs
-    ///   are empty, the shapes do not match, or values are not valid
+    /// - `Error::NotFitted` - If the model has no fitted scoring or projection state.
+    /// - `Error::EmptyInput` - If the input contains no elements.
+    /// - `Error::DimensionMismatch` - If the feature count differs from training.
+    /// - `Error::NonFinite` - If input features contain a non-finite value.
     pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -932,9 +940,10 @@ impl LDA {
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model has not been fitted
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs
-    ///   are empty, the shapes do not match, or values are not valid
+    /// - `Error::NotFitted` - If the model has no fitted scoring or projection state.
+    /// - `Error::EmptyInput` - If the input contains no elements.
+    /// - `Error::DimensionMismatch` - If the feature count differs from training.
+    /// - `Error::NonFinite` - If input features contain a non-finite value.
     pub fn predict_proba<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -964,9 +973,10 @@ impl LDA {
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model has not been fitted
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs
-    ///   are empty, the shapes do not match, or values are not valid
+    /// - `Error::NotFitted` - If the model has no fitted scoring or projection state.
+    /// - `Error::EmptyInput` - If the input contains no elements.
+    /// - `Error::DimensionMismatch` - If the feature count differs from training.
+    /// - `Error::NonFinite` - If input features contain a non-finite value.
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -974,7 +984,7 @@ impl LDA {
         self.transform_internal(x)
     }
 
-    /// Fits the model and transforms the data in one step
+    /// Fits the model and transforms the data in 1 step
     ///
     /// Trains the model, then returns the projected data
     ///
@@ -989,9 +999,11 @@ impl LDA {
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs
-    ///   are empty, the shapes do not match, or values are not valid
-    /// - `Error::Computation` - If numerical computation fails during fitting
+    /// - `Error::EmptyInput` - If the feature matrix has no rows or feature columns.
+    /// - `Error::DimensionMismatch` - If the label count differs from the sample count.
+    /// - `Error::NonFinite` - If input features contain a non-finite value.
+    /// - `Error::InvalidInput` - If class counts or the requested component count are not valid.
+    /// - `Error::Computation` - If covariance, scoring, or projection computation fails.
     ///
     /// # Performance
     ///
@@ -1038,11 +1050,7 @@ impl LDA {
             progress_bar.set_message("Applying projection");
         }
 
-        // scikit-learn projects `(X - xbar_) @ scalings_`. This materializes the centering
-        // rather than folding it into the product as `X W - xbar W`. The 2 forms are equal in
-        // real arithmetic. The folded form loses digits to cancellation when the data sits far
-        // from the origin relative to its spread. Matching scikit-learn numerically is the
-        // point here
+        // Project the centered input as `(X - overall_mean) @ projection`.
         let overall_mean = self
             .overall_mean
             .as_ref()

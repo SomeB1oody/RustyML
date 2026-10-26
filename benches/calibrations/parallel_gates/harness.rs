@@ -11,6 +11,14 @@ use std::time::{Duration, Instant};
 
 /// Nanoseconds per call of `f`: the batch size grows until 1 batch takes >= 5 ms, then the
 /// minimum over 3 batches filters scheduler noise
+///
+/// # Parameters
+///
+/// - `f` - Operation to measure after 1 warmup call
+///
+/// # Returns
+///
+/// - `f64` - Lowest mean duration in nanoseconds across 3 batches
 pub fn time_per_call_ns<F: FnMut()>(mut f: F) -> f64 {
     f(); // warmup
     let mut k = 1usize;
@@ -76,6 +84,11 @@ pub struct Section {
 }
 
 impl Section {
+    /// Prints the measurements and the crossover or fastest-rung conclusion.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the table has no rows.
     pub fn print(&self) {
         println!("\n== {} ==", self.title);
         for r in &self.rows {
@@ -148,7 +161,7 @@ impl Section {
     /// back to a loss
     ///
     /// The rule finds the first rung that wins and has no more than [`MAX_INTERIOR_DIPS`] losing
-    /// rungs at or above it. One tolerated case is a largest shape whose working set stops
+    /// rungs at or above it. 1 tolerated case is a largest shape whose working set stops
     /// fitting in cache, where a wide machine falls back to single-thread throughput. The other
     /// is a lone noisy interior rung.
     fn crossover(&self, ladder: &[(usize, f64)]) -> Option<(Option<usize>, usize, Vec<usize>)> {
@@ -184,6 +197,15 @@ impl Section {
         }
     }
 
+    /// Appends the measurements and conclusion as a Markdown table.
+    ///
+    /// # Parameters
+    ///
+    /// - `out` - Buffer that receives the table
+    ///
+    /// # Panics
+    ///
+    /// Panics if the table has no rows.
     pub fn to_markdown(&self, out: &mut String) {
         let _ = writeln!(out, "## {}\n", self.title);
         let _ = writeln!(
@@ -207,21 +229,63 @@ impl Section {
     }
 }
 
+/// Creates a seeded random matrix with values in `[-1, 1)`.
+///
+/// # Parameters
+///
+/// - `rows` - Number of rows
+/// - `cols` - Number of columns
+/// - `seed` - Seed for the random generator
+///
+/// # Returns
+///
+/// - `Array2<f32>` - Array of sampled values
 pub fn random_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
     let mut rng = StdRng::seed_from_u64(seed);
     Array2::random_using((rows, cols), Uniform::new(-1.0, 1.0).unwrap(), &mut rng)
 }
 
+/// Creates a seeded random matrix with values in `[-1, 1)`.
+///
+/// # Parameters
+///
+/// - `rows` - Number of rows
+/// - `cols` - Number of columns
+/// - `seed` - Seed for the random generator
+///
+/// # Returns
+///
+/// - `Array2<f64>` - Array of sampled values
 pub fn random_matrix_f64(rows: usize, cols: usize, seed: u64) -> Array2<f64> {
     let mut rng = StdRng::seed_from_u64(seed);
     Array2::random_using((rows, cols), Uniform::new(-1.0, 1.0).unwrap(), &mut rng)
 }
 
+/// Creates a seeded random vector with values in `[-1, 1)`.
+///
+/// # Parameters
+///
+/// - `len` - Number of elements
+/// - `seed` - Seed for the random generator
+///
+/// # Returns
+///
+/// - `Array1<f64>` - Array of sampled values
 pub fn random_vector_f64(len: usize, seed: u64) -> Array1<f64> {
     let mut rng = StdRng::seed_from_u64(seed);
     Array1::random_using(len, Uniform::new(-1.0, 1.0).unwrap(), &mut rng)
 }
 
+/// Creates a seeded random vector with values in `[-1, 1)`.
+///
+/// # Parameters
+///
+/// - `len` - Number of elements
+/// - `seed` - Seed for the random generator
+///
+/// # Returns
+///
+/// - `Array1<f32>` - Array of sampled values
 pub fn random_vector_f32(len: usize, seed: u64) -> Array1<f32> {
     let mut rng = StdRng::seed_from_u64(seed);
     Array1::random_using(len, Uniform::new(-1.0, 1.0).unwrap(), &mut rng)

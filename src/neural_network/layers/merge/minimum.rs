@@ -54,7 +54,7 @@ use ndarray::IxDyn;
 /// let output = layer.forward_many_mut(&[&a, &b], &mut ctx).unwrap();
 /// assert_eq!(output, array![[1.0_f32, 2.0], [3.0, 2.0]].into_dyn());
 ///
-/// // Position (1, 0) is a tie of 3.0, and the first input takes the whole gradient there
+/// // Position (1, 0) is a tie of 3.0, and the first input takes the whole gradient there.
 /// let seed = array![[1.0_f32, 1.0], [1.0, 1.0]].into_dyn();
 /// let grads = layer.backward_many(&seed, &mut ctx).unwrap();
 /// assert_eq!(grads[0], array![[1.0_f32, 0.0], [1.0, 1.0]].into_dyn());
@@ -190,6 +190,7 @@ impl Layer for Minimum {
 }
 
 /// Unit tests of the fold, the tie rule, the broadcast, and the refusals of [`Minimum`]
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::*;

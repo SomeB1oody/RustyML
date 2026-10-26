@@ -8,21 +8,16 @@ use rustyml::machine_learning::decomposition::pca::{PCA, SVDSolver};
 
 use crate::common::assert_allclose;
 
-// Helpers
-
-/// Collinear data: 5 points on y = 2x, rank-1 with first PC along [1/sqrt(5), 2/sqrt(5)]
-/// and sigma_1 = sqrt(50) = 5*sqrt(2)
+/// Builds 5 collinear points on y = 2x. The first principal component follows [1/sqrt(5), 2/sqrt(5)], with sigma_1 = sqrt(50).
 fn collinear_data() -> Array2<f64> {
     array![[1.0, 2.0], [2.0, 4.0], [3.0, 6.0], [4.0, 8.0], [5.0, 10.0]]
 }
 
-/// Zero-mean data with different variance per axis: PCs are the standard basis
+/// Data with mean 0 with different variance per axis: PCs are the standard basis
 /// with sigma_1 = sqrt(32) > sigma_2 = sqrt(8)
 fn anisotropic_data() -> Array2<f64> {
     array![[4.0, 0.0], [0.0, 2.0], [-4.0, 0.0], [0.0, -2.0]]
 }
-
-// Construction / validation
 
 /// PCA::new(0) returns Error::InvalidParameter
 #[test]
@@ -45,8 +40,6 @@ fn test_new_valid_n_components() {
         .expect("n_components=2 should be valid")
         .with_svd_solver(SVDSolver::Full);
 }
-
-// Error paths: bad inputs at fit time
 
 /// Single sample returns InvalidInput (check_min_samples requires >= 2)
 #[test]
@@ -74,8 +67,6 @@ fn test_fit_n_components_exceeds_n_features_is_invalid_parameter() {
     );
 }
 
-// Error paths: bad inputs at transform time
-
 /// Wrong feature count on transform returns DimensionMismatch
 #[test]
 fn test_transform_wrong_feature_count_is_dimension_mismatch() {
@@ -89,8 +80,6 @@ fn test_transform_wrong_feature_count_is_dimension_mismatch() {
         err
     );
 }
-
-// Numerical assertions for collinear data (Full SVD solver)
 
 /// Explained variance ratio is > 0.999 for 1 component on perfectly collinear data
 #[test]
@@ -172,8 +161,6 @@ fn test_full_collinear_inverse_transform_reconstruction() {
     assert_allclose(&reconstructed, &x, 1e-6);
 }
 
-// fit_transform == fit + transform
-
 /// fit_transform(x) produces the same result as fit(x) followed by transform(x)
 #[test]
 fn test_fit_transform_equals_fit_then_transform_full() {
@@ -188,8 +175,6 @@ fn test_fit_transform_equals_fit_then_transform_full() {
 
     assert_allclose(&result_a, &result_b, 1e-10);
 }
-
-// Orthonormality of components (anisotropic 2-component case)
 
 /// Component rows are orthonormal for a full 2-component fit
 #[test]
@@ -214,8 +199,6 @@ fn test_components_orthonormal_full() {
     let dot = comp[[0, 0]] * comp[[1, 0]] + comp[[0, 1]] * comp[[1, 1]];
     assert_abs_diff_eq!(dot.abs(), 0.0, epsilon = 1e-8);
 }
-
-// Singular values in descending order
 
 /// Singular values are in non-ascending order (anisotropic data: sqrt(32) > sqrt(8))
 #[test]
@@ -261,8 +244,6 @@ fn test_explained_variance_ratio_sums_to_one() {
     assert_abs_diff_eq!(ratio[0].max(ratio[1]), 0.8, epsilon = 1e-4);
     assert_abs_diff_eq!(ratio[0].min(ratio[1]), 0.2, epsilon = 1e-4);
 }
-
-// Shape and singular-value agreement across the 3 SVD solvers
 
 /// All 3 SVDSolver variants produce the correct output shape
 #[test]
@@ -344,7 +325,7 @@ fn test_all_solvers_agree_on_component_signs() {
         );
     }
 
-    // The approximate solvers must land on the same orientation, not a flipped one
+    // The approximate solvers must use the same component orientation.
     for solver in [SVDSolver::Randomized(42), SVDSolver::PowerIteration] {
         let mut pca = PCA::new(2).unwrap().with_svd_solver(solver);
         pca.fit(&x).unwrap();
@@ -358,8 +339,6 @@ fn test_all_solvers_agree_on_component_signs() {
         }
     }
 }
-
-// Randomized solver: determinism
 
 /// Same seed for Randomized produces bit-identical transform output
 #[test]
@@ -378,8 +357,6 @@ fn test_randomized_determinism_same_seed() {
 
     assert_allclose(&result_a, &result_b, 0.0);
 }
-
-// Component orthonormality for Randomized and PowerIteration
 
 /// Randomized solver produces orthonormal component rows on the anisotropic dataset
 #[test]
@@ -433,8 +410,6 @@ fn test_power_iteration_inverse_transform_recovers_collinear() {
     assert_allclose(&reconstructed, &x, 1e-4);
 }
 
-// Explained variance ratio > 99.9% on collinear data (all 3 solvers)
-
 /// Each solver captures > 99.9% of variance in 1 component on collinear data
 #[test]
 fn test_all_solvers_capture_full_variance_on_collinear_data() {
@@ -458,8 +433,6 @@ fn test_all_solvers_capture_full_variance_on_collinear_data() {
     }
 }
 
-// Save / load round-trip
-
 /// Saving a fitted PCA to a temp file and reloading it preserves the transform output
 #[test]
 fn test_save_load_roundtrip_preserves_transform() {
@@ -482,8 +455,6 @@ fn test_save_load_roundtrip_preserves_transform() {
     let _ = fs::remove_file(path);
 }
 
-// Output shape contract
-
 /// transform output shape is (n_samples, n_components)
 #[test]
 fn test_transform_output_shape() {
@@ -505,8 +476,6 @@ fn test_inverse_transform_output_shape() {
     assert_eq!(reconstructed.shape(), &[5, 2]);
 }
 
-// Projection values for anisotropic data (numerical assertion)
-
 /// Projections for anisotropic data match the closed-form values, checked as
 /// absolute values since PC sign is ambiguous
 #[test]
@@ -518,26 +487,25 @@ fn test_anisotropic_projection_values_full() {
     pca.fit(&x).unwrap();
     let projected = pca.transform(&x).unwrap();
 
-    // First column (first PC, larger variance) has absolute values 4,0,4,0
+    // Column 0 has the larger variance and absolute values 4,0,4,0.
     let col0_abs: Vec<f64> = (0..4).map(|i| projected[[i, 0]].abs()).collect();
     assert_abs_diff_eq!(col0_abs[0], 4.0, epsilon = 1e-6);
     assert_abs_diff_eq!(col0_abs[1], 0.0, epsilon = 1e-6);
     assert_abs_diff_eq!(col0_abs[2], 4.0, epsilon = 1e-6);
     assert_abs_diff_eq!(col0_abs[3], 0.0, epsilon = 1e-6);
 
-    // First PC column: rows 0 and 2 have opposite signs (+/-4)
+    // In column 0, rows 0 and 2 have opposite signs (+/-4).
     let s0 = projected[[0, 0]];
     let s2 = projected[[2, 0]];
     assert_abs_diff_eq!(s0, -s2, epsilon = 1e-6);
 
-    // Second column (second PC, smaller variance) has absolute values 0,2,0,2
+    // Column 1 has the smaller variance and absolute values 0,2,0,2.
     let col1_abs: Vec<f64> = (0..4).map(|i| projected[[i, 1]].abs()).collect();
     assert_abs_diff_eq!(col1_abs[0], 0.0, epsilon = 1e-6);
     assert_abs_diff_eq!(col1_abs[1], 2.0, epsilon = 1e-6);
     assert_abs_diff_eq!(col1_abs[2], 0.0, epsilon = 1e-6);
     assert_abs_diff_eq!(col1_abs[3], 2.0, epsilon = 1e-6);
 }
-// get_mean and get_explained_variance (non-ratio) getters
 
 /// get_mean returns the per-feature centering mean, exactly [3, 6] for collinear_data
 #[test]
@@ -554,7 +522,7 @@ fn test_full_collinear_get_mean() {
     assert_abs_diff_eq!(mean[1], 6.0, epsilon = 1e-9);
 }
 
-/// get_mean is [0, 0] for the zero-centered anisotropic dataset
+/// get_mean is [0, 0] for the centered at 0 anisotropic dataset
 #[test]
 fn test_anisotropic_get_mean_is_zero() {
     use approx::assert_abs_diff_eq;

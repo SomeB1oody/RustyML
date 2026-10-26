@@ -36,9 +36,7 @@ fn params_of(layer: &dyn Layer) -> usize {
     layer.param_count().total()
 }
 
-// DepthwiseConv1D - constructor validation
-
-/// Each invalid constructor argument returns the matching error: InvalidParameter for a zero
+/// Each invalid constructor argument returns the matching error: InvalidParameter for a 0
 /// kernel size or stride, and InvalidInput for a bad input_shape.
 #[test]
 fn depthwise_conv1d_new_rejects_invalid_args() {
@@ -122,8 +120,6 @@ fn depthwise_conv1d_forward_rejects_non_3d_input() {
     );
 }
 
-// DepthwiseConv1D - channel independence (the core correctness invariant)
-
 /// Changing 1 channel's input leaves every other channel's output untouched
 ///
 /// This is what separates a depthwise convolution from a plain one. A plain `Conv1D` mixes all
@@ -132,7 +128,7 @@ fn depthwise_conv1d_forward_rejects_non_3d_input() {
 fn depthwise_conv1d_cross_channel_no_bleed() {
     let mut conv = DepthwiseConv1D::new(3, 1, Linear::new()).unwrap();
     conv.build(&Shape::known(&[1, 6, 3])).unwrap();
-    // Distinct, non-zero weights everywhere, so a leak between channels cannot cancel
+    // Distinct, nonzero weights everywhere, so a leak between channels cannot cancel
     let w = Array3::from_shape_vec((3, 3, 1), ramp(9)).unwrap();
     conv.set_weights(w, Array1::from_vec(vec![0.25, -0.5, 0.75]))
         .unwrap();
@@ -194,8 +190,6 @@ fn depthwise_conv1d_matches_a_block_diagonal_conv1d() {
     );
 }
 
-// DepthwiseConv1D - output length and padding
-
 /// The output length follows `(in - k)/stride + 1` for Valid and `ceil(in/stride)` for Same
 #[test]
 fn depthwise_conv1d_output_length_rule() {
@@ -219,7 +213,7 @@ fn depthwise_conv1d_output_length_rule() {
     }
 }
 
-/// `Same` padding puts `pad_total / 2` zeros on the leading edge and the remainder on the
+/// `Same` padding puts `pad_total / 2` 0s on the leading edge and the remainder on the
 /// trailing edge
 ///
 /// An even kernel over an equal-length input makes the split visible. A width-4 kernel over
@@ -238,15 +232,14 @@ fn depthwise_conv1d_same_padding_splits_with_the_extra_cell_at_the_end() {
     let out = conv.forward(&x, &mut Ctx::inference()).unwrap();
     assert_eq!(out.shape(), &[1, 4, 1]);
 
-    // pad_total = (4-1)*1 = 3, so 1 zero leads and 2 trail. The windows over
-    // [0, 1, 2, 3, 4, 0, 0] are 0+1+2+3, 1+2+3+4, 2+3+4+0, and 3+4+0+0
+    // Total padding is 3, with 1 0 before the input and 2 after it.
+    // The padded input is [0, 1, 2, 3, 4, 0, 0].
+    // Window sums are 0+1+2+3, 1+2+3+4, 2+3+4+0, and 3+4+0+0.
     assert_eq!(
         out.iter().copied().collect::<Vec<f32>>(),
         vec![6.0, 10.0, 9.0, 7.0]
     );
 }
-
-// DepthwiseConv1D - depth multiplier
 
 /// `depth_multiplier` widens the kernel, the bias, and the output, and reports the widened
 /// channel count in `output_shape`
@@ -269,8 +262,6 @@ fn depthwise_conv1d_depth_multiplier_widens_every_shape() {
     assert_eq!(out.shape(), &[2, 8, 12], "output carries C * dm channels");
     assert_eq!(conv.output_shape(), "(None, 8, 12)");
 }
-
-// DepthwiseConv1D - the remaining contract
 
 /// A forward call that returns an error leaves the cache empty, so a later backward call still
 /// errors instead of reading a stale cache
@@ -431,11 +422,8 @@ fn depthwise_conv1d_parallel_path_matches_the_serial_path() {
     }
 }
 
-// SeparableConv1D - constructor validation
-
-/// Each invalid constructor argument returns the matching error: InvalidParameter for a zero
-/// filter count, kernel size, stride, or depth multiplier, and InvalidInput for a bad
-/// input_shape
+/// 0 filters, kernel size, stride, or depth multiplier return `InvalidParameter`.
+/// An invalid input shape returns `InvalidInput`.
 #[test]
 fn separable_conv1d_new_rejects_invalid_args() {
     enum Want {
@@ -514,8 +502,6 @@ fn separable_conv1d_forward_rejects_wrong_channels() {
     );
 }
 
-// SeparableConv1D - shapes and parameter counts
-
 /// The output carries `filters` channels regardless of `depth_multiplier`, which only widens
 /// the intermediate stage
 #[test]
@@ -538,9 +524,7 @@ fn separable_conv1d_output_shape_and_param_count() {
     }
 }
 
-// SeparableConv1D - known-value forward passes
-
-/// Identity depthwise and pointwise 1-tap kernels with zero bias reproduce the input exactly
+/// Identity depthwise and pointwise 1-tap kernels with 0 bias reproduce the input exactly
 #[test]
 fn separable_conv1d_identity_reproduces_input() {
     let mut conv = SeparableConv1D::new(1, 1, 1, 1, Linear::new()).unwrap();
@@ -580,7 +564,7 @@ fn separable_conv1d_known_weight_forward_values() {
     );
 }
 
-/// `Same` padding zero-pads only the depthwise stage, and the pointwise stage adds no padding
+/// `Same` padding pads with 0 only the depthwise stage, and the pointwise stage adds no padding
 /// of its own
 #[test]
 fn separable_conv1d_same_padding_zero_pads_depthwise() {
@@ -599,7 +583,7 @@ fn separable_conv1d_same_padding_zero_pads_depthwise() {
     let out = conv.forward(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[1, 5, 1]);
 
-    // pad_total = 2, so 1 zero sits on each edge. Each entry sums its in-bounds neighborhood
+    // pad_total = 2, so 1 0 sits on each edge. Each entry sums its in-bounds neighborhood
     assert_eq!(
         out.iter().copied().collect::<Vec<f32>>(),
         vec![3.0, 6.0, 9.0, 12.0, 9.0]
@@ -623,8 +607,8 @@ fn separable_conv1d_depth_multiplier_2_forward_values() {
     let out = conv.forward(&x, &mut Ctx::training()).unwrap();
     assert_eq!(out.shape(), &[1, 2, 1]);
 
-    // position 0: 2*1*1 + 2*10*2 + 3*100*4 + 3*1000*8 = 25242
-    // position 1: 1*1*1 + 1*10*2 + 1*100*4 + 1*1000*8 = 8421
+    // Position 0: 2*1*1 + 2*10*2 + 3*100*4 + 3*1000*8 = 25242.
+    // Position 1: 1*1*1 + 1*10*2 + 1*100*4 + 1*1000*8 = 8421
     assert_eq!(
         out.iter().copied().collect::<Vec<f32>>(),
         vec![25242.0, 8421.0]
@@ -656,7 +640,7 @@ fn separable_conv1d_matches_a_depthwise_then_pointwise_stack() {
         )
         .unwrap();
 
-    // Stage 1 alone. It carries no bias, so this stack puts a zero bias on it
+    // Stage 1 alone. It carries no bias, so this stack puts a 0 bias on it
     let mut stage_1 = DepthwiseConv1D::new(kernel, 2, Linear::new())
         .unwrap()
         .with_depth_multiplier(dm)
@@ -696,8 +680,6 @@ fn separable_conv1d_matches_a_depthwise_then_pointwise_stack() {
         1e-5_f32,
     );
 }
-
-// SeparableConv1D - the remaining contract
 
 /// `set_weights` rejects any of the 3 arrays whose shape does not match the layer
 #[test]
@@ -763,8 +745,6 @@ fn separable_conv1d_emits_c_order_tensors_from_a_strided_input() {
         0.0_f32,
     );
 }
-
-// Named weights
 
 /// Each layer names its arrays as Keras does, and the shapes are the ones it declares
 #[test]

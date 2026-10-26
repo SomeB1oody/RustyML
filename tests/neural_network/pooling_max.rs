@@ -21,8 +21,6 @@ use rustyml::neural_network::traits::{Layer, UnaryLayer};
 
 use super::common::assert_allclose;
 
-// MaxPooling1D - forward values
-
 /// MaxPooling1D forward output for pool=2, stride=2 on a single channel
 #[test]
 fn max_pooling_1d_forward_values_pool2_stride2() {
@@ -99,7 +97,7 @@ fn max_pooling_1d_forward_values_batch() {
 
     let data: Vec<f32> = vec![
         // batch 0, single channel
-        5.0, 3.0, 7.0, 2.0, // batch 1, single channel
+        5.0, 3.0, 7.0, 2.0, // batch 0, single channel
         1.0, 9.0, 4.0, 6.0,
     ];
     let x = Array::from_shape_vec((2, 4, 1), data).unwrap().into_dyn();
@@ -115,8 +113,6 @@ fn max_pooling_1d_forward_values_batch() {
         .into_dyn();
     assert_allclose(&out, &expected, 1e-6);
 }
-
-// MaxPooling1D - output_shape string
 
 /// output_shape reports the pooled spatial length as "(None, 4, 2)"
 #[test]
@@ -134,8 +130,6 @@ fn max_pooling_1d_output_shape_unknown_before_forward() {
     let layer = GlobalMaxPooling1D::new();
     assert_eq!(layer.output_shape(), "Unknown");
 }
-
-// MaxPooling1D - build error paths
 
 #[test]
 fn max_pooling_1d_err_pool_size_invalid() {
@@ -169,8 +163,6 @@ fn max_pooling_1d_err_wrong_ndim() {
     );
 }
 
-// MaxPooling1D - wrong ndim at forward time
-
 #[test]
 fn max_pooling_1d_forward_wrong_ndim_err() {
     let mut layer = MaxPooling1D::new(2);
@@ -183,8 +175,6 @@ fn max_pooling_1d_forward_wrong_ndim_err() {
         result
     );
 }
-
-// MaxPooling2D - forward values
 
 /// MaxPooling2D forward output for a 4x4 input with pool=(2,2), stride=(2,2)
 #[test]
@@ -253,8 +243,6 @@ fn max_pooling_2d_forward_values_two_channels() {
     assert_allclose(&out, &expected, 1e-6);
 }
 
-// MaxPooling2D - output_shape string
-
 /// output_shape reports the pooled 2D shape as "(None, 3, 3, 3)"
 #[test]
 fn max_pooling_2d_output_shape_string() {
@@ -264,11 +252,9 @@ fn max_pooling_2d_output_shape_string() {
     assert_eq!(layer.output_shape(), "(None, 3, 3, 3)");
 }
 
-// MaxPooling2D - build error paths
-
 #[test]
 fn max_pooling_2d_err_pool_size_invalid() {
-    // The build rejects a zero or too-large pool extent in the height or the width position
+    // The build rejects a 0 or too-large pool extent in the height or the width position
     for pool in [(0, 2), (2, 0), (5, 2), (2, 5)] {
         let result = MaxPooling2D::new(pool).build(&Shape::known(&[2, 4, 4, 3]));
         assert!(
@@ -313,8 +299,6 @@ fn max_pooling_2d_err_wrong_ndim() {
     );
 }
 
-// MaxPooling2D - wrong ndim at forward time
-
 #[test]
 fn max_pooling_2d_forward_wrong_ndim_err() {
     let mut layer = MaxPooling2D::new((2, 2));
@@ -327,8 +311,6 @@ fn max_pooling_2d_forward_wrong_ndim_err() {
         result
     );
 }
-
-// MaxPooling3D - forward values
 
 /// MaxPooling3D over a single window covering the whole 2x2x2 volume
 #[test]
@@ -374,8 +356,6 @@ fn max_pooling_3d_forward_values_4x4x4_pool2x2x2() {
     assert_allclose(&out, &expected, 1e-6);
 }
 
-// MaxPooling3D - output_shape string
-
 /// output_shape reports the pooled 3D shape as "(None, 2, 2, 2, 2)"
 #[test]
 fn max_pooling_3d_output_shape_string() {
@@ -384,8 +364,6 @@ fn max_pooling_3d_output_shape_string() {
     layer.build(&Shape::known(&[1, 4, 4, 4, 2])).unwrap();
     assert_eq!(layer.output_shape(), "(None, 2, 2, 2, 2)");
 }
-
-// MaxPooling3D - build error paths
 
 #[test]
 fn max_pooling_3d_err_pool_size_invalid() {
@@ -434,8 +412,6 @@ fn max_pooling_3d_err_wrong_ndim() {
     );
 }
 
-// MaxPooling3D - wrong ndim at forward time
-
 #[test]
 fn max_pooling_3d_forward_wrong_ndim_err() {
     let mut layer = MaxPooling3D::new((2, 2, 2));
@@ -448,8 +424,6 @@ fn max_pooling_3d_forward_wrong_ndim_err() {
         result
     );
 }
-
-// GlobalMaxPooling1D - forward values
 
 /// GlobalMaxPooling1D reduces each channel to its maximum
 #[test]
@@ -505,9 +479,7 @@ fn global_max_pooling_1d_forward_values_batch() {
     assert_allclose(&out, &expected, 1e-6);
 }
 
-// GlobalMaxPooling1D - output_shape string
-
-/// output_shape returns "(batch_size, channels)" once a forward pass caches the input shape
+/// `output_shape` reports a free batch axis and the channel count after `forward_mut`.
 #[test]
 fn global_max_pooling_1d_output_shape_after_forward() {
     let mut layer = GlobalMaxPooling1D::new();
@@ -517,8 +489,6 @@ fn global_max_pooling_1d_output_shape_after_forward() {
     layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(layer.output_shape(), "(None, 2)");
 }
-
-// GlobalMaxPooling1D - wrong ndim at forward time
 
 #[test]
 fn global_max_pooling_1d_forward_wrong_ndim_err() {
@@ -532,8 +502,6 @@ fn global_max_pooling_1d_forward_wrong_ndim_err() {
         result
     );
 }
-
-// GlobalMaxPooling2D - forward values
 
 /// GlobalMaxPooling2D reduces each channel plane to its maximum
 #[test]
@@ -583,8 +551,6 @@ fn global_max_pooling_2d_forward_values_batch() {
     assert_allclose(&out, &expected, 1e-6);
 }
 
-// GlobalMaxPooling2D - output_shape string
-
 #[test]
 fn global_max_pooling_2d_output_shape_after_forward() {
     let mut layer = GlobalMaxPooling2D::new();
@@ -594,8 +560,6 @@ fn global_max_pooling_2d_output_shape_after_forward() {
     layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(layer.output_shape(), "(None, 3)");
 }
-
-// GlobalMaxPooling2D - wrong ndim at forward time
 
 #[test]
 fn global_max_pooling_2d_forward_wrong_ndim_err() {
@@ -609,8 +573,6 @@ fn global_max_pooling_2d_forward_wrong_ndim_err() {
         result
     );
 }
-
-// GlobalMaxPooling3D - forward values
 
 /// GlobalMaxPooling3D reduces each channel volume to its maximum
 #[test]
@@ -656,8 +618,6 @@ fn global_max_pooling_3d_forward_values_batch() {
     assert_allclose(&out, &expected, 1e-6);
 }
 
-// GlobalMaxPooling3D - output_shape string
-
 #[test]
 fn global_max_pooling_3d_output_shape_after_forward() {
     let mut layer = GlobalMaxPooling3D::new();
@@ -667,8 +627,6 @@ fn global_max_pooling_3d_output_shape_after_forward() {
     layer.forward_mut(&x, &mut Ctx::training()).unwrap();
     assert_eq!(layer.output_shape(), "(None, 4)");
 }
-
-// GlobalMaxPooling3D - wrong ndim at forward time
 
 #[test]
 fn global_max_pooling_3d_forward_wrong_ndim_err() {
@@ -682,8 +640,6 @@ fn global_max_pooling_3d_forward_wrong_ndim_err() {
         result
     );
 }
-
-// MaxPooling1D - negative values and mixed signs
 
 /// MaxPooling1D picks the algebraically largest value, not the largest absolute value
 #[test]
@@ -704,8 +660,6 @@ fn max_pooling_1d_forward_negative_values() {
         .into_dyn();
     assert_allclose(&out, &expected, 1e-6);
 }
-
-// MaxPooling2D - non-square spatial dims
 
 /// MaxPooling2D forward output when height and width pool to different sizes
 #[test]
@@ -729,8 +683,6 @@ fn max_pooling_2d_forward_non_square_spatial() {
         .into_dyn();
     assert_allclose(&out, &expected, 1e-6);
 }
-
-// MaxPooling2D - parallel assembly
 
 // The pooling engine runs in parallel once batch * out_positions * channels * window taps
 // clears the gate in `crate::tuning::pool`. Forward work splits by output-position block.
@@ -798,7 +750,7 @@ fn max_pooling_2d_parallel_backward_routes_per_window() {
     assert_eq!(grad_in.shape(), &[1, side, side, channels]);
 
     // Max pooling routes each upstream value to the arg-max cell alone. The other 3 taps
-    // of every window receive zero.
+    // of every window receive 0.
     let mut expected = Array::zeros((1, side, side, channels));
     for i in 0..out_side {
         for j in 0..out_side {

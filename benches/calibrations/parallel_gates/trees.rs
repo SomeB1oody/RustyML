@@ -11,6 +11,10 @@ use std::hint::black_box;
 /// Synthetic decision-tree predict kernel: per-sample root-to-leaf walk over a heap-layout
 /// binary tree (depth 16, ~65K nodes), the same pointer-chasing shape as DecisionTree and
 /// IsolationForest prediction
+///
+/// # Returns
+///
+/// - `Section` - Timing tables for the measured size ladder
 pub fn calibrate_tree_traversal() -> Section {
     let depth = 16usize;
     let n_nodes = (1usize << depth) - 1;
@@ -63,6 +67,10 @@ pub fn calibrate_tree_traversal() -> Section {
 
 /// Synthetic split-search kernel: per-feature copy + sort + scan over the node's samples, the
 /// shape of DecisionTree's `find_best_split` (1 task per feature)
+///
+/// # Returns
+///
+/// - `Section` - Timing tables for the measured size ladder
 pub fn calibrate_sort_scan() -> Section {
     let features = 8usize;
     let mut rows = Vec::new();
@@ -108,6 +116,10 @@ pub fn calibrate_sort_scan() -> Section {
 
 /// Synthetic isolation-tree build kernel: each task recursively random-splits a 256-sample
 /// subsample (the IsolationForest default), the shape of parallel forest construction
+///
+/// # Returns
+///
+/// - `Section` - Timing tables for the measured size ladder
 pub fn calibrate_tree_build() -> Section {
     let psi = 256usize;
     let d = 8usize;
@@ -134,7 +146,7 @@ pub fn calibrate_tree_build() -> Section {
         build_rec(x, l, depth - 1, rng) + build_rec(x, r, depth - 1, rng)
     }
 
-    /// Stable partition returning the split point (no std `partition_point` on unsorted data)
+    /// Partitions values in place and returns the split point
     fn itertools_partition(idx: &mut [usize], pred: impl Fn(&usize) -> bool) -> usize {
         let mut split = 0;
         for i in 0..idx.len() {

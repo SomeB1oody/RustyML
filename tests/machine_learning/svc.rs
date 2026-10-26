@@ -1,21 +1,18 @@
 //! Integration tests for SVC (Support Vector Classifier)
 //!
-//! Label-domain contract: fit requires labels in {0.0, 1.0}, predict emits
-//! labels in {0.0, 1.0}, and sign(decision_function[i]) >= 0 <-> predict[i] == 1.0.
-//! The +/-1 encoding the SMO dual needs stays internal to `fit`. Only
-//! `get_support_vector_labels` still exposes it.
+//! Fit requires labels in {0.0, 1.0}, and predict returns that domain.
+//! Non-negative decision values map to label 1.0.
+//! Support vector labels expose the internal {-1, +1} encoding.
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
 use rustyml::machine_learning::{Gamma, KernelType, SVC};
 
-// helpers
-
 /// Linearly separable 2-feature dataset in the 0/1 label domain
 ///
 /// Class 1 sits in the upper-right quadrant, class 0 in the lower-left, so a
-/// large-margin linear-kernel SVC classifies every point with zero error
+/// large-margin linear-kernel SVC classifies every point with error 0
 fn linearly_separable_data() -> (Array2<f64>, Array1<f64>) {
     let x = Array2::from_shape_vec(
         (8, 2),
@@ -36,8 +33,7 @@ fn concentric_rings_data() -> (Array2<f64>, Array1<f64>) {
         (8, 2),
         vec![
             1.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, -1.0, // inner ring (radius 1), class 1
-            // Radius 5 (not 3) keeps every inner-inner distance strictly below every inner-outer
-            // distance, so RBF can separate the rings (at radius 3 some points are equidistant)
+            // Radius 5 puts every inner-inner distance below every inner-outer distance. The RBF kernel can then separate the rings.
             5.0, 0.0, -5.0, 0.0, 0.0, 5.0, 0.0, -5.0, // outer ring (radius 5), class 0
         ],
     )
@@ -46,9 +42,7 @@ fn concentric_rings_data() -> (Array2<f64>, Array1<f64>) {
     (x, y)
 }
 
-// constructor validation
-
-/// C must be a positive, finite value: zero / negative / NaN / +Inf each
+/// C must be a positive, finite value: 0 / negative / NaN / +Inf each
 /// yield InvalidParameter (non-positive and non-finite checks)
 #[test]
 fn new_rejects_invalid_c() {
@@ -62,7 +56,7 @@ fn new_rejects_invalid_c() {
     }
 }
 
-/// tol must be a positive, finite value: zero / negative / NaN each yield
+/// tol must be a positive, finite value: 0 / negative / NaN each yield
 /// InvalidParameter
 #[test]
 fn new_rejects_invalid_tol() {
@@ -121,8 +115,6 @@ fn default_has_expected_params() {
     assert!(svc.get_actual_iterations().is_none());
 }
 
-// fit label-domain validation
-
 /// fit rejects the +/-1 SVM-textbook domain: the public contract is {0.0, 1.0},
 /// matching LinearSVC and LogisticRegression
 #[test]
@@ -141,7 +133,7 @@ fn fit_rejects_plus_minus_one_labels() {
     );
 }
 
-/// SVC and LinearSVC accept the same label array, so one can be swapped for the other
+/// SVC and LinearSVC accept the same label array.
 #[test]
 fn fit_accepts_the_same_labels_as_linear_svc() {
     use rustyml::machine_learning::LinearSVC;
@@ -185,8 +177,6 @@ fn fit_rejects_fractional_labels() {
     );
 }
 
-// predict / decision_function dimension checks
-
 /// predict with wrong feature dimension -> DimensionMismatch
 #[test]
 fn predict_wrong_feature_dim_returns_dimension_mismatch() {
@@ -223,8 +213,6 @@ fn decision_function_wrong_feature_dim_returns_dimension_mismatch() {
         result
     );
 }
-
-// linear kernel: linearly separable data
 
 /// A linear-kernel SVC on well-separated data classifies every training point
 /// correctly against the by-construction labels
@@ -331,8 +319,6 @@ fn actual_iterations_in_valid_range() {
     );
 }
 
-// RBF kernel: non-linearly separable concentric rings
-
 /// An RBF-kernel SVC classifies every concentric-ring point into its known ring
 /// (class 1 inner, class 0 outer), which a linear kernel cannot
 #[test]
@@ -390,8 +376,6 @@ fn sign_consistency_rbf_kernel() {
     }
 }
 
-// all 5 kernels: construct, fit, predict
-
 /// All 5 kernel variants construct, train, and predict on the
 /// linearly-separable data without error
 #[test]
@@ -434,8 +418,6 @@ fn all_kernels_fit_and_predict_without_error() {
     }
 }
 
-// Polynomial kernel correctness
-
 /// A degree-2 polynomial kernel separates the linearly-separable data and
 /// classifies every training point into its known true class
 #[test]
@@ -463,18 +445,16 @@ fn poly_kernel_classifies_separable_data_correctly() {
     }
 }
 
-// Cosine kernel: zero-vector robustness
-
-/// The Cosine kernel tolerates a zero vector without panic or non-finite
+/// The Cosine kernel tolerates a vector filled with 0 without panic or non-finite
 /// values. It does not assert any specific prediction
 #[test]
 fn cosine_kernel_zero_vector_does_not_panic() {
-    // zero vector in the training set, labeled 1.0 here (arbitrary, label domain is {0.0, 1.0})
+    // vector filled with 0 in the training set, labeled 1.0 here (arbitrary, label domain is {0.0, 1.0})
     let x = Array2::from_shape_vec(
         (6, 2),
         vec![
             2.0, 2.0, 3.0, 3.0, // class 1
-            0.0, 0.0, // class 1, zero vector
+            0.0, 0.0, // class 1, vector filled with 0
             -2.0, -2.0, -3.0, -3.0, -4.0, -4.0, // class 0
         ],
     )
@@ -487,8 +467,6 @@ fn cosine_kernel_zero_vector_does_not_panic() {
     // fit may converge or not. What matters is that it does not panic
     let _ = svc.fit(&x, &y);
 }
-
-// Reproducibility with fixed random_state
 
 /// 2 runs with the same seed produce identical predictions, decision values,
 /// and bias
@@ -537,8 +515,6 @@ fn same_seed_produces_identical_results() {
     );
 }
 
-// fit_predict convenience method
-
 /// fit_predict returns the same array as fit then predict on the same data
 #[test]
 fn fit_predict_agrees_with_fit_then_predict() {
@@ -557,8 +533,6 @@ fn fit_predict_agrees_with_fit_then_predict() {
 
     assert_eq!(fp_preds, preds, "fit_predict must match fit+predict");
 }
-
-// save / load round-trip
 
 /// Saving a fitted model and loading it back yields identical predictions and
 /// decision-function values
@@ -640,8 +614,6 @@ fn save_load_round_trip_linear_kernel() {
     let _ = std::fs::remove_file(path);
 }
 
-// Sigmoid kernel: construct, fit, predict
-
 /// Sigmoid-kernel SVC on linearly-separable data: each predicted label agrees
 /// with the sign of its decision value
 #[test]
@@ -674,10 +646,8 @@ fn sigmoid_kernel_sign_consistency() {
     }
 }
 
-// fit: no support vectors (single-class data) -> NotConverged
-
 /// Single-class training data yields an empty support set, so fit surfaces
-/// NotConverged rather than a degenerate all-zero model
+/// NotConverged rather than a degenerate model with all values 0
 #[test]
 fn fit_single_class_data_returns_not_converged() {
     let x = array![[0.0, 0.0], [1.0, 1.0], [2.0, 0.5], [0.5, 2.0]];
@@ -692,10 +662,8 @@ fn fit_single_class_data_returns_not_converged() {
     );
 }
 
-// decision_function / bias: closed-form ground truth (linear kernel)
-
-/// On a 1-D separable set whose max-margin solution is f(x) = x - 1, bias and
-/// decision values match the independently derived non-zero ground truth
+/// The 1-D maximum-margin solution is f(x) = x - 1.
+/// The fitted bias and decision values must match this result.
 #[test]
 fn decision_function_and_bias_match_closed_form_linear_kernel() {
     let x = array![[0.0], [-1.0], [2.0], [3.0]];
@@ -705,7 +673,7 @@ fn decision_function_and_bias_match_closed_form_linear_kernel() {
         .with_random_state(7);
     svc.fit(&x, &y).expect("separable data must fit");
 
-    // asymmetric placement forces a non-zero intercept: b = -1
+    // asymmetric placement forces a intercept other than 0: b = -1
     assert_abs_diff_eq!(svc.get_bias().unwrap(), -1.0, epsilon = 1e-2);
 
     // f(x) = x - 1 at the 2 support vectors (the +/-1 margins) and the boundary
@@ -718,10 +686,7 @@ fn decision_function_and_bias_match_closed_form_linear_kernel() {
     assert_abs_diff_eq!(df[2], 0.0, epsilon = 1e-2); // decision boundary
 }
 
-// data-dependent gamma (Scale / Auto)
-
-/// RBF `Gamma::Scale` is resolved at fit time to 1/(n_features * X.var()) and produces the
-/// same model as constructing the kernel with that explicit value
+/// Fit resolves RBF `Gamma::Scale` to 1/(n_features * X.var()). The resulting model matches a kernel with that explicit gamma.
 #[test]
 fn rbf_gamma_scale_resolves_and_matches_explicit_equivalent() {
     let x = Array2::from_shape_vec(

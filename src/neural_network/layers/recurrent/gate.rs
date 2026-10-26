@@ -35,8 +35,8 @@ impl FusedGates {
     /// Fused gates that hold no weight at all
     ///
     /// A layer holds this until
-    /// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build) reads the
-    /// feature count from the input shape and replaces it with a drawn set
+    /// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build) reads the input
+    /// feature count. The build then draws replacement weights
     ///
     /// # Returns
     ///
@@ -212,6 +212,7 @@ pub fn reshape_2d_to_3d(m: Array2<f32>, dims: (usize, usize, usize)) -> Array3<f
         .expect("row-major [d0*d1, d2] reshapes to [d0, d1, d2]")
 }
 
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::*;

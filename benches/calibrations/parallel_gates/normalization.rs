@@ -39,8 +39,12 @@ fn bench_par_col_sum_rowblock(x: &Array2<f32>) -> Array1<f32> {
 }
 
 /// The viable BatchNorm stats parallelization (COL_FOLD_PARALLEL_MIN_ELEMS): row-block
-/// deterministic fold vs serial mean_axis. Changes the per-channel accumulation grouping
-/// (a versioned behavior change), but is bitwise identical at any thread count
+/// deterministic fold versus serial `mean_axis`. The blocked fold uses a fixed accumulation
+/// order at every thread count
+///
+/// # Returns
+///
+/// - `Section` - Timing tables for the measured size ladder
 pub fn calibrate_bn_col_stats_rowblock() -> Section {
     let mut rows = Vec::new();
     for &(m, c) in &[
@@ -156,6 +160,10 @@ fn bench_ln_row_pass(
 /// plus 3 working buffers, which is 4 times its own size. The working set then overflows a
 /// typical shared L3, and both columns fall to memory bandwidth. Its label says so, because a
 /// bare speedup near 1.00x there reads like a scheduling result and is not one
+///
+/// # Returns
+///
+/// - `Section` - Timing tables for the measured size ladder
 pub fn calibrate_ln_row_pass() -> Section {
     let mut rows = Vec::new();
     for &(r, n) in &[

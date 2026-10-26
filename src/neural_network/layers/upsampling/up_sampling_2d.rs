@@ -30,10 +30,9 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///
 /// The layer is the decoder counterpart of
 /// [`MaxPooling2D`](crate::neural_network::layers::pooling::MaxPooling2D) and
-/// [`AveragePooling2D`](crate::neural_network::layers::pooling::AveragePooling2D). An upsampling
-/// stage followed by a
-/// [`Conv2D`](crate::neural_network::layers::convolution::conv_2d::Conv2D) is the usual way to
-/// build a decoder without a transposed convolution
+/// [`AveragePooling2D`](crate::neural_network::layers::pooling::AveragePooling2D). An upsampling stage followed by
+/// [`Conv2D`](crate::neural_network::layers::convolution::conv_2d::Conv2D) can form a decoder
+/// stage.
 ///
 /// # Examples
 ///
@@ -45,7 +44,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array4;
 ///
-/// // A rank-4 input: 1 sample, 2x2 pixels, 1 channel
+/// // A rank-4 input: 1 sample, 2x2 pixels, 1 channel.
 /// let x = Array4::from_shape_vec((1, 2, 2, 1), vec![1.0, 2.0, 3.0, 4.0])
 ///     .unwrap()
 ///     .into_dyn();
@@ -56,12 +55,12 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
 /// let larger = model.predict(&x).unwrap();
 ///
-/// // 2x2 pixels become 4x4, and each input pixel covers a 2x2 block
+/// // 2x2 pixels become 4x4, and each input pixel covers a 2x2 block.
 /// assert_eq!(larger.shape(), &[1, 4, 4, 1]);
 /// assert_eq!(larger[[0, 0, 0, 0]], 1.0);
 /// assert_eq!(larger[[0, 1, 1, 0]], 1.0);

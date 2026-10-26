@@ -1,33 +1,15 @@
-//! The crate's few additions to the [`gemmkit`](https://docs.rs/gemmkit) matrix-product backend
+//! Matrix product helpers and output tiling rules.
 //!
-//! The backend's own ndarray adapter ([`gemmkit-ndarray`](https://docs.rs/gemmkit-ndarray)) is
-//! already the right call-site API, so the estimators call it directly. They use
-//! `gemmkit_ndarray::dot` for an allocating product on the backend's automatic scheduling. They
-//! use `gemmkit_ndarray::gemm` or `gemm_fused` where the caller owns the output buffer or fuses
-//! an epilogue. This module holds only what the adapter does not provide.
+//! Estimators call `gemmkit_ndarray::dot`, `gemm`, and `gemm_fused` directly for standard matrix products.
+//! `dot_par` also allocates the output but accepts explicit parallel settings.
+//! `matvec` wraps a vector as a `(k, 1)` matrix and returns a vector result.
 //!
-//! - `dot_par`: the allocating product with an explicit [`gemmkit_ndarray::Parallelism`]. `dot`
-//!   always uses the automatic default. Callers inside an already-parallel rayon region pass
-//!   `Parallelism::Serial` so the product does not fork again.
-//! - `matvec`: the matvec with `Array1` operands. The adapter is matrix-shaped, so this wraps
-//!   the vector as a `[k, 1]` column, which the backend reroutes to its bandwidth-bound GEMV
-//!   path.
-//! - the row-chunk tiling policy (`gemm_chunk_rows`, `cache_resident`) for callers that
-//!   materialize a product too large to hold at once (KNN, t-SNE, MeanShift).
+//! Large pairwise products can use row chunks instead of a full output matrix.
+//! KNN, t-SNE, and MeanShift use the shared chunk and cache size rules here.
+//! Runtime setters are available through [`crate::tuning::matmul`].
+//! Backend tuning is available through [`crate::tuning::matmul::backend`].
 //!
-//! Scheduling is entirely gemmkit's. `Parallelism::Rayon(0)` gates serial versus parallel on
-//! the work size and ramps the worker count onto persistent exact-fit pool tiers. It also
-//! parallelizes matvecs by memory bandwidth and runs on the caller's pool when already inside a
-//! rayon region. The knobs live in gemmkit too, as `GEMMKIT_*` environment variables (profiles
-//! from the [`gemmkit-tune`](https://docs.rs/gemmkit-tune) autotuner) or programmatically
-//! through [`crate::tuning::matmul::backend`].
-//!
-//! ## Reproducibility
-//!
-//! gemmkit's blocking and job order do not depend on the worker count. For a fixed machine and
-//! configuration, the same product reproduces the same result bit for bit, no matter how many
-//! threads ran it. The result also repeats from run to run. Fused epilogues (bias and
-//! activation) are bitwise identical to the plain product followed by the same scalar map.
+//! Tests compare products with independent results and check repeatability across worker counts.
 
 #[cfg(feature = "machine_learning")]
 use ndarray::{Array1, Ix1};
@@ -39,7 +21,7 @@ use ndarray::{Array2, ArrayBase, Data, Ix2};
 /// The allocating twin of `gemmkit_ndarray::dot`, for callers that must control the
 /// parallelism. Pass `Parallelism::Serial` from inside an already-parallel rayon region so the
 /// product does not fork again. Pass `Parallelism::Rayon(0)` for the backend's automatic
-/// scheduling, the same one plain `dot` always uses. `A` is `(m, k)` and `B` is `(k, n)`. Any
+/// scheduling, the mode plain `dot` uses. `A` is `(m, k)` and `B` is `(k, n)`. Any
 /// storage works (owned, view, transpose, or slice), because strides pass through with no copy.
 ///
 /// # Panics
@@ -70,12 +52,9 @@ where
 
 /// `y = A @ x` for `Array1` operands, with an explicit [`gemmkit_ndarray::Parallelism`].
 ///
-/// The backend's adapter is matrix-shaped, so this wraps `x` as a `[k, 1]` column and unwraps
-/// the `[m, 1]` result. gemmkit detects the `n == 1` shape and runs its bandwidth-bound GEMV
-/// path. This path stays serial below a byte floor derived from 1 core's private L2, then climbs
-/// a worker ladder as the bytes it touches grow. The result is bit-identical at any worker count.
-/// `A` is `(m, k)` and `x` has length `k`. Pass `Parallelism::Rayon(0)` for the automatic
-/// scheduling, or `Parallelism::Serial` from inside an already-parallel region.
+/// Wraps `x` as a `(k, 1)` column and writes the result through an `(m, 1)` output view.
+/// `a` has shape `(m, k)`, and `x` has length `k`.
+/// The backend receives the given parallel setting.
 ///
 /// # Panics
 ///
@@ -108,15 +87,14 @@ where
 }
 
 tunable_gate! {
-    /// Element budget for one row-chunk of a tiled product. Some products are too large to
+    /// Element budget for 1 row-chunk of a tiled product. Some products are too large to
     /// materialize at once, for example KNN's `[n_query, n_train]` projections or t-SNE's
     /// pairwise blocks. `chunk_rows = gemm_chunk_elems() / row_len`, clamped to `[16, 4096]`
     /// rows.
     ///
-    /// Tiling only pays when the shared operand overflows the cache (see `cache_resident`), and
-    /// bigger chunks are then strictly better. The budget caps the transient chunk buffer at
-    /// 256 MB of `f64` instead of growing without bound. Overridable through
-    /// [`crate::tuning::matmul`].
+    /// The default budget is 33,554,432 elements, or 256 MiB for `f64` output.
+    /// The minimum row count can exceed this budget when each row is very wide.
+    /// Override the budget through [`crate::tuning::matmul`].
     pub(crate) GEMM_CHUNK_ELEMS => gemm_chunk_elems / set_gemm_chunk_elems = 33_554_432
 }
 
@@ -127,23 +105,12 @@ pub(crate) fn gemm_chunk_rows(row_len: usize) -> usize {
 }
 
 tunable_gate! {
-    /// Matrix size in bytes below which repeated row-GEMV sweeps over a shared matrix stay
-    /// cache-resident, making a per-row GEMV swarm faster than a tiled GEMM.
+    /// Shared matrix size limit for the cache-resident product strategy.
     ///
-    /// When many tasks each compute `X . v` against the same `X`, the whole of `X` gets re-read
-    /// per task. That re-read is free while `X` fits in the cache the reading core reaches. It
-    /// becomes a DRAM re-stream once `X` overflows it, and a tiled GEMM, which streams `X` once
-    /// per chunk, wins instead.
-    ///
-    /// Set this to the L3 that 1 core can reach directly, and never to a package total. Each
-    /// sweep runs inside its own rayon task, so what matters is the slice local to the core that
-    /// runs it. On a multi-die part, another die's slice costs a fabric round trip that is close
-    /// to DRAM. The backend states the same rule for its own topology figures. The default is
-    /// the per-die L3 of the calibration machine. Override it through
-    /// [`crate::tuning::matmul`].
-    ///
-    /// The band around this value is not calibrated. The gate also prices only the shared
-    /// matrix, and not the projection buffer the tiled branch allocates.
+    /// Callers compare the shared operand size with this limit before choosing repeated vector products or tiled matrix products.
+    /// The comparison excludes the output buffer.
+    /// The default is 32 MiB.
+    /// Override it through [`crate::tuning::matmul`].
     pub(crate) CACHE_RESIDENT_MAX_BYTES
         => cache_resident_max_bytes / set_cache_resident_max_bytes = 32 * 1024 * 1024
 }
@@ -167,7 +134,7 @@ mod tests {
     use ndarray::Array1;
     use ndarray::{Array2, LinalgScalar, s};
 
-    /// Deterministic pseudo-random matrices (hash-based, no rng dependency).
+    /// Deterministic matrices from a sine-based formula, without an RNG.
     fn rand_f32(r: usize, c: usize, seed: u64) -> Array2<f32> {
         Array2::from_shape_fn((r, c), |(i, j)| {
             let t = (seed as f64) * 0.731 + (i * c + j) as f64 * 0.618_033_988_7;
@@ -210,8 +177,6 @@ mod tests {
             assert!((g - w).abs() <= eps, "f64 mismatch: {g} vs {w}");
         }
     }
-
-    // correctness vs an independent reference
 
     /// The backend's `dot` matches the naive product for f32 on both sides of its work gate
     /// (`m*n*k` = 589,824 by default).
@@ -282,14 +247,12 @@ mod tests {
         assert_close_f32(&dot(&a, &b), &a.dot(&b), 1e-2);
     }
 
-    // the reproducibility guard
-
     /// The backend's contract: for a fixed config the result is identical no matter how many
     /// workers ran it. Serial and forced-parallel also agree bitwise on the current kernels,
     /// because both run the same kernel with thread-count-independent blocking.
     #[test]
     fn dot_par_thread_count_independent_f64() {
-        // square, dense, and a thin-k shape (the one most likely to trigger a split-k reduction)
+        // square, dense, and a thin-k shape (the shape most likely to trigger a split-k reduction)
         for &(m, k, n) in &[(96usize, 96usize, 96usize), (256, 64, 64), (64, 8192, 64)] {
             let a = rand_f64(m, k, 11);
             let b = rand_f64(k, n, 12);
@@ -342,8 +305,6 @@ mod tests {
         );
     }
 
-    // the epilogue guard: fused bias and activation are bitwise identical to the unfused pipeline
-
     /// gemmkit's fused epilogue contract for f32/f64: `gemm_fused` equals plain `gemm` followed
     /// by the same scalar bias-add and activation, bit for bit. The NN layers rely on this to
     /// fuse bias and ReLU without changing numerics.
@@ -380,8 +341,6 @@ mod tests {
         );
     }
 
-    // matvec
-
     /// matvec matches the reference on both cache-resident and larger shapes.
     #[cfg(feature = "machine_learning")]
     #[test]
@@ -399,7 +358,7 @@ mod tests {
     }
 
     /// Forced-serial and auto matvec agree bitwise. The backend reduces each output element
-    /// over the full `k` on one worker, so the matvec is bit-identical at any worker count.
+    /// over the full `k` on 1 worker, so the matvec is bitwise identical at any worker count.
     #[cfg(feature = "machine_learning")]
     #[test]
     fn matvec_serial_and_auto_agree_bitwise() {
@@ -432,12 +391,10 @@ mod tests {
         );
     }
 
-    // degenerate shapes
-
     #[test]
     fn dot_edge_cases() {
-        // zero-sized axes (handled inside gemmkit: `m == 0`/`n == 0` write nothing, `k == 0`
-        // leaves `beta * C`, which is all zeros here)
+        // axes with size 0 (handled inside gemmkit: `m == 0`/`n == 0` write nothing, `k == 0`
+        // leaves `beta * C`, which is all 0 values here)
         let a = Array2::<f64>::zeros((0, 4));
         let b = Array2::<f64>::zeros((4, 3));
         assert_eq!(dot(&a, &b).shape(), &[0, 3]);
@@ -446,7 +403,7 @@ mod tests {
         let c = dot(&a, &b);
         assert_eq!(c.shape(), &[3, 4]);
         assert!(c.iter().all(|&x| x == 0.0));
-        // 1x1
+
         let a = Array2::<f64>::from_elem((1, 1), 3.0);
         let b = Array2::<f64>::from_elem((1, 1), 4.0);
         assert_eq!(dot(&a, &b)[[0, 0]], 12.0);

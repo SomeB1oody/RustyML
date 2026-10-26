@@ -1,4 +1,7 @@
 //! Binary cross-entropy loss for binary classification.
+//!
+//! The loss clips predicted probabilities and averages over all tensor elements.
+//! The gradient uses the clipped values without the derivative of the clip.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -15,7 +18,7 @@ use crate::neural_network::traits::Loss;
 /// use rustyml::neural_network::traits::Loss;
 /// use ndarray::array;
 ///
-/// // Create a binary cross entropy loss function
+/// // Create a binary cross entropy loss function.
 /// let bce_loss = BinaryCrossEntropy::new();
 ///
 /// // True binary labels (0 or 1)
@@ -24,11 +27,11 @@ use crate::neural_network::traits::Loss;
 /// // Predicted probabilities (between 0 and 1)
 /// let y_pred = Tensor::from(array![[0.1f32, 0.9f32, 0.8f32, 0.2f32]].into_dyn());
 ///
-/// // Compute the loss
+/// // Compute the loss.
 /// let loss = bce_loss.compute_loss(&y_true, &y_pred).unwrap();
 /// println!("Binary Cross Entropy Loss: {:.4}", loss);
 ///
-/// // Compute gradients for backpropagation
+/// // Compute gradients for backpropagation.
 /// let gradients = bce_loss.compute_grad(&y_true, &y_pred).unwrap();
 /// println!("Gradients: {:?}", gradients);
 /// ```
@@ -65,7 +68,7 @@ impl Loss for BinaryCrossEntropy {
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, Error> {
         validate_same_shape(y_true, y_pred)?;
 
-        // Clip into (0, 1) to avoid division by zero
+        // Clip into (0, 1) to avoid division by 0
         let y_pred_clipped = clip_probabilities(y_pred);
 
         // gradient: -y_true/y_pred + (1 - y_true)/(1 - y_pred)

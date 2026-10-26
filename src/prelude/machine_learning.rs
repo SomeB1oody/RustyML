@@ -1,4 +1,6 @@
-//! Prelude re-exports for the machine learning estimators, traits, and shared enums
+//! Common machine learning estimators and their configuration types.
+//!
+//! The exports include estimator traits, distance metrics, solvers, and model parameter types.
 
 pub use crate::machine_learning::{DistanceCalculationMetric, RegularizationType};
 pub use crate::traits::{Fit, FitTransform, Predict, Transform};

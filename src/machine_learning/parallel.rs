@@ -8,11 +8,8 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 /// Maps `f` over `0..n`, choosing parallel or sequential execution by the caller's `parallel`
 /// decision
 ///
-/// Centralizes the "parallelize only for large inputs" dispatch that every model re-implements,
-/// so the mechanism lives in one place. The caller passes the decision rather than a bare item
-/// count. The right gate compares **total work** (items * per-item cost, e.g.
-/// `n * centers * features`) against the calibrated class threshold. An item count alone rates
-/// a 2-feature scan the same as a 2000-feature one
+/// Callers select the execution mode from the estimated work and the relevant parallel threshold.
+/// Both execution modes preserve the input index order.
 ///
 /// # Parameters
 ///
@@ -36,6 +33,7 @@ where
     }
 }
 
+/// Tests for the module helpers and model behavior.
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -92,10 +92,9 @@ pub struct ConfusionMatrix {
 impl ConfusionMatrix {
     /// Builds a confusion matrix from hard binary labels.
     ///
-    /// Both arrays must hold only `0.0` and `1.0`. Nothing is binarized. The constructor rejects
-    /// a probability, an unbounded decision-function score, or a `-1`/`+1` label rather than
-    /// silently coercing it. scikit-learn's `confusion_matrix` likewise requires hard labels. For
-    /// a different label pair, use [`new_with_labels`](Self::new_with_labels).
+    /// Both arrays must hold only `0.0` and `1.0`.
+    /// The constructor does not convert scores or other labels.
+    /// Use [`new_with_labels`](Self::new_with_labels) for another label pair.
     ///
     /// # Parameters
     ///
@@ -121,10 +120,7 @@ impl ConfusionMatrix {
 
     /// Builds a confusion matrix from an explicit pair of label values.
     ///
-    /// The binary counterpart of scikit-learn's
-    /// `confusion_matrix(y_true, y_pred, labels=[negative_label, positive_label])`. Reach for it
-    /// when the labels are not `0.0`/`1.0`, for example the `-1.0`/`+1.0` a margin classifier
-    /// emits.
+    /// Use this constructor for labels such as `-1.0` and `1.0`.
     ///
     /// # Parameters
     ///
@@ -178,6 +174,10 @@ impl ConfusionMatrix {
     }
 
     /// Returns the raw counts as `(tp, fp, tn, fn)`.
+    ///
+    /// # Returns
+    ///
+    /// - `(usize, usize, usize, usize)` - True positives, false positives, true negatives, and false negatives
     #[inline]
     pub fn get_counts(&self) -> (usize, usize, usize, usize) {
         (self.tp, self.fp, self.tn, self.fn_)
@@ -268,7 +268,7 @@ impl ConfusionMatrix {
     ///
     /// MCC is a balanced measure usable even when the classes are very different sizes. It ranges
     /// from -1 (total disagreement) through 0 (random) to +1 (perfect). Returns 0.0 when any of
-    /// the 4 marginal sums is zero, since the coefficient is then undefined.
+    /// the 4 marginal sums is 0, since the coefficient is then undefined.
     ///
     /// # Returns
     ///
@@ -355,7 +355,7 @@ impl ConfusionMatrix {
     }
 }
 
-/// Calculates the accuracy of a classification model: the fraction of exactly matching labels.
+/// Calculates the fraction of label pairs whose absolute difference is below [`f64::EPSILON`].
 ///
 /// Labels are compared for equality within [`f64::EPSILON`], so this works for integer-valued
 /// class labels stored as `f64`, in both binary and multi-class settings. The comparison is
@@ -416,9 +416,9 @@ where
 
 /// Calculates the Area Under the ROC Curve (ROC AUC) for binary classification.
 ///
-/// Uses the Mann-Whitney U statistic, which equals the probability that a randomly chosen
-/// positive sample scores above a randomly chosen negative one. Tied scores receive their
-/// average rank.
+/// Uses the Mann-Whitney U statistic.
+/// A positive score above a negative score contributes 1, and a tie contributes 0.5.
+/// Tied score groups receive their average rank.
 ///
 /// # Parameters
 ///
@@ -569,18 +569,30 @@ impl MulticlassConfusionMatrix {
     }
 
     /// Returns a view of the raw `K x K` count matrix (row = true class, column = predicted).
+    ///
+    /// # Returns
+    ///
+    /// - `ArrayView2<usize>` - Count matrix with true classes as rows and predicted classes as columns
     #[inline]
     pub fn matrix(&self) -> ArrayView2<'_, usize> {
         self.matrix.view()
     }
 
     /// Returns the class labels in the order they index the matrix (sorted ascending).
+    ///
+    /// # Returns
+    ///
+    /// - `&[usize]` - Sorted labels that index the count matrix
     #[inline]
     pub fn labels(&self) -> &[usize] {
         &self.labels
     }
 
     /// Returns the number of distinct classes (the matrix dimension).
+    ///
+    /// # Returns
+    ///
+    /// - `usize` - Number of labels in the matrix
     #[inline]
     pub fn n_classes(&self) -> usize {
         self.labels.len()
@@ -588,6 +600,10 @@ impl MulticlassConfusionMatrix {
 
     /// Returns the support of each class: the number of ground-truth samples per class, in
     /// label order.
+    ///
+    /// # Returns
+    ///
+    /// - `Vec<usize>` - Ground-truth count for each class in label order
     pub fn support(&self) -> Vec<usize> {
         self.matrix.sum_axis(Axis(1)).to_vec()
     }
@@ -608,6 +624,10 @@ impl MulticlassConfusionMatrix {
 
     /// Per-class precision (`TP / (TP + FP)`), in label order. Returns 0.0 for a class never
     /// predicted.
+    ///
+    /// # Returns
+    ///
+    /// - `Vec<f64>` - Precision for each class, with 0.0 for classes never predicted
     pub fn per_class_precision(&self) -> Vec<f64> {
         let predicted = self.matrix.sum_axis(Axis(0));
         (0..self.labels.len())
@@ -624,6 +644,10 @@ impl MulticlassConfusionMatrix {
 
     /// Per-class recall (`TP / (TP + FN)`), in label order. Returns 0.0 for a class with no true
     /// samples.
+    ///
+    /// # Returns
+    ///
+    /// - `Vec<f64>` - Recall for each class, with 0.0 for classes absent from ground truth
     pub fn per_class_recall(&self) -> Vec<f64> {
         let actual = self.matrix.sum_axis(Axis(1));
         (0..self.labels.len())
@@ -639,6 +663,10 @@ impl MulticlassConfusionMatrix {
     }
 
     /// Per-class F1 score (harmonic mean of precision and recall), in label order.
+    ///
+    /// # Returns
+    ///
+    /// - `Vec<f64>` - F1 for each class, with 0.0 when precision and recall are both 0
     pub fn per_class_f1(&self) -> Vec<f64> {
         self.per_class_precision()
             .iter()
@@ -654,16 +682,40 @@ impl MulticlassConfusionMatrix {
     }
 
     /// Precision aggregated across classes by the given [`Average`] strategy.
+    ///
+    /// # Parameters
+    ///
+    /// - `average` - Rule for combining class scores
+    ///
+    /// # Returns
+    ///
+    /// - `f64` - Aggregated precision score
     pub fn precision(&self, average: Average) -> f64 {
         self.aggregate(&self.per_class_precision(), average)
     }
 
     /// Recall aggregated across classes by the given [`Average`] strategy.
+    ///
+    /// # Parameters
+    ///
+    /// - `average` - Rule for combining class scores
+    ///
+    /// # Returns
+    ///
+    /// - `f64` - Aggregated recall score
     pub fn recall(&self, average: Average) -> f64 {
         self.aggregate(&self.per_class_recall(), average)
     }
 
     /// F1 score aggregated across classes by the given [`Average`] strategy.
+    ///
+    /// # Parameters
+    ///
+    /// - `average` - Rule for combining class scores
+    ///
+    /// # Returns
+    ///
+    /// - `f64` - Aggregated F1 score
     pub fn f1(&self, average: Average) -> f64 {
         self.aggregate(&self.per_class_f1(), average)
     }
@@ -808,7 +860,7 @@ impl MulticlassConfusionMatrix {
 /// # Parameters
 ///
 /// - `y_true` - True class index of each sample (must be a valid column index into `y_prob`)
-/// - `y_prob` - Predicted class probabilities, one row per sample and one column per class
+/// - `y_prob` - Predicted class probabilities, 1 row per sample and 1 column per class
 ///
 /// # Returns
 ///
@@ -871,8 +923,8 @@ where
 ///
 /// # Parameters
 ///
-/// - `y_true` - First labeling (e.g. ground truth)
-/// - `y_pred` - Second labeling (e.g. predictions)
+/// - `y_true` - First labeling (for example ground truth)
+/// - `y_pred` - Second labeling (for example predictions)
 ///
 /// # Returns
 ///
@@ -925,7 +977,7 @@ where
 /// # Parameters
 ///
 /// - `y_true` - True class index of each sample (must be a valid column index into `y_prob`)
-/// - `y_prob` - Predicted class probabilities, one row per sample and one column per class
+/// - `y_prob` - Predicted class probabilities, 1 row per sample and 1 column per class
 /// - `k` - Number of top predictions to consider
 ///
 /// # Returns
@@ -940,7 +992,7 @@ where
 ///
 /// let y_true = array![0, 1, 2];
 /// let y_prob = arr2(&[[0.7, 0.2, 0.1], [0.3, 0.3, 0.4], [0.1, 0.5, 0.4]]);
-/// // Every true class is within the two most probable, so top-2 accuracy is 1.0.
+/// // Every true class is within the 2 most probable, so top-2 accuracy is 1.0.
 /// assert!((top_k_accuracy(&y_true, &y_prob, 2) - 1.0).abs() < 1e-12);
 /// ```
 ///
@@ -948,7 +1000,7 @@ where
 ///
 /// - Panics if `y_true`'s length differs from the number of rows in `y_prob`.
 /// - Panics if the inputs are empty.
-/// - Panics if `k` is zero, or if any label is out of range for `y_prob`'s columns.
+/// - Panics if `k` is 0, or if any label is out of range for `y_prob`'s columns.
 /// - Panics if `y_prob` contains `NaN`. A `NaN` true-class probability would make every
 ///   `p > true_prob` comparison false, which would otherwise miscount the sample as a hit.
 pub fn top_k_accuracy<S1, S2>(
@@ -1099,14 +1151,10 @@ where
 
 /// Computes the Receiver Operating Characteristic (ROC) curve.
 ///
-/// Returns `(fpr, tpr, thresholds)`: the false-positive rate and true-positive rate at each
-/// distinct score threshold (in decreasing order), preceded by the `(0, 0)` origin. `thresholds`
-/// holds the score at each point. Its leading entry is [`f64::INFINITY`], the only threshold
-/// that classifies nothing as positive, as in scikit-learn.
-///
-/// Unlike scikit-learn's default (`drop_intermediate = True`), the full sweep is always
-/// returned: collinear interior points are kept. So the point count can be larger than
-/// scikit-learn's, while the curve itself, and [`roc_auc`], are identical.
+/// Returns false-positive and true-positive rates at every distinct score threshold, in decreasing threshold order.
+/// A leading `(0, 0)` point has an infinite threshold sentinel.
+/// All interior points remain in the output.
+/// If an input score is infinite, its real threshold can equal the sentinel.
 ///
 /// # Parameters
 ///
@@ -1155,9 +1203,7 @@ where
     let mut tpr = Vec::with_capacity(points.len() + 1);
     let mut thresholds = Vec::with_capacity(points.len() + 1);
 
-    // Origin: no sample is classified positive. scikit-learn uses an infinite threshold here,
-    // rather than a finite one just above the maximum. This also keeps the sentinel distinct from
-    // the top real threshold for large scores (`1e17 + 1.0 == 1e17`).
+    // The infinite sentinel marks the origin, before any score group contributes.
     fpr.push(0.0);
     tpr.push(0.0);
     thresholds.push(f64::INFINITY);
@@ -1177,14 +1223,9 @@ where
 
 /// Computes the precision-recall curve.
 ///
-/// Returns `(precision, recall, thresholds)` at each distinct score threshold, in **increasing**
-/// order (so recall decreases along the arrays). A final `(precision = 1, recall = 0)` point is
-/// appended that has no threshold. Hence `precision` and `recall` are one element longer than
-/// `thresholds`. This matches scikit-learn's `precision_recall_curve` layout, element for
-/// element.
-///
-/// The ordering is the opposite of [`roc_curve`], which runs from the highest threshold down.
-/// scikit-learn makes the same distinction between the 2.
+/// Thresholds increase along the output arrays, so recall decreases.
+/// A final `(precision = 1, recall = 0)` point has no threshold.
+/// Precision and recall therefore each contain 1 more element than the threshold array.
 ///
 /// # Parameters
 ///
@@ -1234,8 +1275,7 @@ where
     let mut recall = Vec::with_capacity(points.len() + 1);
     let mut thresholds = Vec::with_capacity(points.len());
 
-    // `points` is ranked by descending score. Walking it backwards yields ascending thresholds
-    // and therefore descending recall, the order scikit-learn returns.
+    // Reverse the score groups to return ascending thresholds and descending recall.
     for &(score, tp, fp) in points.iter().rev() {
         precision.push(tp as f64 / (tp + fp) as f64);
         recall.push(tp as f64 / total_pos as f64);
@@ -1276,7 +1316,7 @@ mod tests {
         assert_eq!(cm.aggregate(&[], Average::Macro), 0.0);
     }
 
-    /// Weighted averaging with zero total support returns 0.0.
+    /// Weighted averaging with total support 0 returns 0.0.
     #[test]
     fn test_aggregate_weighted_zero_support_is_zero() {
         let cm = empty_cm();

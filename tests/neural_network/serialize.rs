@@ -1,21 +1,13 @@
-//! Integration tests for Sequential model save/load round-trips.
+//! Integration tests for Sequential model save and load.
 //!
-//! Each test builds a model, either with known injected weights or trained for a few steps. It
-//! saves the model and reloads it into a fresh model of the same architecture. Then it checks
-//! that predict output matches element-wise (within ~1e-6) across the round-trip.
+//! The tests check trained models, multiple layers, and state such as BatchNormalization
+//! running statistics. Single-layer round trips also appear in `layer_contract.rs`.
 //!
-//! The round trip of each single layer type lives in `layer_contract.rs`. The round trips here
-//! cover trained models, models of more than 1 layer, and the state of 1 layer type that the
-//! contract cannot reach, such as the running statistics of `BatchNormalization`.
+//! Error cases cover incompatible layer counts, types, shapes, and build configurations. Other
+//! cases cover absent files, corrupt data, invalid magic tags, and unsupported format versions.
 //!
-//! Error paths cover layer-count, layer-type, and weight-shape mismatches (all
-//! ModelStructureMismatch). They also cover a nonexistent file (IoError::Std), corrupt binary
-//! data (IoError::Serialization), and a wrong magic tag or format version
-//! (IoError::UnsupportedModelFormat).
-//!
-//! The 2 tests under "The atomic refusal" pin the atomicity of a refusal. A load validates the
-//! whole file before it writes any array. A refusal therefore leaves every array of the model
-//! bit for bit as it was.
+//! A load validates the whole file before it writes any array. Refused loads must leave all
+//! model arrays unchanged.
 
 use crate::common::assert_allclose;
 use ndarray::Array;
@@ -49,12 +41,13 @@ use rustyml::neural_network::traits::WeightKind;
 use std::borrow::Cow;
 use std::env;
 
-// Helpers
-
 /// Temporary file that deletes itself when dropped
 ///
 /// The single field is the path of the file, inside the system temporary directory.
-struct TempFile(std::path::PathBuf);
+struct TempFile(
+    /// The path to the temporary file.
+    std::path::PathBuf,
+);
 
 impl TempFile {
     /// Builds a path for a new temporary file, under a name unique to the calling test
@@ -173,7 +166,7 @@ fn dense_scaled_identity_value_check_and_round_trip() {
     assert_allclose(&after, &expected, 1e-6_f32);
 }
 
-// Dense with zero weights (W = 0): output is the bias broadcast over the batch, and survives
+// Dense with 0 weights (W = 0): output is the bias broadcast over the batch, and survives
 // a round-trip
 #[test]
 fn dense_zero_weights_bias_only_value_check_and_round_trip() {
@@ -577,8 +570,6 @@ fn pre_activation_layers_trained_round_trip() {
     assert_eq!(after, before);
 }
 
-// Error paths
-
 /// Nonexistent file gives Error::Io(IoError::Std)
 #[test]
 fn load_from_nonexistent_file_gives_io_error() {
@@ -665,11 +656,8 @@ fn load_layer_type_mismatch_gives_structure_error() {
     }
 }
 
-/// 2 normalization layers that name and shape their arrays identically are still told apart
-///
-/// InstanceNormalization and GroupNormalization both hold `gamma` and `beta` of length
-/// `channels`. A name and a shape therefore say nothing about which of the 2 wrote the file,
-/// and the layer type of the position is what separates them. The refusal names both types
+/// The 2 layers have matching weight names and shapes. Their different layer types distinguish
+/// them in the checkpoint.
 #[test]
 fn load_refuses_a_layer_type_that_no_longer_matches() {
     let tmp = TempFile::new("norm_type_mismatch");
@@ -730,7 +718,7 @@ fn load_weight_shape_mismatch_gives_structure_error() {
 }
 
 /// A file whose magic tag does not match gives Error::Io(IoError::UnsupportedModelFormat). This
-/// catches a pre-header file, which began with its layer count where the tag is now expected.
+/// checks that the loader refuses data without the required file header.
 #[test]
 fn load_wrong_magic_gives_unsupported_format_error() {
     let tmp = TempFile::new("wrong_magic");
@@ -782,8 +770,6 @@ fn load_wrong_format_version_gives_unsupported_format_error() {
         other => panic!("expected UnsupportedModelFormat, got {:?}", other),
     }
 }
-
-// The named checkpoint
 
 /// A file of the format version before this one is refused, and the refusal names both numbers
 ///
@@ -941,8 +927,6 @@ fn load_partial_reports_applied_missing_and_unused() {
     ));
 }
 
-// The atomic refusal
-
 /// Every array of 1 layer of a model, as a path and the raw f32 bits of its elements
 ///
 /// A load either writes an array or leaves it alone, and nothing between the 2. The comparison
@@ -965,16 +949,13 @@ fn layer_bits(model: &Sequential, scope: usize) -> Vec<(String, Vec<u32>)> {
         .collect()
 }
 
-/// A refused load leaves every layer before the disagreement exactly as it was
+/// A refused load must preserve earlier layers.
 ///
-/// The file holds 2 Dense layers. Position 0 agrees with the model on the layer type, on the
-/// names, on the kinds, and on the shapes. It carries other values there. Position 1 has 4
-/// units where the model has 5, so both of its arrays disagree on shape.
+/// The file has 2 Dense layers. Position 0 matches the target structure but has different
+/// values. Position 1 has 4 units where the target has 5, so its shapes differ.
 ///
-/// The validate pass reads the model and writes nothing, and the write pass runs only after
-/// it. The refusal at position 1 must therefore leave position 0 untouched. A load that wrote
-/// position 0 on its way to the refusal would leave the model holding 1 layer of the file next
-/// to 1 layer of its own, and no error would say so
+/// The load validates all records before it writes any array. The failure at position 1 must
+/// therefore leave position 0 unchanged.
 #[test]
 fn a_refused_load_writes_no_array_of_the_layers_before_the_mismatch() {
     let tmp = TempFile::new("atomic_refusal_across_layers");
@@ -1149,11 +1130,9 @@ fn a_saved_model_reloads_through_the_build_path() {
     assert_allclose(&target.predict(&x).unwrap(), &expected, 0.0_f32);
 }
 
-/// A file written by a model built for another input shape does not load
-///
-/// The 2 models hold arrays of the same names and the same extents, because a convolution
-/// kernel reads the channel count alone and never a spatial extent. The build shape in the
-/// file is what tells them apart
+/// The 2 models have matching weight names and extents. A convolution kernel depends on the
+/// channel count, which matches across the models. The different spatial build shapes
+/// distinguish them.
 #[test]
 fn a_checkpoint_of_another_build_shape_is_refused() {
     let tmp = TempFile::new("build_shape_mismatch");

@@ -1,46 +1,8 @@
-//! Model-evaluation metrics for classification, clustering, and regression
+//! Metrics for classification, clustering, and regression.
 //!
-//! Each metric lives in a category submodule and the module root re-exports it. You can reach a
-//! metric by category (`metrics::regression::mean_squared_error`) or by the flat path
-//! (`metrics::mean_squared_error`). The crate and its prelude use the flat paths.
-//!
-//! # Regression metrics
-//! - **mean_squared_error** / **root_mean_squared_error**: average squared error and its root
-//! - **mean_absolute_error** / **median_absolute_error**: mean and (outlier-robust) median
-//!   absolute error
-//! - **mean_absolute_percentage_error**: mean error relative to the true values
-//! - **r2_score**: coefficient of determination (R^2)
-//! - **explained_variance_score**: residual variance relative to the data variance (ignores
-//!   constant bias)
-//!
-//! # Classification metrics
-//! - [`ConfusionMatrix`]: binary TP/FP/TN/FN with derived
-//!   accuracy, precision, recall, specificity, F1, error rate, balanced accuracy, and MCC
-//! - [`MulticlassConfusionMatrix`]: KxK matrix with
-//!   per-class precision/recall/F1/support and macro/micro/weighted aggregation via
-//!   [`Average`]
-//! - **accuracy**, **roc_auc**, **log_loss**, **cohen_kappa**, **top_k_accuracy**,
-//!   **average_precision**, and the **roc_curve** / **precision_recall_curve** threshold sweeps
-//!
-//! # Clustering metrics
-//! - **adjusted_rand_index**, **normalized_mutual_info**, **adjusted_mutual_info**
-//! - **homogeneity_score** / **completeness_score** / **v_measure_score**,
-//!   **fowlkes_mallows_score**
-//! - **silhouette_score**, **davies_bouldin_score**, **calinski_harabasz_score** (internal
-//!   indices, no ground truth needed)
-//!
-//! # Conventions
-//!
-//! - **Panics instead of returning `Result`.** The functions in `metrics` panic on a precondition
-//!   violation, such as mismatched lengths or empty input. This follows `ndarray` on a dimension
-//!   mismatch, rather than returning the crate's `Error`. The panic messages mirror that type's
-//!   wording (`dimension mismatch: ...`, `input is empty: ...`).
-//! - **2 argument conventions.** A hard-label function takes `(y_true, y_pred)`, ground truth
-//!   first. This mirrors the clustering metrics' `(labels_true, labels_pred)`. Order does not
-//!   affect the symmetric metrics (MSE, MAE, `accuracy`), but it does affect `r2_score` and the
-//!   confusion matrix types. A threshold-based function instead takes `(labels, scores)`: `bool`
-//!   ground truth first, then `f64` scores. `roc_auc`, `roc_curve`, `precision_recall_curve`, and
-//!   `average_precision` use this second convention.
+//! Each category has a submodule, and this module re-exports its public metrics.
+//! Metrics panic when their input checks fail.
+//! Hard-label and regression metrics take true values before predicted values.
 //!
 //! # Examples
 //!
@@ -94,7 +56,7 @@ pub use regression::{
 
 /// Checks a `(y_true, y_pred)`-style pair of inputs for equal length and non-empty content.
 ///
-/// The length check runs first, so a length mismatch is reported even when one input is empty.
+/// The length check runs first, so a length mismatch is reported even when 1 input is empty.
 /// The panic messages mirror [`crate::error::Error::DimensionMismatch`] and
 /// [`crate::error::Error::EmptyInput`]. This keeps the lightweight `metrics` tier consistent with
 /// the rest of the crate, without depending on the `error` module.

@@ -15,8 +15,11 @@ use rustyml::math::reduction::{det_reduce, det_reduce_range};
 use std::hint::black_box;
 use std::ops::AddAssign;
 
-// f64 elementwise classes (the ML/utils gates)
-
+/// Measures serial and parallel f64 maps, row scans, and sums.
+///
+/// # Returns
+///
+/// - `Vec<Section>` - Timing tables for the measured size ladder
 pub fn calibrate_elementwise_f64() -> Vec<Section> {
     let sizes = [
         512usize, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 1048576, 4194304,
@@ -146,8 +149,11 @@ pub fn calibrate_elementwise_f64() -> Vec<Section> {
     sections
 }
 
-// deterministic blocked reduction: DET_REDUCE_BLOCK
-
+/// Measures deterministic reduction speed across block sizes.
+///
+/// # Returns
+///
+/// - `Section` - Timing tables for the measured size ladder
 pub fn calibrate_det_reduce_block() -> Section {
     let data = random_vector_f64(4_194_304, 69);
     let slice = data.as_slice().unwrap();
@@ -185,6 +191,10 @@ pub fn calibrate_det_reduce_block() -> Section {
 /// is an order of magnitude heavier than the cheap sum-of-squares class, so its crossover sits
 /// well below SUM_F64_PARALLEL_MIN_ELEMS. The parallel side is the deterministic blocked range
 /// fold the production path uses
+///
+/// # Returns
+///
+/// - `Section` - Timing tables for the measured size ladder
 pub fn calibrate_exp_reduction() -> Section {
     let max_n = 1_048_576usize;
     let logits = random_vector_f64(max_n, 81).mapv(|v| v * 4.0);
@@ -240,11 +250,17 @@ pub fn calibrate_exp_reduction() -> Section {
 /// The per-iteration k-means pass that folds every sample's row into its cluster's centroid sum
 /// (plus counts and inertia). Serial is the production scatter loop. Parallel is the
 /// deterministic blocked range fold with an (Array2 sums, counts, inertia) accumulator per
-/// block. The work metric is samples x features. The fold blocks the sample axis alone, so
+/// block.
+///
+/// The work metric is samples x features. The fold blocks the sample axis alone, so
 /// the feature count inflates the estimate without adding a task. The d=8 and d=32 rungs
 /// therefore do NOT share a bracket at equal work: every rung tracks the block count, which is
 /// `ceil(n / DET_REDUCE_BLOCK)`. The call site pairs the product with a 2-block floor on the
 /// sample count for that reason.
+///
+/// # Returns
+///
+/// - `Section` - Timing tables for the measured size ladder
 pub fn calibrate_kmeans_accumulate() -> Section {
     let mut rows = Vec::new();
     for &(n, d, k) in &[
@@ -322,6 +338,10 @@ pub fn calibrate_kmeans_accumulate() -> Section {
 /// The clip-by-global-norm reduction: f32 gradients squared and accumulated in f64. The serial
 /// baseline is the production flat chain. The parallel side is the generic deterministic
 /// blocked fold over f32 blocks with f64 partials
+///
+/// # Returns
+///
+/// - `Section` - Timing tables for the measured size ladder
 pub fn calibrate_f32_sq_sum() -> Section {
     let data = random_vector_f32(4_194_304, 101);
     let slice = data.as_slice().unwrap();

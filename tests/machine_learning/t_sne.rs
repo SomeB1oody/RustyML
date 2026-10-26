@@ -8,7 +8,7 @@ use ndarray::Array2;
 use rustyml::error::Error;
 use rustyml::machine_learning::manifold::t_sne::{Init, TSNE, TSNEMethod};
 
-// Small valid dataset (6 points, 2 features). perplexity=2.0 < 6 passes the n_samples guard
+/// Small valid dataset (6 points, 2 features). perplexity=2.0 < 6 passes the n_samples guard
 fn small_data() -> Array2<f64> {
     ndarray::array![
         [0.0, 0.0],
@@ -19,8 +19,6 @@ fn small_data() -> Array2<f64> {
         [5.0, 6.0]
     ]
 }
-
-// Constructor validation: perplexity
 
 /// Non-positive (0.0, negative) and non-finite (NaN, +inf) perplexity values are all
 /// rejected as InvalidParameter
@@ -35,8 +33,6 @@ fn new_perplexity_invalid_returns_invalid_parameter() {
     }
 }
 
-// Constructor validation: learning_rate
-
 /// Non-positive (0.0, negative) and non-finite (NaN, +inf) learning_rate values are all
 /// rejected as InvalidParameter
 #[test]
@@ -50,12 +46,10 @@ fn new_learning_rate_invalid_returns_invalid_parameter() {
     }
 }
 
-// Constructor validation: n_components and n_iter
-
 /// n_components = 0 and n_iter = 0 are each rejected as InvalidParameter
 #[test]
 fn new_zero_integer_param_returns_invalid_parameter() {
-    // (n_components, n_iter): 1 argument is the zero offender per row
+    // (n_components, n_iter): 1 argument is the argument with value 0 per row
     for (n_components, n_iter) in [(0, 250), (2, 0)] {
         let err = TSNE::new(n_components, 5.0, 200.0, n_iter).unwrap_err();
         assert!(
@@ -71,8 +65,6 @@ fn new_valid_params_returns_ok() {
     let result = TSNE::new(2, 5.0, 200.0, 250);
     assert!(result.is_ok(), "expected Ok, got {result:?}");
 }
-
-// fit_transform: output shape
 
 /// fit_transform on an (n, d) matrix returns an (n, n_components) matrix
 #[test]
@@ -112,8 +104,6 @@ fn fit_transform_output_shape_n_components_one() {
     );
 }
 
-// fit_transform: all finite
-
 /// Every element in the embedding is finite (no NaN or +/-inf)
 #[test]
 fn fit_transform_all_elements_finite() {
@@ -132,8 +122,6 @@ fn fit_transform_all_elements_finite() {
         );
     }
 }
-
-// fit_transform: determinism (same seed gives bit-identical result)
 
 /// 2 calls with the same random_state produce a bit-for-bit identical embedding
 #[test]
@@ -206,8 +194,6 @@ fn fit_transform_pca_init_is_seed_independent() {
     crate::common::assert_allclose(&emb1, &emb2, 0.0_f64);
 }
 
-// fit_transform: centered output
-
 /// Each column of the final embedding has mean ~0 (tolerance 1e-10)
 #[test]
 fn fit_transform_column_means_are_zero() {
@@ -241,8 +227,6 @@ fn fit_transform_column_mean_zero_n_components_one() {
     let mean0: f64 = embedding.column(0).iter().sum::<f64>() / n;
     assert_abs_diff_eq!(mean0, 0.0, epsilon = 1e-10);
 }
-
-// fit_transform: neighborhood preservation
 
 /// 2 well-separated high-D clusters remain separated in the 2-D embedding
 #[test]
@@ -314,8 +298,7 @@ fn fit_transform_well_separated_clusters_remain_separated() {
         }
     }
 
-    // The 2 cluster centroids must be at least 5x the max intra-cluster spread apart:
-    // a conservative check given the 100:1 high-D separation ratio and 1000 iterations
+    // The centroid distance must exceed 5 times the largest within-cluster spread. The input has a 100:1 separation ratio, and optimization uses 1000 iterations.
     assert!(
         inter_centroid > 5.0 * max_intra,
         "cluster separation weak: inter_centroid={inter_centroid:.6}, \
@@ -323,8 +306,6 @@ fn fit_transform_well_separated_clusters_remain_separated() {
         inter_centroid / max_intra.max(1e-10)
     );
 }
-
-// Error paths: fit_transform
 
 /// perplexity == n_samples (5.0) and perplexity > n_samples (10.0) are both rejected as
 /// InvalidParameter (the dataset has 5 samples)
@@ -364,8 +345,6 @@ fn fit_transform_single_sample_returns_invalid_input() {
     );
 }
 
-// Getter roundtrips
-
 /// Getters return exactly the values set by the constructor and builder methods
 #[test]
 fn getters_return_construction_values() {
@@ -394,8 +373,7 @@ fn min_grad_norm_default_and_builder() {
     assert_abs_diff_eq!(tuned.get_min_grad_norm(), 1e-3, epsilon = 0.0);
 }
 
-/// Early stopping (a large threshold stops right after early exaggeration) and disabling it
-/// (threshold 0 runs the full n_iter) both produce a valid, correctly shaped embedding
+/// A large gradient threshold stops after early exaggeration. A 0 threshold runs all n_iter iterations. Both paths return finite embeddings with the correct shape.
 #[test]
 fn min_grad_norm_early_stop_and_disable_produce_valid_output() {
     let x = small_data();
@@ -435,8 +413,6 @@ fn getter_random_state_none() {
         .unwrap();
     assert_eq!(tsne.get_random_state(), None);
 }
-
-// Barnes-Hut method
 
 /// Barnes-Hut rejects embeddings with more than 3 components
 #[test]

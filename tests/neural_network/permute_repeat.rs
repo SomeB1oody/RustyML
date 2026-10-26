@@ -23,8 +23,6 @@ use rustyml::prelude::Activation;
 
 use super::common::assert_allclose;
 
-// helpers
-
 /// Build a 2D Tensor from row-major data
 fn t2(a: usize, b: usize, data: Vec<f32>) -> Tensor {
     Array2::from_shape_vec((a, b), data)
@@ -56,8 +54,6 @@ fn ramp_of(shape: &[usize]) -> Tensor {
     let count: usize = shape.iter().product();
     Tensor::from_shape_vec(IxDyn(shape), ramp(count)).expect("shape/data mismatch")
 }
-
-// Permute: the constructor
 
 /// The constructor accepts any permutation of 1..=n at every rank the layer serves
 #[test]
@@ -115,8 +111,6 @@ fn permute_new_rejects_axis_above_range() {
         "expected InvalidParameter for an out-of-range entry, got {result:?}"
     );
 }
-
-// Permute: forward
 
 /// Swapping the 2 axes after the batch axis transposes each sample
 #[test]
@@ -228,8 +222,6 @@ fn permute_predict_matches_forward() {
     assert_allclose(&from_predict, &from_forward, 1e-6_f32);
 }
 
-// Permute: backward
-
 /// The backward pass undoes the forward permutation, restoring the original axis order
 #[test]
 fn permute_backward_applies_the_inverse_order() {
@@ -259,8 +251,6 @@ fn permute_rotation_round_trips_through_its_inverse() {
     let restored = back.forward_mut(&rotated, &mut Ctx::training()).unwrap();
     assert_allclose(&restored, &x, 1e-6_f32);
 }
-
-// Permute: error paths
 
 /// The input rank must be dims.len() + 1
 #[test]
@@ -307,8 +297,6 @@ fn permute_backward_wrong_grad_shape_returns_err() {
     );
 }
 
-// Permute: metadata and the free batch axis
-
 /// layer_type names the layer, and the layer holds no parameters
 #[test]
 fn permute_metadata() {
@@ -318,8 +306,8 @@ fn permute_metadata() {
     assert!(p.weights().is_empty(), "Permute must expose no weight");
 }
 
-/// output_shape is unknown before the first forward pass and resolved after it. The resolved
-/// shape is the shape the layer built for, so the batch axis prints its real extent
+/// `output_shape` is unknown before the initial build. After `forward_mut`, it reports the
+/// feature extents with a free batch axis.
 #[test]
 fn permute_output_shape_before_and_after_forward() {
     let mut p = Permute::new(vec![2, 1]).unwrap();
@@ -346,8 +334,6 @@ fn permute_one_instance_serves_every_batch_size() {
     }
 }
 
-// RepeatVector: the constructor
-
 /// A count of 0 leaves the output with no step, so the constructor rejects it
 #[test]
 fn repeat_vector_new_rejects_zero() {
@@ -357,8 +343,6 @@ fn repeat_vector_new_rejects_zero() {
         "expected InvalidParameter for n = 0, got {result:?}"
     );
 }
-
-// RepeatVector: forward
 
 /// Each feature vector appears at every step, unchanged
 #[test]
@@ -403,8 +387,6 @@ fn repeat_vector_predict_matches_forward() {
     assert_allclose(&from_predict, &from_forward, 1e-6_f32);
 }
 
-// RepeatVector: backward
-
 /// Every step reads the same input, so the input gradient is the sum over the step axis
 #[test]
 fn repeat_vector_backward_sums_over_the_step_axis() {
@@ -420,8 +402,6 @@ fn repeat_vector_backward_sums_over_the_step_axis() {
     let want = t2(2, 3, vec![5.0, 7.0, 9.0, 17.0, 19.0, 21.0]);
     assert_allclose(&grad_input, &want, 1e-6_f32);
 }
-
-// RepeatVector: error paths
 
 /// The input must be rank 2
 #[test]
@@ -468,8 +448,6 @@ fn repeat_vector_backward_wrong_grad_shape_returns_err() {
     );
 }
 
-// RepeatVector: metadata and the free batch axis
-
 /// layer_type names the layer, and the layer holds no parameters
 #[test]
 fn repeat_vector_metadata() {
@@ -479,8 +457,8 @@ fn repeat_vector_metadata() {
     assert!(r.weights().is_empty(), "RepeatVector must expose no weight");
 }
 
-/// output_shape is unknown before the first forward pass and resolved after it. The resolved
-/// shape is the shape the layer built for, so the batch axis prints its real extent
+/// `output_shape` is unknown before the initial build. After `forward_mut`, it reports the
+/// feature extents with a free batch axis.
 #[test]
 fn repeat_vector_output_shape_before_and_after_forward() {
     let mut r = RepeatVector::new(3).unwrap();
@@ -506,8 +484,6 @@ fn repeat_vector_one_instance_serves_every_batch_size() {
         );
     }
 }
-
-// Inside a Sequential model
 
 /// RepeatVector bridges 1 recurrent layer to the next, which is the encoder-decoder pattern
 #[test]

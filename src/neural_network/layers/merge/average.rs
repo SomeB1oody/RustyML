@@ -42,7 +42,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::layers::Average;
 /// use rustyml::neural_network::traits::Layer;
 ///
-/// // 3 inputs of 1 sample and 2 features each
+/// // 3 inputs of 1 sample and 2 features each.
 /// let a = Array::from_shape_vec((1, 2), vec![1.0, 2.0]).unwrap().into_dyn();
 /// let b = Array::from_shape_vec((1, 2), vec![3.0, 4.0]).unwrap().into_dyn();
 /// let c = Array::from_shape_vec((1, 2), vec![8.0, 9.0]).unwrap().into_dyn();
@@ -51,13 +51,13 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// let mut ctx = Ctx::training();
 /// let output = layer.forward_many_mut(&[&a, &b, &c], &mut ctx).unwrap();
 ///
-/// // The sum divided by the input count of 3
+/// // The sum divided by the input count of 3.
 /// assert_eq!(
 ///     output,
 ///     Array::from_shape_vec((1, 2), vec![4.0, 5.0]).unwrap().into_dyn()
 /// );
 ///
-/// // Every input takes 1 third of the gradient, at its own shape
+/// // Every input takes 1 third of the gradient, at its own shape.
 /// let grads = layer
 ///     .backward_many(&Array::from_elem((1, 2), 3.0).into_dyn(), &mut ctx)
 ///     .unwrap();
@@ -173,6 +173,7 @@ impl Layer for Average {
 }
 
 /// Unit tests of the forward average, of the gradient split, and of every refusal
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::*;

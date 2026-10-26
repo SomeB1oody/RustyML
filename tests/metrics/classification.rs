@@ -8,8 +8,6 @@ use rustyml::metrics::{
     log_loss, precision_recall_curve, roc_auc, roc_curve, top_k_accuracy,
 };
 
-// ConfusionMatrix::new: TP/FP/TN/FN counting
-
 #[test]
 fn cm_new_perfect_predictions() {
     // y_true=[1,0,1,0], y_pred=[1,0,1,0] -> TP=2, FP=0, TN=2, FN=0
@@ -30,7 +28,7 @@ fn cm_new_all_wrong() {
 
 #[test]
 fn cm_new_mixed() {
-    // y_true=[1,1,1,1,1,0,0,0], y_pred=[1,1,1,0,0,0,0,1] -> TP=3, FN=2, TN=2, FP=1
+    // The input pair gives TP=3, FN=2, TN=2, and FP=1.
     let y_true = array![1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0];
     let y_pred = array![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
     let cm = ConfusionMatrix::new(&y_true, &y_pred);
@@ -93,9 +91,7 @@ fn cm_new_accepts_mixed_storage() {
     assert_eq!(cm.get_counts(), (1, 0, 2, 1));
 }
 
-// ConfusionMatrix derived metrics (tp=3, fp=1, tn=2, fn=2)
-// from y_true=[1,1,1,1,1,0,0,0], y_pred=[1,1,1,0,0,0,0,1]
-
+/// Builds a confusion matrix with TP=3, FP=1, TN=2, and FN=2.
 fn cm_3_1_2_2() -> ConfusionMatrix {
     let y_true = array![1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0];
     let y_pred = array![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
@@ -172,7 +168,7 @@ fn cm_recall_partial() {
 
 #[test]
 fn cm_recall_no_actual_positives() {
-    // tp=0, fn=0 (all actual negatives) -> recall = 0.0 (zero-denominator yields 0.0,
+    // tp=0, fn=0 (all actual negatives) -> recall = 0.0 (denominator 0 yields 0.0,
     // consistent with MulticlassConfusionMatrix::per_class_recall)
     let y_true = array![0.0, 0.0];
     let y_pred = array![0.0, 1.0];
@@ -271,8 +267,7 @@ fn cm_balanced_accuracy_partial() {
 
 #[test]
 fn cm_balanced_accuracy_vs_accuracy_imbalanced() {
-    // All predictions positive on imbalanced data y_true=[1,1,1,1,0], y_pred=[1,1,1,1,1]:
-    // accuracy = 4/5 = 0.8 but balanced_accuracy = (1.0+0.0)/2 = 0.5
+    // All predictions are positive, with 4 true positives and 1 false positive. Accuracy is 0.8, and balanced accuracy is (1.0+0.0)/2 = 0.5.
     let y_true = array![1.0, 1.0, 1.0, 1.0, 0.0];
     let y_pred = array![1.0, 1.0, 1.0, 1.0, 1.0];
     let cm = ConfusionMatrix::new(&y_true, &y_pred);
@@ -296,8 +291,6 @@ fn cm_summary_contains_metric_labels() {
     assert!(s.contains("FN:"));
 }
 
-// ConfusionMatrix panic paths
-
 #[test]
 #[should_panic(expected = "dimension mismatch")]
 fn cm_new_length_mismatch_panics() {
@@ -313,8 +306,6 @@ fn cm_new_empty_input_panics() {
     let y_pred: ndarray::Array1<f64> = array![];
     let _ = ConfusionMatrix::new(&y_true, &y_pred);
 }
-
-// Free function: accuracy
 
 #[test]
 fn accuracy_perfect() {
@@ -376,12 +367,9 @@ fn accuracy_empty_panics() {
     let _ = accuracy(&y_true, &y_pred);
 }
 
-// roc_auc
-
 #[test]
 fn roc_auc_perfect() {
-    // Perfect ranking (all positives score higher than all negatives) -> AUC = 1.0
-    // labels=[T,T,F,F], scores=[0.9,0.8,0.2,0.1]
+    // Every positive score exceeds every negative score, so AUC is 1.0.
     let labels = array![true, true, false, false];
     let scores = array![0.9, 0.8, 0.2, 0.1];
     assert_abs_diff_eq!(roc_auc(&labels, &scores), 1.0, epsilon = 1e-12);
@@ -389,8 +377,7 @@ fn roc_auc_perfect() {
 
 #[test]
 fn roc_auc_worst() {
-    // Worst ranking (all positives score lower than all negatives) -> AUC = 0.0
-    // labels=[T,T,F,F], scores=[0.1,0.2,0.8,0.9]
+    // Every positive score is below every negative score, so AUC is 0.0.
     let labels = array![true, true, false, false];
     let scores = array![0.1, 0.2, 0.8, 0.9];
     assert_abs_diff_eq!(roc_auc(&labels, &scores), 0.0, epsilon = 1e-12);
@@ -415,8 +402,7 @@ fn roc_auc_with_all_tied_scores() {
 
 #[test]
 fn roc_auc_partial_ties() {
-    // 2 tie groups (scores=[0.8,0.8,0.2,0.2], labels=[T,F,T,F]) with averaged
-    // ranks 1.5 and 3.5 per group -> AUC = 0.5
+    // The 2 score groups each contain 1 positive and 1 negative. Their average ranks are 1.5 and 3.5, so AUC is 0.5.
     let labels = array![true, false, true, false];
     let scores = array![0.8, 0.8, 0.2, 0.2];
     assert_abs_diff_eq!(roc_auc(&labels, &scores), 0.5, epsilon = 1e-12);
@@ -462,10 +448,7 @@ fn roc_auc_no_negative_panics() {
     let _ = roc_auc(&labels, &scores);
 }
 
-// MulticlassConfusionMatrix
-
-// y_true=[0,1,2,2,1], y_pred=[0,2,2,2,1] -> matrix (row=true, col=pred)
-// [[1,0,0],[0,1,1],[0,0,2]]
+/// The confusion matrix uses true classes as rows and predicted classes as columns. The expected rows are [1,0,0], [0,1,1], and [0,0,2].
 fn mcm_3class() -> MulticlassConfusionMatrix {
     let y_true = array![0usize, 1, 2, 2, 1];
     let y_pred = array![0usize, 2, 2, 2, 1];
@@ -585,8 +568,7 @@ fn mcm_aggregated_precision_recall_f1() {
 
 #[test]
 fn mcm_per_class_precision_zero_guard() {
-    // Classes 1 and 2 never predicted (y_true=[0,1,2], y_pred=[0,0,0]) -> col sums
-    // [3,0,0], so precision for the unpredicted classes is 0.0 by guard
+    // Classes 1 and 2 have no predictions. Their column sums are 0, so the guard sets their precision to 0.0.
     let y_true = array![0usize, 1, 2];
     let y_pred = array![0usize, 0, 0];
     let cm = MulticlassConfusionMatrix::new(&y_true, &y_pred);
@@ -597,8 +579,7 @@ fn mcm_per_class_precision_zero_guard() {
 
 #[test]
 fn mcm_per_class_recall_zero_guard() {
-    // Classes 1 and 2 appear only in y_pred (y_true=[0,0,0], y_pred=[0,1,2]) -> row
-    // sums [3,0,0], so recall for the absent classes is 0.0 by guard
+    // Classes 1 and 2 have no true samples. Their row sums are 0, so the guard sets their recall to 0.0.
     let y_true = array![0usize, 0, 0];
     let y_pred = array![0usize, 1, 2];
     let cm = MulticlassConfusionMatrix::new(&y_true, &y_pred);
@@ -655,8 +636,6 @@ fn mcm_empty_panics() {
     let _ = MulticlassConfusionMatrix::new(&y_true, &y_pred);
 }
 
-// log_loss
-
 #[test]
 fn log_loss_two_samples() {
     // y_true=[0,1], y_prob=[[0.9,0.1],[0.2,0.8]]
@@ -702,8 +681,7 @@ fn log_loss_renormalizes_rows() {
 
 #[test]
 fn log_loss_multiclass_three_classes() {
-    // y_true=[0,1,2], y_prob=[[0.8,0.1,0.1],[0.1,0.7,0.2],[0.2,0.2,0.6]]
-    // loss = -(ln(0.8)+ln(0.7)+ln(0.6))/3
+    // The true-class probabilities are 0.8, 0.7, and 0.6. Mean log loss is -(ln(0.8)+ln(0.7)+ln(0.6))/3.
     let y_true = array![0usize, 1, 2];
     let y_prob = arr2(&[[0.8, 0.1, 0.1], [0.1, 0.7, 0.2], [0.2, 0.2, 0.6]]);
     let expected = -(0.8_f64.ln() + 0.7_f64.ln() + 0.6_f64.ln()) / 3.0;
@@ -733,8 +711,6 @@ fn log_loss_label_out_of_range_panics() {
     let y_prob = arr2(&[[0.9, 0.1], [0.2, 0.8]]);
     let _ = log_loss(&y_true, &y_prob);
 }
-
-// cohen_kappa
 
 #[test]
 fn cohen_kappa_perfect() {
@@ -794,12 +770,9 @@ fn cohen_kappa_empty_panics() {
     let _ = cohen_kappa(&y_true, &y_pred);
 }
 
-// top_k_accuracy
-
 #[test]
 fn top_k_accuracy_top1() {
-    // k=1 on y_true=[0,1,2], y_prob=[[0.7,0.2,0.1],[0.3,0.3,0.4],[0.1,0.5,0.4]]:
-    // only sample 0 has the true class as the top score -> top1 = 1/3
+    // Only sample 0 has its true class at the highest score. Top-1 accuracy is 1/3.
     let y_true = array![0usize, 1, 2];
     let y_prob = arr2(&[[0.7, 0.2, 0.1], [0.3, 0.3, 0.4], [0.1, 0.5, 0.4]]);
     assert_abs_diff_eq!(
@@ -835,8 +808,7 @@ fn top_k_accuracy_all_wrong_top1() {
 
 #[test]
 fn top_k_accuracy_tie_boundary_counts_in_favor() {
-    // Tied probs at the boundary count in the sample's favor (no strictly higher score),
-    // so y_true=[0], y_prob=[[0.5,0.5,0.5]] is correct for any k>=1
+    // No class has a strictly higher score than the true class. Equal probabilities therefore count as correct for every k>=1.
     let y_true = array![0usize];
     let y_prob = arr2(&[[0.5, 0.5, 0.5]]);
     assert_abs_diff_eq!(top_k_accuracy(&y_true, &y_prob, 1), 1.0, epsilon = 1e-12);
@@ -884,8 +856,6 @@ fn top_k_accuracy_nan_true_prob_panics() {
     let _ = top_k_accuracy(&y_true, &y_prob, 1);
 }
 
-// average_precision
-
 #[test]
 fn average_precision_known_value() {
     // labels=[T,F,T,F], scores=[0.9,0.6,0.4,0.1]. Ranked in descending order, the positive
@@ -920,8 +890,7 @@ fn average_precision_single_positive() {
 
 #[test]
 fn average_precision_single_positive_worst_rank() {
-    // Single positive at the lowest score (labels=[F,F,F,T],
-    // scores=[0.9,0.6,0.4,0.1]) -> P=1/4 at recall 1.0, so AP = 0.25
+    // The only positive has the lowest score. Precision at recall 1.0 is 1/4, so average precision is 0.25.
     let labels = array![false, false, false, true];
     let scores = array![0.9, 0.6, 0.4, 0.1];
     assert_abs_diff_eq!(average_precision(&labels, &scores), 0.25, epsilon = 1e-12);
@@ -959,10 +928,9 @@ fn average_precision_empty_panics() {
     let _ = average_precision(&labels, &scores);
 }
 
-// roc_curve
-
-/// Matches `sklearn.metrics.roc_curve` values from scikit-learn 1.9.0: fpr = [0, 0, 0.5, 0.5, 1],
-/// tpr = [0, 0.5, 0.5, 1, 1], thresholds = [inf, 0.9, 0.6, 0.4, 0.1].
+/// Matches `sklearn.metrics.roc_curve` from scikit-learn 1.9.0 on this input.
+/// Expected fpr is [0, 0, 0.5, 0.5, 1], and tpr is [0, 0.5, 0.5, 1, 1].
+/// Expected thresholds are [inf, 0.9, 0.6, 0.4, 0.1].
 #[test]
 fn roc_curve_specific_points() {
     let labels = array![true, false, true, false];
@@ -998,8 +966,7 @@ fn roc_curve_specific_points() {
 
 #[test]
 fn roc_curve_trapezoidal_area_matches_roc_auc() {
-    // Trapezoidal integral of the curve must equal roc_auc on the same data
-    // labels=[T,F,T,F], scores=[0.9,0.6,0.4,0.1] -> AUC = 0.75
+    // The trapezoidal area of the ROC curve equals roc_auc on the same input. The expected area is 0.75.
     let labels = array![true, false, true, false];
     let scores = array![0.9, 0.6, 0.4, 0.1];
     let auc_direct = roc_auc(&labels, &scores);
@@ -1055,10 +1022,8 @@ fn roc_curve_no_negative_panics() {
     let _ = roc_curve(&labels, &scores);
 }
 
-// precision_recall_curve
-
-/// Matches `sklearn.metrics.precision_recall_curve` values from scikit-learn 1.9.0 for
-/// `y_true=[1,0,1,0]`: precision = [0.5, 2/3, 0.5, 1, 1], recall = [1, 1, 0.5, 0.5, 0].
+/// Matches `sklearn.metrics.precision_recall_curve` from scikit-learn 1.9.0 on this input.
+/// Expected precision is [0.5, 2/3, 0.5, 1, 1], and recall is [1, 1, 0.5, 0.5, 0].
 #[test]
 fn precision_recall_curve_specific_points() {
     let labels = array![true, false, true, false];
@@ -1107,8 +1072,8 @@ fn precision_recall_curve_is_ordered_like_scikit_learn() {
     }
 }
 
-/// Matches scikit-learn 1.9.0 when the positives separate cleanly from the negatives:
-/// precision = [0.5, 2/3, 1, 1, 1], recall = [1, 1, 1, 0.5, 0].
+/// Matches scikit-learn 1.9.0 for separated positive and negative scores.
+/// Expected precision is [0.5, 2/3, 1, 1, 1], and recall is [1, 1, 1, 0.5, 0].
 #[test]
 fn precision_recall_curve_perfect() {
     let labels = array![true, true, false, false];
@@ -1149,8 +1114,7 @@ fn precision_recall_curve_no_positive_panics() {
     let _ = precision_recall_curve(&labels, &scores);
 }
 
-// NaN-score contract: scores cannot be ranked meaningfully (f64::total_cmp would silently treat
-// a NaN as the most confident prediction), so the ranking metrics reject NaN
+/// Ranking metrics reject NaN scores. The total float order would assign NaN a rank, which has no valid score meaning.
 
 #[test]
 #[should_panic(expected = "must not contain NaN")]

@@ -33,8 +33,6 @@ use rustyml::neural_network::traits::{
 };
 use rustyml::neural_network::{Ctx, Shape, Tensor};
 
-// Helper: simple regression problem
-
 /// Fixed, deterministic (x, y) pair for a tiny 1-input -> 1-output regression
 ///
 /// Target y = 2*x over 4 samples. With identity weights (w=1, b=0), the initial MSE is 1.875
@@ -70,8 +68,6 @@ fn eval_mse(model: &Sequential, x: &Tensor, y: &Tensor) -> f32 {
     sq.sum() / sq.len() as f32
 }
 
-// SGD: constructor validation
-
 #[test]
 fn sgd_rejects_invalid_learning_rate() {
     for lr in [0.0_f32, -0.1, f32::INFINITY, f32::NAN] {
@@ -92,8 +88,6 @@ fn sgd_accepts_valid_learning_rate() {
     // smallest positive finite f32
     assert!(SGD::new(f32::MIN_POSITIVE, 0.0, false, 0.0).is_ok());
 }
-
-// Adam: constructor validation
 
 #[test]
 fn adam_rejects_invalid_learning_rate() {
@@ -166,8 +160,6 @@ fn adam_accepts_valid_hyperparameters() {
     assert!(Adam::new(0.01, 0.5, 0.9, 1e-6, 0.0).is_ok());
 }
 
-// RMSprop: constructor validation
-
 #[test]
 fn rmsprop_rejects_invalid_learning_rate() {
     for lr in [0.0_f32, -0.01, f32::INFINITY, f32::NAN] {
@@ -219,8 +211,6 @@ fn rmsprop_accepts_valid_hyperparameters() {
     assert!(RMSprop::new(0.01, 0.95, 1e-5, 0.0).is_ok());
 }
 
-// AdaGrad: constructor validation
-
 #[test]
 fn adagrad_rejects_invalid_learning_rate() {
     for lr in [0.0_f32, -0.01, f32::INFINITY, f32::NAN] {
@@ -253,8 +243,6 @@ fn adagrad_accepts_valid_hyperparameters() {
     assert!(AdaGrad::new(0.001, 1e-5, 0.0).is_ok());
 }
 
-// Known initial-loss sanity check
-
 /// Untrained Dense(w=1, b=0) predicts y_hat = x, giving MSE = 1.875 on the fixture
 #[test]
 fn identity_dense_initial_mse_is_1_875() {
@@ -271,8 +259,6 @@ fn identity_dense_initial_mse_is_1_875() {
     let mse = eval_mse(&model, &x, &y);
     assert_abs_diff_eq!(mse, 1.875_f32, epsilon = 1e-5);
 }
-
-// End-to-end convergence: every optimizer lowers the loss
 
 /// Every optimizer lowers the MSE of 1 Dense layer from the known start of 1.875
 ///
@@ -400,8 +386,6 @@ fn every_optimizer_lowers_two_layer_loss() {
     loss_falls("AdaGrad", AdaGrad::new(0.5, 1e-8, 0.0).unwrap(), 30, None);
 }
 
-// Numerical value: SGD 1-step weight update on known weights
-
 /// 1 SGD step (lr=0.01) on w=1, b=0 with x=2, y=6 yields y_hat=2.40 after refit
 #[test]
 fn sgd_one_step_weight_update_matches_hand_calculation() {
@@ -439,8 +423,6 @@ fn sgd_one_step_weight_update_matches_hand_calculation() {
     let val_after = *pred_after.iter().next().unwrap();
     assert_abs_diff_eq!(val_after, 2.40_f32, epsilon = 1e-4);
 }
-
-// Clip-by-global-norm (opt-in via the `with_global_clipnorm` builder)
 
 /// Reads the (weight, bias) scalars of a model whose first layer is a 1x1 Dense
 fn dense_wb(model: &Sequential) -> (f32, f32) {
@@ -493,8 +475,8 @@ fn clip_by_global_norm_scales_sgd_step() {
     assert_abs_diff_eq!((w_new - 1.0) / (b_new), 0.16 / 0.08, epsilon = 1e-4);
 }
 
-/// A clip threshold above the global gradient norm (sqrt(320) ~= 17.9) leaves the update identical
-/// to plain SGD: w_new=1.16, b_new=0.08
+/// A threshold above the gradient norm leaves the plain SGD update unchanged. The norm is
+/// sqrt(320), about 17.9. Expected values are w_new=1.16 and b_new=0.08.
 #[test]
 fn clip_by_global_norm_above_norm_is_noop() {
     let x = Array::from_shape_vec((1, 1), vec![2.0_f32])
@@ -552,8 +534,6 @@ fn new_rejects_invalid_global_clipnorm() {
     );
     assert!(SGD::new(0.01, 0.0, false, 0.0).is_ok());
 }
-
-// SGD: momentum, weight decay, and LR scheduling (integration)
 
 /// `set_learning_rate` retunes the step: doubling lr before 1 SGD step doubles the weight delta.
 /// Reuses the w=1, b=0, x=2, y=6 problem (grad_w=-16, grad_b=-8)
@@ -713,7 +693,7 @@ fn batchnorm_gamma_beta_after_one_sgd_step(weight_decay: f32) -> (ArrayD<f32>, A
     )
 }
 
-/// Normalization scale and shift (gamma and beta) are excluded from weight decay: a non-zero
+/// Normalization scale and shift (gamma and beta) are excluded from weight decay: a non-0
 /// `weight_decay` produces a byte-identical update to no decay at all
 #[test]
 fn weight_decay_skips_batchnorm_gamma_and_beta() {
@@ -734,8 +714,6 @@ fn weight_decay_skips_batchnorm_gamma_and_beta() {
         "gamma should have a non-trivial gradient update"
     );
 }
-
-// Adam (classic coupled L2 weight decay) vs AdamW (decoupled weight decay)
 
 /// Runs a Dense(2->2, Linear) with fixed weights and bias through 1 forward and backward pass
 /// and 1 step of the given optimizer. The upstream gradient is fixed and nonzero. Returns the
@@ -786,7 +764,7 @@ fn adam_equals_adamw_without_weight_decay() {
 }
 
 /// Coupled L2 (Adam) flows through the moments and the adaptive denominator. Decoupled decay
-/// (AdamW) does not, so the 2 schemes diverge on the weights when weight_decay is non-zero
+/// (AdamW) does not, so the 2 schemes diverge on the weights when weight_decay is non-0
 #[test]
 fn adam_l2_and_adamw_decoupled_differ_with_weight_decay() {
     let w0 = Array::from_shape_vec((2, 2), vec![1.0_f32, -2.0, 3.0, -4.0]).unwrap();
@@ -848,8 +826,6 @@ fn new_rejects_negative_momentum_and_weight_decay() {
     ));
 }
 
-// Learning rate: readable as well as writable
-
 /// Every optimizer round-trips learning_rate(): it reports the value it was built with, and the
 /// value it was last set to. This lets a schedule read the current rate instead of a stale copy
 #[test]
@@ -883,11 +859,10 @@ fn pass_through_dense() -> Dense {
     layer
 }
 
-/// Runs 1 forward and 1 backward pass over a fixed input and a fixed upstream gradient, and
-/// gives the context back, so the caller reads the gradients of the pass out of its store
+/// Runs forward and backward passes with fixed input and upstream gradient.
 ///
-/// `scope` is the position the caller gives the layer. The context addresses every gradient by
-/// that position, so the matching `update` call finds them
+/// The returned context holds the gradients. `scope` sets the layer position that the matching
+/// optimizer update uses.
 fn one_pass(layer: &mut Dense, scope: usize) -> Ctx {
     let mut ctx = Ctx::training();
     ctx.set_owner(scope);
@@ -915,13 +890,11 @@ fn assert_same_kernel(got: &ArrayD<f32>, want: &ArrayD<f32>, message: &str) {
     }
 }
 
-/// A layer whose gradient store holds nothing on 1 step and 2 gradients on the next must not
-/// move any other layer's per-parameter optimizer state
+/// An empty gradient store must not change another layer's optimizer state.
 ///
-/// `quiet` runs no pass before step 1, so its store holds nothing there. `tracked` runs a pass
-/// on both steps, so its store holds 2 gradients each time. The momentum buffer of every
-/// `tracked` tensor must therefore be the same buffer on both steps, and `quiet` must start
-/// from a zero buffer of its own
+/// `quiet` has no gradients on step 1 and 2 gradients on step 2. `tracked` has 2 gradients on
+/// both steps. Each tracked tensor must retain its momentum buffer. Each quiet tensor must
+/// start with its own buffer of 0 values.
 #[test]
 fn a_changing_parameter_count_must_not_move_another_layer_state() {
     let mut quiet = pass_through_dense();
@@ -981,11 +954,10 @@ fn a_changing_parameter_count_must_not_move_another_layer_state() {
     );
 }
 
-/// Builds a Dense(2 -> 2, Linear) that holds the identity map and a bias of `[1, 0]`
+/// Builds a Dense(2 -> 2, Linear) layer with identity weights and bias `[1, 0]`.
 ///
-/// The bias moves the output away from the input, so a layer that stands after this one sees
-/// something other than `x`. The 2 layers then have 2 different kernel gradients, which is
-/// what lets the data of the test below hold 1 of them at 0 and the other away from it
+/// The bias changes the input to the next layer. The 2 layers can therefore have different
+/// kernel gradients. The test keeps the second gradient at 0 on the first batch.
 fn shifted_dense() -> Dense {
     let mut layer = Dense::new(2, Linear::new()).unwrap();
     layer.build(&Shape::known(&[1, 2])).unwrap();
@@ -995,11 +967,10 @@ fn shifted_dense() -> Dense {
     layer
 }
 
-/// Builds a bias-free Dense(2 -> 2, Linear) that holds the identity map
+/// Builds a bias-free Dense(2 -> 2, Linear) layer with the identity map.
 ///
-/// A bias-free layer holds the kernel alone. A step that leaves the kernel where it is
-/// therefore leaves the whole layer where it is, and the layer goes on passing its input and
-/// its gradient through unchanged
+/// The layer holds only its kernel. If the kernel stays fixed, forward and backward passes
+/// preserve their inputs.
 fn pass_through_dense_no_bias() -> Dense {
     let mut layer = Dense::new(2, Linear::new()).unwrap().with_use_bias(false);
     layer.build(&Shape::known(&[1, 2])).unwrap();
@@ -1008,23 +979,18 @@ fn pass_through_dense_no_bias() -> Dense {
     layer
 }
 
-/// A second layer in the stack moves no per-parameter optimizer state of the first one
+/// A second layer must not change the optimizer state of the first layer.
 ///
-/// The optimizer keys its state on `ParamId`, which is the position of the layer counted
-/// from the input plus the name the layer gives the tensor. The first layer therefore holds
-/// `{scope 0, "kernel"}` in both models below, and the second layer of the stacked model
-/// reaches a key of its own. A key that dropped the scope would give both layers 1 momentum
-/// buffer, and the first layer would carry the gradient of the second one into batch 2
+/// Each parameter key contains its layer path and tensor name. The first kernel keeps scope 0
+/// in both models. The second kernel uses scope 1. A key without the scope would mix their
+/// momentum buffers.
 ///
-/// The 2 models must agree element by element, so the second layer must pass the forward
-/// output and the backward gradient through unchanged for every batch that the comparison
-/// covers. It holds the identity map at the start, and the data below holds it there. The
-/// first layer adds a bias of `[1, 0]`, so what reaches the second layer is `h = x + [1, 0]`.
-/// The kernel gradient of the second layer is `h^T (pred - y)`, and `y` is picked so that
-/// `h` has 2 proportional rows that both stand orthogonal to `pred - y`. That gradient is
-/// therefore 0, and a bias-free layer has no other tensor to move. The kernel gradient of the
-/// first layer is `x^T (pred - y)`, and the bias shift keeps that 1 away from 0, so a shared
-/// momentum buffer would carry a real value from the first layer into the second one
+/// The second layer starts as a bias-free identity map. The first layer adds `[1, 0]`, so the
+/// second layer receives `h = x + [1, 0]`. The chosen targets make `h^T (pred - y)` equal 0 on
+/// the first batch. The second kernel therefore stays fixed for the next backward pass.
+///
+/// The first kernel gradient, `x^T (pred - y)`, is not 0. Shared momentum would move the second
+/// kernel and break the comparison.
 #[test]
 fn a_second_layer_moves_no_state_of_the_first() {
     // The first layer adds `[1, 0]`, so it gives the second layer `h = [[1, 2], [2, 4]]`, whose
@@ -1068,9 +1034,9 @@ fn a_second_layer_moves_no_state_of_the_first() {
             .to_owned()
     };
 
-    // The comparison holds because batch 1 gives the second layer a gradient of 0, and its
-    // batch-2 step lands after every backward pass of that batch, so the first layer's
-    // gradient always passes through the second layer as the identity.
+    // Batch 1 gives the second layer a gradient of 0, so it retains the identity map. Batch 2
+    // completes backward passes before updates. The first layer therefore receives its gradient
+    // through the identity map in both batches.
     let mut probe = SequentialBuilder::new()
         .add(shifted_dense())
         .add(pass_through_dense_no_bias())
@@ -1196,7 +1162,7 @@ fn a_tensor_joining_the_roster_must_not_take_another_tensor_state() {
         );
     }
 
-    // Control for gamma: 1 step from a zero momentum buffer of its own
+    // Control for gamma: 1 step from a 0 momentum buffer of its own
     let mut gamma_control = RosterLayer::new();
     let mut gamma_control_opt = SGD::new(0.1, 0.9, false, 0.0).unwrap();
     gamma_control_opt.step();
@@ -1256,14 +1222,11 @@ fn one_pass_with(layer: &mut Dense, scope: usize, grad_out: [f32; 2]) -> Ctx {
     ctx
 }
 
-/// Asserts that an optimizer keys its per-parameter state on the layer index as well as on the
-/// name of the tensor
+/// Checks that optimizer state uses both the layer position and the tensor name.
 ///
-/// 2 Dense layers of the same shape run on 1 optimizer, at scope 0 and at scope 1. Both layers
-/// name their tensors `kernel` and `bias`, and the 2 tensors of a name have equal length. A key
-/// that drops the scope therefore collides across the 2 layers, and the length guard inside the
-/// optimizer cannot see the collision. The gradients of the 2 layers differ, so a collision
-/// moves both layers away from the control, which gives each layer an optimizer of its own
+/// The 2 Dense layers share tensor names, shapes, and lengths. They use scopes 0 and 1, so a
+/// key without the scope would collide. Their different gradients expose that collision. Each
+/// control layer uses its own optimizer.
 fn scope_must_separate_2_same_shape_layers<O: Optimizer>(make: impl Fn() -> O, optimizer: &str) {
     // 1 step is not enough. The state that step 1 writes is the state that step 2 reads
     const STEPS: usize = 3;
@@ -1371,17 +1334,17 @@ fn every_optimizer_must_separate_2_same_shape_layers() {
 
 // Momentum state must reach the parameter, and not only the right parameter
 
-/// The SGD momentum buffer must survive between 2 calls to `update`
+/// The SGD momentum buffer must survive between calls to `update`.
 ///
-/// Every identity test above is control relative. It sees state that reaches the wrong tensor,
-/// and never state that reaches no tensor at all. This test closes that hole for SGD.
+/// The identity comparisons above detect state that reaches the wrong tensor. This test also
+/// detects state that no tensor retains.
 ///
-/// The gradient is the same on every step, so the trajectory has a closed form. With
-/// `v = momentum * v + g` and `p -= lr * v`, 3 steps at momentum 0.9 move the parameter by
-/// `(1 + 1.9 + 2.71) = 5.61` times the plain SGD step. A buffer that starts again on every
-/// call gives 3 times the plain step, which is plain SGD. The Nesterov arm uses the look-ahead
-/// step `g + momentum * v`, where the same 3 steps sum to 8.049, against 5.7 for a buffer that
-/// is thrown away
+/// A fixed gradient gives a closed form for the trajectory. With momentum 0.9, the buffer
+/// follows `v = 0.9 * v + g`. The 3 ordinary steps total 5.61 times the plain SGD displacement.
+/// A buffer reset on every call gives only 3 times that displacement.
+///
+/// Nesterov uses `g + momentum * v`. Its 3 steps total 8.049 times the plain displacement. A
+/// reset buffer gives only 5.7 times that displacement.
 #[test]
 fn sgd_momentum_velocity_must_survive_between_steps() {
     // 1 plain SGD step gives the displacement `lr * g` of every element

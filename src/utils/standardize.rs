@@ -1,10 +1,10 @@
-//! Feature standardization (zero mean, unit variance) along row, column, or global axes
+//! Feature standardization (mean 0, variance 1) along row, column, or global axes
 //!
 //! Provides [`standardize()`] and the [`StandardizationAxis`] selector, with sequential
 //! and parallel paths chosen by data size
 //!
-//! This is the one-shot form. Every call recomputes the statistics from the array it is
-//! handed. When the same statistics must apply to more than one batch, use
+//! This is the stateless form. Every call recomputes the statistics from the array it is
+//! handed. When the same statistics must apply to more than 1 batch, use
 //! [`StandardScaler`] instead. Examples include a test split scaled by the training mean, or a
 //! single sample at inference time. It stores the statistics at fit time
 //!
@@ -19,14 +19,17 @@ use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::iter::ParallelIterator;
 use rayon::prelude::IntoParallelRefMutIterator;
 
-/// Axis along which standardization is applied
+/// Axis along which standardization is applied.
+///
+/// Row mode uses the last axis, and column mode uses the next-to-last axis.
+/// These modes require at least 2 dimensions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StandardizationAxis {
     /// Standardize each row independently
     Row,
     /// Standardize each column independently
     Column,
-    /// Standardize the entire array as one dataset
+    /// Standardize the entire array as 1 dataset
     Global,
 }
 
@@ -52,10 +55,11 @@ impl StandardizationAxis {
     }
 }
 
-/// Standardizes data to have zero mean and unit variance
+/// Standardizes data to have mean 0 and variance 1
 ///
-/// Subtracts the mean and divides by the standard deviation per the chosen axis, so the
-/// standardized values have mean 0 and standard deviation 1
+/// Subtracts the mean and divides by the scale along the chosen axis.
+/// Constant or near-constant data uses a divisor of `1.0`.
+/// Other finite data has mean 0 and standard deviation 1, subject to rounding.
 ///
 /// # Parameters
 ///
@@ -69,7 +73,7 @@ impl StandardizationAxis {
 /// # Notes
 ///
 /// The statistics come from `data` itself on every call, so standardizing a test set this way
-/// scales it by its own column statistics. This is a different linear map than the one applied
+/// scales it by its own column statistics. This is a different linear map than the map applied
 /// to the training data. Fit a [`StandardScaler`](crate::utils::StandardScaler) on the training
 /// matrix and `transform` the rest when the batches have to agree.
 /// `StandardScaler::default().fit_transform(&x)` returns exactly what
@@ -89,13 +93,12 @@ impl StandardizationAxis {
 ///
 /// - [`Error::EmptyInput`] - If the input array is empty
 /// - [`Error::NonFinite`] - If the input contains NaN or infinite values
-/// - [`Error::Computation`] - If the global-axis path has no values to standardize
+/// - [`Error::InvalidInput`] - If row or column standardization has fewer than 2 dimensions
 ///
 /// # Performance
 ///
-/// The global-axis path computes its moments through a blocked parallel reduction above the
-/// sum gate in `crate::parallel_gates`. The reduction order can vary with the thread count, so
-/// results stay close but are not always bit for bit identical
+/// The global path uses fixed reduction blocks for contiguous storage.
+/// Its serial and parallel modes use the same accumulation order.
 pub fn standardize<S, D>(
     data: &ArrayBase<S, D>,
     axis: StandardizationAxis,
@@ -121,7 +124,7 @@ where
 /// algorithm, which computes mean and variance in a single numerically stable pass
 pub(super) type WelfordState = (f64, f64, f64);
 
-/// Folds one value into a Welford accumulator
+/// Folds 1 value into a Welford accumulator
 #[inline]
 pub(super) fn welford_step((count, mean, m2): WelfordState, x: f64) -> WelfordState {
     let count = count + 1.0;
@@ -131,7 +134,7 @@ pub(super) fn welford_step((count, mean, m2): WelfordState, x: f64) -> WelfordSt
     (count, mean, m2)
 }
 
-/// Merges 2 Welford accumulators (Chan et al.), enabling a parallel one-pass reduction
+/// Merges 2 Welford accumulators (Chan et al.), enabling a parallel 1-pass reduction
 /// and the incremental refits behind
 /// [`StandardScaler::partial_fit`](crate::utils::StandardScaler::partial_fit)
 #[inline]
@@ -167,7 +170,7 @@ fn is_constant_feature(variance: f64, mean: f64, n: f64) -> bool {
 /// Converts a lane's population variance and mean into the standardization divisor
 ///
 /// Returns the raw `sqrt(variance)`, or `1.0` for a constant lane (see [`is_constant_feature`]).
-/// This keeps a constant feature's centered values at zero instead of amplifying them through
+/// This keeps a constant feature's centered values at 0 instead of amplifying them through
 /// a vanishing divisor
 #[inline]
 pub(super) fn scale_from_variance(variance: f64, mean: f64, n: f64) -> f64 {
@@ -261,7 +264,7 @@ where
         lane.mapv_inplace(|x| (x - mean) / scale);
     };
 
-    // Scan-class gate: one O(lane) Welford pass + map per lane, so the work is the element count
+    // Scan-class gate: 1 O(lane) Welford pass + map per lane, so the work is the element count
     if data_len >= scan_f64_parallel_min_elems() {
         lanes.par_iter_mut().for_each(process);
     } else {

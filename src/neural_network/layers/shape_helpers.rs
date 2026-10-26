@@ -1,8 +1,11 @@
 //! Output-shape calculators for the pooling and convolution layers
+//!
+//! These helpers compute channels-last spatial extents from window sizes, strides,
+//! and padding rules. Callers must validate ranks and dimensions before each calculation.
 
 use crate::neural_network::layers::convolution::PaddingType;
 
-/// Output size of one pooling axis: `(in - pool)/stride + 1` for `Valid`, `ceil(in/stride)` for
+/// Output size of 1 pooling axis: `(in - pool)/stride + 1` for `Valid`, `ceil(in/stride)` for
 /// `Same`
 fn pool_out_dim(input: usize, pool: usize, stride: usize, padding: PaddingType) -> usize {
     match padding {
@@ -123,7 +126,7 @@ pub(super) fn calculate_output_shape_3d_pooling(
 ///
 /// - `(usize, usize)` - Output dimensions (output_height, output_width)
 ///   - For `Valid` padding: dimensions are reduced based on kernel size and stride
-///   - For `Same` padding: dimensions equal the input spatial size divided by the stride
+///   - For `Same` padding: dimensions equal the input spatial size divided by the stride, rounded up
 pub(super) fn calculate_output_height_and_weight(
     padding_type: PaddingType,
     input_height: usize,
@@ -190,6 +193,7 @@ pub(super) fn calculate_output_shape_2d(
     vec![batch_size, output_height, output_width, channels]
 }
 
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,11 +1,7 @@
 //! Linear algebra primitives for `f64` matrices, built in pure Rust on top of `ndarray`.
 //!
-//! The module has 2 groups of routines. The **dense direct factorizations** are the 3 core
-//! routines the classical-ML estimators need: symmetric eigendecomposition, singular value
-//! decomposition, and thin QR orthonormalization. Each one operates directly on [`ndarray`]
-//! arrays, so the crate does not depend on a second linear-algebra library (`nalgebra` stays a
-//! dev-dependency for test cross-checks). Every routine works on row-major [`Array2<f64>`] /
-//! [`Array1<f64>`]:
+//! This module provides symmetric eigendecomposition, SVD, thin QR, and iterative solvers for leading eigenpairs.
+//! All routines use `f64` arrays from [`ndarray`].
 //!
 //! - [`symmetric_eigen`] returns eigenvalues with their eigenvectors stored as the columns of
 //!   the returned matrix, in ascending eigenvalue order. Callers re-sort as they need.
@@ -13,11 +9,8 @@
 //!   [`Svd::solve`] (minimum-norm least squares) and [`Svd::pseudo_inverse`].
 //! - [`qr_q`] returns an orthonormal basis `Q` for the column space of its input.
 //!
-//! The **iterative partial eigensolvers**, [`top_eigenpairs_power_iteration`] and
-//! [`top_eigenpairs_lanczos`], extract only the leading eigenpairs of a symmetric matrix.
-//! Callers use them when they need a few components of a large matrix, for example PCA's
-//! `PowerIteration` solver, or KernelPCA's `Lanczos` and `PowerIteration` solvers. Both return
-//! eigenpairs in descending eigenvalue order:
+//! The iterative solvers extract eigenpairs from symmetric matrices.
+//! Lanczos sorts eigenpairs by eigenvalue. Power iteration returns components in extraction order.
 //!
 //! - [`top_eigenpairs_power_iteration`] uses power iteration with in-place Hotelling deflation.
 //! - [`top_eigenpairs_lanczos`] uses Lanczos with full reorthogonalization. It reduces the
@@ -31,11 +24,9 @@
 //! and mid-sized symmetric matrices that arise here. Those matrices include covariance
 //! matrices, centered kernels, and the reduced tridiagonal Lanczos problem.
 //!
-//! SVD uses the one-sided Jacobi method. It orthogonalizes the columns of the taller orientation
-//! of the matrix through a sweep of plane rotations. It converges reliably and computes small
-//! singular values to high relative accuracy.
+//! SVD uses the one-sided Jacobi method to orthogonalize columns through plane rotations.
 //!
-//! QR uses modified Gram-Schmidt with one reorthogonalization pass. This matches the stabilized
+//! QR uses modified Gram-Schmidt with 1 reorthogonalization pass. This matches the stabilized
 //! orthogonalization that the Lanczos solver already relies on.
 //!
 //! This module is a crate-internal helper for `machine_learning`. Callers include LDA and
@@ -74,7 +65,11 @@ pub(crate) struct SymmetricEigen {
 ///
 /// # Returns
 ///
-/// - [`SymmetricEigen`] - Eigenvalues in ascending order with their unit eigenvectors as columns
+/// - `SymmetricEigen` - Eigenvalues in ascending order with their unit eigenvectors as columns
+///
+/// # Panics
+///
+/// Panics in debug builds if `a` is not square. Index access can also panic for a rectangular matrix.
 pub(crate) fn symmetric_eigen(a: &Array2<f64>) -> SymmetricEigen {
     let n = a.nrows();
     debug_assert_eq!(n, a.ncols(), "symmetric_eigen requires a square matrix");
@@ -341,9 +336,18 @@ pub(crate) struct Svd {
 #[cfg(feature = "machine_learning")]
 impl Svd {
     /// Solves the least-squares problem `min ||A x - b||` using the decomposition. It returns
-    /// the minimum-norm solution and treats singular values at or below `tol` as zero
+    /// the minimum-norm solution and treats singular values at or below `tol` as 0
     ///
     /// The decomposition must include both `u` and `v_t`
+    ///
+    /// # Parameters
+    ///
+    /// - `b` - Right-hand side vector with 1 value per matrix row.
+    /// - `tol` - Singular-value threshold for the pseudo-inverse.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Array1<f64>, Error>` - The minimum-norm least-squares solution.
     ///
     /// # Errors
     ///
@@ -392,9 +396,17 @@ impl Svd {
     }
 
     /// Builds the Moore-Penrose pseudo-inverse `A^+ = V * sigma^+ * U^T` (`n x m`). It treats
-    /// singular values at or below `tol` as zero
+    /// singular values at or below `tol` as 0
     ///
     /// The decomposition must include both `u` and `v_t`
+    ///
+    /// # Parameters
+    ///
+    /// - `tol` - Singular-value threshold for the pseudo-inverse.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Array2<f64>, Error>` - The pseudo-inverse matrix.
     ///
     /// # Errors
     ///
@@ -444,6 +456,10 @@ impl Svd {
 /// - `a` - Input matrix (`m x n`)
 /// - `compute_u` - Whether to return the left singular vectors `U`
 /// - `compute_v` - Whether to return the right singular vectors (as `V^T`)
+///
+/// # Returns
+///
+/// - `Svd` - Singular values and the requested singular vectors.
 pub(crate) fn svd(a: &Array2<f64>, compute_u: bool, compute_v: bool) -> Svd {
     let m = a.nrows();
     let n = a.ncols();
@@ -572,14 +588,15 @@ fn sort_svd_descending(
 
 /// Returns an orthonormal basis `Q` for the column space of `a` (same shape as `a`)
 ///
-/// Uses modified Gram-Schmidt with one reorthogonalization pass for numerical stability. The
-/// Lanczos solver uses this same two-pass approach. A column that collapses to zero during
-/// orthogonalization signals a rank-deficient direction. The function leaves that column as
-/// zero. Downstream consumers treat a zero column as a zero singular value
+/// Uses modified Gram-Schmidt with 1 reorthogonalization pass. Dependent columns become columns filled with 0.
 ///
 /// # Parameters
 ///
 /// - `a` - Input matrix whose columns span the target subspace (`m x k`, `m >= k`)
+///
+/// # Returns
+///
+/// - `Array2<f64>` - Orthonormal columns, with columns filled with 0 for dependent directions.
 pub(crate) fn qr_q(a: &Array2<f64>) -> Array2<f64> {
     let m = a.nrows();
     let k = a.ncols();
@@ -620,7 +637,7 @@ pub(crate) fn qr_q(a: &Array2<f64>) -> Array2<f64> {
 // Iterative partial eigensolvers: power iteration and Lanczos. Both build on the dense
 // `symmetric_eigen` above.
 
-/// Builds a random unit vector of length `n`. If the random draw is numerically zero, it falls
+/// Builds a random unit vector of length `n`. If the random draw is numerically 0, it falls
 /// back to a uniform unit vector instead
 ///
 /// # Parameters
@@ -701,8 +718,7 @@ fn dominant_eigenpair(
 /// with Hotelling deflation
 ///
 /// The function takes matrix by value because deflation modifies it in place as it extracts
-/// each component. Eigenpairs come back in descending eigenvalue order as
-/// parallel vectors: `eigenvectors[i]` is the unit eigenvector for
+/// each component. Eigenpairs retain extraction order in parallel vectors: `eigenvectors[i]` is the unit eigenvector for
 /// `eigenvalues[i]`. Callers arrange those eigenvectors into rows or columns as
 /// their own layout requires
 ///
@@ -717,11 +733,11 @@ fn dominant_eigenpair(
 /// # Returns
 ///
 /// - `Result<(Vec<f64>, Vec<Array1<f64>>), Error>` - The eigenvalues and their parallel unit
-///   eigenvectors, in descending eigenvalue order
+///   eigenvectors, in extraction order
 ///
 /// # Errors
 ///
-/// - [`Error::NotConverged`] - If any component fails to converge
+/// - [`Error::NotConverged`] - If an iteration produces a 0 or non-finite matrix-vector norm
 /// - [`Error::NonFinite`] - If a component produces a non-finite eigenvalue
 pub(crate) fn top_eigenpairs_power_iteration(
     mut matrix: Array2<f64>,
@@ -736,7 +752,7 @@ pub(crate) fn top_eigenpairs_power_iteration(
 
     for _ in 0..k {
         let (vector, value) = dominant_eigenpair(&matrix, &mut rng, max_iter, tol)?;
-        // Deflate the extracted component so the next iteration surfaces the next one.
+        // Deflate the extracted component so the next iteration extracts the next component.
         // M = M - value * v * v^T
         deflate_rank_one(&mut matrix, &vector, value);
         eigenvalues.push(value);
@@ -819,7 +835,7 @@ pub(crate) fn top_eigenpairs_lanczos(
     let mut beta_prev = 0.0;
 
     for _ in 0..m {
-        // Three-term recurrence: w = A v - alpha v - beta_prev v_prev
+        // 3-term recurrence: w = A v - alpha v - beta_prev v_prev
         let mut w = matvec(matrix, &v, Parallelism::Rayon(0));
         let alpha = v.dot(&w);
         w.scaled_add(-alpha, &v);
@@ -1064,7 +1080,7 @@ mod tests {
         }
     }
 
-    /// Rank-deficient pseudo-inverse drops the (near-)zero singular value via the tolerance
+    /// Rank-deficient pseudo-inverse drops the singular value near 0 via the tolerance
     #[cfg(feature = "machine_learning")]
     #[test]
     fn svd_pseudo_inverse_rank_deficient() {
@@ -1278,7 +1294,7 @@ mod iterative_tests {
             "eigenvalues and eigenvectors must have equal length"
         );
 
-        // A rank-1 matrix has exactly 1 non-zero eigenvalue, so at most 1 value is >= 1e-3
+        // A rank-1 matrix has exactly 1 eigenvalue other than 0, so at most 1 value is >= 1e-3
         let n_large = vals.iter().filter(|&&v| v.abs() >= 1e-3).count();
         assert!(
             n_large <= 1,

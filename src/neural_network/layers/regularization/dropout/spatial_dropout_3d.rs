@@ -6,9 +6,9 @@
 //! generator that draws the per-channel mask. [`SpatialDropout3D::with_random_state`] reseeds that
 //! generator for reproducible masks.
 //!
-//! The forward pass samples 1 keep/drop value per `(batch, channel)` pair, scales the kept
-//! channels by `1 / (1 - rate)` with `spatial_dropout_scale`, and parks the small mask for
-//! `spatial_dropout_backward` to reuse on the backward pass.
+//! The forward pass samples 1 keep/drop value per `(batch, channel)` pair.
+//! `spatial_dropout_scale` scales kept channels by `1 / (1 - rate)`. The cache stores the small
+//! mask for `spatial_dropout_backward`.
 //!
 //! [`UnaryLayer::build`]: crate::neural_network::traits::UnaryLayer::build
 
@@ -45,13 +45,13 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// use rustyml::neural_network::Ctx;
 /// use ndarray::Array5;
 ///
-/// // Create a SpatialDropout3D layer with 20% dropout rate
+/// // Create a SpatialDropout3D layer with 20% dropout rate.
 /// let mut spatial_dropout = SpatialDropout3D::new(0.2).unwrap();
 ///
-/// // Create input tensor (batch_size=32, depth=16, height=28, width=28, channels=64)
+/// // Create input tensor (batch_size=32, depth=16, height=28, width=28, channels=64).
 /// let input = Array5::ones((32, 16, 28, 28, 64)).into_dyn();
 ///
-/// // During training, ~20% of channels will be set to 0
+/// // During training, ~20% of channels will be set to 0.
 /// let mut ctx = Ctx::training();
 /// let output = spatial_dropout.forward_mut(&input, &mut ctx).unwrap();
 /// ```
@@ -124,8 +124,8 @@ impl LayerBase for SpatialDropout3D {
     /// Takes back the random stream that the forward pass advanced
     ///
     /// The stream is the only state of the layer that a forward pass changes. A training pass
-    /// leaves the advanced stream in the context, and this moves it into the layer, so the next
-    /// pass draws the values that follow
+    /// leaves the advanced stream in the context. This method moves it into the layer so the
+    /// next pass continues the stream
     fn apply_state(&mut self, state: &mut StateSlot<'_>) {
         if let Some(rng) = state.take::<StdRng>("rng") {
             self.rng = rng;

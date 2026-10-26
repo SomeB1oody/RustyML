@@ -39,22 +39,22 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::MeanSquaredError;
 /// use ndarray::Array2;
 ///
-/// // Create a 2D input tensor
+/// // Create a 2D input tensor.
 /// let x = Array2::from_shape_vec((2, 3), vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0])
 ///     .unwrap()
 ///     .into_dyn();
 ///
-/// // Build a model with GELU activation
+/// // Build a model with GELU activation.
 /// let mut model = SequentialBuilder::new()
 ///     .add(GELU::new())
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Forward propagation
+/// // Forward propagation.
 /// let output = model.predict(&x);
 ///
-/// // Output will be: [[-0.15865526, 1.9544997, -0.004049696], [3.9998734, -1.4332579e-6, 6.0]]
+/// // Output will be: [[-0.15865526, 1.9544997, -0.004049696], [3.9998734, -1.4332579e-6, 6.0]].
 /// ```
 ///
 /// Select the tanh approximation with the builder:
@@ -71,7 +71,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// let mut layer = GELU::new().with_approximate(true);
 /// let output = layer.forward_mut(&x, &mut Ctx::inference()).unwrap();
 ///
-/// // Output will be: [[-0.158808, 0.0, 0.841192]]
+/// // Output will be: [[-0.158808, 0.0, 0.841192]].
 /// ```
 #[derive(Debug)]
 pub struct GELU {
@@ -111,6 +111,15 @@ impl GELU {
 }
 
 impl Default for GELU {
+    /// Creates the default GELU layer.
+    ///
+    /// # Default Values
+    ///
+    /// Uses the configuration from [`Self::new`].
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The default layer.
     fn default() -> Self {
         Self::new()
     }

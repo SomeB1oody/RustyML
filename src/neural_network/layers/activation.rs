@@ -155,7 +155,7 @@ pub enum Activation {
     },
     /// Leaky rectified linear unit, `x` for `x >= 0` and `negative_slope * x` below it
     ///
-    /// Unlike [`Activation::ReLU`], the negative side keeps a non-zero gradient, so a unit
+    /// Unlike [`Activation::ReLU`], the negative side keeps a gradient other than 0, so a unit
     /// whose pre-activation stays negative can still recover
     LeakyReLU {
         /// Slope applied below 0. Must be finite and greater than 0. The layer form
@@ -827,7 +827,7 @@ impl Activation {
     /// Both bounds are strict for the same reason. [`Activation::backward`] reads only the
     /// activated output, and it separates the 2 branches by the sign of that output. A slope
     /// or scale of 0 collapses the whole negative side onto `a = 0`, which erases the branch.
-    /// A negative one inverts the sign, which reads the wrong branch
+    /// A negative slope inverts the sign, which reads the wrong branch
     ///
     /// # Returns
     ///
@@ -1172,6 +1172,7 @@ fn softmax_backward(output: &Tensor, grad_output: &Tensor, axis: i32) -> Result<
 }
 
 /// Unit tests for the activation layer helpers and the `Activation` enum
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1379,7 +1380,7 @@ mod tests {
         assert_abs_diff_eq!(vals[2], -0.125_f32, epsilon = 1e-6);
     }
 
-    /// The gradient row sums to about zero, since the softmax Jacobian rows sum to zero
+    /// The gradient row sums to about 0, since the softmax Jacobian rows sum to 0
     #[test]
     fn softmax_backward_row_sums_to_zero() {
         let output = tensor2(1, 3, vec![0.25, 0.25, 0.5]);

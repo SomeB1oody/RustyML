@@ -6,8 +6,6 @@ use ndarray::{Array2, array, s};
 use rustyml::error::Error;
 use rustyml::machine_learning::{Contamination, IsolationForest};
 
-// Constructor validation
-
 #[test]
 fn test_new_rejects_invalid_scalar_arguments() {
     // Each row supplies 1 invalid scalar, and its InvalidParameter error must carry that name.
@@ -88,8 +86,6 @@ fn test_default_has_expected_parameter_values() {
     assert!(model.get_trees().is_none());
 }
 
-// predict error paths (after fit)
-
 #[test]
 fn test_predict_wrong_feature_count_returns_dimension_mismatch() {
     let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
@@ -111,8 +107,6 @@ fn test_predict_wrong_feature_count_returns_dimension_mismatch() {
     );
 }
 
-// score_sample error paths (after fit)
-
 #[test]
 fn test_score_sample_wrong_dim_returns_dimension_mismatch() {
     let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
@@ -132,8 +126,6 @@ fn test_score_sample_wrong_dim_returns_dimension_mismatch() {
         "expected DimensionMismatch{{expected:2, found:3}}, got: {err:?}"
     );
 }
-
-// Post-fit state
 
 #[test]
 fn test_fit_sets_n_features() {
@@ -160,8 +152,6 @@ fn test_fit_stores_exactly_n_estimators_trees() {
         trees.len()
     );
 }
-
-// Scores in [-1, 0)
 
 #[test]
 fn test_scores_are_in_negative_unit_interval() {
@@ -205,8 +195,8 @@ fn test_score_sample_is_in_negative_unit_interval() {
     );
 }
 
-// Outlier detection correctness: anomalous points (far from the bulk) are
-// isolated in fewer steps and so get lower (more negative) anomaly scores than inliers
+/// Outlier detection correctness: anomalous points (far from the bulk) are
+/// isolated in fewer steps and so get lower (more negative) anomaly scores than inliers
 
 #[test]
 fn test_outlier_score_exceeds_all_inlier_scores() {
@@ -282,8 +272,6 @@ fn test_outlier_score_sample_is_below_inlier_via_single_sample_api() {
     );
 }
 
-// Identical points get identical scores
-
 #[test]
 fn test_identical_points_have_equal_scores() {
     // 2 identical rows must be scored identically under a seeded (deterministic) model
@@ -302,8 +290,6 @@ fn test_identical_points_have_equal_scores() {
         scores[0], scores[2]
     );
 }
-
-// Determinism: same seed -> identical scores
 
 #[test]
 fn test_same_seed_produces_identical_scores() {
@@ -347,8 +333,6 @@ fn test_different_seeds_may_produce_different_scores() {
     );
 }
 
-// fit_predict convenience method
-
 #[test]
 fn test_fit_predict_matches_fit_then_predict() {
     let data = array![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [10.0, 10.0]];
@@ -366,8 +350,6 @@ fn test_fit_predict_matches_fit_then_predict() {
     );
 }
 
-// Single-sample dataset
-
 #[test]
 fn test_fit_and_predict_on_single_sample() {
     // 1 training row gives a size-1 leaf with path length 0, so score = -(2^0) = -1.0
@@ -383,8 +365,6 @@ fn test_fit_and_predict_on_single_sample() {
     );
 }
 
-// n_features is set from data columns
-
 #[test]
 fn test_n_features_reflects_training_data_columns() {
     let mut model = IsolationForest::new(10, 20).unwrap().with_random_state(1);
@@ -394,8 +374,6 @@ fn test_n_features_reflects_training_data_columns() {
     model.fit(&data).unwrap();
     assert_eq!(model.get_n_features(), 5);
 }
-
-// max_samples clamped to nrows
 
 #[test]
 fn test_fit_with_fewer_rows_than_max_samples_succeeds() {
@@ -410,8 +388,6 @@ fn test_fit_with_fewer_rows_than_max_samples_succeeds() {
     }
 }
 
-// Constant-feature column (all equal)
-
 #[test]
 fn test_fit_with_constant_feature_column_does_not_panic() {
     // column 1 is constant. The tree builder makes a leaf when max_val - min_val < 1e-10
@@ -421,8 +397,6 @@ fn test_fit_with_constant_feature_column_does_not_panic() {
     let scores = model.score_samples(&data).unwrap();
     assert_eq!(scores.len(), 5);
 }
-
-// 1-D data (single feature)
 
 #[test]
 fn test_fit_and_predict_with_single_feature() {
@@ -441,8 +415,6 @@ fn test_fit_and_predict_with_single_feature() {
         "1-D outlier score {outlier_score:.4} should fall below inlier scores (min={min_inlier:.4})"
     );
 }
-
-// High-dimensional data
 
 #[test]
 fn test_fit_and_predict_high_dimensional() {
@@ -472,8 +444,6 @@ fn test_fit_and_predict_high_dimensional() {
     );
 }
 
-// Save / load round-trip
-
 #[test]
 fn test_save_load_roundtrip_yields_identical_predictions() {
     let data = array![[0.0, 0.0], [0.5, 0.5], [1.0, 0.0], [0.0, 1.0], [50.0, 50.0]];
@@ -502,10 +472,8 @@ fn test_save_load_roundtrip_yields_identical_predictions() {
     let _ = std::fs::remove_file(path);
 }
 
-// Closed-form anomaly score on identical points: every tree is 1 leaf, and the
-// path-length correction cancels to score = -0.5, using c(n) = 2*H_{n-1} - 2(n-1)/n
-
-/// max_samples == n_rows gives score = -2^(-c(max_samples)/c(max_samples)) = -0.5, exactly
+/// Identical points produce 1 leaf per tree and score -2^(-c(n)/c(n)) = -0.5.
+/// The correction uses c(n) = 2*H_{n-1} - 2(n-1)/n.
 #[test]
 fn test_identical_points_score_equals_one_half_when_sample_size_equals_max_samples() {
     // 4 identical rows, max_samples = 4 == n_rows, so sample_size = min(4,4) = 4
@@ -523,8 +491,7 @@ fn test_identical_points_score_equals_one_half_when_sample_size_equals_max_sampl
     }
 }
 
-/// max_samples > n_rows makes sample_size = n_rows, so normalization must use
-/// c(sample_size), not c(max_samples), giving score = -2^(-c(n_rows)/c(n_rows)) = -0.5
+/// max_samples above n_rows sets sample_size to n_rows. Normalization uses c(sample_size), so the score is -2^(-c(n_rows)/c(n_rows)) = -0.5.
 #[test]
 fn test_identical_points_score_matches_closed_form_when_sample_size_below_max_samples() {
     // 4 identical rows, max_samples = 8 > 4, so sample_size = min(8,4) = 4 (leaf size = 4)
@@ -590,8 +557,6 @@ fn predict_handles_non_contiguous_input() {
     assert_eq!(result.unwrap().len(), 3, "one score per input row");
 }
 
-// predict: contamination-based {-1, +1} outlier classification
-
 /// A single obvious outlier among a tight inlier cluster is flagged -1, inliers +1.
 /// With contamination 0.1 on 10 training samples, exactly ceil(1.0)=1 sample is flagged.
 #[test]
@@ -627,8 +592,7 @@ fn predict_flags_obvious_outlier() {
     }
 }
 
-/// The number of flagged training samples equals ceil(contamination * n_train) when scores
-/// are well-separated (continuous isolation scores make ties negligible)
+/// With 20 distinct training points and contamination 0.25, predict flags exactly 5 points.
 #[test]
 fn predict_count_matches_contamination() {
     let mut flat = Vec::new();
@@ -762,8 +726,6 @@ fn predict_on_single_sample_is_not_forced_to_outlier() {
     );
 }
 
-// Contamination::Auto
-
 /// Auto is the paper's fixed -0.5 cutoff, recorded on the model at fit time
 #[test]
 fn contamination_auto_uses_paper_threshold() {
@@ -825,8 +787,7 @@ fn contamination_fraction_offset_is_the_training_score_percentile() {
     let mut sorted = model.score_samples(&x).unwrap().to_vec();
     sorted.sort_unstable_by(f64::total_cmp);
 
-    // n=10, c=0.2 gives position (10 - 1) * 0.2 = 1.8, a fractional index that interpolates
-    // between the 2nd and 3rd smallest scores (indices 1 and 2)
+    // For n=10 and c=0.2, the quantile position is 1.8. Linear interpolation uses sorted score indices 1 and 2.
     let expected = sorted[1] + 0.8 * (sorted[2] - sorted[1]);
     assert!(
         (offset - expected).abs() < 1e-12,

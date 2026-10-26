@@ -26,9 +26,9 @@ use ndarray::{Array1, Array3};
 /// A 1D convolutional layer for neural networks
 ///
 /// Applies a convolution operation to sequential data such as time series, audio signals,
-/// or text. Input shape is \[batch_size, length, channels\] and output shape is
-/// \[batch_size, output_length, filters\], where output_length depends on input length,
-/// kernel size, stride, and padding
+/// or text. Input shape is `[batch_size, length, channels]`. Output shape is `[batch_size,
+/// output_length, filters]`. The output length depends on input length, kernel size, stride,
+/// dilation, and padding.
 ///
 /// The dimension-generic convolution math lives in
 /// [`convolution_engine`](crate::neural_network::layers::convolution). This layer holds the
@@ -44,14 +44,14 @@ use ndarray::{Array1, Array3};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array3;
 ///
-/// // Create a simple 3D input tensor: [batch_size, length, channels]
-/// // Batch size=2, 10 time steps, 1 input channel
+/// // Create a simple 3D input tensor: [batch_size, length, channels].
+/// // Batch size=2, 10 time steps, 1 input channel.
 /// let x = Array3::ones((2, 10, 1)).into_dyn();
 ///
-/// // Create target tensor (output length 8, 3 filters)
+/// // Create target tensor (output length 8, 3 filters).
 /// let y = Array3::ones((2, 8, 3)).into_dyn();
 ///
-/// // Build model: add a Conv1D layer with 3 filters and kernel size 3
+/// // Build model: add a Conv1D layer with 3 filters and kernel size 3.
 /// let mut model = SequentialBuilder::new()
 ///     .add(Conv1D::new(
 ///         3,                      // Number of filters
@@ -63,17 +63,17 @@ use ndarray::{Array1, Array3};
 ///     .unwrap();
 /// model.compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Print model structure
+/// // Print model structure.
 /// model.summary();
 ///
-/// // Train the model (run a few epochs)
+/// // Train the model (run a few epochs).
 /// model.fit(&x, &y, 3).unwrap();
 ///
-/// // Use predict for forward propagation prediction
+/// // Use predict for forward propagation prediction.
 /// let prediction = model.predict(&x).unwrap();
 /// println!("Convolution layer prediction results: {:?}", prediction);
 ///
-/// // Check if output shape is correct (should be [2, 8, 3])
+/// // Check if output shape is correct (should be [2, 8, 3]).
 /// assert_eq!(prediction.shape(), &[2, 8, 3]);
 /// ```
 #[derive(Debug)]
@@ -92,9 +92,8 @@ pub struct Conv1D {
     weights: Array3<f32>,
     /// 1D array of bias values with shape \[filters\]
     ///
-    /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
-    /// The forward pass adds nothing: it reads `weights` alone, and `parameters` never yields
-    /// the bias array, so a bias-free layer holds it and no more
+    /// The array stays allocated when `use_bias` is false. The forward pass and weight rosters
+    /// exclude it.
     bias: Array1<f32>,
     /// Activation applied to the convolution output
     activation: Activation,
@@ -228,7 +227,7 @@ impl Conv1D {
     /// By default, the draw takes the global seed or entropy (see [`crate::random`]). An
     /// unbuilt layer holds no kernel, so this records the seed and draws nothing. A layer that
     /// is already built draws its kernel again from the new seed, so the order of the 2 calls
-    /// does not matter. The bias stays zero-initialized
+    /// does not matter. A built layer also resets its bias to 0
     ///
     /// # Parameters
     ///
@@ -247,8 +246,8 @@ impl Conv1D {
 
     /// Draws the kernel and zeroes the bias, at the extents the build settled
     ///
-    /// The layer names its own channel count and filter count, so the fan pair does not depend
-    /// on the order of the 2 channel axes in the stored kernel
+    /// The layer supplies its channel count and filter count. The fan pair does not depend on
+    /// the order of the stored channel axes.
     fn draw_parameters(&mut self) {
         let mut rng = crate::random::make_rng(self.random_state);
         self.weights = Initializer::GlorotUniform.draw(
@@ -461,8 +460,7 @@ impl UnaryLayer for Conv1D {
                 .expect("weight gradient shape matches weights")
                 .into_dyn(),
         )?;
-        // A bias-free layer computes no bias gradient, so the store holds none and no
-        // optimizer state is ever keyed on a bias that the layer does not hold
+        // A layer without bias has no stored bias gradient or bias optimizer state.
         if self.use_bias {
             ctx.add_grad(
                 "bias",

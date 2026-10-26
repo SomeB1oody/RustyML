@@ -48,8 +48,8 @@ pub type TrainTestSplit<A> = (Array2<f64>, Array2<f64>, Array1<A>, Array1<A>);
 /// # Errors
 ///
 /// - [`Error::EmptyInput`] if the dataset is empty
-/// - [`Error::DimensionMismatch`] if `x` and `y` have different lengths
-/// - [`Error::InvalidParameter`] if `test_size` is not between 0 and 1
+/// - [`Error::DimensionMismatch`] if the row count of `x` differs from the length of `y`
+/// - [`Error::InvalidParameter`] if `test_size <= 0.0` or `test_size >= 1.0`
 /// - [`Error::InvalidInput`] if the dataset is too small to split
 pub fn train_test_split<A>(
     x: Array2<f64>,
@@ -81,7 +81,7 @@ where
         ));
     }
 
-    // Clamp so both train and test always keep at least one sample
+    // Clamp so both train and test always keep at least 1 sample
     let n_test = if n_samples == 1 {
         return Err(Error::invalid_input(
             "Cannot split a dataset with only 1 sample into train and test sets",
@@ -100,7 +100,7 @@ where
 
     let (test_indices, train_indices) = indices.split_at(n_test);
 
-    // select gathers rows by index in one pass
+    // select gathers rows by index in 1 pass
     let x_train = x.select(Axis(0), train_indices);
     let x_test = x.select(Axis(0), test_indices);
     let y_train = y.select(Axis(0), train_indices);
@@ -112,7 +112,7 @@ where
 /// Splits a dataset into training and test sets while preserving class proportions
 ///
 /// Each class is split independently using `test_size`, so both subsets keep roughly the same
-/// label distribution as the input. This avoids a class being absent from one side, which a
+/// label distribution as the input. This avoids a class being absent from 1 side, which a
 /// plain [`train_test_split`] can produce on imbalanced data
 ///
 /// # Parameters
@@ -147,8 +147,8 @@ where
 /// # Errors
 ///
 /// - [`Error::EmptyInput`] if the dataset is empty
-/// - [`Error::DimensionMismatch`] if `x` and `y` have different lengths
-/// - [`Error::InvalidParameter`] if `test_size` is not between 0 and 1
+/// - [`Error::DimensionMismatch`] if the row count of `x` differs from the length of `y`
+/// - [`Error::InvalidParameter`] if `test_size <= 0.0` or `test_size >= 1.0`
 /// - [`Error::InvalidInput`] if any class has fewer than 2 samples
 pub fn train_test_split_stratified<A>(
     x: Array2<f64>,
@@ -196,7 +196,7 @@ where
 
     let mut rng = crate::random::make_rng(random_state);
 
-    // Split every class on its own, so both sides keep at least one sample of each class
+    // Split every class on its own, so both sides keep at least 1 sample of each class
     let mut test_indices: Vec<usize> = Vec::new();
     let mut train_indices: Vec<usize> = Vec::new();
     for group in groups.iter_mut() {

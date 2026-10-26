@@ -48,7 +48,7 @@ mod noise;
 mod norm_batch_layer;
 /// Tests for GroupNormalization and InstanceNormalization
 mod norm_group_instance;
-/// Tests for UnitNormalization: axis forms, the near-zero cap, layout, and error paths
+/// Tests for UnitNormalization: axis forms, the near-0 cap, layout, and error paths
 mod norm_unit;
 /// Tests for the optimizers: SGD, Adam, AdamW, RMSprop, and AdaGrad
 mod optimizers;

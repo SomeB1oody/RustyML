@@ -34,11 +34,11 @@ use ndarray_rand::rand::rngs::StdRng;
 /// use rustyml::machine_learning::{Gamma, SVC, KernelType};
 /// use ndarray::{Array2, Array1};
 ///
-/// // Create training data
+/// // Create training data.
 /// let x_train = Array2::from_shape_vec((4, 2), vec![0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0]).unwrap();
 /// let y_train = Array1::from_vec(vec![1.0, 0.0, 0.0, 1.0]);
 ///
-/// // Initialize SVM classifier with RBF kernel
+/// // Initialize SVM classifier with RBF kernel.
 /// let mut svc = SVC::new(
 ///     KernelType::RBF { gamma: Gamma::Value(0.5) },
 ///     1.0,  // regularization parameter
@@ -48,10 +48,10 @@ use ndarray_rand::rand::rngs::StdRng;
 /// .expect("Failed to create SVC")
 /// .with_random_state(42); // fixed seed for reproducible training
 ///
-/// // Train the model
+/// // Train the model.
 /// svc.fit(&x_train, &y_train).expect("Failed to train SVM");
 ///
-/// // Make predictions
+/// // Make predictions.
 /// let x_test = Array2::from_shape_vec((2, 2), vec![0.5, 0.5, 0.8, 0.8]).unwrap();
 /// let predictions = svc.predict(&x_test).expect("Failed to predict");
 /// println!("Predictions: {:?}", predictions);
@@ -94,6 +94,10 @@ impl Default for SVC {
     /// - `max_iter` - 1000
     /// - `eps` - 1e-8
     /// - `random_state` - None (non-deterministic working-set selection)
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - An instance with default settings.
     fn default() -> Self {
         SVC {
             kernel: KernelType::RBF {
@@ -184,7 +188,6 @@ impl SVC {
         self
     }
 
-    // Getters
     get_field!(get_kernel, kernel, KernelType);
     get_field!(get_regularization_parameter, regularization_param, f64);
     get_field!(get_tolerance, tol, f64);
@@ -238,10 +241,7 @@ impl SVC {
     ///
     /// # Notes
     ///
-    /// The SMO dual uses +/-1 labels internally. `fit` converts the labels, so the
-    /// `{0.0, 1.0}` domain matches [`LinearSVC`](crate::machine_learning::LinearSVC)
-    /// and [`LogisticRegression`](crate::machine_learning::LogisticRegression), and the
-    /// 2 SVM classifiers are interchangeable without rewriting the label array
+    /// The public label values are `0.0` and `1.0`. Training converts them to `-1.0` and `1.0` for SMO.
     ///
     /// # Errors
     ///
@@ -486,14 +486,14 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, Error>` - Raw decision function values (distance to hyperplane)
-    ///   per sample
+    /// - `Result<Array1<f64>, Error>` - Raw, unnormalized decision scores per sample
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model has not been fitted yet
-    /// - `Error::EmptyInput` - If input data is empty
-    /// - `Error::DimensionMismatch` - If feature dimensions mismatch
+    /// - `Error::NotFitted` - If the model has not been trained.
+    /// - `Error::EmptyInput` - If the input matrix has no rows.
+    /// - `Error::DimensionMismatch` - If the feature count differs from training.
+    /// - `Error::NonFinite` - If the input contains a non-finite value.
     ///
     /// # Performance
     ///
@@ -805,7 +805,7 @@ impl SVC {
     {
         let n_samples = alphas.len();
 
-        // Decision-function sum over the non-zero alphas. Stays serial because the O(n^2)
+        // Decision-function sum over the alphas other than 0. Stays serial because the O(n^2)
         // kernel matrix already bounds n far below the parallel sum gate
         let sum: f64 = (0..n_samples)
             .filter(|&j| alphas[j] > 0.0)

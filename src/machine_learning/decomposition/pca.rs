@@ -15,19 +15,19 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// SVD solver options for Principal Component Analysis
 ///
-/// Selects the decomposition strategy used to compute principal components. Use `Full` for
-/// small to mid-sized datasets (typically fewer than 10,000 samples or features) when accuracy
-/// matters. Use `Randomized` for large datasets (10,000+ samples or features) when speed
-/// matters. Use `PowerIteration` when you need only a few components from very large or
-/// memory-constrained problems
+/// `Full` decomposes the feature covariance matrix. `Randomized` first builds a smaller subspace.
+/// `PowerIteration` extracts covariance eigenpairs with deflation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub enum SVDSolver {
     /// Full SVD using deterministic decomposition
     #[default]
     Full,
     /// Randomized SVD with a fixed RNG seed
-    Randomized(u64),
-    /// Power-iteration approximation with Hotelling deflation, extracting one component
+    Randomized(
+        /// Random seed for the subspace projection.
+        u64,
+    ),
+    /// Power-iteration approximation with Hotelling deflation, extracting 1 component
     /// at a time (best when only a few components are needed)
     PowerIteration,
 }
@@ -236,6 +236,10 @@ impl Default for PCA {
     ///
     /// - `n_components` - 2
     /// - `svd_solver` - `SVDSolver::Full`
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - An instance with default settings.
     fn default() -> Self {
         PCA::new(2).expect("Default PCA parameters should be valid")
     }
@@ -244,10 +248,8 @@ impl Default for PCA {
 impl PCA {
     /// Creates a new PCA instance with validated hyperparameters
     ///
-    /// Choose `SVDSolver::Full` for small to mid-sized datasets, typically fewer than 10,000
-    /// samples or features. Choose `SVDSolver::Randomized` for large datasets (10,000+ samples
-    /// or features) when speed matters. Choose `SVDSolver::PowerIteration` when you need only a
-    /// few components from very large or memory-constrained problems
+    /// The full solver uses the feature covariance matrix.
+    /// The randomized solver builds a smaller subspace. Power iteration extracts components in sequence.
     ///
     /// # Parameters
     ///
@@ -303,7 +305,6 @@ impl PCA {
         self
     }
 
-    // Getters
     get_field!(get_n_components, n_components, usize);
     get_field!(get_svd_solver, svd_solver, SVDSolver);
     get_field!(get_n_samples, n_samples, Option<usize>);
@@ -376,7 +377,7 @@ impl PCA {
     ///
     /// # Performance
     ///
-    /// The projection runs as one GEMM call, which parallelizes in the backend above an
+    /// The projection runs as 1 GEMM call, which parallelizes in the backend above an
     /// internal size gate
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
@@ -461,7 +462,7 @@ impl PCA {
     ///
     /// # Performance
     ///
-    /// The reconstruction runs as one GEMM call, which parallelizes in the backend above an
+    /// The reconstruction runs as 1 GEMM call, which parallelizes in the backend above an
     /// internal size gate
     pub fn inverse_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
@@ -561,7 +562,7 @@ impl PCA {
             .svd_solver
             .compute_components(&x_centered, self.n_components)?;
 
-        // Fix component signs so the result is deterministic and identical across solvers
+        // Make the largest absolute loading of each component positive
         Self::flip_component_signs(&mut components);
 
         #[cfg(feature = "show_progress")]

@@ -1,7 +1,7 @@
 //! Integration tests for `rustyml::machine_learning::LDA`
 //!
-//! Expected values come from the problem design or closed-form definitions,
-//! never from running the model and recording its output
+//! Checks solver agreement, class predictions, projected statistics, and model persistence.
+//! Expected values follow the test data or closed-form definitions.
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
@@ -9,8 +9,6 @@ use rustyml::error::Error;
 use rustyml::machine_learning::{DiscriminantSolver, LDA, Shrinkage};
 
 use crate::common::assert_allclose;
-
-// Local helpers
 
 /// 3 well-separated classes in 2D (3 samples per class), centered near (1,1), (5,5), and
 /// (9,1). The clusters sit far enough apart that every solver reaches 100% accuracy
@@ -41,8 +39,8 @@ fn make_three_class_holdout() -> (Array2<f64>, Array1<i32>) {
     (x, y)
 }
 
-/// Minimal 2-class, 1-feature dataset with hand-verifiable projections: class 0
-/// is {1,2,3} (mean 2.0), class 1 is {7,8,9} (mean 8.0), grand mean 5.0
+/// Builds 2 classes with 1 feature: class 0 contains {1,2,3}, and class 1 contains {7,8,9}.
+/// Their means are 2.0 and 8.0, and the grand mean is 5.0.
 fn make_two_class_1d() -> (Array2<f64>, Array1<i32>) {
     let x = array![[1.0], [2.0], [3.0], [7.0], [8.0], [9.0]];
     let y = array![0, 0, 0, 1, 1, 1];
@@ -58,8 +56,6 @@ fn accuracy(predicted: &Array1<i32>, true_labels: &Array1<i32>) -> f64 {
         .count();
     correct as f64 / true_labels.len() as f64
 }
-
-// 1. Constructor validation
 
 #[test]
 fn test_new_default_values() {
@@ -136,8 +132,6 @@ fn test_new_shrinkage_boundary_one_succeeds() {
         .unwrap();
 }
 
-// 2. fit() error paths
-
 #[test]
 fn test_fit_x_y_length_mismatch_errors() {
     let mut lda = LDA::new(1).unwrap();
@@ -212,8 +206,6 @@ fn test_fit_n_components_exceeds_max_errors() {
     );
 }
 
-// 3. predict / transform dimension-mismatch errors (after fit)
-
 #[test]
 fn test_predict_wrong_feature_count_errors() {
     let (x, y) = make_three_class_2d();
@@ -252,8 +244,6 @@ fn test_transform_wrong_feature_count_errors() {
         "expected DimensionMismatch or InvalidInput, got {err:?}"
     );
 }
-
-// 4. Correctness: fit -> predict on training data (3-class, SVD solver)
 
 #[test]
 fn test_fit_predict_train_100pct_svd() {
@@ -314,8 +304,6 @@ fn test_classes_sorted_after_fit() {
     assert_eq!(classes.as_slice().unwrap(), &[0, 1, 2]);
 }
 
-// 5. Correctness: all 3 solvers
-
 #[test]
 fn test_all_solvers_classify_correctly() {
     let (x, y) = make_three_class_2d();
@@ -335,8 +323,6 @@ fn test_all_solvers_classify_correctly() {
         );
     }
 }
-
-// 6. transform() output shape and finiteness
 
 #[test]
 fn test_transform_output_shape_2d_3class() {
@@ -380,7 +366,7 @@ fn test_transform_n_components_1() {
 
 #[test]
 fn test_transform_single_sample() {
-    // A single-sample input always takes the sequential path
+    // Transform a batch with 1 sample.
     let (x_train, y_train) = make_three_class_2d();
     let mut lda = LDA::new(2).unwrap();
     lda.fit(&x_train, &y_train).unwrap();
@@ -392,8 +378,6 @@ fn test_transform_single_sample() {
         assert!(v.is_finite());
     }
 }
-
-// 7. Hand-computed reference for 2-class 1D case
 
 #[test]
 fn test_two_class_1d_classification_correctness() {
@@ -426,8 +410,7 @@ fn test_two_class_1d_projected_class_separation() {
     let mean0: f64 = proj_class0.iter().sum::<f64>() / 3.0;
     let mean1: f64 = proj_class1.iter().sum::<f64>() / 3.0;
 
-    // The pooled within-class variance in the raw data is 1, so the projection scale is
-    // about 1, and the mean gap stays close to |8 - 2| = 6.0
+    // The pooled within-class variance is 1, so the projection scale is near 1. The projected mean gap stays near |8 - 2| = 6.0.
     assert_abs_diff_eq!((mean1 - mean0).abs(), 6.0, epsilon = 0.05);
 
     // Within each class the projections stay monotone (strictly increasing or
@@ -442,8 +425,7 @@ fn test_two_class_1d_projected_class_separation() {
 
 #[test]
 fn test_two_class_1d_projection_is_the_whitening_scale() {
-    // For a 1-feature dataset with n_components=1 the projection is a single scalar: the
-    // reciprocal square root of the pooled within-class variance, not a unit vector
+    // For 1 feature and n_components=1, the projection is a scalar. It equals the reciprocal square root of pooled within-class variance.
     let (x, y) = make_two_class_1d();
     let mut lda = LDA::new(1).unwrap().with_solver(DiscriminantSolver::SVD);
     let z = lda.fit_transform(&x, &y).unwrap();
@@ -457,8 +439,6 @@ fn test_two_class_1d_projection_is_the_whitening_scale() {
         epsilon = 1e-4
     );
 }
-
-// 8. fit_transform consistency
 
 #[test]
 fn test_fit_transform_equals_fit_then_transform() {
@@ -485,8 +465,6 @@ fn test_fit_transform_sets_projection() {
         "projection must be set after fit_transform"
     );
 }
-
-// 9. Shrinkage variants
 
 #[test]
 fn test_shrinkage_auto_classifies_correctly() {
@@ -549,8 +527,6 @@ fn test_shrinkage_manual_boundary_one_produces_finite_output() {
     }
 }
 
-// 10. Projection columns are whitened, not unit-norm
-//
 // scikit-learn's `scalings_` scales each discriminant axis so the projected data has unit
 // within-class covariance. The axes are therefore not unit vectors, and their norms carry the
 // data's units. This is why `DiscriminantSolver::project` uses a relative degenerate-axis
@@ -621,8 +597,6 @@ fn test_projection_whitens_within_class_covariance_lsqr() {
     }
 }
 
-// 11. Priors sum to 1 after fit
-
 #[test]
 fn test_priors_sum_to_one() {
     // Priors are n_class/n_samples per class and must sum to 1.0
@@ -648,8 +622,6 @@ fn test_priors_equal_for_balanced_classes() {
     }
 }
 
-// 12. Class means after fit
-
 #[test]
 fn test_class_means_correct_2class_1d() {
     // Class 0: [1,2,3] -> mean 2.0. Class 1: [7,8,9] -> mean 8.0
@@ -662,8 +634,6 @@ fn test_class_means_correct_2class_1d() {
     assert_abs_diff_eq!(means[[0, 0]], 2.0, epsilon = 1e-12);
     assert_abs_diff_eq!(means[[1, 0]], 8.0, epsilon = 1e-12);
 }
-
-// 13. Determinism (same seed -> identical result)
 
 #[test]
 fn test_determinism_svd_same_data() {
@@ -690,8 +660,6 @@ fn test_determinism_svd_same_data() {
         }
     }
 }
-
-// 14. save_to_path / load_from_path round-trip
 
 #[test]
 fn test_save_load_round_trip() {
@@ -766,13 +734,9 @@ fn test_load_preserves_fit_state() {
     );
 }
 
-// 15. Large-batch correctness check
-
 /// 600-sample (200 per class) 3-class 2D dataset that is linearly separable by construction
 ///
-/// Centroids (0,0), (10,10), (20,0) each get a deterministic `sin`-based jitter
-/// bounded by ~1.131, far below the >= 7.071 margin to any class boundary. So
-/// every sample lies on the correct side and expected accuracy = 1.0
+/// Centroids are (0,0), (10,10), and (20,0). Deterministic `sin` jitter has magnitude at most 1.131, below the class-boundary margin of 7.071.
 fn make_large_separable_3class_2d() -> (Array2<f64>, Array1<i32>) {
     const PER_CLASS: usize = 200;
     let centroids: [(f64, f64); 3] = [(0.0, 0.0), (10.0, 10.0), (20.0, 0.0)];
@@ -825,9 +789,9 @@ fn test_fit_predict_large_separable_parallel_paths() {
     );
 }
 
-// Auto n_components (default = None): the cap is min(n_classes-1, n_features), applied
-// automatically so the default model fits any valid dataset (binary included)
-
+/// Auto n_components (default = None): the cap is min(n_classes-1, n_features), applied
+/// automatically so the default model fits any valid dataset (binary included)
+///
 /// `LDA::default()` must fit binary data. The default auto-caps `n_components` to
 /// min(n_classes - 1, n_features), which is 1 for 2 classes
 #[test]
@@ -858,8 +822,6 @@ fn test_default_auto_caps_multiclass_components() {
         "3-class/2-feature LDA caps to 2 components"
     );
 }
-
-// decision_function (per-class discriminant scores) and predict_proba (softmax posteriors)
 
 /// Helper: index of the max element in a 1D view
 fn argmax(row: ndarray::ArrayView1<f64>) -> usize {
@@ -960,10 +922,8 @@ fn test_predict_proba_confident_on_separated_data() {
     }
 }
 
-// 16. scikit-learn parity of transform()
-
 /// `transform` centers input by the training mean before projecting, matching scikit-learn's
-/// `(X - xbar_) @ scalings_`, so the projected training data is mean-zero
+/// `(X - xbar_) @ scalings_`, so the projected training data is mean 0
 #[test]
 fn test_transform_projected_training_data_is_mean_zero() {
     let x: Array2<f64> = array![

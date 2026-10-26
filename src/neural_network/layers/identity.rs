@@ -1,5 +1,8 @@
 //! Identity layer that passes its input through unchanged, and parks the input shape for
 //! backpropagation
+//!
+//! The layer accepts nonempty tensors with a batch axis and emits values in C order.
+//! Training caches the input shape to validate the backward gradient.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -12,7 +15,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 
 /// Passes its input through unchanged
 ///
-/// The output equals the input, at every rank and every shape. The backward pass returns the
+/// The output equals each nonempty input with rank 1 or higher. The backward pass returns the
 /// gradient it receives. The layer holds no parameter and reads no configuration
 ///
 /// Its use is a placeholder. A function that chooses among several layers to build a model
@@ -30,7 +33,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array2;
 ///
-/// // A rank-2 input: 2 samples of 3 features each
+/// // A rank-2 input: 2 samples of 3 features each.
 /// let x = Array2::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
 ///     .unwrap()
 ///     .into_dyn();
@@ -41,12 +44,12 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
 /// let same = model.predict(&x).unwrap();
 ///
-/// // Every value comes back untouched
+/// // Every value comes back untouched.
 /// assert_eq!(same, x);
 /// ```
 ///

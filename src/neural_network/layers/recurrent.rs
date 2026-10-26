@@ -78,6 +78,7 @@ pub use gru::GRU;
 pub use lstm::LSTM;
 pub use simple_rnn::SimpleRNN;
 
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::*;

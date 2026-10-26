@@ -5,8 +5,8 @@
 //! \[batch, height, width, channels\]. Kernels are \[k, Cin, F\] / \[kh, kw, Cin, F\] and every
 //! bias is rank-1 of length `filters`.
 //!
-//! Expected values come from the cross-correlation definition with known weights,
-//! not from recorded implementation output. Gradient checks live in gradient_check.rs.
+//! Expected values come from cross-correlation with known weights or the Keras reference cases identified below.
+//! Gradient checks also live in gradient_check.rs.
 //!
 //! The dilation and causal-padding cases at the end also cover DepthwiseConv1D and
 //! SeparableConv1D, because those 2 layers share the dilated kernel with the depthwise stage.
@@ -26,8 +26,6 @@ use rustyml::neural_network::traits::{LayerBase, ParamId, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::{assert_allclose, named};
-
-// Conv1D - forward with known weights
 
 /// All-ones kernel=3, stride=1, Valid, Linear: each output is a windowed sum
 #[test]
@@ -92,7 +90,8 @@ fn conv1d_asymmetric_kernel_values() {
     let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 1]);
-    // Cross-correlation, no kernel flip: out[i] = 2*x[i] + 0*x[i+1] + 1*x[i+2]
+    // Cross-correlation does not flip the kernel.
+    // out[i] = 2*x[i] + 0*x[i+1] + 1*x[i+2].
     // 2*1+3=5, 2*2+4=8, 2*3+5=11
     let expected = Array::from_shape_vec((1, 3, 1), vec![5.0f32, 8.0, 11.0])
         .unwrap()
@@ -152,7 +151,7 @@ fn conv1d_two_filters_independent_outputs() {
     }
 }
 
-/// ReLU activation clips negative pre-activations to zero
+/// ReLU activation clips negative pre-activations to 0
 #[test]
 fn conv1d_relu_activation_clips_negatives() {
     let mut layer = Conv1D::new(1, 3, 1, ReLU::new()).unwrap();
@@ -175,7 +174,7 @@ fn conv1d_relu_activation_clips_negatives() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// Same padding, stride=1: output length stays at input length with symmetric zero padding
+/// Same padding, stride=1: output length stays at input length with symmetric 0 padding
 #[test]
 fn conv1d_same_padding_forward_values() {
     let mut layer = Conv1D::new(1, 3, 1, Linear::new())
@@ -193,7 +192,7 @@ fn conv1d_same_padding_forward_values() {
     let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 5, 1]);
-    // pad_total = (5-1)*1 + 3 - 5 = 2, so pad_before = pad_after = 1: [0,1,2,3,4,5,0]
+    // Total padding is 2, with 1 0 at each edge: [0,1,2,3,4,5,0].
     // Windowed sums: 0+1+2, 1+2+3, 2+3+4, 3+4+5, 4+5+0
     let expected = Array::from_shape_vec((1, 5, 1), vec![3.0f32, 6.0, 9.0, 12.0, 9.0])
         .unwrap()
@@ -298,8 +297,6 @@ fn conv1d_two_input_channels_cross_channel_sum() {
     assert_abs_diff_eq!(output[[0, 1, 0]], 105.0f32, epsilon = 1e-6f32);
 }
 
-// Conv1D - param_count
-
 /// param_count = filters * channels * kernel_size + filters
 #[test]
 fn conv1d_param_count_formula() {
@@ -317,8 +314,6 @@ fn conv1d_param_count_single_channel() {
     layer.build(&Shape::known(&[1, 5, 1])).unwrap();
     assert_eq!(layer.param_count(), ParamCounts::trainable(8));
 }
-
-// Conv1D - set_weights
 
 /// set_weights with the correct shape succeeds and the forward output reflects it
 #[test]
@@ -383,8 +378,6 @@ fn conv1d_set_weights_mismatched_bias_shape_errors() {
     );
 }
 
-// Conv1D - constructor error paths
-
 /// Each invalid scalar hyperparameter (filters=0, kernel_size=0, stride=0)
 /// independently makes the constructor return InvalidParameter
 #[test]
@@ -405,7 +398,7 @@ fn conv1d_invalid_scalar_param_errors() {
     }
 }
 
-/// Each invalid input_shape (wrong ndim or zero channels) independently makes the build step
+/// Each invalid input_shape (wrong ndim or 0 channels) independently makes the build step
 /// return InvalidInput
 ///
 /// A length below the kernel size is not on this list. `Same` and `Causal` padding make that
@@ -430,8 +423,6 @@ fn conv1d_build_rejects_invalid_input_shape() {
     }
 }
 
-// Conv1D - forward error paths
-
 /// Passing a 2D tensor to forward() returns InvalidInput
 #[test]
 fn conv1d_forward_wrong_ndim_errors() {
@@ -445,8 +436,6 @@ fn conv1d_forward_wrong_ndim_errors() {
     );
 }
 
-// Conv1D - named weight shapes
-
 /// The Conv1D kernel has shape [kernel, channels, filters], and the bias [filters]
 #[test]
 fn conv1d_weights_correct_shapes() {
@@ -455,8 +444,6 @@ fn conv1d_weights_correct_shapes() {
     assert_eq!(named(&layer, "kernel").shape(), &[5, 2, 3]);
     assert_eq!(named(&layer, "bias").shape(), &[3]);
 }
-
-// Conv2D - forward with known weights
 
 /// All-ones 2x2 kernel, 1 channel, Valid, stride=(1,1): each output is a 2x2 windowed sum
 #[test]
@@ -606,7 +593,7 @@ fn conv2d_two_input_channels_cross_channel_sum() {
     let bias = Array1::zeros(1);
     layer.set_weights(weights, bias).unwrap();
 
-    // input [batch=1, height=2, width=2, channels=2], channels innermost:
+    // Input shape is [1,2,2,2], with channels innermost.
     // (0,0) -> [1,2], (0,1) -> [3,4], (1,0) -> [5,6], (1,1) -> [7,8]
     let input = Array::from_shape_vec(
         (1, 2, 2, 2),
@@ -626,7 +613,7 @@ fn conv2d_two_input_channels_cross_channel_sum() {
     assert_abs_diff_eq!(output[[0, 1, 1, 0]], 87.0f32, epsilon = 1e-5f32); // 7 + 10*8
 }
 
-/// ReLU clips negative pre-activations to zero
+/// ReLU clips negative pre-activations to 0
 #[test]
 fn conv2d_relu_clips_negatives() {
     let mut layer = Conv2D::new(1, (2, 1), (1, 1), ReLU::new()).unwrap();
@@ -683,7 +670,7 @@ fn conv2d_same_padding_all_ones_values() {
     let output = layer.forward(&input, &mut ctx).unwrap();
 
     assert_eq!(output.shape(), &[1, 3, 3, 1]);
-    // pad_total = (3-1)*1 + 3 - 3 = 2 per axis, 1 row/column of zeros on each side
+    // pad_total = (3-1)*1 + 3 - 3 = 2 per axis, 1 row/column of 0s on each side
     // Corners: 2x2 = 4 overlapping ones
     assert_abs_diff_eq!(output[[0, 0, 0, 0]], 4.0f32, epsilon = 1e-5f32);
     assert_abs_diff_eq!(output[[0, 0, 2, 0]], 4.0f32, epsilon = 1e-5f32);
@@ -697,8 +684,6 @@ fn conv2d_same_padding_all_ones_values() {
     // Center: 3x3 = 9 overlapping ones
     assert_abs_diff_eq!(output[[0, 1, 1, 0]], 9.0f32, epsilon = 1e-5f32);
 }
-
-// Conv2D - param_count
 
 /// param_count = filters * channels * kh * kw + filters
 #[test]
@@ -717,8 +702,6 @@ fn conv2d_param_count_single_filter_single_channel() {
     layer.build(&Shape::known(&[1, 4, 4, 1])).unwrap();
     assert_eq!(layer.param_count(), ParamCounts::trainable(5));
 }
-
-// Conv2D - set_weights
 
 /// set_weights with the correct shape succeeds and new weights change the output
 #[test]
@@ -787,8 +770,6 @@ fn conv2d_set_weights_mismatched_bias_shape_errors() {
     );
 }
 
-// Conv2D - constructor error paths
-
 /// Each invalid scalar hyperparameter (filters=0, kernel height/width=0,
 /// stride height/width=0) independently makes the constructor return InvalidParameter
 #[test]
@@ -811,7 +792,7 @@ fn conv2d_invalid_scalar_param_errors() {
     }
 }
 
-/// Each invalid input_shape (wrong ndim or zero channels) independently makes the build step
+/// Each invalid input_shape (wrong ndim or 0 channels) independently makes the build step
 /// return InvalidInput
 ///
 /// A spatial axis below the kernel size is not on this list. `Same` padding makes that geometry
@@ -835,8 +816,6 @@ fn conv2d_build_rejects_invalid_input_shape() {
     }
 }
 
-// Conv2D - forward error paths
-
 /// Passing a 3D tensor to forward() returns InvalidInput (4D expected)
 #[test]
 fn conv2d_forward_wrong_ndim_errors() {
@@ -850,8 +829,6 @@ fn conv2d_forward_wrong_ndim_errors() {
     );
 }
 
-// Conv2D - named weight shapes
-
 /// The Conv2D kernel has shape [kh, kw, channels, filters], and the bias [filters]
 #[test]
 fn conv2d_weights_correct_shapes() {
@@ -860,8 +837,6 @@ fn conv2d_weights_correct_shapes() {
     assert_eq!(named(&layer, "kernel").shape(), &[3, 3, 2, 4]);
     assert_eq!(named(&layer, "bias").shape(), &[4]);
 }
-
-// Conv1D - Valid output length formula for diverse (len, kernel, stride) cases
 
 /// Valid output length is (input_len - kernel) / stride + 1 across parameterized cases
 #[test]
@@ -887,8 +862,6 @@ fn conv1d_valid_output_length_cases() {
     }
 }
 
-// Conv1D - Same output length = ceil(input_len / stride) for diverse cases
-
 /// Same output length is ceil(input_len / stride) across parameterized cases
 #[test]
 fn conv1d_same_output_length_cases() {
@@ -913,8 +886,6 @@ fn conv1d_same_output_length_cases() {
         );
     }
 }
-
-// Conv2D - Valid output shape for diverse (H, W, kh, kw, sh, sw) cases
 
 /// Valid output shape is (dim - kernel) / stride + 1 on each spatial axis, across parameterized
 /// cases
@@ -1038,8 +1009,6 @@ fn conv2d_parallel_weight_grad_constant_count() {
         assert_abs_diff_eq!(g, 55_696.0f32, epsilon = 1e-2f32);
     }
 }
-
-// Dilation
 
 /// A dilated kernel skips input positions between its taps
 ///
@@ -1293,8 +1262,6 @@ fn separable_conv1d_dilates_the_depthwise_stage() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-// Causal padding
-
 /// Causal padding puts all `(k - 1) * dilation` pad cells on the leading edge
 ///
 /// The kernel is `[10, 1]` at dilation 3, so the leading pad is 3 cells. Output `o` is
@@ -1516,8 +1483,6 @@ fn conv1d_causal_dilated_gradients_match_a_finite_difference() {
         / (2.0 * step);
     assert_abs_diff_eq!(bias_grad[0], numeric, epsilon = 1e-3f32);
 }
-
-// Effective kernels longer than the input, and dilated gradients, pinned to Keras 3.15.1
 
 // Keras 3.15.1 on the jax backend produced every expected value below. Rerunning the probe
 // reproduces the numbers, and every ramp value is exact in f32, so no rounding enters the

@@ -21,7 +21,10 @@ pub enum NnError {
     #[error(
         "forward pass has not been run on layer `{0}`; run `forward` before accessing outputs or `backward`"
     )]
-    ForwardPassNotRun(&'static str),
+    ForwardPassNotRun(
+        /// The name of the affected layer or missing component.
+        &'static str,
+    ),
 
     /// A weight array assigned to a layer did not match the shape the layer expects
     #[error("weight shape mismatch for `{name}`: layer expects {expected:?}, got {found:?}")]
@@ -38,7 +41,10 @@ pub enum NnError {
     ///
     /// The payload names the missing component, such as `"optimizer"` or `"loss function"`
     #[error("model has not been compiled: `{0}` is not specified")]
-    NotCompiled(&'static str),
+    NotCompiled(
+        /// The name of the affected layer or missing component.
+        &'static str,
+    ),
 
     /// An operation was tried on a model that contains no layers
     #[error("model has no layers")]
@@ -50,25 +56,44 @@ pub enum NnError {
     /// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build), from the shape
     /// of the input. Until then it holds no kernel, no bias, and no shape to check an input
     /// against.
-    /// [`UnaryLayer::forward_mut`](crate::neural_network::traits::UnaryLayer::forward_mut) builds
-    /// the layer from the tensor it receives, so only the paths that take `&self` can report this
+    /// [`UnaryLayer::forward_mut`](crate::neural_network::traits::UnaryLayer::forward_mut)
+    /// builds the layer from its input tensor. Paths that take `&self` can report this error.
     ///
     /// The payload is the layer's name, such as `"Dense"` or `"Conv2D"`
     #[error(
         "layer `{0}` is not built; build it with `UnaryLayer::build`, or add it to a \
          `SequentialBuilder` and build the model"
     )]
-    NotBuilt(&'static str),
+    NotBuilt(
+        /// The name of the affected layer or missing component.
+        &'static str,
+    ),
 }
 
 impl Error {
     /// Builds [`Error::NeuralNetwork`]`(`[`NnError::ForwardPassNotRun`]`)` for the named layer
+    ///
+    /// # Parameters
+    ///
+    /// - `layer` - The name of the layer.
+    ///
+    /// # Returns
+    ///
+    /// - `Error` - The neural network error for the named layer.
     #[cold]
     pub fn forward_pass_not_run(layer: &'static str) -> Self {
         Self::NeuralNetwork(NnError::ForwardPassNotRun(layer))
     }
 
     /// Builds [`Error::NeuralNetwork`]`(`[`NnError::NotBuilt`]`)` for the named layer
+    ///
+    /// # Parameters
+    ///
+    /// - `layer` - The name of the layer.
+    ///
+    /// # Returns
+    ///
+    /// - `Error` - The neural network error for the named layer.
     #[cold]
     pub fn not_built(layer: &'static str) -> Self {
         Self::NeuralNetwork(NnError::NotBuilt(layer))

@@ -1,6 +1,6 @@
 //! Integration tests for the UnitNormalization layer
 //!
-//! Covers the forward values, the axis forms, the row and strided paths, the near-zero cap,
+//! Covers the forward values, the axis forms, the row and strided paths, the near-0 cap,
 //! memory layout, and the error paths. `gradient_check.rs` covers the gradient against finite
 //! differences. This file pins the gradient against reference values instead.
 
@@ -19,8 +19,6 @@ use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
-
-// helpers
 
 /// Build a 2D Tensor from row-major data
 fn t2(a: usize, b: usize, data: Vec<f32>) -> Tensor {
@@ -41,8 +39,7 @@ fn last_axis() -> UnitNormalization {
     UnitNormalization::new(UnitNormalizationAxis::Default).expect("Default axis is always valid")
 }
 
-/// The upstream gradient `gradient_check.rs` uses, so the pinned reference tables below were
-/// produced from the same weights
+/// Builds the upstream gradient used by `gradient_check.rs` and the reference tables.
 fn upstream(like: &Tensor) -> Tensor {
     let flat: Vec<f32> = (0..like.len())
         .map(|k| 1.0 + 0.1 * ((k % 7) as f32 - 3.0))
@@ -56,8 +53,6 @@ fn ramp(shape: &[usize], offset: f32) -> Tensor {
     let data: Vec<f32> = (0..n).map(|k| k as f32 - offset).collect();
     Tensor::from_shape_vec(IxDyn(shape), data).expect("product of the shape")
 }
-
-// forward values, pinned against reference values
 
 /// Hand-derived values on the 2 best known right triangles
 ///
@@ -262,8 +257,6 @@ fn unit_normalization_matches_reference_on_2_separated_axes() {
     assert_allclose(&grad, &want_grad, 1e-6);
 }
 
-// axis forms
-
 /// The 3 ways of naming the last axis of a rank-3 input are the same layer
 #[test]
 fn unit_normalization_axis_spellings_agree_on_the_last_axis() {
@@ -357,8 +350,6 @@ fn unit_normalization_serves_every_rank_from_2_up() {
     }
 }
 
-// properties
-
 /// Scaling the input leaves the output alone, because only the direction survives
 #[test]
 fn unit_normalization_ignores_the_length_of_its_input() {
@@ -400,9 +391,7 @@ fn unit_normalization_gradient_is_orthogonal_to_its_output() {
     }
 }
 
-// the near-zero cap
-
-/// An all-zero group returns all zero instead of dividing by zero
+/// An all-0 group returns all 0 instead of dividing by 0
 #[test]
 fn unit_normalization_leaves_an_all_zero_group_at_zero() {
     let x = t2(2, 3, vec![0.0, 0.0, 0.0, 3.0, 4.0, 0.0]);
@@ -445,11 +434,11 @@ fn unit_normalization_cap_takes_over_below_a_norm_of_1e_minus_12() {
     assert!((out[[1, 0]] - 1.0).abs() < 1e-6, "got {}", out[[1, 0]]);
 }
 
-/// A capped group whose elements are not all zero drops the projection term of the gradient
+/// A capped group whose elements are not all 0 drops the projection term of the gradient
 ///
 /// The cap replaces the norm with a constant, so the derivative of that group is the constant
-/// alone. The all-zero test above cannot see this. Its output is 0, which zeroes the projection
-/// term whether or not the layer drops it. Here the output is `0.1`, so a layer that kept the
+/// alone. The all-0 test cannot detect this because its output makes the projection term 0.
+/// Here the output is `0.1`, so a layer that kept the
 /// term would return `0.99e12` in the first column instead of `1e12`
 #[test]
 fn unit_normalization_capped_group_gradient_drops_the_projection_term() {
@@ -510,8 +499,6 @@ fn unit_normalization_returns_zero_when_the_sum_of_squares_overflows() {
     }
 }
 
-// layout
-
 /// Both passes emit C order, so a consumer can read either as 1 contiguous slice
 #[test]
 fn unit_normalization_output_is_in_c_order() {
@@ -537,7 +524,7 @@ fn unit_normalization_output_is_in_c_order() {
     }
 }
 
-/// An input whose strides are not in C order gives the same values as one that is
+/// Strided input gives the same values as an equal input in C order.
 #[test]
 fn unit_normalization_accepts_input_that_is_not_in_c_order() {
     let base = t2(3, 5, (0..15).map(|k| k as f32 - 6.0).collect());
@@ -618,8 +605,6 @@ fn unit_normalization_parallel_path_matches_the_serial_path() {
     assert_eq!(parallel_grad, serial_grad, "the gate moved a backward bit");
 }
 
-// contract
-
 /// The layer holds nothing an optimizer can update
 #[test]
 fn unit_normalization_holds_no_parameter() {
@@ -630,10 +615,10 @@ fn unit_normalization_holds_no_parameter() {
     assert!(layer.parameters_mut().is_empty());
 }
 
-/// The summary reads "Unknown" until the layer holds a build
+/// The summary reports "Unknown" until the layer has a build.
 ///
-/// `forward_mut` builds the layer from the whole shape of the tensor it receives, batch extent
-/// included, so the display reports that extent and not a free batch axis
+/// `forward_mut` builds the layer from its input. The output shape keeps the feature extents
+/// and reports a free batch axis.
 #[test]
 fn unit_normalization_output_shape_needs_a_forward_pass() {
     let mut layer = last_axis();
@@ -667,8 +652,6 @@ fn unit_normalization_runs_inside_a_sequential_model() {
     let history = model.fit(&x, &y, 2).unwrap();
     assert_eq!(history.loss().len(), 2);
 }
-
-// error paths
 
 /// An empty axis list reduces over nothing, which no norm can do
 #[test]

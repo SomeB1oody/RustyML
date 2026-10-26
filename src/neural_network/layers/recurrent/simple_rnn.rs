@@ -3,8 +3,8 @@
 //!
 //! `SimpleRnnCell` implements `RnnCell` with the arithmetic of 1 timestep: 1 recurrent GEMM,
 //! plus at most 1 activation sweep. [`SimpleRNN`] is the public layer. It holds an `Rnn` over
-//! `SimpleRnnCell` and forwards every trait method to it, adding only the constructors and the
-//! weight setters that a caller uses directly.
+//! `SimpleRnnCell` and delegates trait methods to it.
+//! The wrapper provides constructors and weight setters.
 
 use crate::error::Error;
 use crate::neural_network::layers::activation::{Activation, ActivationInput};
@@ -145,29 +145,32 @@ impl RnnCell for SimpleRnnCell {
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array;
 ///
-/// // Create input with batch_size=2, timesteps=5, input_dim=4,
-/// // and target with batch_size=2, units=3 (same dimension as the last hidden state)
+/// // Create input for 2 samples, 5 timesteps, and 4 features.
+/// // The target has 3 units per sample.
 /// let x = Array::ones((2, 5, 4)).into_dyn();
 /// let y = Array::ones((2, 3)).into_dyn();
 ///
-/// // Build model: 1 SimpleRNN layer with Tanh activation
+/// // Build model: 1 SimpleRNN layer with Tanh activation.
 /// let mut model = SequentialBuilder::new()
 ///     .add(SimpleRNN::new(3, Activation::Tanh).unwrap())
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Print structure
+/// // Print structure.
 /// model.summary();
 ///
-/// // Train for 1 epoch
+/// // Train for 1 epoch.
 /// model.fit(&x, &y, 1).unwrap();
 ///
-/// // Predict
+/// // Predict.
 /// let pred = model.predict(&x);
 /// println!("SimpleRnn prediction:\n{:#?}\n", pred);
 /// ```
-pub struct SimpleRNN(Rnn<SimpleRnnCell>);
+pub struct SimpleRNN(
+    /// Shared recurrent driver and cell state.
+    Rnn<SimpleRnnCell>,
+);
 
 impl SimpleRNN {
     /// Creates a SimpleRNN layer with the specified unit count and activation
@@ -200,9 +203,9 @@ impl SimpleRNN {
     /// Sets the seed used to initialize the weights and re-initializes them deterministically
     ///
     /// By default the draw takes the global seed or entropy (see [`crate::random`]). An unbuilt
-    /// layer holds no weight, so this records the seed and draws nothing. A layer that is already
-    /// built redraws its kernel (Xavier/Glorot) and recurrent kernel (orthogonal) from the new
-    /// seed, so the order of the 2 calls does not matter. The bias stays zero-initialized.
+    /// layer holds no weight, so this records the seed and draws nothing. An already built
+    /// layer redraws its kernel (Xavier/Glorot) and recurrent kernel (orthogonal) from the new
+    /// seed. Either call order gives the same result. The bias stays initialized to 0.
     ///
     /// # Parameters
     ///
@@ -242,10 +245,10 @@ impl SimpleRNN {
 
     /// Sets whether the layer processes the input timesteps from last to first
     ///
-    /// The default is false. With true, processing step 0 consumes input timestep
-    /// `timesteps` - 1, and the output stays in processing order. The layer does not reverse the
-    /// output back to input order, so slot 0 of a returned sequence holds the state that came
-    /// from the last input timestep. This flag changes no shape.
+    /// The default is false. With true, processing step 0 consumes input timestep `timesteps` -
+    /// 1, and the output stays in processing order. The returned sequence follows processing
+    /// order. With reverse processing, slot 0 holds the state from the last input timestep.
+    /// This flag changes no shape.
     ///
     /// # Parameters
     ///

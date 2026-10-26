@@ -31,8 +31,7 @@
 //!
 //! # What the family shares
 //!
-//! The private items of this module are the shared half, and every layer file reaches them
-//! through a `use super::{...}` import that names each one it needs:
+//! The private items provide shared shape and gradient logic:
 //!
 //! - `elementwise_output_shape` applies the 2 clauses above and gives the output shape.
 //! - `merged_dims` runs the same rule over the live tensors of a forward pass, and
@@ -94,9 +93,8 @@ pub use subtract::Subtract;
 ///
 /// # Errors
 ///
-/// - `Error::InvalidInput` - If `inputs` is empty, if a shape holds no batch axis, if 2 batch
-///   extents differ, or if 2 extents of another axis differ and neither is 1. Each message
-///   names the 2 shapes that disagree
+/// - `Error::InvalidInput` - If `inputs` is empty or a shape has no batch axis. Also returned
+///   for unequal batch extents or incompatible feature extents
 fn elementwise_output_shape(layer: &str, inputs: &[Shape]) -> Result<Shape, Error> {
     let Some((first, rest)) = inputs.split_first() else {
         return Err(Error::invalid_input(format!(
@@ -214,8 +212,8 @@ fn merged_dims(layer: &str, inputs: &[&Tensor]) -> Result<Vec<usize>, Error> {
 /// Lifts 1 input tensor to the extents of the output, for a forward pass
 ///
 /// The extents of 1 that rank alignment inserts land AFTER the batch axis, exactly as the
-/// [shape rule](self) says. A tensor of shape `[2, 4]` therefore reaches the output shape
-/// `[2, 3, 4]` as `[2, 1, 4]`, and each of the 3 positions of axis 1 reads the same row
+/// [shape rule](self) says. A tensor of shape `[2, 4]` aligns as `[2, 1, 4]` for output shape
+/// `[2, 3, 4]`. Axis 1 repeats the row 3 times
 ///
 /// The result owns its data and is in the standard memory order, which every layer of the
 /// crate emits
@@ -232,8 +230,8 @@ fn merged_dims(layer: &str, inputs: &[&Tensor]) -> Result<Vec<usize>, Error> {
 ///
 /// # Errors
 ///
-/// - `Error::InvalidInput` - If the tensor holds no batch axis, if the output holds fewer axes
-///   than the tensor, or if an extent of the tensor is neither 1 nor the output extent
+/// - `Error::InvalidInput` - If the tensor has no batch axis or the output has fewer axes. Also
+///   returned when an extent cannot broadcast
 /// - `Error::Computation` - If the tensor cannot take the aligned rank
 fn broadcast_input(layer: &str, input: &Tensor, output: &[usize]) -> Result<Tensor, Error> {
     let Some((&batch, tail)) = input.shape().split_first() else {
@@ -278,10 +276,10 @@ fn broadcast_input(layer: &str, input: &Tensor, output: &[usize]) -> Result<Tens
 /// An input that broadcast in the forward pass reaches several positions of the output, so its
 /// gradient is the sum over every position it reached. The 2 kinds of axis reduce alike:
 ///
-/// 1. An axis that rank alignment inserted after the batch axis goes away, and the sum runs
-///    over the whole axis.
-/// 2. An axis where the input holds 1 position and the output holds more keeps its 1 position,
-///    and the sum runs over the positions of the output.
+/// 1. The reduction sums over each axis that rank alignment inserted after the batch axis.
+///    It then removes that axis.
+/// 2. An input axis with extent 1 keeps that extent.
+///    Its gradient sums over the output positions.
 ///
 /// An input that did not broadcast at all takes the gradient as it is
 ///
@@ -305,8 +303,8 @@ fn reduce_to(grad: &Tensor, target: &[usize]) -> Tensor {
     );
     let inserted = grad.ndim() - target.len();
 
-    // Rank alignment inserts every extra axis directly after the batch axis, so each sum takes
-    // axis 1 away and the next inserted axis takes its place
+    // Rank alignment inserts extra axes after the batch axis. Each sum removes axis 1, so the
+    // next inserted axis takes its place
     let mut reduced = if inserted == 0 {
         let mut owned = Tensor::zeros(grad.raw_dim());
         owned.assign(grad);
@@ -329,9 +327,8 @@ fn reduce_to(grad: &Tensor, target: &[usize]) -> Tensor {
 
 /// Opens the build of 1 elementwise merge layer, and records the shapes it accepted
 ///
-/// The 3 steps repeat over the 6 elementwise layers: refuse an input count that the arity
-/// rejects, refuse a second build for other shapes, and refuse shapes that the shape rule
-/// cannot merge. A layer that already holds the build for these shapes keeps it
+/// All 6 elementwise layers check input count, prior build shapes, and shape compatibility. A
+/// layer that already holds the build for these shapes keeps it
 ///
 /// # Parameters
 ///
@@ -453,6 +450,7 @@ macro_rules! elementwise_merge_layer_functions {
 pub(in crate::neural_network::layers::merge) use elementwise_merge_layer_functions;
 
 /// Unit tests of the shared shape rule, the forward broadcast, and the gradient reduction
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::*;

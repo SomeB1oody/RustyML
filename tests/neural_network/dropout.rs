@@ -1,7 +1,7 @@
 //! Integration tests for Dropout, SpatialDropout1D, SpatialDropout2D, and SpatialDropout3D
 //!
 //! Focus areas:
-//! - Forward values (not just shapes): inverted-dropout scaling, rate=0 identity, rate=1 zeros
+//! - Forward values (not just shapes): inverted-dropout scaling, rate=0 identity, rate=1 0s
 //! - Eval mode: output == input (identity), whatever the rate
 //! - SpatialDropout channel-consistency: whole channel 0 or fully kept and scaled
 //! - Constructor rejects invalid rates
@@ -23,8 +23,6 @@ use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
 
-// Helpers
-
 /// Tensor of all-ones with the given flat shape
 fn ones(shape: &[usize]) -> Tensor {
     Tensor::ones(shape)
@@ -36,8 +34,6 @@ fn filled(shape: &[usize], value: f32) -> Tensor {
     let data: Vec<f32> = vec![value; n];
     Tensor::from_shape_vec(ndarray::IxDyn(shape), data).unwrap()
 }
-
-// Dropout - basic forward values
 
 #[test]
 fn dropout_rate_zero_is_identity_in_training_mode() {
@@ -60,7 +56,7 @@ fn dropout_rate_zero_is_identity_in_training_mode() {
 
 #[test]
 fn dropout_rate_one_yields_zeros_in_training_mode() {
-    // rate=1 takes the dedicated early-return path, giving all zeros
+    // rate=1 takes the dedicated early-return path, giving all 0s
     let mut layer = Dropout::new(1.0).unwrap();
     let mut ctx = Ctx::training();
 
@@ -133,7 +129,7 @@ fn dropout_training_inverted_scaling_on_kept_units() {
             approx::assert_abs_diff_eq!(v, 2.0_f32, epsilon = 1e-5);
         }
     }
-    // The wide [20%, 80%] window tolerates randomness around the ~50% expected zero fraction
+    // The wide [20%, 80%] window tolerates randomness around the ~50% expected 0 fraction
     let zero_frac = zero_count as f32 / 200.0;
     assert!(
         (0.20..=0.80).contains(&zero_frac),
@@ -144,7 +140,7 @@ fn dropout_training_inverted_scaling_on_kept_units() {
 
 #[test]
 fn dropout_rate_one_backward_returns_zeros() {
-    // rate=1 zeroes the forward output. Backward returns zeros too, from its own early-return path
+    // rate=1 sets the forward output to 0. Backward returns 0s too, from its own early-return path
     let mut layer = Dropout::new(1.0).unwrap();
     let mut ctx = Ctx::training();
 
@@ -213,8 +209,6 @@ fn dropout_backward_kept_units_scaled_correctly() {
         }
     }
 }
-
-// Dropout - error paths
 
 #[test]
 fn dropout_constructor_rejects_invalid_rate() {
@@ -306,8 +300,6 @@ fn dropout_accepts_any_rank() {
     assert!(layer.forward(&a, &mut Ctx::inference()).is_ok());
     assert!(layer.forward(&b, &mut Ctx::inference()).is_ok());
 }
-
-// SpatialDropout1D - channel-consistency and values
 
 #[test]
 fn spatial_dropout_1d_rate_zero_is_identity() {
@@ -431,7 +423,7 @@ fn spatial_dropout_1d_kept_channel_exact_scale() {
 
 #[test]
 fn spatial_dropout_1d_backward_channel_consistency() {
-    // Backward: gradient zeroed for dropped channels, scaled for kept channels
+    // Backward: gradient is 0 for dropped channels and scaled for kept channels
     // Channels-last layout: (batch=1, length=4, channels=6)
     let rate = 0.5_f32;
     let mut layer = SpatialDropout1D::new(rate).unwrap();
@@ -458,8 +450,6 @@ fn spatial_dropout_1d_backward_channel_consistency() {
         }
     }
 }
-
-// SpatialDropout1D - error paths
 
 #[test]
 fn spatial_dropout_1d_rejects_invalid_rate() {
@@ -498,8 +488,6 @@ fn spatial_dropout_1d_rejects_wrong_ndim_predict() {
     let input_2d = Array::ones((2, 8)).into_dyn();
     assert!(layer.forward(&input_2d, &mut Ctx::inference()).is_err());
 }
-
-// SpatialDropout2D - channel-consistency and values
 
 #[test]
 fn spatial_dropout_2d_rate_zero_is_identity() {
@@ -627,8 +615,6 @@ fn spatial_dropout_2d_backward_channel_consistency() {
     }
 }
 
-// SpatialDropout3D - channel-consistency and values
-
 #[test]
 fn spatial_dropout_3d_rate_zero_is_identity() {
     // Channels-last: (batch=1, depth=2, height=3, width=3, channels=3)
@@ -728,7 +714,7 @@ fn spatial_dropout_3d_rejects_invalid_rate() {
 
 #[test]
 fn spatial_dropout_3d_backward_channel_consistency() {
-    // Backward: a whole channel's gradient must be uniform (all zero or all scaled)
+    // Backward: a whole channel's gradient must be uniform (all 0 or all scaled)
     // Channels-last layout: (batch=1, depth=2, height=2, width=2, channels=4)
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate);
@@ -864,9 +850,8 @@ fn dropout_noise_shape_of_all_none_matches_the_default() {
 
 /// TRAP (a): the layer samples at the small shape, and never at the full shape
 ///
-/// A `noise_shape` of `[2, 1, 4]` over a `[2, 3, 4]` input must draw exactly 8 values. An
-/// implementation that samples 24 values at the full shape and then zeroes axis 1 reproduces
-/// 1 sample by coincidence and is statistically wrong.
+/// A `noise_shape` of `[2, 1, 4]` over a `[2, 3, 4]` input must draw exactly 8 values.
+/// A full-shape draw uses 24 values. Selecting a slice from that draw gives the wrong shared-mask distribution.
 ///
 /// The check pins the draw count and the draw order together. A second layer whose input shape
 /// IS `[2, 1, 4]`, at the same seed and with no noise_shape, must produce the identical mask.
@@ -895,7 +880,7 @@ fn dropout_noise_shape_draws_only_at_the_resolved_small_shape() {
 ///
 /// With a `[4, 1, 3]` noise_shape over a `[4, 200, 3]` input, the mask holds 12 draws. The mean
 /// keep rate over many seeds therefore varies with the spread of 12 coin flips, about
-/// `0.25 / 12 = 0.0208`. A sampler that drew 2400 independent values and then zeroed axis 1
+/// `0.25 / 12 = 0.0208`. A sampler that drew 2400 independent values and then sets axis 1 to 0
 /// would still average 0.5. Its spread would be about `0.25 / 2400 = 0.000104`, which is
 /// 200 times smaller. Keras measures 0.0209 here
 #[test]
@@ -1065,7 +1050,7 @@ fn dropout_noise_shape_none_entry_takes_the_input_extent() {
     );
 }
 
-/// TRAP (c): a rate of 1 with a noise_shape is legal and gives all zeros
+/// TRAP (c): a rate of 1 with a noise_shape is legal and gives all 0s
 #[test]
 fn dropout_noise_shape_at_rate_one_gives_zeros() {
     let mut layer = Dropout::new(1.0)

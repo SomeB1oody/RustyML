@@ -8,8 +8,6 @@ use ndarray::{Array1, Array2, array};
 use rustyml::math::DistanceCalculationMetric;
 use rustyml::metrics::*;
 
-// adjusted_rand_index
-
 /// Identical 3-class assignment gives ARI = 1.0 exactly
 #[test]
 fn test_ari_identical_clustering() {
@@ -80,8 +78,6 @@ fn test_ari_empty_panics() {
     let _ = adjusted_rand_index(&t, &p);
 }
 
-// normalized_mutual_info
-
 /// Identical clustering gives NMI = 1.0
 #[test]
 fn test_nmi_identical_clustering() {
@@ -93,7 +89,7 @@ fn test_nmi_identical_clustering() {
     );
 }
 
-/// Canonical pair [0,0,1,1,2,2] vs [0,0,1,2,1,2] gives NMI = (1/3 + (2/3)*ln(3/2)/ln(3))
+/// The canonical label pair gives NMI = 1/3 + (2/3)*ln(3/2)/ln(3).
 #[test]
 fn test_nmi_canonical_pair() {
     let t = array![0isize, 0, 1, 1, 2, 2];
@@ -114,7 +110,7 @@ fn test_nmi_independent_clustering() {
     assert_abs_diff_eq!(normalized_mutual_info(&t, &p), 0.0, epsilon = 1e-12);
 }
 
-/// NMI = 0 when a partition has a single cluster (zero entropy, zero denominator)
+/// A partition with 1 cluster has entropy 0 and mutual information 0, so NMI is 0.
 #[test]
 fn test_nmi_single_pred_cluster_zero() {
     let t = array![0isize, 0, 1, 1];
@@ -134,8 +130,8 @@ fn test_nmi_symmetry() {
     );
 }
 
-/// Asymmetric case true=[0,0,1,1] pred=[0,1,2,3]: MI=ln(2), H_true=ln(2), H_pred=2ln(2), so with
-/// arithmetic-mean normalization NMI = ln(2) / ((ln(2) + 2ln(2)) / 2) = 2/3
+/// The true labels form 2 equal classes, and predicted labels form 4 singletons.
+/// MI and H_true equal ln(2), while H_pred equals 2ln(2). Arithmetic-mean normalization gives NMI = 2/3.
 #[test]
 fn test_nmi_asymmetric_case() {
     let t = array![0isize, 0, 1, 1];
@@ -173,8 +169,6 @@ fn test_nmi_empty_panics() {
     let p: Array1<isize> = array![];
     let _ = normalized_mutual_info(&t, &p);
 }
-
-// adjusted_mutual_info
 
 /// Identical clustering gives AMI = 1.0 exactly
 #[test]
@@ -232,8 +226,6 @@ fn test_ami_empty_panics() {
     let _ = adjusted_mutual_info(&t, &p);
 }
 
-// homogeneity_score
-
 /// Each cluster is a pure subset of 1 class, so homogeneity equals 1.0.
 #[test]
 fn test_homogeneity_perfect() {
@@ -283,8 +275,6 @@ fn test_homogeneity_empty_panics() {
     let p: Array1<isize> = array![];
     let _ = homogeneity_score(&t, &p);
 }
-
-// completeness_score
 
 /// All members of each class fall in 1 cluster, so completeness equals 1.0.
 #[test]
@@ -349,8 +339,6 @@ fn test_completeness_empty_panics() {
     let _ = completeness_score(&t, &p);
 }
 
-// v_measure_score
-
 /// Identical clustering gives V-measure = 1.0
 #[test]
 fn test_v_measure_identical() {
@@ -413,8 +401,6 @@ fn test_v_measure_empty_panics() {
     let p: Array1<isize> = array![];
     let _ = v_measure_score(&t, &p);
 }
-
-// fowlkes_mallows_score
 
 /// Identical clustering gives FMI = 1.0
 #[test]
@@ -490,8 +476,6 @@ fn test_fmi_empty_panics() {
     let p: Array1<isize> = array![];
     let _ = fowlkes_mallows_score(&t, &p);
 }
-
-// silhouette_score
 
 /// Well-separated 1-D clusters give silhouette = 359/399 (~ 0.8997)
 #[test]
@@ -611,8 +595,6 @@ fn test_silhouette_empty_panics() {
     let _ = silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean);
 }
 
-// davies_bouldin_score
-
 /// Well-separated 1-D clusters give DB = 0.1
 #[test]
 fn test_db_well_separated_exact() {
@@ -687,8 +669,6 @@ fn test_db_empty_panics() {
     let labels: Array1<isize> = array![];
     let _ = davies_bouldin_score(&x, &labels);
 }
-
-// calinski_harabasz_score
 
 /// Well-separated 1-D clusters give CH = 200.0
 #[test]

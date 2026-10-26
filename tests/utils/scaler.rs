@@ -10,8 +10,6 @@ use rustyml::utils::normalize::{NormalizationAxis, NormalizationOrder, normalize
 use rustyml::utils::standardize::{StandardizationAxis, standardize};
 use rustyml::utils::{MaxAbsScaler, MinMaxScaler, Normalizer, RobustScaler, StandardScaler};
 
-// Fitted statistics
-
 /// The fitted statistics are the population mean and standard deviation per feature
 #[test]
 fn test_fit_learns_population_statistics() {
@@ -55,8 +53,6 @@ fn test_fit_replaces_previous_statistics() {
     assert_allclose(scaler.get_mean().unwrap(), &array![20.0], 1e-12);
 }
 
-// Transform semantics
-
 /// `fit_transform` on the training matrix reproduces the stateless column standardization
 #[test]
 fn test_fit_transform_matches_stateless_standardize() {
@@ -88,7 +84,7 @@ fn test_transform_uses_frozen_training_statistics() {
     assert!((self_scaled[[0, 0]] - z_test[[0, 0]]).abs() > 1.0);
 }
 
-/// A single sample transforms correctly, which the stateless function cannot do
+/// A single sample uses the fitted column statistics during transform.
 #[test]
 fn test_transform_single_sample() {
     let mut scaler = StandardScaler::new();
@@ -161,8 +157,6 @@ fn test_with_mean_and_with_std_flags() {
     let restored = scaler.inverse_transform(&untouched).unwrap();
     assert_eq!(restored, x);
 }
-
-// Incremental fitting
 
 /// `partial_fit` over batches matches a single `fit` over their concatenation
 #[test]
@@ -238,9 +232,7 @@ fn test_partial_fit_feature_mismatch() {
     }
 }
 
-// Edge cases
-
-/// A constant feature is divided by 1.0 and maps to zeros, leaving other features alone
+/// A constant feature is divided by 1.0 and maps to 0, leaving other features alone
 #[test]
 fn test_constant_feature() {
     let x = array![[3.0, 1.0], [3.0, 3.0], [3.0, 5.0]];
@@ -253,7 +245,7 @@ fn test_constant_feature() {
     assert!(z.iter().all(|v| v.is_finite()));
 }
 
-/// A single training sample gives zero variance everywhere, so every feature is constant
+/// A single training sample gives variance 0 everywhere, so every feature is constant
 #[test]
 fn test_single_sample_fit() {
     let mut scaler = StandardScaler::new();
@@ -263,8 +255,6 @@ fn test_single_sample_fit() {
     assert_allclose(scaler.get_scale().unwrap(), &array![1.0, 1.0], 1e-12);
     assert_eq!(scaler.get_n_samples_seen(), 1);
 }
-
-// Traits
 
 /// The scaler is usable through the shared `Fit` / `Transform` / `FitTransform` traits
 #[test]
@@ -282,8 +272,6 @@ fn test_scaler_through_shared_traits() {
     let fitted = FitTransform::fit_transform(&mut other, &x_train).unwrap();
     assert_eq!(fitted.dim(), (3, 2));
 }
-
-// Persistence
 
 /// A fitted scaler survives a save/load round trip and keeps transforming identically
 #[test]
@@ -306,8 +294,6 @@ fn test_save_and_load_round_trip() {
     assert_eq!(loaded.get_n_samples_seen(), 3);
     assert_eq!(loaded.transform(&x_test).unwrap(), expected);
 }
-
-// Error paths
 
 /// Transforming before fitting reports NotFitted
 #[test]
@@ -381,8 +367,6 @@ fn test_non_finite_input() {
     }
 }
 
-// MinMaxScaler
-
 /// The training extrema are recorded and mapped onto the default `[0, 1]` range
 #[test]
 fn test_min_max_default_range() {
@@ -428,7 +412,7 @@ fn test_min_max_custom_feature_range() {
         1e-12,
     );
 
-    // Retargeting after fitting keeps the learned extrema and only moves the destination
+    // A new feature range keeps the fitted extrema and changes the output interval.
     let retargeted = scaler.clone().with_feature_range(0.0, 100.0).unwrap();
     assert_allclose(
         &retargeted.transform(&x).unwrap(),
@@ -598,9 +582,7 @@ fn test_min_max_errors() {
     }
 }
 
-// MaxAbsScaler
-
-/// Each feature is divided by its own magnitude, leaving zeros and signs intact
+/// Each feature is divided by its own magnitude, leaving 0 and signs intact
 #[test]
 fn test_max_abs_divides_by_magnitude() {
     let x = array![[1.0, -4.0], [0.0, 2.0], [-2.0, 0.0]];
@@ -614,7 +596,7 @@ fn test_max_abs_divides_by_magnitude() {
     assert_eq!(scaler.get_n_features(), Some(2));
 }
 
-/// Structural zeros stay zero (the property that separates MaxAbs from MinMax)
+/// Structural 0 stay 0 (the property that separates MaxAbs from MinMax)
 #[test]
 fn test_max_abs_preserves_zeros_where_min_max_does_not() {
     let x = array![[0.0, 1.0], [4.0, 2.0], [8.0, 3.0]];
@@ -622,10 +604,10 @@ fn test_max_abs_preserves_zeros_where_min_max_does_not() {
     let max_abs = MaxAbsScaler::new().fit_transform(&x).unwrap();
     let min_max = MinMaxScaler::new().fit_transform(&x).unwrap();
 
-    // MaxAbs never shifts, so a zero entry stays exactly zero
+    // MaxAbs never shifts, so a entry with value 0 stays exactly 0
     assert_eq!(max_abs[[0, 0]], 0.0);
-    // MinMax shifts by the column minimum, so column 1's scaled zero comes from its
-    // minimum value (1.0), not from an actual zero entry
+    // MinMax maps column 1's minimum value (1.0) to 0.
+    // That input entry has value 1.0.
     assert_eq!(min_max[[0, 1]], 0.0);
     assert!((max_abs[[0, 1]] - 1.0 / 3.0).abs() < 1e-12);
 }
@@ -640,7 +622,7 @@ fn test_max_abs_bounds_training_values() {
     assert!(z.iter().all(|v| v.abs() <= 1.0));
 }
 
-/// An all-zero feature keeps a divisor of 1.0 and stays zero
+/// An feature filled with 0 keeps a divisor of 1.0 and stays 0
 #[test]
 fn test_max_abs_all_zero_feature() {
     let x = array![[0.0, 1.0], [0.0, 2.0]];
@@ -736,8 +718,6 @@ fn test_max_abs_errors() {
     }
 }
 
-// Normalizer
-
 /// Each row is scaled to unit norm under the configured order
 #[test]
 fn test_normalizer_orders() {
@@ -794,7 +774,7 @@ fn test_normalizer_is_batch_independent() {
     }
 }
 
-/// A zero row has no direction and is left exactly as-is
+/// A row filled with 0 has no direction and is left exactly as-is
 #[test]
 fn test_normalizer_zero_row() {
     let x = array![[3.0, 4.0], [0.0, 0.0]];
@@ -846,8 +826,6 @@ fn test_normalizer_errors() {
         other => panic!("expected DimensionMismatch, got {other:?}"),
     }
 }
-
-// Family through shared traits
 
 /// Every scaler in the family is usable through `Fit` / `Transform` / `FitTransform`
 #[test]
@@ -901,8 +879,6 @@ fn test_scaler_family_through_shared_traits() {
     );
 }
 
-// RobustScaler
-
 /// Reproduces the worked example from scikit-learn's `RobustScaler` documentation
 #[test]
 fn test_robust_matches_scikit_learn_reference() {
@@ -917,7 +893,7 @@ fn test_robust_matches_scikit_learn_reference() {
     );
 }
 
-/// The quantiles use NumPy's linear interpolation, so they match a ported pipeline exactly
+/// Quantiles use linear interpolation between adjacent sorted values.
 #[test]
 fn test_robust_quantile_interpolation() {
     // Quantiles of [1, 2, 3, 4]: q25 = 1.75, median = 2.5, q75 = 3.25
@@ -940,7 +916,7 @@ fn test_robust_quantile_interpolation() {
     assert_allclose(scaler.get_scale().unwrap(), &array![2.0], 1e-12);
 }
 
-/// The robust statistics ignore an extreme value that wrecks the mean and standard deviation
+/// The test outlier leaves robust statistics unchanged but shifts the mean and standard deviation.
 #[test]
 fn test_robust_resists_outliers() {
     let clean = array![
@@ -975,7 +951,7 @@ fn test_robust_resists_outliers() {
     assert_eq!(robust_clean.get_center(), robust_spoiled.get_center());
     assert_eq!(robust_clean.get_scale(), robust_spoiled.get_scale());
 
-    // StandardScaler on the same data moves a long way
+    // The outlier changes StandardScaler statistics on the same data.
     let mut standard_clean = StandardScaler::new();
     standard_clean.fit(&clean).unwrap();
     let mut standard_spoiled = StandardScaler::new();
@@ -984,7 +960,7 @@ fn test_robust_resists_outliers() {
         standard_spoiled.get_mean().unwrap()[0] > 100.0 * standard_clean.get_mean().unwrap()[0]
     );
 
-    // And the 8 in-distribution rows stay comparable under robust scaling
+    // The 8 in-distribution rows remain close under robust scaling.
     let z = robust_spoiled.transform(&spoiled).unwrap();
     assert!(z.rows().into_iter().take(8).all(|row| row[0].abs() <= 1.0));
 }
@@ -1015,7 +991,7 @@ fn test_robust_custom_quantile_range() {
     assert!(wide.get_scale().unwrap()[0] > iqr.get_scale().unwrap()[0]);
     assert_eq!(wide.get_quantile_range(), (10.0, 90.0));
 
-    // Refitting an already-fitted scaler through the builder also clears the old numbers
+    // A new quantile range clears the fitted statistics.
     let retargeted = iqr.clone().with_quantile_range(5.0, 95.0).unwrap();
     assert!(retargeted.get_scale().is_none());
     assert_eq!(retargeted.get_n_samples_seen(), 0);
@@ -1041,7 +1017,7 @@ fn test_robust_invalid_quantile_range() {
     }
 }
 
-/// A constant feature has no spread, so it centers to zeros rather than dividing by zero
+/// A constant feature has no spread, so it centers to 0 rather than dividing by 0
 #[test]
 fn test_robust_constant_feature() {
     let x = array![[3.0, 1.0], [3.0, 3.0], [3.0, 5.0]];

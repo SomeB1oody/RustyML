@@ -1,36 +1,8 @@
-//! Shared parallel/serial gate thresholds for the elementwise kernel classes
+//! Shared thresholds for serial and parallel numeric kernels.
 //!
-//! Every gated pass in the crate belongs to 1 of a few cost classes. Declaring 1 gate per
-//! class here keeps its value in 1 place. Call sites import the getter for their kernel's
-//! class instead of restating the value.
-//!
-//! The classes come in 2 element widths. The `f32` gates serve the neural-network layers.
-//! The `f64` gates serve the classical-ML and utils modules. The 2 widths use separate gates.
-//!
-//! Each gate is a runtime-tunable atomic (see `tunable_gate!`). Override the default at
-//! runtime through [`crate::tuning`]. A gate only picks serial versus rayon. Because the gated
-//! reductions use the deterministic blocked fold of [`crate::math::reduction`], moving a gate
-//! never changes a result. The parallel path matches the serial result.
-//!
-//! The engine-specific gates stay with their engines, because their work metrics are
-//! engine-specific rather than shared by a class:
-//!
-//! - the caller-side tiling constants in `crate::math::matmul` (the matrix product's own
-//!   scheduling belongs to the `gemmkit` backend, whose knobs live there instead of here)
-//! - `CONV_PARALLEL_MIN_FLOPS` and `CONV_MIN_CHUNK_POSITIONS` (the im2col+GEMM engine)
-//! - `POOL_PARALLEL_MIN_OPS`, `POOL_MIN_CHUNK_OUT`, and `POOL_MIN_CHUNK_CHANNELS` (the pooling
-//!   engine)
-//! - `UPSAMPLE_PARALLEL_MIN_OPS` (the upsampling resize engine, whose taps per output position
-//!   run from 1 to 11, so an element count alone would not compare 2 modes)
-//! - `BATCH_NORM_PARALLEL_THRESHOLD` (a per-layer mapping), plus the 2 gates the 3
-//!   normalization layers share, `COL_FOLD_PARALLEL_MIN_ELEMS` and `ROW_PASS_PARALLEL_MIN_ELEMS`
-//!
-//! 2 thresholds are plain constants rather than gates. `metrics` fixes its silhouette threshold.
-//! Its parallel fill is not bit-for-bit equal to its serial fill, so a movable value there
-//! would change a returned score. `math` fixes its exp-reduction threshold, because the block
-//! size already sets the smallest value that gives more than 1 task.
-
-// f32 classes (neural-network layers)
+//! Separate gates serve `f32` neural network work and `f64` estimator or utility work.
+//! Each atomic threshold can change at runtime through [`crate::tuning`].
+//! Engine-specific work thresholds stay with their engines.
 
 tunable_gate! {
     /// Cheap memory-bound `f32` maps: the activations with no transcendental call, such as
@@ -97,8 +69,6 @@ tunable_gate! {
         => naive_conv_parallel_min_flops / set_naive_conv_parallel_min_flops = 1_000_000
 }
 
-// f64 classes (classical ML / utils)
-
 tunable_gate! {
     /// Cheap memory-bound `f64` maps: centering, scaling, normalization, kernel-matrix
     /// centering, and similar 1- or 2-stream copy-speed loops. Gated on the total element
@@ -162,8 +132,6 @@ tunable_gate! {
         => sum_f64_parallel_min_elems / set_sum_f64_parallel_min_elems = 262_144
 }
 
-// The task-size caps of the parallel drivers
-
 /// Applies a test-only cap to a calibrated task size
 ///
 /// A parallel driver first computes the task size that its calibrated rule gives, and then
@@ -173,10 +141,9 @@ tunable_gate! {
 /// `natural` and adds 1 relaxed load. A value of 1 or more holds each task at that size or
 /// below. An input far under the calibrated size then still builds more than 1 task.
 ///
-/// A task size decides only where the task boundaries fall. Each driver that reads a capped
-/// size runs the same serial kernel over each task, and joins the results in task order. The
-/// result is therefore the same at every cap. See `crate::bench_internals` for the surface that
-/// installs a cap, and for the drivers that must never take one.
+/// The cap changes task boundaries.
+/// Callers must account for any resulting change in floating-point accumulation order.
+/// [`crate::bench_internals`] lists the drivers that expose caps and the convolution caveat.
 ///
 /// # Parameters
 /// - `natural` - The calibrated task size. It is 1 or more.

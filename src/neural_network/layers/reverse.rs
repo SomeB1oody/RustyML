@@ -1,4 +1,7 @@
 //! Reverse layer that flips the order of the positions along 1 axis
+//!
+//! The layer checks the selected axis, preserves the tensor shape, and reverses the same
+//! axis in the backward pass. Axis 0 is not allowed.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -25,25 +28,22 @@ use ndarray::{Axis, Slice};
 ///
 /// # Notes
 ///
-/// **The axis counts against the FULL rank, and axis 0 is the batch axis.** A negative axis
+/// The axis counts against the full rank. Axis 0 is the batch axis. A negative axis
 /// counts back from the end, so -1 is the last axis. The layer keeps the axis as given and
 /// resolves it against the rank on every call, which follows
 /// [`Concatenate`](crate::neural_network::layers::Concatenate). The batch axis is refused,
 /// because reversing it would reorder the samples of a batch against their targets.
 ///
-/// **The input must hold at least 3 axes.** A rank-2 input is 1 batch of feature vectors, and
-/// it holds no time axis and no spatial axis. Reversing the feature order of such an input is
-/// not an operation of this crate. It is what a caller gets by mistake, after leaving
-/// `return_sequences` unset on a recurrent branch. The build refuses that input rather than
-/// reordering the features without a word.
+/// The input must have at least 3 axes. Rank-2 feature batches have no time or spatial axis.
+/// The build rejects rank-2 input. Enable `return_sequences` on a recurrent branch to retain
+/// its time axis.
 ///
 /// **A padded sequence needs care.** This crate carries no mask. Padding that sits at the end
 /// of a sequence sits at the FRONT after this layer. A recurrent layer that reads the reversed
 /// sequence then starts on the padding. Reverse the values of a ragged batch yourself, per
 /// sample, before the model reads them.
 ///
-/// **The reported type carries the axis.** A checkpoint compares the type of every layer of a
-/// position, and it compares the shapes that the layer built for. This layer changes no shape
+/// The reported type carries the axis. A checkpoint compares each layer type and build shape. This layer changes no shape
 /// and holds no array. The axis is the only thing that separates 2 of them, and it is the only
 /// field where a strict load can see a difference. The type is therefore `Reverse(1)` and not
 /// `Reverse`, and a load that meets a different axis refuses.
@@ -58,7 +58,7 @@ use ndarray::{Axis, Slice};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array;
 ///
-/// // 2 samples, 4 timesteps, 3 features. Value 0 of every sequence is its first timestep
+/// // 2 samples, 4 timesteps, 3 features. Value 0 of every sequence is its first timestep.
 /// let x: Array<f32, _> = Array::from_shape_fn((2, 4, 3), |(_, t, _)| t as f32).into_dyn();
 ///
 /// let mut model = SequentialBuilder::new()
@@ -69,7 +69,7 @@ use ndarray::{Axis, Slice};
 ///
 /// let prediction = model.predict(&x).unwrap();
 /// assert_eq!(prediction.shape(), &[2, 4, 3]);
-/// // The first timestep of the output is the last timestep of the input
+/// // The first timestep of the output is the last timestep of the input.
 /// assert_eq!(prediction[[0, 0, 0]], 3.0);
 /// ```
 #[derive(Debug)]

@@ -2,7 +2,7 @@
 //!
 //! [`SeparableConv2D`] runs a depthwise stage that convolves each input channel on its own,
 //! followed by a pointwise stage that mixes the depthwise outputs with a 1x1 convolution. This
-//! factoring uses fewer parameters and less computation than a standard convolution with the
+//! factorization can use fewer parameters and less work than a standard convolution with the
 //! same channel counts. `SeparableConv2DCache` holds the tensors the layer parks between its
 //! forward and backward passes.
 
@@ -32,8 +32,8 @@ use ndarray::{Array1, Array4};
 
 /// A 2D separable convolutional layer
 ///
-/// Runs a depthwise step followed by a pointwise step. This uses fewer parameters and less
-/// computation than a standard convolution. Input shape is \[batch_size, height, width, channels\].
+/// Runs a depthwise step followed by a pointwise step. This can use fewer parameters and less
+/// work than a standard convolution. Input shape is \[batch_size, height, width, channels\].
 /// Intermediate depthwise output shape is
 /// \[batch_size, height', width', channels * depth_multiplier\]. Final output shape is
 /// \[batch_size, height', width', filters\]
@@ -57,10 +57,10 @@ use ndarray::{Array1, Array4};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array4;
 ///
-/// // input tensor: [batch_size, height, width, channels]
+/// // input tensor: [batch_size, height, width, channels].
 /// let x = Array4::ones((2, 32, 32, 3)).into_dyn();
 ///
-/// // target tensor
+/// // target tensor.
 /// let y = Array4::ones((2, 32, 32, 64)).into_dyn();
 ///
 /// let mut model = SequentialBuilder::new()
@@ -99,7 +99,8 @@ pub struct SeparableConv2D {
     pointwise_weights: Array4<f32>,
     /// Bias vector with shape \[filters\]
     ///
-    /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
+    /// The array stays allocated when `use_bias` is false. The forward pass and weight rosters
+    /// exclude it.
     /// The pointwise stage adds nothing, `weights` hides the array, and `parameters_mut` never
     /// yields it, so a bias-free layer holds it and no more
     bias: Array1<f32>,
@@ -120,8 +121,7 @@ pub struct SeparableConv2D {
 impl SeparableConv2D {
     /// Creates a new 2D separable convolutional layer
     ///
-    /// The layer initializes weights with Xavier (Glorot) uniform initialization. Biases start
-    /// at 0
+    /// The build draws weights with Xavier (Glorot) uniform initialization and sets biases to 0.
     ///
     /// # Parameters
     ///
@@ -250,8 +250,9 @@ impl SeparableConv2D {
     /// deterministically
     ///
     /// By default, the layer seeds weights from the global seed or entropy (see
-    /// [`crate::random`]). This re-runs Xavier/Glorot uniform initialization with `random_state`.
-    /// Call it before you assign custom weights or start training. The bias stays zero-initialized
+    /// [`crate::random`]). For a built layer, this repeats Xavier/Glorot uniform initialization with `random_state`.
+    /// Call it before you assign custom weights or start training. A built layer also resets
+    /// its bias to 0
     ///
     /// # Parameters
     ///
@@ -316,8 +317,8 @@ impl SeparableConv2D {
         let input_width = input_shape[2];
 
         let (keff_h, keff_w) = self.effective_kernel_size();
-        // A `Valid` layer whose effective kernel is longer than an input axis is refused here,
-        // rather than reported as an axis of 0 positions that every later layer would carry
+        // Reject `Valid` padding if the effective kernel exceeds an input axis. This prevents
+        // an empty output axis.
         let (output_height, output_width) = match self.padding {
             PaddingType::Valid => (
                 valid_output_size(
@@ -458,7 +459,7 @@ impl SeparableConv2D {
         ]
     }
 
-    /// Calculates the symmetric zero-padding (total height/width pad) for the depthwise stage
+    /// Calculates the symmetric padding with 0 (total height/width pad) for the depthwise stage
     ///
     /// Returns `(0, 0)` for `Valid` padding. For `Same`, returns the total padding along each
     /// spatial axis required so a stride-`s` convolution yields the given output size. The
@@ -486,11 +487,10 @@ impl SeparableConv2D {
 
     /// Sets whether the layer adds a bias to the pointwise output (defaults to `true`)
     ///
-    /// With `use_bias` set to false the layer holds the 2 kernels alone: `param_count` counts
-    /// the 2 kernels, `parameters_mut` yields the 2 kernels, and a checkpoint of the layer holds
-    /// the paths `<position>.depthwise_kernel` and `<position>.pointwise_kernel`. A checkpoint
-    /// written by a layer that has a bias therefore fails to load into a layer that has none,
-    /// and the refusal names the path
+    /// With `use_bias` set to false, the weight roster contains only the 2 kernels. `param_count` counts
+    /// them, and `parameters_mut` yields them. Checkpoints store `<position>.depthwise_kernel`
+    /// and `<position>.pointwise_kernel`. A checkpoint with bias cannot load into a layer
+    /// without bias. The error names the path.
     ///
     /// # Parameters
     ///
@@ -514,6 +514,10 @@ impl SeparableConv2D {
     ///   \[1, 1, channels * depth_multiplier, filters\]
     /// - `bias` - 1D bias vector with shape \[filters\], or `None` for a layer built with
     ///   [`with_use_bias(false)`](Self::with_use_bias)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - Success after the weights are set
     ///
     /// # Errors
     ///
@@ -699,8 +703,7 @@ impl UnaryLayer for SeparableConv2D {
                 .expect("pointwise weight gradient shape matches weights")
                 .into_dyn(),
         )?;
-        // A bias-free layer writes no bias gradient, so the store holds none and no
-        // optimizer state is ever keyed on a bias that the layer does not hold
+        // A layer without bias has no stored bias gradient or bias optimizer state.
         if self.use_bias {
             ctx.add_grad("bias", Array1::from_vec(pw_grads.bias_grad).into_dyn())?;
         }

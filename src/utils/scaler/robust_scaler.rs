@@ -1,13 +1,7 @@
-//! Outlier-resistant scaling built on quantiles rather than moments
+//! Feature scaling with medians and quantile ranges.
 //!
-//! Provides [`RobustScaler`], which centers on the median and divides by the interquartile
-//! range instead of using the mean and standard deviation. Both statistics are order-based, so
-//! a handful of extreme values moves them barely at all. A single outlier can drag
-//! [`StandardScaler`]'s mean and inflate its standard deviation. An outlier can also stretch
-//! [`MinMaxScaler`]'s denominator until every other sample is squeezed into a sliver of the range
-//!
-//! [`StandardScaler`]: super::StandardScaler
-//! [`MinMaxScaler`]: super::MinMaxScaler
+//! [`RobustScaler`] stores each training feature's median and selected quantile spread.
+//! Shared quantile helpers sort each feature and interpolate between adjacent values.
 
 use super::{
     column_quantiles, fitted, for_each_row, handle_zero_scale, validate_matrix,
@@ -17,30 +11,15 @@ use crate::error::Error;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
 
-/// Scales features by their median and interquartile range
+/// Scales each feature with a stored median and quantile spread.
 ///
-/// Rows are samples and columns are features. [`fit`](Self::fit) records each feature's median
-/// and the spread between the 2 quantiles of `quantile_range` (the interquartile range by
-/// default). [`transform`](Self::transform) applies `(x - center) / scale` with those stored
-/// values. A feature whose quantile spread is degenerate gets a divisor of `1.0`, so it centers
-/// to zeros instead of producing `NaN`
+/// Rows are samples and columns are features.
+/// By default, the transform subtracts the median and divides by the interquartile range.
+/// A near-spread 0 uses a divisor of `1.0`, so values retain their distance from the median.
+/// The output has no fixed range or required variance.
 ///
-/// This is scikit-learn's `RobustScaler`. Use it when the data has outliers you do not want to
-/// remove. The median ignores how far the extremes sit, and the IQR measures the bulk of the
-/// distribution rather than its tails. The trade-off is that the output has no fixed range and
-/// no unit variance, only a comparable middle
-///
-/// # Differences from the rest of the family
-///
-/// - **No `partial_fit`.** Quantiles cannot merge across batches the way moments and extrema
-///   can. The whole training matrix must be in hand (scikit-learn has no `partial_fit` here
-///   either)
-/// - **No `unit_variance` option.** scikit-learn can also rescale so that normally distributed
-///   features come out with unit variance. That needs the inverse normal CDF, which this crate
-///   does not provide
-/// - As with [`StandardScaler`](super::StandardScaler), `center_` and `scale_` are computed and
-///   kept even when `with_centering` / `with_scaling` are `false`. The flags decide only what
-///   [`transform`](Self::transform) applies
+/// Fitting computes statistics even when centering or scaling is disabled.
+/// This scaler has no incremental fit or unit-variance option.
 ///
 /// # Examples
 ///
@@ -48,7 +27,7 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
 /// use ndarray::array;
 /// use rustyml::utils::RobustScaler;
 ///
-/// // Two identical features, except that column 1's last value is a wild outlier
+/// // 2 identical features, except that column 1's last value is a wild outlier.
 /// let x = array![
 ///     [1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0], [5.0, 5.0],
 ///     [6.0, 6.0], [7.0, 7.0], [8.0, 8.0], [9.0, 1000.0],
@@ -57,11 +36,11 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
 /// let mut scaler = RobustScaler::new();
 /// let z = scaler.fit_transform(&x).unwrap();
 ///
-/// // Both columns get the same center and scale: the outlier never enters either statistic
+/// // Both columns get the same center and scale: the outlier never enters either statistic.
 /// assert_eq!(scaler.get_center().unwrap(), &array![5.0, 5.0]);
 /// assert_eq!(scaler.get_scale().unwrap(), &array![4.0, 4.0]);
 ///
-/// // So the bulk of the data lands on a reasonable scale, and the outlier stays visible as one
+/// // The first 8 rows have magnitudes at most 1, while the outlier stays above 200.
 /// assert!(z.rows().into_iter().take(8).all(|row| row.iter().all(|v| v.abs() <= 1.0)));
 /// assert!(z[[8, 1]] > 200.0);
 /// ```
@@ -73,20 +52,25 @@ pub struct RobustScaler {
     with_scaling: bool,
     /// Quantile percentages `(low, high)` whose spread becomes the divisor
     quantile_range: (f64, f64),
-    /// Per-feature median learned during fitting (scikit-learn's `center_`)
+    /// Per-feature median learned during fitting
     center: Option<Array1<f64>>,
     /// Per-feature divisor: the quantile spread, or `1.0` when it is degenerate (`scale_`)
     scale: Option<Array1<f64>>,
     /// Number of samples the statistics were computed over
-    ///
-    /// A RustyML addition for symmetry with the rest of the family. scikit-learn's
-    /// `RobustScaler` has no such attribute
     n_samples_seen: usize,
 }
 
 impl Default for RobustScaler {
     /// Creates a scaler centering on the median and dividing by the IQR, equivalent to
     /// [`RobustScaler::new`]
+    ///
+    /// # Default Values
+    ///
+    /// Center and scale enabled, quantile range `(25.0, 75.0)`, no fitted statistics
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Unfitted scaler with the default options
     fn default() -> Self {
         Self::new()
     }
@@ -148,7 +132,7 @@ impl RobustScaler {
     /// Sets the quantile percentages whose spread becomes the divisor (default: `(25.0, 75.0)`)
     ///
     /// A wider range (say `(10.0, 90.0)`) uses more of the distribution and reacts more to the
-    /// tails. A narrower one is more resistant but rests on fewer samples
+    /// tails. A narrower range uses fewer central samples
     ///
     /// # Parameters
     ///
@@ -188,7 +172,6 @@ impl RobustScaler {
         Ok(self)
     }
 
-    // Getters
     get_field!(get_with_centering, with_centering, bool);
     get_field!(get_with_scaling, with_scaling, bool);
     get_field!(get_quantile_range, quantile_range, (f64, f64));
@@ -196,7 +179,7 @@ impl RobustScaler {
     get_field_as_ref!(get_center, center, Option<&Array1<f64>>);
     get_field_as_ref!(get_scale, scale, Option<&Array1<f64>>);
 
-    /// Gets the number of features the scaler was fitted on (scikit-learn's `n_features_in_`)
+    /// Gets the number of features the scaler was fitted on
     ///
     /// # Returns
     ///
@@ -266,12 +249,12 @@ impl RobustScaler {
     ///
     /// - [`Error::NotFitted`] - If the scaler has not been fitted
     /// - [`Error::EmptyInput`] - If `x` has no rows or no columns
-    /// - [`Error::DimensionMismatch`] - If `x`'s feature count differs from the fitted one
+    /// - [`Error::DimensionMismatch`] - If `x`'s feature count differs from the fitted 1
     /// - [`Error::NonFinite`] - If `x` contains NaN or infinite values
     ///
     /// # Performance
     ///
-    /// One fused pass per row (subtract and divide together), parallelized across rows above
+    /// 1 fused pass per row (subtract and divide together), parallelized across rows above
     /// the calibrated cheap-map gate (see `crate::parallel_gates`)
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
@@ -334,8 +317,9 @@ impl RobustScaler {
 
     /// Maps scaled data back to the original feature space
     ///
-    /// Applies `x * scale + center`, the exact inverse of [`transform`](Self::transform). A
-    /// feature whose quantile spread was degenerate comes back as its median
+    /// Reverses the enabled scale and center steps with the stored training statistics.
+    /// A degenerate quantile spread uses a divisor of `1.0` and preserves differences from the median.
+    /// Floating-point arithmetic can introduce rounding error.
     ///
     /// # Parameters
     ///
@@ -349,7 +333,7 @@ impl RobustScaler {
     ///
     /// - [`Error::NotFitted`] - If the scaler has not been fitted
     /// - [`Error::EmptyInput`] - If `x` has no rows or no columns
-    /// - [`Error::DimensionMismatch`] - If `x`'s feature count differs from the fitted one
+    /// - [`Error::DimensionMismatch`] - If `x`'s feature count differs from the fitted 1
     /// - [`Error::NonFinite`] - If `x` contains NaN or infinite values
     pub fn inverse_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
@@ -506,7 +490,7 @@ mod tests {
         }
     }
 
-    /// A constant feature has no spread, so it centers to zeros instead of dividing by zero
+    /// A constant feature has no spread, so it centers to 0 values instead of dividing by 0
     #[test]
     fn constant_feature_maps_to_zeros() {
         let x = array![[3.0, 1.0], [3.0, 3.0], [3.0, 5.0]];
@@ -519,7 +503,7 @@ mod tests {
         assert!(z.iter().all(|v| v.is_finite()));
     }
 
-    /// `inverse_transform` round-trips back to the original values
+    /// `inverse_transform` round trips back to the original values
     #[test]
     fn inverse_transform_round_trips() {
         let x = array![[1.0, -5.0], [2.0, 7.5], [3.0, 0.5], [4.0, 100.0]];

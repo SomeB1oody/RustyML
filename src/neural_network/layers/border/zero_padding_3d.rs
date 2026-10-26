@@ -1,9 +1,9 @@
-//! 3D zero-padding layer that adds zero planes at the 6 faces of a volume
+//! 3D layer that adds planes with value 0 at the 6 faces of a volume
 //!
-//! [`ZeroPadding3D`] adds zero planes to the depth axis, the height axis, and the width axis of
+//! [`ZeroPadding3D`] adds planes with value 0 to the depth axis, the height axis, and the width axis of
 //! a `[batch, depth, height, width, channels]` tensor. It holds no parameter. The forward pass
-//! and the backward pass both run through `pad_crop_engine`, which also backs this layer's
-//! inverse, [`Cropping3D`].
+//! and the backward pass both run through `pad_crop_engine`, which also backs the matching
+//! border layer, [`Cropping3D`].
 //!
 //! [`Cropping3D`]: crate::neural_network::layers::border::Cropping3D
 
@@ -20,7 +20,7 @@ use crate::neural_network::layers::{
 use crate::neural_network::traits::{LayerBase, UnaryLayer};
 use crate::neural_network::{Ctx, Shape, Tensor};
 
-/// Adds zero planes at the 6 faces of a rank-5 tensor
+/// Adds planes with value 0 at the 6 faces of a rank-5 tensor
 ///
 /// The input shape is `[batch_size, depth, height, width, channels]`. Each of the 3 spatial
 /// axes grows by the amount at its 2 ends. The batch axis and the channel axis pass through
@@ -43,7 +43,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array5;
 ///
-/// // A rank-5 input: 2 samples, a 3x4x4 volume, 1 channel
+/// // A rank-5 input: 2 samples, a 3x4x4 volume, 1 channel.
 /// let x = Array5::ones((2, 3, 4, 4, 1)).into_dyn();
 ///
 /// let mut model = SequentialBuilder::new()
@@ -52,17 +52,17 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
 /// let padded = model.predict(&x).unwrap();
 ///
-/// // 1 plane at each end of the first axis, 2 at each end of the second, none on the third
+/// // 1 plane at each end of the first axis, 2 at each end of the second, none on the third.
 /// assert_eq!(padded.shape(), &[2, 5, 8, 4, 1]);
 /// ```
 #[derive(Debug)]
 pub struct ZeroPadding3D {
-    /// Zero planes to add at each of the 6 faces
+    /// Planes with value 0 to add at each of the 6 faces
     padding: Border3D,
     /// Shape the layer was built for, batch axis first. `None` before the build.
     built: Option<Shape>,
@@ -73,7 +73,7 @@ impl ZeroPadding3D {
     ///
     /// # Parameters
     ///
-    /// - `padding` - Zero planes to add. An integer gives the same amount at all 6 faces. A
+    /// - `padding` - Planes with value 0 to add. An integer gives the same amount at all 6 faces. A
     ///   triple gives 1 amount per axis. A triple of pairs names all 6 faces. See [`Border3D`]
     ///
     /// # Returns

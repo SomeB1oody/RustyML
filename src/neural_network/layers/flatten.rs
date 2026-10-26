@@ -1,5 +1,8 @@
 //! Flatten layer that reshapes a 3D, 4D, or 5D tensor into a 2D tensor, and parks the input
 //! shape for backpropagation
+//!
+//! The batch axis stays first, and all other axes collapse in C order. The backward pass
+//! restores the cached input shape.
 
 use crate::error::{Context, Error};
 use crate::neural_network::layers::ParamCounts;
@@ -18,11 +21,8 @@ use ndarray::IxDyn;
 /// The reshape itself is layout-agnostic. It collapses every axis after the batch axis in C
 /// order, without regard to which feature lands at which output index. Under the crate's
 /// channels-last layout, the channel axis is innermost. The flattened vector then runs position
-/// by position, with all channels of 1 position adjacent, rather than plane by plane. A
-/// `Dense` layer trained against the other ordering then reads its inputs permuted, even though
-/// its weight shape stays the same. This is why saved models carry a format version (see
-/// [`MODEL_FORMAT_VERSION`](crate::neural_network::layers::checkpoint::MODEL_FORMAT_VERSION))
-/// instead of relying on a shape check to catch the mismatch
+/// by position, with all channels of 1 position adjacent. Dense weights must use this feature
+/// order. A shape check alone cannot detect a different feature order
 ///
 /// Input shapes are `[batch_size, length, features]`, `[batch_size, height, width, channels]`,
 /// or `[batch_size, depth, height, width, channels]`. The output shape is always
@@ -39,24 +39,24 @@ use ndarray::IxDyn;
 /// use rustyml::neural_network::Shape;
 /// use ndarray::Array4;
 ///
-/// // Create a 4D input tensor: [batch_size, height, width, channels]
-/// // Batch size=2, 4x4 pixels, 3 channels
+/// // Create a 4D input tensor: [batch_size, height, width, channels].
+/// // Batch size=2, 4x4 pixels, 3 channels.
 /// let x = Array4::ones((2, 4, 4, 3)).into_dyn();
 ///
-/// // Build a model containing a Flatten layer
+/// // Build a model containing a Flatten layer.
 /// let mut model = SequentialBuilder::new()
 ///     .add(Flatten::new())
 ///     .build(&Shape::known(&[2, 4, 4, 3]))
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
-/// // Forward propagation
+/// // Forward propagation.
 /// let flattened = model.predict(&x).unwrap();
 ///
-/// // The output shape should be [2, 48]
+/// // The output shape should be [2, 48].
 /// assert_eq!(flattened.shape(), &[2, 48]);
 /// ```
 #[derive(Debug, Default)]

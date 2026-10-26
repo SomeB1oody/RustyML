@@ -232,9 +232,10 @@ fn assert_same_bits(actual: &Tensor, expected: &Tensor, what: &str) {
     }
 }
 
-/// A model that holds `Pair(Dense, Dense)` trains to the same bits as the 2 Dense layers in a
-/// flat model. The 2 kernels have the same shape, so the result also holds that each sublayer
-/// has its own gradient, its own Adam moments, and its place in the global gradient norm
+/// A model with `Pair(Dense, Dense)` trains to the same bits as a flat model of the 2 layers.
+///
+/// The kernels have equal shapes. The comparison checks separate gradients, Adam moments, and
+/// contributions to the global gradient norm.
 #[test]
 fn a_composite_trains_like_the_flat_model() {
     let x = ramp(&[6, 4], 0);
@@ -265,9 +266,10 @@ fn a_composite_trains_like_the_flat_model() {
     }
 }
 
-/// The state of a sublayer moves into that sublayer. The moving statistics of a
-/// BatchNormalization and the random stream of a Dropout inside a composite match the flat
-/// model after training, and so does the prediction
+/// Sublayer state must return to its owner.
+///
+/// BatchNormalization running statistics and the Dropout random stream match the flat model
+/// after training. Predictions also match.
 #[test]
 fn the_state_of_a_sublayer_moves_into_that_sublayer() {
     let x = ramp(&[6, 4], 0);

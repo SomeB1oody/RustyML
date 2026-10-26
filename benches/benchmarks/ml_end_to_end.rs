@@ -1,7 +1,6 @@
 //! End-to-end criterion benchmarks over the classical-ML public API
 //!
-//! Tracks the wall-clock effect of the GEMM/parallelism work (and guards against regressions)
-//! at the level a user sees: whole `fit`/`predict`/`transform` calls. Detailed reports and
+//! Measures complete `fit`, `predict`, and `transform` calls to track runtime across model and utility workloads. Detailed reports and
 //! saved baselines live under `target/criterion/`. Compare across changes with
 //! `cargo bench --bench ml_end_to_end -- --save-baseline <name>` and `-- --baseline <name>`
 //!
@@ -30,7 +29,7 @@ fn random_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f64> {
     Array2::random_using((rows, cols), Uniform::new(-1.0, 1.0).unwrap(), &mut rng)
 }
 
-/// KMeans fit: per-iteration assignment GEMM + arg-min scan over 20k x 32, k = 16
+/// KMeans fit: per-iteration assignment GEMM and minimum scan over 20000 x 32 values, with 16 clusters
 fn bench_kmeans_fit(c: &mut Criterion) {
     let x = random_matrix(20_000, 32, 1);
     c.bench_function("kmeans_fit_20000x32_k16", |b| {
@@ -42,10 +41,8 @@ fn bench_kmeans_fit(c: &mut Criterion) {
     });
 }
 
-/// KMeans fit at high cluster count: k = 256, 128 features, 4k samples. A small sample count
-/// keeps the assignment GEMM modest. The per-iteration centroid-averaging step (which fires 1
-/// rayon job per centroid) is then a visible fraction. Stresses the nested per-centroid
-/// parallelism in the cluster-mean update
+/// Measures KMeans fit with 256 clusters, 128 features, and 4096 samples.
+/// The fit includes assignments and fixed-block centroid accumulation over 30 iterations at most.
 fn bench_kmeans_fit_high_k(c: &mut Criterion) {
     let x = random_matrix(4_096, 128, 11);
     let mut group = c.benchmark_group("kmeans_high_k");
@@ -60,16 +57,10 @@ fn bench_kmeans_fit_high_k(c: &mut Criterion) {
     group.finish();
 }
 
-/// LDA fit across 2 parallelism regimes. The fit parallelizes the per-class scatter statistics
-/// over the *classes*, but the current parallel decision keys off the total data size. Each
-/// class task runs a `[d, n_class] x [n_class, d]` scatter GEMM that can itself fork. The 2
-/// configs separate the regimes:
-/// - few classes, high-dim: a 3-wide class fan, far below the core count. The class axis alone
-///   cannot fill the pool while each per-class GEMM is large. Probes idle cores plus the
-///   parallel branch's whole-matrix clone
-/// - many classes, moderate dim: a 64-wide class fan (above the core count) where each
-///   per-class GEMM still clears the GEMM parallel gate. Probes the case where the class axis
-///   fills the pool while the inner GEMM also forks
+/// Measures LDA fit with 4 or 64 classes and the SVD solver.
+/// Class tasks compute scatter matrices. Their GEMMs run serial when the class tasks fill the thread pool.
+/// The 4-class case measures a small task count with 128 features.
+/// The 64-class case measures a larger task count with 96 features.
 fn bench_lda_fit(c: &mut Criterion) {
     let mut group = c.benchmark_group("lda_fit");
     group.sample_size(20);
@@ -203,7 +194,7 @@ fn bench_mean_shift_fit(c: &mut Criterion) {
     group.finish();
 }
 
-/// Logistic regression fit: per-iteration GEMV + sigmoid map over 50k x 64
+/// Logistic regression fit: per-iteration GEMV + sigmoid map over 50000 x 64
 fn bench_logistic_fit(c: &mut Criterion) {
     let x = random_matrix(50_000, 64, 5);
     let y: Array1<f64> = Array1::from_iter(

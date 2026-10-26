@@ -7,8 +7,6 @@ use rustyml::error::Error;
 use rustyml::machine_learning::DistanceCalculationMetric as Metric;
 use rustyml::machine_learning::{KNN, WeightingStrategy};
 
-// Constructor validation
-
 /// k=0 must return Error::InvalidParameter
 #[test]
 fn constructor_k_zero_returns_invalid_parameter() {
@@ -65,8 +63,6 @@ fn constructor_stores_parameters() {
     assert_eq!(knn.get_metric(), Metric::Manhattan);
 }
 
-// fit error paths
-
 /// Fitting with fewer samples than k returns Error::InvalidInput (k=5, 3 rows)
 #[test]
 fn fit_fewer_samples_than_k_returns_invalid_input() {
@@ -101,8 +97,6 @@ fn fit_mismatched_y_length_returns_dimension_mismatch() {
     );
 }
 
-// predict error paths
-
 /// predict with wrong feature count must return Error::DimensionMismatch (train 2, predict 3)
 #[test]
 fn predict_wrong_feature_count_returns_dimension_mismatch() {
@@ -124,8 +118,6 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
     );
 }
 
-// k=1 Euclidean correctness
-
 /// k=1 Euclidean Uniform picks the single nearest neighbor per query
 #[test]
 fn predict_k1_euclidean_correctness() {
@@ -146,8 +138,6 @@ fn predict_k1_euclidean_correctness() {
     assert_eq!(predictions[2], 1, "Q2=(0,9.5) should map to class 1");
 }
 
-// k=1 Manhattan correctness
-
 /// k=1 Manhattan Uniform picks the single nearest neighbor per query
 #[test]
 fn predict_k1_manhattan_correctness() {
@@ -167,8 +157,6 @@ fn predict_k1_manhattan_correctness() {
     assert_eq!(predictions[1], 1, "Q1=(9.5,0) should map to class 1");
     assert_eq!(predictions[2], 1, "Q2=(0,9.5) should map to class 1");
 }
-
-// Minkowski p=1 equals Manhattan
 
 /// Minkowski(p=1) predictions must equal Manhattan predictions on the same data
 #[test]
@@ -201,8 +189,6 @@ fn predict_minkowski_p1_equals_manhattan() {
     );
 }
 
-// Minkowski p=2 equals Euclidean
-
 /// Minkowski(p=2) predictions must equal Euclidean predictions on the same data
 #[test]
 fn predict_minkowski_p2_equals_euclidean() {
@@ -234,8 +220,6 @@ fn predict_minkowski_p2_equals_euclidean() {
     );
 }
 
-// k=3 majority vote
-
 /// k=3 Euclidean Uniform resolves a clean 3-vs-0 majority per query
 #[test]
 fn predict_k3_majority_clean() {
@@ -262,8 +246,8 @@ fn predict_k3_majority_clean() {
     assert_eq!(predictions[1], 1, "Q1=(10.5,0) → 3 votes for class 1");
 }
 
-/// Above 8 features, KNN falls back from the kd-tree to a brute-force search.
-/// Predictions on the sequential and parallel paths must stay correct on that path.
+/// Above 8 features, KNN uses a brute-force search.
+/// Both prediction methods must return the expected labels.
 #[test]
 fn predict_high_dimensional_falls_back_to_brute_force() {
     let n_features = 18; // above the kd-tree dimensionality cutoff (8)
@@ -316,8 +300,8 @@ fn predict_k3_majority_two_to_one_split() {
     let y_train = array![0, 0, 1, 1];
     knn.fit(&x_train, &y_train).unwrap();
 
-    // Q=(0.5,0): 3 nearest P0,P1,P2 -> 2 class 0, 1 class 1 -> 0
-    // Q=(5.5,0): 3 nearest P2,P3,P1 -> 2 class 1, 1 class 0 -> 1
+    // At Q=(0.5,0), neighbors P0,P1,P2 give class 0 a 2-to-1 majority.
+    // At Q=(5.5,0), neighbors P2,P3,P1 give class 1 a 2-to-1 majority.
     let x_test = array![[0.5, 0.0], [5.5, 0.0]];
     let predictions = knn.predict(&x_test).unwrap();
 
@@ -330,8 +314,6 @@ fn predict_k3_majority_two_to_one_split() {
         "Q1=(5.5,0): 2 votes class 1, 1 vote class 0 → class 1"
     );
 }
-
-// Distance weighting
 
 /// k=2 Distance weighting: the closer neighbor decides the class
 #[test]
@@ -378,8 +360,6 @@ fn predict_distance_zero_exact_match_returns_immediately() {
     assert_eq!(predictions[0], 7, "exact-match query must return class 7");
 }
 
-// String labels
-
 /// KNN with T=String returns the nearest neighbor's string label
 #[test]
 fn predict_string_labels() {
@@ -402,8 +382,6 @@ fn predict_string_labels() {
     assert_eq!(predictions[0], "cat");
     assert_eq!(predictions[1], "dog");
 }
-
-// predict == predict_parallel
 
 /// predict and predict_parallel must produce identical results (Uniform, small k)
 #[test]
@@ -455,8 +433,6 @@ fn predict_and_predict_parallel_agree_distance_weights() {
         "predict and predict_parallel must agree with Distance weighting"
     );
 }
-
-// k=100: predict and predict_parallel agreement at a larger k
 
 /// Checks predict and predict_parallel agree at k=100 with Uniform weighting.
 #[test]
@@ -543,8 +519,6 @@ fn predict_parallel_large_k_distance_weighting_exercises_parallel_weight_branch(
     assert_eq!(preds_seq, preds_par, "parallel must agree with sequential");
 }
 
-// fit_predict convenience method
-
 /// fit_predict with k=1 on the training data returns every training label unchanged
 #[test]
 fn fit_predict_returns_training_labels() {
@@ -561,8 +535,6 @@ fn fit_predict_returns_training_labels() {
     assert_eq!(result[1], 1);
 }
 
-// Minkowski p=3 numerical check (end-to-end)
-
 /// k=1 Minkowski(p=3) finds the correct nearest neighbor under the Lp-3 metric
 #[test]
 fn predict_minkowski_p3_correct_nearest_neighbour() {
@@ -575,8 +547,8 @@ fn predict_minkowski_p3_correct_nearest_neighbour() {
     let y_train = array![0, 1];
     knn.fit(&x_train, &y_train).unwrap();
 
-    // Q=(0,0): dist to P0=3, to P1=4 -> nearest P0 -> class 0
-    // Q=(0,3): dist to P0=(54)^(1/3), about 3.78, to P1=1 -> nearest P1 -> class 1
+    // At Q=(0,0), distances to P0 and P1 are 3 and 4, so P0 gives class 0.
+    // At Q=(0,3), distances are 54^(1/3) and 1, so P1 gives class 1.
     let x_test = array![[0.0, 0.0], [0.0, 3.0]];
     let predictions = knn.predict(&x_test).unwrap();
 
@@ -589,8 +561,6 @@ fn predict_minkowski_p3_correct_nearest_neighbour() {
         "Q=(0,3): Minkowski-3 nearest is P1=(0,4)"
     );
 }
-
-// Save / Load round-trip
 
 /// A reloaded KNN model must produce predictions identical to the original
 #[test]

@@ -77,8 +77,8 @@ pub(super) fn validate_input_3d(input: &Tensor) -> Result<(), Error> {
 ///
 /// With `return_sequences` off, the whole upstream gradient is the gradient of the single
 /// returned state, so it starts the backward recurrence directly. With `return_sequences` on,
-/// the upstream gradient holds 1 direct contribution per processing step, and the backward
-/// recurrence starts from 0 and adds 1 slice per step.
+/// the upstream gradient has 1 direct contribution per processing step. The backward recurrence
+/// starts at 0 and adds each slice.
 ///
 /// # Parameters
 ///

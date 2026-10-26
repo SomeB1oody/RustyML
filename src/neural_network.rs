@@ -16,7 +16,9 @@
 //! A layer can hold other layers, which are its sublayers.
 //! [`LayerBase::sublayers`] lists them by name, and the layer calls each sublayer inside
 //! [`Ctx::sublayer`]. A [`LayerPath`] addresses each layer of that tree. The path `2.forward` is
-//! the sublayer `forward` of the layer at model position 2. The gradient store, the optimizer
+//! the sublayer `forward` of the layer at model position 2.
+//!
+//! The gradient store, the optimizer
 //! state, the state channel, and the checkpoint all key on this path. 2 sublayers of 1 type
 //! therefore never share 1 address. A checkpoint path is the layer path and the name of the array,
 //! such as `2.forward.kernel`
@@ -35,8 +37,8 @@
 //!   1 axis, and `RepeatVector` repeats a feature vector into a sequence
 //! - **Identity**: passes its input through unchanged, as a placeholder where a model needs a
 //!   layer that does nothing
-//! - **Rescaling**: applies the fixed affine map `y = x * scale + offset` to every element, to
-//!   condition an input in front of the first weight that a model trains
+//! - **Rescaling**: applies `y = x * scale + offset` to each element before the trainable
+//! layers
 //! - **Activation**: standalone activation layers (ReLU, LeakyReLU, ELU, SELU, Sigmoid, Tanh, ...)
 //! - **PReLU**: a ReLU whose negative-side slope is trainable, with a `shared_axes` rule that
 //!   sets how many slopes it holds
@@ -51,7 +53,7 @@
 //!   several inputs and gives 1 output, so a graph model joins its branches with them.
 //!   [`Concatenate::new`] never fails, and its axis counts against the full rank. The axis 0
 //!   therefore joins the batch axis, and a negative axis counts back from the end. [`Average`] is
-//!   the 1 name that 2 categories of the crate give to an item. The root of [`prelude`] keeps the
+//!   a name shared by a merge layer and a classification averaging mode. The root of [`prelude`] keeps the
 //!   averaging mode of the classification scores, so a caller that wants the layer must write
 //!   `prelude::neural_network::Average` or `neural_network::layers::Average`
 //!
@@ -76,7 +78,7 @@
 //! ## Weight initialization
 //! - [`Initializer`]: how a layer draws the starting values of a weight array. Every drawn array of
 //!   the module comes from this closed set of 3 rules. The layer supplies the [`Fans`] pair,
-//!   because a kernel shape alone cannot tell a plain convolution from a transposed one
+//!   because the kernel shape alone does not identify the convolution type
 //!
 //! ## Models
 //! - [`Sequential`]: a linear stack of layers with an integrated training loop, prediction, and
@@ -86,7 +88,7 @@
 //! - [`Graph`]: a directed graph of layers, with the same training loop, prediction, and weight
 //!   save and load. It takes several inlets and gives several outlets, and it holds a layer arena.
 //!   Several nodes can call 1 layer of that arena. Those nodes then share 1 set of arrays, and the
-//!   sum of their gradients updates that set. [`GraphBuilder`] is the only way to reach one
+//!   sum of their gradients updates that set. [`GraphBuilder`] creates the model
 //!
 //! # Examples
 //!
@@ -102,11 +104,11 @@
 //! };
 //! use ndarray::Array;
 //!
-//! // Create input and target tensors
+//! // Create input and target tensors.
 //! let x = Array::ones((2, 4)).into_dyn();  // 2 samples, 4 features
 //! let y = Array::ones((2, 1)).into_dyn();  // 2 samples, 1 output
 //!
-//! // Build sequential model
+//! // Build sequential model.
 //! let mut model = SequentialBuilder::new()
 //!     .add(Dense::new(8, Activation::ReLU).unwrap())   // Input layer: 4 -> 8
 //!     .add(Dense::new(3, Activation::ReLU).unwrap())   // Hidden layer: 8 -> 3
@@ -114,16 +116,16 @@
 //!     .build(&Shape::known(x.shape()))
 //!     .unwrap();
 //!
-//! // Compile with optimizer and loss function
+//! // Compile with optimizer and loss function.
 //! model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 //!
-//! // Display model architecture
+//! // Display model architecture.
 //! model.summary();
 //!
-//! // Train the model
+//! // Train the model.
 //! model.fit(&x, &y, 100).unwrap();
 //!
-//! // Make predictions
+//! // Make predictions.
 //! let predictions = model.predict(&x);
 //! ```
 //!
@@ -139,12 +141,12 @@
 //! };
 //! use ndarray::Array;
 //!
-//! // 2 inlets of 4 samples each, and 1 target of 2 values per sample
+//! // 2 inlets of 4 samples each, and 1 target of 2 values per sample.
 //! let left = Array::ones((4, 3)).into_dyn();
 //! let right = Array::ones((4, 5)).into_dyn();
 //! let y = Array::ones((4, 2)).into_dyn();
 //!
-//! // The 2 inlets keep registration order, and every call takes its tensors in that order
+//! // The 2 inlets keep registration order, and every call takes its tensors in that order.
 //! let mut builder = GraphBuilder::new();
 //! let a = builder.input(Shape::known(&[4, 3]));
 //! let b = builder.input(Shape::known(&[4, 5]));
@@ -152,7 +154,7 @@
 //! let head = builder.add(Dense::new(2, Activation::Linear).unwrap(), &[joined]);
 //! let mut model = builder.build(&[head]).unwrap();
 //!
-//! // The merge layer adds the 2 feature counts, so the head reads 8 features
+//! // The merge layer adds the 2 feature counts, so the head reads 8 features.
 //! assert_eq!(model.output_shapes()[0].to_string(), "(4, 2)");
 //!
 //! model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());

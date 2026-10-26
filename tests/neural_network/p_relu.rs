@@ -5,10 +5,8 @@
 //! weight surface. `gradient_check.rs` covers the gradients against finite differences, and
 //! `serialize.rs` covers the save and load round trip. This file does not duplicate them.
 //!
-//! Every pinned number here is exact in `f32`, so the test writes it as a plain decimal rather
-//! than as a rounded reference value. The branch rule at exactly 0 is the one place a reasonable
-//! implementation could differ. A comparison with the reference layer, version 3.15 on the jax
-//! backend, confirms this. The derivative there is 0, and not 1 and not `alpha`.
+//! Fixed forward and gradient values check the branch rules. Keras 3.15 on the jax backend
+//! confirms the derivative at exactly 0: it is 0.
 
 use ndarray::{Array, Array1, Array2, Array4, ArrayD, IxDyn};
 use rustyml::neural_network::Ctx;
@@ -27,8 +25,6 @@ use rustyml::neural_network::traits::{Layer, LayerBase, ParamId, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::{assert_allclose, named};
-
-// helpers
 
 /// Build a Tensor of any rank from row-major data
 fn tensor(shape: &[usize], data: Vec<f32>) -> Tensor {
@@ -67,8 +63,6 @@ fn slope_gradient(layer: &mut PReLU, ctx: &Ctx) -> Vec<f32> {
         .copied()
         .collect()
 }
-
-// Constructor validation
 
 /// The batch axis plus at least 1 slope axis is the smallest usable input
 #[test]
@@ -111,7 +105,7 @@ fn p_relu_rejects_a_non_finite_alpha() {
     }
 }
 
-/// A negative or zero slope is a legal starting point, unlike `LeakyReLU`'s constant
+/// A negative or 0 slope is a legal starting point, unlike `LeakyReLU`'s constant
 #[test]
 fn p_relu_accepts_a_zero_or_negative_alpha() {
     for alpha in [0.0f32, -0.5, -3.0] {
@@ -139,8 +133,6 @@ fn p_relu_holds_1_slope_per_position_without_shared_axes() {
         assert_eq!(slopes_of(&layer).shape(), &shape[1..]);
     }
 }
-
-// shared_axes validation
 
 /// Axis 0 is the batch axis. Every slope already covers the whole batch
 #[test]
@@ -232,8 +224,6 @@ fn p_relu_shared_axes_keeps_the_starting_slope() {
     assert_eq!(slopes.shape(), &[1, 4]);
     assert!(slopes.iter().all(|&v| v == 0.25), "{slopes:?}");
 }
-
-// Forward values
 
 /// 1 slope per feature, applied only below 0
 #[test]
@@ -336,8 +326,6 @@ fn p_relu_with_a_uniform_slope_matches_leaky_relu_away_from_0() {
     assert_eq!(fixed.backward(&ones, &mut fixed_ctx).unwrap()[[0, 0]], 1.0);
 }
 
-// Backward values
-
 /// The input gradient passes above 0, scales below 0, and stops at exactly 0
 #[test]
 fn p_relu_input_gradient_follows_the_sign_of_the_input() {
@@ -415,12 +403,10 @@ fn p_relu_exposes_no_parameter_before_the_first_backward() {
     assert_eq!(ctx.grads().len(), 1);
 }
 
-/// Resizing the slope array leaves a gradient of an earlier pass that does not match the new
-/// shape
+/// A resized slope array has a different length from the earlier gradient.
 ///
-/// The context owns the gradient, so the layer holds no stale one. The gradient of the
-/// pass before the resize still has the shape of the slope array before the resize, which is
-/// what an optimizer must not write into the resized array
+/// The context retains the gradient from the earlier pass. The test checks that this gradient
+/// cannot fit the resized parameter array.
 #[test]
 fn p_relu_shared_axes_drops_a_stale_gradient() {
     let mut layer = PReLU::new(0.25).unwrap();
@@ -441,8 +427,6 @@ fn p_relu_shared_axes_drops_a_stale_gradient() {
         "the old gradient does not fit the resized slope array"
     );
 }
-
-// Memory layout
 
 /// A strided input must still give a C-order output and a C-order input gradient
 #[test]
@@ -505,8 +489,6 @@ fn p_relu_set_weights_repacks_a_strided_array() {
     assert_eq!(layer.parameters_mut()[0].value.len(), 6);
 }
 
-// The parallel gate
-
 /// Above the elementwise gate the layer must give the same bits as below it
 ///
 /// The whole batch clears the gate. 1 sample of it does not, so each single-sample pass runs on
@@ -558,8 +540,6 @@ fn p_relu_parallel_path_matches_the_serial_path() {
         );
     }
 }
-
-// Input validation
 
 /// The rank is fixed by the slope array, so a tensor of another rank cannot broadcast
 #[test]
@@ -633,8 +613,6 @@ fn p_relu_rejects_an_empty_input() {
     assert!(matches!(err, Error::EmptyInput(_)), "{err:?}");
 }
 
-// Error paths on backward
-
 /// The layer keeps the shape, so the upstream gradient must match the cached input
 #[test]
 fn p_relu_rejects_a_gradient_of_the_wrong_shape() {
@@ -648,8 +626,6 @@ fn p_relu_rejects_a_gradient_of_the_wrong_shape() {
         .unwrap_err();
     assert!(matches!(err, Error::ShapeMismatch { .. }), "{err:?}");
 }
-
-// The weight surface
 
 /// `set_weights` guards the slope shape, which a shared axis changes
 #[test]
@@ -686,9 +662,7 @@ fn p_relu_reports_its_type_and_output_shape() {
     assert_eq!(layer.output_shape(), "(None, 3, 4)");
 }
 
-// Training
-
-/// The slopes move under an optimizer, and each one moves on its own
+/// Training changes at least 1 slope and keeps every slope finite.
 #[test]
 fn p_relu_trains_its_slopes() {
     let x = Array2::from_shape_vec(
@@ -733,7 +707,7 @@ fn p_relu_trains_its_slopes() {
     );
 }
 
-/// A model with a per-channel slope trains end to end on a 4-D input
+/// Per-channel slopes support forward and backward passes on a rank-4 input.
 #[test]
 fn p_relu_trains_with_shared_spatial_axes() {
     let x: Tensor = Array::from_shape_vec(
@@ -777,7 +751,7 @@ fn p_relu_names_its_live_slopes_alpha() {
     );
 }
 
-/// A 4-D per-channel slope array keeps its rank in the named weight
+/// A rank-4 input uses a rank-3 slope array with shared spatial axes.
 #[test]
 fn p_relu_weights_keep_a_shared_axis_at_extent_1() {
     let mut layer = PReLU::new(0.25)

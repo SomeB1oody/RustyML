@@ -10,7 +10,7 @@ use crate::{Deserialize, Serialize};
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
-/// Norm magnitude below which a lane is treated as near-zero and left unscaled
+/// Norm magnitude below which a lane is treated as near 0 and left unscaled
 const NORM_CONSTANT_THRESHOLD: f64 = 10.0 * f64::EPSILON;
 
 /// Axis along which normalization is applied
@@ -36,7 +36,7 @@ pub enum NormalizationAxis {
 
 /// Order of the norm used for normalization
 ///
-/// Serializable so that a fitted [`Normalizer`](crate::utils::Normalizer) round-trips through
+/// Serializable so that a fitted [`Normalizer`](crate::utils::Normalizer) round trips through
 /// `save_to_path` / `load_from_path`
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum NormalizationOrder {
@@ -47,14 +47,17 @@ pub enum NormalizationOrder {
     /// Max norm (infinity norm): maximum absolute value
     Max,
     /// Lp norm with custom p value: (sum of |x|^p)^(1/p)
-    Lp(f64),
+    Lp(
+        /// Positive finite norm exponent.
+        f64,
+    ),
 }
 
 /// Normalize data along the specified axis using the given norm order
 ///
 /// Divides each element by the norm computed along the chosen axis, so the norm of the
 /// data along that axis equals 1. A lane whose norm is below `10 * f64::EPSILON` is a
-/// near-zero lane and is left unchanged, since its norm counts as 1.0
+/// lane with norm near 0 and is left unchanged, since its norm counts as 1.0
 ///
 /// # Parameters
 ///
@@ -82,7 +85,8 @@ pub enum NormalizationOrder {
 /// - [`Error::EmptyInput`] if the input array is empty
 /// - [`Error::NonFinite`] if the input contains non-finite values (NaN/Inf)
 /// - [`Error::InvalidParameter`] if the Lp norm parameter `p` is not positive and finite
-/// - [`Error::NonFinite`] if the normalization computation produces non-finite values
+/// - [`Error::NonFinite`] if a norm sum is non-finite
+/// - [`Error::InvalidInput`] if row or column normalization has fewer than 2 dimensions
 ///
 /// # Performance
 ///
@@ -121,8 +125,8 @@ where
 /// Divides a single lane by its norm in place
 ///
 /// A lane is scaled unless its norm is below [`NORM_CONSTANT_THRESHOLD`] (`10 * f64::EPSILON`).
-/// Below that threshold, the norm counts as `1.0` and the lane is left untouched, since a
-/// near-zero lane has no meaningful direction to rescale
+/// Below that threshold, the norm counts as `1.0` and the lane stays unchanged.
+/// A lane with norm near 0 has no meaningful direction to rescale
 fn normalize_lane(lane: &mut ArrayViewMut1<f64>, norm: f64) {
     if norm >= NORM_CONSTANT_THRESHOLD {
         lane.mapv_inplace(|x| x / norm);
@@ -186,7 +190,7 @@ where
         Ok(())
     };
 
-    // Scan-class gate: one O(lane) norm + map per lane, so the work is the element count
+    // Scan-class gate: 1 O(lane) norm + map per lane, so the work is the element count
     if data_len >= scan_f64_parallel_min_elems() {
         lanes.par_iter_mut().try_for_each(process)
     } else {

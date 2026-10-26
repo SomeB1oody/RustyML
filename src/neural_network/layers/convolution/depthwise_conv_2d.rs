@@ -46,7 +46,7 @@ use ndarray::{Array1, Array4};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array4;
 ///
-/// // Input data shape: [batch_size, height, width, channels]
+/// // Input data shape: [batch_size, height, width, channels].
 /// let batch_size = 1;
 /// let input_channels = 3;
 /// let height = 4;
@@ -54,7 +54,7 @@ use ndarray::{Array1, Array4};
 ///
 /// let mut input_data = Array4::zeros((batch_size, height, width, input_channels));
 ///
-/// // Give each channel distinct values
+/// // Give each channel distinct values.
 /// for c in 0..input_channels {
 ///     for h in 0..height {
 ///         for w in 0..width {
@@ -65,7 +65,7 @@ use ndarray::{Array1, Array4};
 ///
 /// let input = input_data.into_dyn();
 ///
-/// // DepthwiseConv2D with ReLU. The build draws the weights
+/// // DepthwiseConv2D with ReLU. The build draws the weights.
 /// let depthwise_layer = DepthwiseConv2D::new(
 ///     (2, 2),                  // kernel_size
 ///     (1, 1),                  // strides
@@ -82,11 +82,11 @@ use ndarray::{Array1, Array4};
 ///
 /// let output = model.predict(&input).unwrap();
 ///
-/// // Input [1, 4, 4, 3] with kernel (2, 2), stride (1, 1), and Valid padding gives output
-/// // [1, 3, 3, 3]
+/// // Input [1, 4, 4, 3] with kernel (2, 2), stride (1, 1), and Valid padding gives output.
+/// // [1, 3, 3, 3].
 /// assert_eq!(output.shape(), &[1, 3, 3, 3]);
 ///
-/// // ReLU makes every output value non-negative
+/// // ReLU makes every output value non-negative.
 /// for value in output.iter() {
 ///     assert!(*value >= 0.0);
 /// }
@@ -111,9 +111,8 @@ pub struct DepthwiseConv2D {
     weights: Array4<f32>,
     /// 1D bias vector with shape \[channels * depth_multiplier\]
     ///
-    /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
-    /// The forward pass adds nothing, `weights` hides the array, and `parameters` never yields
-    /// it, so a bias-free layer holds it and no more
+    /// The array stays allocated when `use_bias` is false. The forward pass and weight rosters
+    /// exclude it.
     bias: Array1<f32>,
     /// Activation applied to the convolution output
     activation: Activation,
@@ -136,18 +135,21 @@ impl DepthwiseConv2D {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A new `DepthwiseConv2D` instance with Xavier-initialized
-    ///   weights, or an error
+    /// - `Result<Self, Error>` - A new unbuilt `DepthwiseConv2D` layer, or an error
     ///
     /// # Notes
     ///
     /// There is no `filters` argument. A depthwise convolution derives its output channel count
     /// from the input, as `channels * depth_multiplier`. `depth_multiplier` defaults to 1. Set it
     /// with [`DepthwiseConv2D::with_depth_multiplier`]. Padding defaults to
-    /// [`PaddingType::Valid`]. Choose
+    /// [`PaddingType::Valid`].
+    ///
+    /// Choose
     /// [`PaddingType::Same`] with
     /// [`DepthwiseConv2D::with_padding`]. The kernel is solid by default. Space its taps out with
-    /// [`DepthwiseConv2D::with_dilation_rate`]. The layer seeds weights from the global seed or
+    /// [`DepthwiseConv2D::with_dilation_rate`].
+    ///
+    /// The layer seeds weights from the global seed or
     /// entropy by default. For reproducible initialization, set a seed with
     /// [`DepthwiseConv2D::with_random_state`]
     ///
@@ -257,11 +259,12 @@ impl DepthwiseConv2D {
         Ok(self)
     }
 
-    /// Sets the seed for the depthwise weights and re-initializes them deterministically
+    /// Sets the depthwise weight seed and redraws weights if the layer has a build
     ///
     /// By default, the layer seeds weights from the global seed or entropy (see
-    /// [`crate::random`]). This re-runs Xavier/Glorot uniform initialization with `random_state`.
-    /// Call it before you assign custom weights or start training. The bias stays zero-initialized
+    /// [`crate::random`]). For a built layer, this repeats Xavier/Glorot uniform initialization with `random_state`.
+    /// Call it before you assign custom weights or start training. A built layer also resets
+    /// its bias to 0
     ///
     /// # Parameters
     ///
@@ -280,9 +283,9 @@ impl DepthwiseConv2D {
 
     /// Xavier/Glorot uniform initialization of the \[kh, kw, channels, depth_multiplier\] tensor
     ///
-    /// The depth multiplier takes the place of the filter count in the fan pair, so `fan_in`
-    /// counts every input channel although a depthwise unit reads only 1 of them. See
-    /// [`Fans::conv`]
+    /// The depth multiplier replaces the filter count in the fan pair. Thus, `fan_in` counts
+    /// every input channel although each depthwise unit reads only 1 channel. See
+    /// [`Fans::conv`].
     fn draw_parameters(&mut self) {
         let (kernel_height, kernel_width) = self.kernel_size;
         let mut rng = crate::random::make_rng(self.random_state);
@@ -327,10 +330,9 @@ impl DepthwiseConv2D {
 
     /// Sets whether the layer adds a bias to the convolution output (defaults to `true`)
     ///
-    /// With `use_bias` set to false the layer holds the kernel alone: `param_count` counts the
-    /// kernel alone, `parameters` yields the kernel alone, and a checkpoint of the layer holds
-    /// 1 array under the path `<position>.kernel`. A checkpoint written by a layer that has a
-    /// bias therefore fails to load into a layer that has none, and the refusal names the path
+    /// With `use_bias` set to false, the weight roster contains only the kernel. `param_count` counts it,
+    /// and `parameters` yields it. A checkpoint holds 1 array under `<position>.kernel`. A
+    /// checkpoint with bias cannot load into a layer without bias. The error names the path.
     ///
     /// # Parameters
     ///
@@ -352,6 +354,10 @@ impl DepthwiseConv2D {
     ///   \[kernel_height, kernel_width, channels, depth_multiplier\]
     /// - `bias` - 1D bias vector with shape \[channels * depth_multiplier\], or `None`
     ///   for a layer built with [`with_use_bias(false)`](Self::with_use_bias)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - Success after the weights are set
     ///
     /// # Errors
     ///
@@ -568,8 +574,7 @@ impl UnaryLayer for DepthwiseConv2D {
                 .expect("weight gradient shape matches weights")
                 .into_dyn(),
         )?;
-        // A bias-free layer writes no bias gradient, so the store holds none and no
-        // optimizer state is ever keyed on a bias that the layer does not hold
+        // A layer without bias has no stored bias gradient or bias optimizer state.
         if self.use_bias {
             ctx.add_grad("bias", Array1::from_vec(grads.bias).into_dyn())?;
         }
@@ -593,8 +598,8 @@ impl UnaryLayer for DepthwiseConv2D {
             return Err(Error::dimension_mismatch(self.channels, channels));
         }
         let (keff_h, keff_w) = self.effective_kernel_size();
-        // A `Valid` layer whose effective kernel is longer than an input axis is refused here,
-        // rather than reported as an axis of 0 positions that every later layer would carry
+        // Reject `Valid` padding if the effective kernel exceeds an input axis. This prevents
+        // an empty output axis.
         let (out_height, out_width) = match self.padding {
             PaddingType::Valid => (
                 valid_output_size("DepthwiseConv2D", "height", height, keff_h, self.strides.0)?,
@@ -621,7 +626,7 @@ mod tests {
 
     /// Channels never mix. The values match a hand-worked cross-correlation
     ///
-    /// Channel 0 carries 1..9 against an all-ones kernel. Channel 1 carries all ones against an
+    /// Channel 0 carries 1..9 against an all-ones kernel. Channel 1 carries all 1 against an
     /// all-twos kernel. Channel 1's output is therefore the same constant at every position,
     /// while channel 0's output varies. This only holds if the 2 kernels stay on their own
     /// channels
@@ -629,13 +634,13 @@ mod tests {
     fn depthwise_forward_keeps_channels_separate_hand_derived() {
         let mut layer = DepthwiseConv2D::new((2, 2), (1, 1), Linear::new()).unwrap();
         layer.build(&Shape::known(&[1, 3, 3, 2])).unwrap();
-        // [kh, kw, C, dm] with dm == 1: channel 0 all ones, channel 1 all twos
+        // [kh, kw, C, dm] with dm == 1: channel 0 all 1, channel 1 all 2
         let weights =
             Array4::from_shape_vec((2, 2, 2, 1), vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0])
                 .unwrap();
         layer.set_weights(weights, Array1::zeros(2)).unwrap();
 
-        // [1, 3, 3, 2]: channel 0 is 1..9, channel 1 is all ones
+        // [1, 3, 3, 2]: channel 0 is 1..9, channel 1 is all 1
         let input = ArrayD::from_shape_vec(
             ndarray::IxDyn(&[1, 3, 3, 2]),
             vec![

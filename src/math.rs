@@ -1,21 +1,7 @@
-//! Shared low-level numeric primitives used across estimators and metrics
+//! Numeric primitives shared by estimators, metrics, and neural networks.
 //!
-//! - [`matmul`] provides `gemmkit`-backed matrix products with automatic
-//!   parallelism
-//! - [`reduction`] provides deterministic blocked parallel reductions
-//! - [`distance`] holds the pairwise distance primitives and the
-//!   [`DistanceCalculationMetric`] dispatcher
-//!
-//! It also hosts the tunable exp-reduction parallel gate used by the logistic-regression
-//! log-loss.
-//!
-//! # What belongs here
-//!
-//! A function lives in `math` only if it meets 3 conditions. It is pure and stateless. It is
-//! model-agnostic, so it encodes no single algorithm's policy. It is, or plausibly could be,
-//! shared by more than one caller. Per-algorithm solvers live next to their model. Post-hoc
-//! evaluation metrics live in [`crate::metrics`] and call these primitives. Trainable,
-//! gradient-aware losses live in `neural_network::losses`.
+//! The submodules provide matrix products, fixed-block reductions, and vector distances.
+//! This module also defines the logistic loss reduction threshold.
 //!
 //! # Examples
 //!
@@ -49,13 +35,9 @@ pub use distance::{
     squared_euclidean_distance_row,
 };
 
-/// Parallel gate for exp-heavy `f64` reductions (the logistic-regression log-loss). Below this
-/// element count, the deterministic blocked fold cannot beat the serial sum.
+/// Element threshold for parallel logistic loss reductions with `exp` and `ln` calls.
 ///
-/// Sits below the cheap-sum gate because each element costs an `exp` plus an `ln`.
-///
-/// The fold splits the range into [`reduction::DET_REDUCE_BLOCK`]-sized blocks, so a value below
-/// 2 blocks gives 1 task and no parallelism at all. That floor is what fixes this constant, so it
-/// is not runtime-tunable.
+/// The value equals 2 fixed reduction blocks, the smallest count that yields multiple tasks.
+/// This threshold has no runtime setter.
 #[cfg(feature = "machine_learning")]
 pub(crate) const EXP_REDUCE_MIN_ELEMS: usize = 32_768;

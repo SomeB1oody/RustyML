@@ -8,8 +8,8 @@
 //! SeparableConv2D chains a depthwise kernel of that same shape with a pointwise kernel
 //! \[1, 1, channels * depth_multiplier, F\] and an \[F\] bias.
 //!
-//! Expected values come from the mathematical definition or hand calculation, not from
-//! recording layer output. Gradient checks live in tests/neural_network/gradient_check.rs.
+//! Expected values come from hand calculations or the Keras reference cases identified below.
+//! Gradient checks also live in tests/neural_network/gradient_check.rs.
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array4, Array5};
@@ -25,9 +25,7 @@ use rustyml::{error::Error, neural_network::NnError};
 
 use crate::common::assert_allclose;
 
-// Conv3D - constructor validation
-
-/// Each invalid constructor argument returns the matching error: InvalidParameter for a zero
+/// Each invalid constructor argument returns the matching error: InvalidParameter for a 0
 /// filter count, kernel dimension, or stride, and InvalidInput for a bad input_shape.
 #[test]
 fn conv3d_new_rejects_invalid_args() {
@@ -109,8 +107,6 @@ fn conv3d_new_rejects_invalid_args() {
     }
 }
 
-// Conv3D - forward output shape
-
 /// Valid padding forward output shape is [1, 3, 3, 3, 2] for input [1,4,4,4,1], kernel (2,2,2)
 #[test]
 fn conv3d_forward_output_shape_valid_padding() {
@@ -155,8 +151,6 @@ fn conv3d_forward_output_shape_stride2_valid() {
     );
 }
 
-// Conv3D - known-weight forward value
-
 /// All-ones 2x2x2 kernel sums the 8-element window. Forward output matches a hand calculation
 /// for `x[0, d, h, w, 0] = 0.05 * (9d + 3h + w) - 0.40`.
 #[test]
@@ -189,8 +183,6 @@ fn conv3d_known_weight_forward_values() {
     // (1,1,1): S = 156 -> 0.05*156 - 3.20 = 4.60
     assert_abs_diff_eq!(out[[0, 1, 1, 1, 0]], 4.60_f32, epsilon = 1e-5);
 }
-
-// Conv3D - error paths
 
 /// A non-5D input to forward() must return InvalidInput
 #[test]
@@ -268,9 +260,7 @@ fn conv3d_set_weights_shape_mismatch_errors() {
     );
 }
 
-// DepthwiseConv2D - constructor validation
-
-/// Each invalid constructor argument returns the matching error: InvalidParameter for a zero
+/// Each invalid constructor argument returns the matching error: InvalidParameter for a 0
 /// kernel or stride, and InvalidInput for a bad input_shape.
 #[test]
 fn depthwise_conv2d_new_rejects_invalid_args() {
@@ -387,16 +377,14 @@ fn depthwise_conv2d_forward_rejects_wrong_channels() {
     );
 }
 
-// DepthwiseConv2D - channel independence (the core correctness invariant)
-
-/// Each channel convolves only its own input: all-ones kernel gives 4.0, zero kernel gives 0.0
+/// Each channel convolves only its own input: all-ones kernel gives 4.0, 0 kernel gives 0.0
 #[test]
 fn depthwise_conv2d_channel_independence() {
     let mut conv = DepthwiseConv2D::new((2, 2), (1, 1), Linear::new()).unwrap();
     conv.build(&Shape::known(&[1, 3, 3, 2])).unwrap();
 
     // Weight layout is [kh, kw, channels, depth_multiplier], dm = 1 here
-    // Channel 0 kernel = all 1s. Channel 1 kernel stays zero.
+    // Channel 0 kernel = all 1s. Channel 1 kernel stays 0.
     let mut w = Array4::<f32>::zeros((2, 2, 2, 1));
     w[[0, 0, 0, 0]] = 1.0;
     w[[0, 1, 0, 0]] = 1.0;
@@ -427,7 +415,7 @@ fn depthwise_conv2d_channel_independence() {
         }
     }
 
-    // Channel 1: zero kernel -> 0.0 everywhere, regardless of non-zero input
+    // Channel 1: 0 kernel -> 0.0 everywhere, regardless of nonzero input
     for oh in 0..2 {
         for ow in 0..2 {
             assert_abs_diff_eq!(out[[0, oh, ow, 1]], 0.0_f32, epsilon = 1e-6,);
@@ -441,7 +429,7 @@ fn depthwise_conv2d_cross_channel_no_bleed() {
     let mut conv = DepthwiseConv2D::new((2, 2), (1, 1), Linear::new()).unwrap();
     conv.build(&Shape::known(&[1_usize, 3, 3, 2])).unwrap();
 
-    // Channel 0 kernel = [[1,0],[0,0]] (only top-left). Channel 1 kernel = all zeros.
+    // Channel 0 kernel = [[1,0],[0,0]] (only top-left). Channel 1 kernel = all 0s.
     let mut w = Array4::<f32>::zeros((2, 2, 2, 1));
     w[[0, 0, 0, 0]] = 1.0;
     let bias = Array1::<f32>::zeros(2);
@@ -482,15 +470,13 @@ fn depthwise_conv2d_cross_channel_no_bleed() {
         }
     }
 
-    // Channel 1: zero kernel -> 0.0 everywhere even though input was 999
+    // Channel 1: 0 kernel -> 0.0 everywhere even though input was 999
     for oh in 0..2 {
         for ow in 0..2 {
             assert_abs_diff_eq!(out_b[[0, oh, ow, 1]], 0.0_f32, epsilon = 1e-6);
         }
     }
 }
-
-// DepthwiseConv2D - known-weight forward values
 
 /// 1-channel 2x2 kernel [[1,2],[3,4]] with bias 0.5 over input 1..=9 matches hand calculation
 #[test]
@@ -529,8 +515,6 @@ fn depthwise_conv2d_known_weight_single_channel() {
     assert_abs_diff_eq!(out[[0, 1, 1, 0]], 77.5_f32, epsilon = 1e-5);
 }
 
-// DepthwiseConv2D - error paths
-
 /// set_weights with wrong weight shape must return NeuralNetwork(WeightShape)
 #[test]
 fn depthwise_conv2d_set_weights_shape_mismatch_errors() {
@@ -546,10 +530,8 @@ fn depthwise_conv2d_set_weights_shape_mismatch_errors() {
     );
 }
 
-// SeparableConv2D - constructor validation
-
-/// Each invalid constructor argument returns the matching error: InvalidParameter for a zero
-/// filter count, depth multiplier, or kernel dimension, and InvalidInput for a bad input_shape.
+/// 0 filters, depth multiplier, or kernel dimensions return `InvalidParameter`.
+/// An invalid input shape returns `InvalidInput`.
 #[test]
 fn separable_conv2d_new_rejects_invalid_args() {
     enum Want {
@@ -606,8 +588,6 @@ fn separable_conv2d_new_rejects_invalid_args() {
     }
 }
 
-// SeparableConv2D - depth_multiplier behavior and output shape
-
 /// depth_multiplier=1, filters=1, 1 input channel: forward output shape is [1, 2, 2, 1]
 #[test]
 fn separable_conv2d_output_shape_dm1() {
@@ -660,9 +640,7 @@ fn separable_conv2d_forward_rejects_wrong_channels() {
     );
 }
 
-// SeparableConv2D - identity depthwise + identity pointwise reproduces input
-
-/// Identity 1x1 depthwise and pointwise kernels with zero bias reproduce the input exactly
+/// Identity 1x1 depthwise and pointwise kernels with 0 bias reproduce the input exactly
 #[test]
 fn separable_conv2d_identity_reproduces_input() {
     let mut conv = SeparableConv2D::new(1, (1, 1), (1, 1), 1, Linear::new()).unwrap();
@@ -691,8 +669,6 @@ fn separable_conv2d_identity_reproduces_input() {
         }
     }
 }
-
-// SeparableConv2D - known-weight forward value
 
 /// Depthwise [[1,0],[0,1]] then pointwise scale-by-2 plus bias 1 over input 1..=9 matches by hand
 #[test]
@@ -733,7 +709,7 @@ fn separable_conv2d_known_weight_forward_values() {
     assert_abs_diff_eq!(out[[0, 1, 1, 0]], 29.0_f32, epsilon = 1e-5);
 }
 
-/// `Same` padding zero-pads the depthwise stage: output is the zero-padded 3x3 box filter
+/// `Same` padding pads with 0 the depthwise stage: output is the padded with 0 3x3 box filter
 /// over the input 1..=9.
 #[test]
 fn separable_conv2d_same_padding_zero_pads_depthwise() {
@@ -760,7 +736,7 @@ fn separable_conv2d_same_padding_zero_pads_depthwise() {
     // `Same` keeps the spatial shape
     assert_eq!(out.shape(), &[1, 3, 3, 1]);
 
-    // pad_total = (3-1)*1 = 2, so 1 zero row/column sits on each edge. Each entry is
+    // pad_total = (3-1)*1 = 2, so 1 row or column of 0s sits on each edge. Each entry is
     // the sum of the in-bounds members of its 3x3 neighborhood over [[1,2,3],[4,5,6],[7,8,9]].
     let expected = [
         [12.0_f32, 21.0, 16.0],
@@ -773,8 +749,6 @@ fn separable_conv2d_same_padding_zero_pads_depthwise() {
         }
     }
 }
-
-// SeparableConv2D - error paths
 
 /// set_weights with wrong depthwise shape must return NeuralNetwork(WeightShape)
 #[test]
@@ -791,8 +765,6 @@ fn separable_conv2d_set_weights_shape_mismatch_errors() {
         "expected WeightShape, got {err:?}"
     );
 }
-
-// SeparableConv2D - depth_multiplier correctly expands intermediate channels
 
 /// depth_multiplier=2 yields 2 scaled copies. Filter 0 reproduces the input, filter 1 doubles it.
 #[test]
@@ -839,14 +811,12 @@ fn separable_conv2d_depth_multiplier_2_forward_values() {
     }
 }
 
-// DepthwiseConv2D - large-input windowed sums
-
 /// All-ones 2x2 kernel over a [1,40,40,1] ramp: every window sums to 4*oh + 4*ow + 4
 #[test]
 fn depthwise_conv2d_large_input_windowed_sums() {
     let mut conv = DepthwiseConv2D::new((2, 2), (1, 1), Linear::new()).unwrap();
     conv.build(&Shape::known(&[1, 40, 40, 1])).unwrap();
-    // All-ones 2x2 kernel ([kh, kw, channels, dm]), zero bias
+    // All-ones 2x2 kernel ([kh, kw, channels, dm]), 0 bias
     let w = Array4::<f32>::from_elem((2, 2, 1, 1), 1.0);
     let bias = Array1::<f32>::zeros(1);
     conv.set_weights(w, bias).unwrap();
@@ -870,8 +840,6 @@ fn depthwise_conv2d_large_input_windowed_sums() {
     assert_abs_diff_eq!(out[[0, 1, 0, 0]], expect(1, 0), epsilon = 1e-4); // 8
     assert_abs_diff_eq!(out[[0, 38, 38, 0]], expect(38, 38), epsilon = 1e-4); // 308
 }
-
-// SeparableConv2D - large-input windowed sums
 
 /// A [1,72,72,1] ramp goes through an all-ones 2x2 depthwise, then a scale-by-2 pointwise plus
 /// bias 1. The final output is 8*oh + 8*ow + 9.
@@ -905,8 +873,6 @@ fn separable_conv2d_large_input_windowed_sums() {
     assert_abs_diff_eq!(out[[0, 1, 0, 0]], expect(1, 0), epsilon = 1e-4); // 17
     assert_abs_diff_eq!(out[[0, 70, 70, 0]], expect(70, 70), epsilon = 1e-4); // 1129
 }
-
-// Dilation
 
 /// Each of the 3 spatial axes carries its own dilation
 ///
@@ -947,8 +913,7 @@ fn conv3d_dilation_is_per_axis() {
 
 /// The stride-with-dilation rule reads the maximum over the axes, not 1 axis at a time
 ///
-/// A stride above 1 on the depth axis and a dilation above 1 on the width axis carry no common
-/// axis, and the rule still fires.
+/// The rule rejects a depth stride above 1 together with a width dilation above 1.
 #[test]
 fn conv3d_rejects_a_stride_and_a_dilation_above_one_on_different_axes() {
     let mixed = Conv3D::new(1, (2, 2, 2), (2, 1, 1), Linear::new())
@@ -1050,8 +1015,8 @@ fn separable_conv2d_dilated_same_padding_splits_with_the_extra_cell_at_the_end()
 
 // Effective kernels longer than the input, and dilated gradients, pinned to Keras 3.15.1
 //
-// Keras 3.15.1 on the jax backend produced every expected value in this section, from the
-// weights, the input, and the upstream gradient the ramps below build. Every ramp value is
+// Keras 3.15.1 on the JAX backend produced these expected values.
+// The reference uses the weight, input, and upstream-gradient ramps below. Every ramp value is
 // exact in f32, so no rounding enters the comparison.
 //
 // A kernel whose effective extent is longer than the input axis is legal under `Same`

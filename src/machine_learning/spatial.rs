@@ -1,15 +1,11 @@
 //! Internal kd-tree spatial index used to accelerate neighborhood queries
 //!
-//! Brute-force neighbor search costs O(n) distance evaluations per query, so a full DBSCAN
-//! fit or a batch of KNN predictions is O(n^2). A kd-tree partitions the points with
-//! axis-aligned splits so that whole subtrees can be pruned. This brings the average query
-//! cost down to roughly O(log n) in low dimensions
+//! This module provides radius and nearest-neighbor queries with a kd-tree.
+//! The index owns sample coordinates and uses axis splits to prune subtrees.
 //!
-//! The tree is metric-agnostic: it works for any [`DistanceCalculationMetric`] variant
-//! (Euclidean, Manhattan, Minkowski). All comparisons happen in the metric's root-free
-//! "comparable" space (see [`DistanceCalculationMetric::comparable_distance`]). Pruning
-//! uses the per-axis lower bound `comparable_scalar(|q_a - split|)`. This is a valid lower
-//! bound on the comparable distance for every Minkowski metric (`p >= 1`)
+//! Queries support Euclidean, Manhattan, and Minkowski distances.
+//! The comparable distance avoids roots during comparisons.
+//! Per-axis distance bounds permit subtree pruning for valid Minkowski metrics.
 //!
 //! kd-trees lose their pruning power as the dimensionality grows, so callers fall back to
 //! brute force above a small feature-count threshold. This module only provides the index
@@ -22,7 +18,7 @@ use std::collections::BinaryHeap;
 /// Sentinel for an absent child (empty subtree)
 const NONE: usize = usize::MAX;
 
-/// A single kd-tree node, holding one point (the per-subtree median) and the split it defines
+/// A single kd-tree node, holding 1 point (the per-subtree median) and the split it defines
 #[derive(Debug, Clone)]
 struct KdNode {
     /// Index (into the owned `points` matrix) of the point stored at this node
@@ -63,7 +59,7 @@ impl PartialOrd for Neighbor {
 }
 impl Ord for Neighbor {
     fn cmp(&self, other: &Self) -> Ordering {
-        // `total_cmp` gives a total order on f64. Distances here are finite and non-negative
+        // `total_cmp` orders the distance values. The sample index resolves equal distances.
         self.cmp_dist
             .total_cmp(&other.cmp_dist)
             .then(self.idx.cmp(&other.idx))
@@ -90,6 +86,15 @@ impl KdTree {
     /// Construction is `O(n * d * log n)`. Each level chooses the maximum-spread axis and splits
     /// at the count-median (via `select_nth_unstable`). The tree stays balanced regardless of how
     /// the coordinate values are distributed
+    ///
+    /// # Parameters
+    ///
+    /// - `points` - Sample coordinates, with 1 sample per row.
+    /// - `metric` - Distance metric for all queries.
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The balanced spatial index.
     pub fn build(points: ArrayView2<f64>, metric: DistanceCalculationMetric) -> Self {
         let points = points.to_owned();
         let n = points.nrows();
@@ -171,6 +176,15 @@ impl KdTree {
     ///
     /// The result is sorted ascending by index, matching a brute-force `(0..n).filter(...)`
     /// scan, so downstream order-sensitive logic (e.g. DBSCAN expansion) is unaffected
+    ///
+    /// # Parameters
+    ///
+    /// - `query` - Feature vector of the query sample.
+    /// - `radius` - Maximum distance from the query.
+    ///
+    /// # Returns
+    ///
+    /// - `Vec<usize>` - Neighbor indices in ascending index order.
     pub(super) fn radius_neighbors(&self, query: ArrayView1<f64>, radius: f64) -> Vec<usize> {
         let radius_cmp = self.metric.comparable_scalar(radius);
         let mut out = Vec::new();
@@ -217,6 +231,15 @@ impl KdTree {
     ///
     /// Distances are returned in comparable space. Convert with
     /// [`DistanceCalculationMetric::distance_from_comparable`] when a true distance is needed
+    ///
+    /// # Parameters
+    ///
+    /// - `query` - Feature vector of the query sample.
+    /// - `k` - Maximum number of neighbors to return.
+    ///
+    /// # Returns
+    ///
+    /// - `Vec<(usize, f64)>` - Sample indices and comparable distances in ascending distance order.
     pub fn k_nearest(&self, query: ArrayView1<f64>, k: usize) -> Vec<(usize, f64)> {
         let mut heap: BinaryHeap<Neighbor> = BinaryHeap::with_capacity(k.min(self.nodes.len()));
         if k > 0 {
@@ -275,6 +298,7 @@ impl KdTree {
     }
 }
 
+/// Tests for the module helpers and model behavior.
 #[cfg(test)]
 mod tests {
     use super::*;

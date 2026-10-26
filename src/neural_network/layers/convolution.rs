@@ -14,12 +14,12 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PaddingType {
     /// Applies no padding. The convolution runs only where the filter fully overlaps the
-    /// input, so the output has smaller spatial dimensions than the input
+    /// input. The output size depends on the kernel extent and stride
     #[default]
     Valid,
 
     /// Adds zeros around the input borders so the output keeps the same spatial dimensions
-    /// as the input, when the stride is 1
+    /// as the input when the stride is 1. Pooling excludes padded cells from its reduction
     Same,
 }
 

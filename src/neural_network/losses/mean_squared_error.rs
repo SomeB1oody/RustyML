@@ -1,4 +1,7 @@
-//! Mean Squared Error loss function and its gradient.
+//! Mean squared error loss and its prediction gradient.
+//!
+//! Both operations require equal tensor shapes and average over all elements.
+//! The gradient is `2 * (prediction - target) / element_count`.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -14,10 +17,10 @@ use crate::neural_network::traits::Loss;
 /// use ndarray::ArrayD;
 /// use rustyml::neural_network::traits::Loss;
 ///
-/// // Create an MSE loss function instance
+/// // Create an MSE loss function instance.
 /// let mse = MeanSquaredError::new();
 ///
-/// // Sample data: true values and predictions
+/// // Sample data: true values and predictions.
 /// let y_true = ArrayD::from_shape_vec(
 ///     vec![3, 1],
 ///     vec![1.0, 2.0, 3.0]
@@ -28,11 +31,11 @@ use crate::neural_network::traits::Loss;
 ///     vec![1.1, 2.2, 2.8]
 /// ).unwrap();
 ///
-/// // Compute the MSE loss
+/// // Compute the MSE loss.
 /// let loss = mse.compute_loss(&y_true, &y_pred).unwrap();
 /// println!("MSE Loss: {:.4}", loss);
 ///
-/// // Compute gradients for backpropagation
+/// // Compute gradients for backpropagation.
 /// let gradients = mse.compute_grad(&y_true, &y_pred).unwrap();
 /// println!("Gradients: {:?}", gradients);
 /// ```

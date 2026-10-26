@@ -2,9 +2,8 @@
 //!
 //! `GruCell` implements `RnnCell` with the arithmetic of 1 GRU timestep. The record-slot
 //! constants below it name, in order, the 4 values that `step` parks for `step_backward` to read
-//! back. [`GRU`] is the public layer. It holds an `Rnn` over `GruCell` and forwards every
-//! trait method to it, adding only the constructors and the weight setters that a caller uses
-//! directly.
+//! back. [`GRU`] is the public layer. It holds an `Rnn` over `GruCell` and delegates trait methods to it.
+//! The wrapper provides constructors and weight setters.
 
 use crate::error::Error;
 use crate::neural_network::layers::activation::Activation;
@@ -225,26 +224,29 @@ impl RnnCell for GruCell {
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array;
 ///
-/// // Create input data: batch_size=2, timesteps=5, features=4
+/// // Create input data: batch_size=2, timesteps=5, features=4.
 /// let input = Array::ones((2, 5, 4)).into_dyn();
 /// let target = Array::ones((2, 3)).into_dyn(); // batch_size=2, units=3
 ///
-/// // Create GRU layer with 4 input features, 3 units, Tanh activation
+/// // Create GRU layer with 4 input features, 3 units, Tanh activation.
 /// let mut model = SequentialBuilder::new()
 ///     .add(GRU::new(3, Activation::Tanh).unwrap())
 ///     .build(&Shape::known(input.shape()))
 ///     .unwrap();
 /// model.compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Train the model
+/// // Train the model.
 /// model.fit(&input, &target, 10).unwrap();
 ///
-/// // Make predictions
+/// // Make predictions.
 /// let predictions = model.predict(&input).unwrap();
 /// println!("GRU output shape: {:?}", predictions.shape());
-/// // Output: [2, 3] (batch_size, units)
+/// // Output: [2, 3] (batch_size, units).
 /// ```
-pub struct GRU(Rnn<GruCell>);
+pub struct GRU(
+    /// Shared recurrent driver and cell state.
+    Rnn<GruCell>,
+);
 
 impl GRU {
     /// Creates a GRU layer with the specified dimensions and activation
@@ -319,10 +321,10 @@ impl GRU {
 
     /// Sets whether the layer processes the input timesteps from last to first
     ///
-    /// The default is false. With true, processing step 0 consumes input timestep
-    /// `timesteps` - 1, and the output stays in processing order. The layer does not reverse the
-    /// output back to input order, so slot 0 of a returned sequence holds the state that came
-    /// from the last input timestep. This flag changes no shape.
+    /// The default is false. With true, processing step 0 consumes input timestep `timesteps` -
+    /// 1, and the output stays in processing order. The returned sequence follows processing
+    /// order. With reverse processing, slot 0 holds the state from the last input timestep.
+    /// This flag changes no shape.
     ///
     /// # Parameters
     ///

@@ -39,12 +39,16 @@ pub(super) struct DepthwiseGeometry {
     pub strides: (usize, usize),
     /// Tap spacing as (height, width). 1 on an axis gives a solid kernel on that axis
     pub dilation: (usize, usize),
-    /// Leading zero-padding as (top, left)
+    /// Leading padding with 0 as (top, left)
     pub pad_before: (usize, usize),
 }
 
 impl DepthwiseGeometry {
-    /// Output channel count, `channels * depth_multiplier`
+    /// Returns the output channel count.
+    ///
+    /// # Returns
+    ///
+    /// - `usize` - `channels * depth_multiplier`
     pub fn out_channels(&self) -> usize {
         self.channels * self.depth_multiplier
     }
@@ -60,7 +64,7 @@ impl DepthwiseGeometry {
     }
 
     /// Flat offset of the input position a window at `(oh, ow)` reads for tap `(kh, kw)`, or
-    /// `None` when that tap falls in the zero padding
+    /// `None` when that tap falls in the padding with 0
     ///
     /// The window advances by the stride and the taps sit `dilation` apart, so the position of
     /// tap `kh` is `oh * stride + kh * dilation`. The 2 factors stay independent. They agree only
@@ -116,7 +120,7 @@ pub(super) fn depthwise_forward(
 /// `src` is the whole `[batch, height, width, channels]` input and `ker` the whole
 /// `[kh, kw, channels, depth_multiplier]` kernel, both flat and row-major. `out_row` is the
 /// `[out_width, channels * depth_multiplier]` row for output row `oh` of batch item `b`.
-/// `bias` seeds it when the caller has one. Otherwise the row starts at zero
+/// `bias` seeds it when the caller has one. Otherwise the row starts at 0
 fn depthwise_forward_row(
     g: &DepthwiseGeometry,
     src: &[f32],
@@ -296,6 +300,7 @@ fn depthwise_item_gradients(
     }
 }
 
+/// Tests for depthwise convolution geometry and gradients.
 #[cfg(test)]
 mod tests {
     use super::*;

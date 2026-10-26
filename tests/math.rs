@@ -1,15 +1,12 @@
-//! Integration tests for the public `math` surface: the pairwise distance metrics
+//! Integration tests for public pairwise distance functions.
 //!
-//! Everything else that once lived in `math` (variance, std-dev, impurity, losses, sigmoid,
-//! SST/SSE, the isolation-forest path-length factor) is now inlined into its consumer. It is
-//! tested there, or through that consumer's public API
+//! Checks squared Euclidean, Manhattan, and Minkowski distances against exact values.
+//! Also checks symmetry, identical vectors, and equivalent norm orders.
 #![cfg(feature = "math")]
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use ndarray::array;
 use rustyml::math::*;
-
-// squared_euclidean_distance_row
 
 /// [1,2] vs [4,6] gives squared distance 25
 #[test]
@@ -60,8 +57,6 @@ fn test_squared_euclidean_non_negative() {
     assert!(squared_euclidean_distance_row(&a, &b) >= 0.0);
 }
 
-// manhattan_distance_row
-
 /// [1,2] vs [4,6] gives L1 distance 7
 #[test]
 fn test_manhattan_basic() {
@@ -96,8 +91,6 @@ fn test_manhattan_from_origin() {
     let b = array![0.0_f64, 0.0];
     assert_abs_diff_eq!(manhattan_distance_row(&a, &b), 7.0, epsilon = 1e-10);
 }
-
-// minkowski_distance_row
 
 /// p=1 recovers the L1 (Manhattan) distance
 #[test]
@@ -141,7 +134,7 @@ fn test_minkowski_p3_hand_calc() {
     );
 }
 
-/// Identical vectors have minkowski distance 0 for any p
+/// Identical vectors have Minkowski distance 0 for p=2 and p=3
 #[test]
 fn test_minkowski_identical() {
     let v = array![2.0_f64, 5.0, -1.0];

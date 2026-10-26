@@ -50,8 +50,9 @@ use ndarray::{Array1, Array5};
 /// Unlike `Conv3D`, this layer puts no lower bound on the input size. A 1x1x1 input under a
 /// 3x3x3 kernel is a normal first decoder step.
 ///
-/// A stride wider than the kernel leaves output positions that no input position reaches. These
-/// positions hold exactly the bias.
+/// A stride wider than the kernel leaves output positions that no input position reaches.
+/// Before activation, these
+/// positions hold the bias or 0 when bias is disabled.
 ///
 /// # Examples
 ///
@@ -63,13 +64,13 @@ use ndarray::{Array1, Array5};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array5;
 ///
-/// // Create a simple 5D input tensor: [batch_size, depth, height, width, channels]
+/// // Create a simple 5D input tensor: [batch_size, depth, height, width, channels].
 /// let x = Array5::ones((1, 3, 3, 3, 1)).into_dyn();
 ///
-/// // A 2x2x2 kernel at stride 1 with Valid padding grows 3x3x3 into 4x4x4
+/// // A 2x2x2 kernel at stride 1 with Valid padding grows 3x3x3 into 4x4x4.
 /// let y = Array5::ones((1, 4, 4, 4, 2)).into_dyn();
 ///
-/// // Build model: add a Conv3DTranspose layer with 2 filters and a 2x2x2 kernel
+/// // Build model: add a Conv3DTranspose layer with 2 filters and a 2x2x2 kernel.
 /// let mut model = SequentialBuilder::new()
 ///     .add(Conv3DTranspose::new(
 ///         2,                      // Number of filters
@@ -81,16 +82,16 @@ use ndarray::{Array1, Array5};
 ///     .unwrap();
 /// model.compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Print model structure
+/// // Print model structure.
 /// model.summary();
 ///
-/// // Train the model (run a few epochs)
+/// // Train the model (run a few epochs).
 /// model.fit(&x, &y, 3).unwrap();
 ///
-/// // Use predict for forward propagation prediction
+/// // Use predict for forward propagation prediction.
 /// let prediction = model.predict(&x).unwrap();
 ///
-/// // Check if output shape is correct (should be [1, 4, 4, 4, 2])
+/// // Check if output shape is correct (should be [1, 4, 4, 4, 2]).
 /// assert_eq!(prediction.shape(), &[1, 4, 4, 4, 2]);
 /// ```
 ///
@@ -118,9 +119,8 @@ pub struct Conv3DTranspose {
     weights: Array5<f32>,
     /// 1D array of bias values with shape \[filters\]
     ///
-    /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
-    /// The forward pass adds nothing, `param_count` hides the array, and `parameters_mut` never
-    /// yields it, so a bias-free layer holds it and no more
+    /// The array stays allocated when `use_bias` is false. The forward pass and weight rosters
+    /// exclude it.
     bias: Array1<f32>,
     /// Activation applied to the transposed convolution output
     activation: Activation,
@@ -251,7 +251,7 @@ impl Conv3DTranspose {
     /// By default, the draw takes the global seed or entropy (see [`crate::random`]). An
     /// unbuilt layer holds no kernel, so this records the seed and draws nothing. A layer that
     /// is already built draws its kernel again from the new seed, so the order of the 2 calls
-    /// does not matter. The bias stays zero-initialized
+    /// does not matter. A built layer also resets its bias to 0
     ///
     /// # Parameters
     ///
@@ -320,10 +320,9 @@ impl Conv3DTranspose {
 
     /// Sets whether the layer adds a bias to the convolution output (defaults to `true`)
     ///
-    /// With `use_bias` set to false the layer holds the kernel alone: `param_count` counts the
-    /// kernel alone, `parameters_mut` yields the kernel alone, and a checkpoint of the layer
-    /// holds 1 array under the path `<position>.kernel`. A checkpoint written by a layer that has
-    /// a bias therefore fails to load into a layer that has none, and the refusal names the path
+    /// With `use_bias` set to false, the weight roster contains only the kernel. `param_count` counts it,
+    /// and `parameters_mut` yields it. A checkpoint holds 1 array under `<position>.kernel`.
+    /// A checkpoint with a bias cannot load into a layer without bias. The error names the path
     ///
     /// # Parameters
     ///
@@ -345,6 +344,10 @@ impl Conv3DTranspose {
     ///   kernel_width, filters, channels\]
     /// - `bias` - 1D array of bias values with shape \[filters\], or `None` for a layer
     ///   built with [`with_use_bias(false)`](Self::with_use_bias)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - Success after the weights are set
     ///
     /// # Errors
     ///
@@ -498,8 +501,7 @@ impl UnaryLayer for Conv3DTranspose {
                 .expect("weight gradient shape matches weights")
                 .into_dyn(),
         )?;
-        // A bias-free layer computes no bias gradient, so the store holds none and no
-        // optimizer state is ever keyed on a bias that the layer does not hold
+        // A layer without bias has no stored bias gradient or bias optimizer state.
         if self.use_bias {
             ctx.add_grad(
                 "bias",

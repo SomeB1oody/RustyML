@@ -1,21 +1,7 @@
-//! Prelude that re-exports the crate's machine learning, metrics, neural network, and utility items
+//! Common public types and functions grouped by feature.
 //!
-//! A single import point for the crate's most commonly used types, traits, and functions. `use
-//! rustyml::prelude::*` pulls in every enabled category at once. Alternatively, import 1
-//! category at a time through the [`machine_learning`], [`metrics`], [`neural_network`], and
-//! [`utils`] submodules. Each category is feature-gated, so the prelude exposes only the items
-//! whose feature is enabled
-//!
-//! # Available components
-//!
-//! - **Machine learning**: classification (KNN, DecisionTree, LogisticRegression, SVC, LinearSVC,
-//!   LDA), regression (LinearRegression), clustering (KMeans, DBSCAN, MeanShift), dimensionality
-//!   reduction (PCA, KernelPCA, t-SNE), and anomaly detection (IsolationForest)
-//! - **Utilities**: preprocessing (standardize, StandardScaler, normalize, label encoding) and
-//!   dataset splitting (train_test_split)
-//! - **Metrics**: regression, classification, and clustering evaluation metrics
-//! - **Neural network**: layers, optimizers, loss functions, and the `SequentialBuilder` that
-//!   makes a `Sequential` model
+//! Import the root to use every enabled category, or select a category submodule.
+//! The root resolves the shared `Average` name to the metrics enum when metrics are enabled.
 //!
 //! # Examples
 //!
@@ -24,9 +10,9 @@
 //! use rustyml::prelude::*;
 //!
 //! // Or import a single category:
-//! // `use rustyml::prelude::machine_learning::*;` for the machine learning models
-//! // `use rustyml::prelude::utils::*;`            for the utility functions
-//! // `use rustyml::prelude::metrics::*;`          for the metric functions
+//! // `use rustyml::prelude::machine_learning::*;` for the machine learning models.
+//! // `use rustyml::prelude::utils::*;`            for the utility functions.
+//! // `use rustyml::prelude::metrics::*;`          for the metric functions.
 //! ```
 
 /// Prelude re-exports for the machine learning estimators, traits, and shared enums

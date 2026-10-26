@@ -4,7 +4,7 @@
 //! the thread-local global seed (`set_global_seed` / `clear_global_seed`), and the
 //! `Sequential` fit-time shuffle seed (`new_with_seed` / `set_seed`).
 //!
-//! Equal seeds yield byte-identical output, so the "same" assertions use zero epsilon. The
+//! Equal seeds yield byte-identical output, so the "same" assertions use 0 epsilon. The
 //! "different" assertions require the max absolute difference to clear a small threshold.
 
 use ndarray::Array2;
@@ -67,7 +67,7 @@ fn same_seed_same_init() {
     let pa = a.forward(&x, &mut Ctx::inference()).unwrap();
     let pb = b.forward(&x, &mut Ctx::inference()).unwrap();
 
-    // An identical seed gives identical weights, so predict output matches at zero epsilon
+    // An identical seed gives identical weights, so predict output matches at 0 epsilon
     assert_allclose(&pa, &pb, 0.0_f32);
 }
 
@@ -129,7 +129,7 @@ fn local_overrides_global() {
         .unwrap();
 
     // The local Some(5) ignores the global, so both sides give identical weights and output,
-    // at zero epsilon
+    // at 0 epsilon
     assert_allclose(&p_with_global, &p_without_global, 0.0_f32);
 }
 

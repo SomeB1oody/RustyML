@@ -1,7 +1,7 @@
 //! Border layers that add or remove positions at the ends of the spatial axes
 //!
 //! The family has 2 halves. [`ZeroPadding1D`], [`ZeroPadding2D`], and [`ZeroPadding3D`] add
-//! zero positions. [`Cropping1D`], [`Cropping2D`], and [`Cropping3D`] remove positions. Each
+//! positions with value 0. [`Cropping1D`], [`Cropping2D`], and [`Cropping3D`] remove positions. Each
 //! half is the backward pass of the other half, so both halves share 1 pair of kernels
 //!
 //! Every layer in the family leaves the batch axis and the channel axis unchanged. Only the
@@ -23,11 +23,11 @@ pub mod cropping_2d;
 pub mod cropping_3d;
 /// Pad and crop kernels shared by every border layer
 mod pad_crop_engine;
-/// 1D zero-padding layer
+/// 1D layer that pads with 0
 pub mod zero_padding_1d;
-/// 2D zero-padding layer
+/// 2D layer that pads with 0
 pub mod zero_padding_2d;
-/// 3D zero-padding layer
+/// 3D layer that pads with 0
 pub mod zero_padding_3d;
 
 pub use cropping_1d::Cropping1D;
@@ -48,14 +48,17 @@ pub use zero_padding_3d::ZeroPadding3D;
 /// ```rust
 /// use rustyml::neural_network::layers::ZeroPadding1D;
 ///
-/// // 2 zero steps before the first step and 2 after the last
+/// // 2 steps with value 0 before the first step and 2 after the last.
 /// let even = ZeroPadding1D::new(2);
 ///
-/// // 1 zero step before the first step and 3 after the last
+/// // 1 step with value 0 before the first step and 3 after the last.
 /// let uneven = ZeroPadding1D::new((1, 3));
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Border1D([(usize, usize); 1]);
+pub struct Border1D(
+    /// Border amounts as `(before, after)` pairs in spatial axis order.
+    [(usize, usize); 1],
+);
 
 impl From<usize> for Border1D {
     fn from(amount: usize) -> Self {
@@ -85,17 +88,20 @@ impl From<(usize, usize)> for Border1D {
 /// ```rust
 /// use rustyml::neural_network::layers::ZeroPadding2D;
 ///
-/// // 1 zero row and 1 zero column at every edge
+/// // 1 row of 0 values and 1 column of 0 values at every edge.
 /// let ring = ZeroPadding2D::new(1);
 ///
-/// // 2 zero rows at the top and bottom, 3 zero columns at the left and right
+/// // 2 rows with value 0 at the top and bottom, 3 columns with value 0 at the left and right.
 /// let per_axis = ZeroPadding2D::new((2, 3));
 ///
-/// // 1 zero row at the top only, and 2 zero columns at the right only
+/// // 1 row of 0 values at the top only, and 2 columns with value 0 at the right only.
 /// let named = ZeroPadding2D::new(((1, 0), (0, 2)));
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Border2D([(usize, usize); 2]);
+pub struct Border2D(
+    /// Border amounts as `(before, after)` pairs in spatial axis order.
+    [(usize, usize); 2],
+);
 
 impl From<usize> for Border2D {
     fn from(amount: usize) -> Self {
@@ -131,17 +137,20 @@ impl From<((usize, usize), (usize, usize))> for Border2D {
 /// ```rust
 /// use rustyml::neural_network::layers::ZeroPadding3D;
 ///
-/// // 1 zero plane at every one of the 6 faces
+/// // 1 plane with value 0 at every one of the 6 faces.
 /// let shell = ZeroPadding3D::new(1);
 ///
-/// // 1 plane on the first axis, 2 on the second, and none on the third
+/// // 1 plane on the first axis, 2 on the second, and none on the third.
 /// let per_axis = ZeroPadding3D::new((1, 2, 0));
 ///
-/// // Every end named on its own
+/// // Every end named on its own.
 /// let named = ZeroPadding3D::new(((1, 0), (0, 2), (1, 1)));
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Border3D([(usize, usize); 3]);
+pub struct Border3D(
+    /// Border amounts as `(before, after)` pairs in spatial axis order.
+    [(usize, usize); 3],
+);
 
 impl From<usize> for Border3D {
     fn from(amount: usize) -> Self {

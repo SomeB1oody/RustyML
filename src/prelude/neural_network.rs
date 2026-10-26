@@ -1,14 +1,7 @@
-//! Prelude re-exports for the neural network module: tensors, shapes, layers, losses,
-//! optimizers, and the 2 model builders
+//! Neural network types, layers, losses, optimizers, and model builders.
 //!
-//! `Average` is the 1 name that 2 categories of the crate give to an item. This module gives
-//! the merge layer that averages its inputs, and the metrics category gives the averaging mode
-//! of the classification scores. The root of [`prelude`] keeps the averaging
-//! mode, so a caller that wants the layer through `use rustyml::prelude::*` names it
-//! [`layers::Average`]
-//!
-//! [`prelude`]: crate::prelude
-//! [`layers::Average`]: crate::neural_network::layers::Average
+//! This category exports the `Average` merge layer.
+//! With metrics enabled, the prelude root uses `Average` for the metrics enum instead.
 
 pub use crate::neural_network::Ctx;
 pub use crate::neural_network::Shape;

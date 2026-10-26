@@ -1,46 +1,56 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-This change log records updates after 2025-3-24, summarized per version — each entry lists only the significant changes for that release.
+This file records significant changes by version after 2025-3-24.
 
-Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
+See [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more information.
 
 ## [Unreleased]
+
 ### Added
-- **A layer can hold other layers, and each sublayer gets its own parameter address.** `LayerBase::sublayers` and `sublayers_mut` list the sublayers of a layer by name, through the new `Sublayer` and `SublayerMut` views. Both return an empty list by default. A layer calls each sublayer inside `Ctx::sublayer(name, &sublayer, f)`. A layer that calls 1 sublayer several times in 1 pass uses `Ctx::sublayer_call(name, call, &sublayer, f)`, and each call number gets its own cache stack. Every channel of the context then keys on the sublayer. 2 sublayers of 1 type therefore never share a gradient, an optimizer buffer, a state value, or a cache. The frame of a sublayer call leaves the context on a normal return, on an error, and on a panic.
+- **A layer can hold other layers, and each sublayer gets its own parameter address.** `LayerBase::sublayers` and `sublayers_mut` list the sublayers of a layer by name, through the new `Sublayer` and `SublayerMut` views. Both return an empty list by default. A layer calls each sublayer inside `Ctx::sublayer(name, &sublayer, f)`. For repeated sublayer calls in 1 pass, use `Ctx::sublayer_call(name, call, &sublayer, f)`.
+
+  Each call number gets its own cache stack. Every channel of the context then keys on the sublayer. 2 sublayers of 1 type therefore never share a gradient, an optimizer buffer, a state value, or a cache. The frame of a sublayer call leaves the context on a normal return, on an error, and on a panic.
   - A layer that holds other layers lists them in `sublayers`. It does not pass their arrays on as its own under a prefixed name.
-  - The optimizer update, the global gradient norm, the state apply, the checkpoint, and `weight_paths` all walk every layer tree in pre-order: a layer first, then each sublayer in roster order.
+  - Optimizer updates, global gradient norms, state application, checkpoints, and `weight_paths` walk each layer tree in pre-order. They visit the layer before its sublayers, in roster order.
 - **`LayerPath`, the address of 1 layer inside a model.** It holds the model position and the sublayer names below it, and its text form is `2.forward`. `Ctx::layer_path` gives the current path. `Ctx::state_left_under` lists the state values of a model position that no layer took back. `neural_network` re-exports `LayerPath`, `Sublayer`, `SublayerMut`, and `SublayerName`.
 - **Public tree walks for a layer that a caller drives by hand.** `layer_path::walk` and `walk_mut` visit every node of 1 layer tree in pre-order. `update_tree` runs `Optimizer::update` on every node, and `apply_state_tree` moves the state of every node. `Ctx::state_left_below` lists the state values at a path, or below it, that no layer took back.
 - **`layer_path::total_param_count` sums the parameters of a layer and all of its sublayers.** `Sequential::summary` and `Graph::summary` use it. `LayerBase::param_count` still counts the arrays of 1 layer alone.
-- **3 new activations: GELU, SiLU, and Mish.** `Activation::GELU { approximate }` is `x * Phi(x)`, where `Phi` is the standard normal cumulative distribution function. With `approximate: true` it uses the tanh approximation `x * sigmoid(2 * sqrt(2/pi) * (x + 0.044715 * x^3))`. `Activation::SiLU`, also named Swish, is `x * sigmoid(x)`. `Activation::Mish` is `x * tanh(softplus(x))`. Each one is also a standalone layer: `GELU`, `SiLU`, and `Mish`. `GELU::new()` gives the exact form, and `with_approximate(true)` selects the tanh approximation. `Dense`, all 10 convolution layers, `SimpleRNN`, `LSTM`, and `GRU` accept the 3 new activations.
+- **3 new activations: GELU, SiLU, and Mish.** `Activation::GELU { approximate }` is `x * Phi(x)`, where `Phi` is the standard normal cumulative distribution function. With `approximate: true` it uses the tanh approximation `x * sigmoid(2 * sqrt(2/pi) * (x + 0.044715 * x^3))`. `Activation::SiLU`, also named Swish, is `x * sigmoid(x)`. `Activation::Mish` is `x * tanh(softplus(x))`.
+
+  Each one is also a standalone layer: `GELU`, `SiLU`, and `Mish`. `GELU::new()` gives the exact form, and `with_approximate(true)` selects the tanh approximation. `Dense`, all 10 convolution layers, `SimpleRNN`, `LSTM`, and `GRU` accept the 3 new activations.
 - **`ActivationInput` and `ActivationCache` name the tensor that the backward pass of an activation reads.** `Activation::saves()` returns `ActivationInput::PreActivation` for GELU, SiLU, and Mish, and `ActivationInput::Output` for every other variant. `Activation::forward_train(z)` returns the activated output and an `ActivationCache` that holds the saved tensor. `Activation::output_of(&cache)` gives the activated output that a cache stands for. A host layer caches 1 activation tensor, never both.
 
 ### Changed
+
 - **Breaking: `ParamId` is `{ layer: LayerPath, name }` in place of `{ scope, name }`, and it is no longer `Copy`.** `ParamId::new(scope, name)` still addresses the layer at a model position. `ParamId::at(path, name)` and `LayerPath::param(name)` address a sublayer. `ParamId` implements `Display` and prints its checkpoint path.
 - **Breaking: `Grads::get` takes `&ParamId`, and `Grads::iter` yields `(&ParamId, &Tensor)`.**
-- **Breaking: `Optimizer::update` takes `path: &LayerPath` in place of `scope: usize`.** A model calls it once for each layer and each sublayer. Only out-of-crate optimizers need an edit: build each address with `path.param(name)`.
+- **Breaking: `Optimizer::update` takes `path: &LayerPath` in place of `scope: usize`.** A model calls it once for each layer and each sublayer. For custom optimizers, build each address with `path.param(name)`.
 - **Breaking: `Ctx::has_state` and `Ctx::state_slot` take `&LayerPath` in place of a model position.** Pass `&LayerPath::root(scope)` for the layer at a model position.
-- **Breaking: `MODEL_FORMAT_VERSION` is 4, and no version 3 checkpoint loads.** `LayerCheckpoint` gains a `sublayers` field of the new `SublayerCheckpoint` records, so a file holds the same tree as the model. A checkpoint path is `<layer path>.<name>`, such as `2.kernel` or `2.forward.kernel`. A layer with no sublayer keeps the path it had in version 3. Rebuild the model, retrain, and save again.
+- **Breaking: `MODEL_FORMAT_VERSION` is 4, and no version 3 checkpoint loads.** `LayerCheckpoint` gains a `sublayers` field of the new `SublayerCheckpoint` records, so a file holds the same tree as the model. A checkpoint path is `<layer path>.<name>`, such as `2.kernel` or `2.forward.kernel`. A layer with no sublayer keeps the path it had in version 3.
+
+  Rebuild the model. Retrain it. Save it again.
 - **Breaking: `weight_path` moves from `layers::checkpoint` to `layer_path`, and it takes a `&LayerPath` in place of a model position.**
 - **Breaking: `Activation::backward` takes `&ActivationCache` in place of the activated output tensor.** Get the cache from `Activation::forward_train(z)`. The inference path still calls `Activation::forward(&z)`, which makes no cache and no copy.
 - **Behavior change: `Activation::backward` returns an error for a bad argument.** It returns `Error::InvalidInput` for a cache that holds the other tensor than `Activation::saves()` names. It returns `Error::ShapeMismatch` for a gradient whose shape is not the shape of the cache. Before, a gradient of another shape caused a panic in most variants.
 - **Behavior change: a state value that no layer takes back stops the training step.** `Sequential::train_batch` and `Graph::train_batch` return `Error::Computation`, and the message names each value. Before, a debug assertion caught this case, and a release build ignored the value.
 - **Behavior change: `UnaryLayer::forward_mut` and `Layer::forward_many_mut` return `Error::Computation` for a state value that no layer takes back.**
-- **Behavior change: a training step refuses a sublayer call that reaches another layer than the tree holds at its path.** A training pass records the layer of each `Ctx::sublayer` call. The model compares each record against the tree after the forward pass and after the backward pass. A call of sublayer `b` under the name of sublayer `a` therefore stops the step, also when `a` and `b` have the same type and shape.
-- **Behavior change: the model build checks the whole layer tree.** It refuses 2 arrays or 2 sublayers of 1 layer with 1 name. It also refuses an empty name, a name that holds a `.`, 2 sublayer rosters that disagree, 1 layer at 2 nodes of 1 tree, and a path more than 64 sublayers deep. A roster that lists its own layer therefore gives an error, not a stack overflow. The message names the layer path.
+- **Behavior change: a training step refuses a sublayer call that reaches another layer than the tree holds at its path.** A training pass records the layer of each `Ctx::sublayer` call. The model compares each record against the tree after the forward pass and after the backward pass. A call of sublayer `b` under the name of sublayer `a` stops the step. This check applies even when their types and shapes match.
+- **Behavior change: the model build checks the whole layer tree.** It refuses 2 arrays or 2 sublayers of 1 layer with 1 name. It refuses empty names, names with `.`, and sublayer rosters that disagree. It also refuses repeated layer nodes and paths more than 64 sublayers deep. A roster that lists its own layer therefore gives an error, not a stack overflow. The message names the layer path.
 - **Fix: `Sequential::weight` and `Graph::weight` accept 1 spelling per model position.** A path such as `00.kernel` or `+0.kernel` reaches no array.
 - **Behavior change: `DBSCAN::predict` returns `Error::EmptyInput` for a matrix with 0 rows.** Before, it returned an empty array, and it skipped the feature-count check for that matrix. Every other model already returned `EmptyInput`.
 - **Fix: `DecisionTree::predict_one`, `DecisionTree::predict_proba_one`, and `IsolationForest::score_sample` return `Error::NonFinite` for a NaN or an infinite value.** Before, these single-sample methods checked only the length. A NaN then took the right branch at each split, and the method returned a normal-looking result. The matrix methods already refused such a value.
-- **Fix: `GroupNormalization` and `InstanceNormalization` refuse the same ranks in `compute_output_shape`, in the build, and in the forward pass.** Before, the build accepted rank 1 and rank 2, and the forward pass refused both, so a model built and then failed on its first batch. `GroupNormalization` now accepts rank 2 and higher. At rank 2 each group folds over its own channels alone. `InstanceNormalization` accepts rank 3 and higher, because at rank 2 its output would always equal `beta`.
+- **Fix: `GroupNormalization` and `InstanceNormalization` refuse the same ranks in `compute_output_shape`, in the build, and in the forward pass.** Before, the build accepted ranks 1 and 2, but the forward pass refused both. Such models failed on their first batch. `GroupNormalization` now accepts rank 2 and higher. At rank 2 each group folds over its own channels alone. `InstanceNormalization` accepts rank 3 and higher, because at rank 2 its output would always equal `beta`.
 
 ## [v0.16.0] - 2026-08-23
+
 ### Added
-- **`Graph` and `GraphBuilder`, a model whose layers form a directed graph rather than a chain,** for residual connections, multiple towers, shared encoders, and several inputs or outputs. `input`, `layer`, `apply`, and `add` are infallible, and `build(&outputs)` is the one fallible call. It refuses an empty graph, a forward reference, or a node that reaches no output, and names the node in the message. Several nodes can call 1 layer, which is weight sharing: 1 set of arrays and 1 update per step, with the gradient summed over the nodes. `compile_many` and `with_loss_weights` give each output its own loss. Training, inference, and persistence follow `Sequential`. A graph that holds 1 chain agrees with the equivalent `Sequential` bit for bit.
+- **`Graph` and `GraphBuilder` connect layers in a directed graph.** They support residual connections, multiple towers, shared encoders, and multiple inputs or outputs. `input`, `layer`, `apply`, and `add` are infallible, and `build(&outputs)` is the only fallible call. It refuses an empty graph, a forward reference, or a node that reaches no output, and names the node in the message. Several nodes can share 1 layer.
+
+  They share its arrays and sum its gradients for 1 update per step. `compile_many` and `with_loss_weights` give each output its own loss. Training, inference, and persistence follow `Sequential`. A graph that holds 1 chain agrees with the equivalent `Sequential` bit for bit.
 - **7 merge layers: `Add`, `Subtract`, `Multiply`, `Average`, `Maximum`, `Minimum`, and `Concatenate`.** The elementwise 6 broadcast every axis after the batch axis. `Concatenate::new(axis)` takes a possibly negative axis against the full rank. `Maximum` and `Minimum` route a tied gradient to the first input, as `MaxPooling2D` does. The layer is reached as `prelude::neural_network::Average`, since the prelude root keeps `metrics::Average`.
 - **`SequentialBuilder`, now the only way to reach a `Sequential`.** `build(&input_shape)` walks the stack once and hands each layer the shape that reaches it. A shape mismatch fails at build time and names the layer's position and type. Training an unbuilt model is a compile error. `Sequential::input_shape()` and `output_shape()` report the built shapes.
 - **Shape inference through `Layer::build`, `Layer::compute_output_shape`, and the new `Shape` type.** `compute_output_shape` is pure, so it answers before any pass. `NnError::NotBuilt` reports a layer that was used before it was built.
-- **`Ctx`, a per-pass context that holds the training flag, the caches, the parameter gradients (`Grads`, keyed by `ParamId`), and pending state changes.** Layers now keep no state between passes: `forward` and `backward` take `&self`. `Sequential` and `Graph` are `Send + Sync`, so several threads can run inference against 1 model.
+- **`Ctx` holds data for each pass. It contains the training flag, caches, parameter gradients (`Grads`, keyed by `ParamId`), and pending state changes.** Layers now keep no state between passes: `forward` and `backward` take `&self`. `Sequential` and `Graph` are `Send + Sync`, so several threads can run inference against 1 model.
 - **The layer trait is split into `LayerBase`, `UnaryLayer`, and `Layer`, with `Arity` declaring the input count.** Every 1-input layer implements `UnaryLayer` and gets `Layer` through a blanket impl. `UnaryLayer::forward_mut` drives 1 layer by hand.
 - **Named checkpoints.** Every array is addressed as `<layer position>.<name>`, and it records a `WeightKind` (trainable or non-trainable) and the layer's build shape. `Sequential` gains `weight_paths()`, `weight(path)`, and the lenient `load_partial_from_path`, which returns a `LoadReport`. `load_from_path` stays strict, and a refusal leaves the model untouched. `Layer::weights`, `weights_mut`, and `weight` expose the arrays, and `ParamCounts` reports trainable and non-trainable counts together.
 - **New layer options.** The recurrent layers gain `return_sequences` and `go_backwards`, verified against Keras 3.15. All 10 convolutions gain `dilation_rate`, and `Conv1D` gains causal padding through the new `ConvPadding` enum. `Dense` and the convolutions gain `use_bias`, and the normalization layers gain `center` and `scale`. `Dropout` gains `noise_shape`. `Dense` accepts input of rank 2 or more and contracts the last axis.
@@ -48,207 +58,233 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - **`Initializer` (`GlorotUniform`, `Uniform`, `Orthogonal`) and `Fans` make the weight-draw rules explicit.** No drawn weight changes.
 
 ### Changed
+
 - **Breaking: layer constructors no longer take an input shape.** This affects 32 constructors, for example `Dense::new(units, activation)`. The shape arrives through `build`. `Sequential::new`, `new_with_seed`, and `add` are removed. The windowed pooling constructors and `Flatten::new()` are now infallible.
-- **Breaking: `MODEL_FORMAT_VERSION` is 3, and no checkpoint from an earlier release loads.** The format now stores names instead of per-layer enum variants. Rebuild the model, retrain, and save again.
-- **Breaking: `Optimizer::update` takes the gradient store and a `&mut dyn LayerBase`.** Optimizer state is keyed by parameter name rather than position. Parameter names follow Keras: `kernel`, `depthwise_kernel`, `pointwise_kernel`, and on `BatchNormalization`, `moving_mean` and `moving_variance`. Only out-of-crate optimizers need an edit.
+- **Breaking: `MODEL_FORMAT_VERSION` is 3, and no checkpoint from an earlier release loads.** The format now stores names instead of per-layer enum variants. Rebuild the model. Retrain it. Save it again.
+- **Breaking: `Optimizer::update` takes the gradient store and a `&mut dyn LayerBase`.** Optimizer state is keyed by parameter name rather than position. Parameter names follow Keras: `kernel`, `depthwise_kernel`, `pointwise_kernel`, and on `BatchNormalization`, `moving_mean` and `moving_variance`. Custom optimizers need an update.
 - **Behavior change: a built layer refuses input whose rank or fixed non-batch axes disagree with its build shape.** `summary` shapes no longer depend on the last pass. `Dropout`, `GaussianDropout`, and `GaussianNoise` accept any shape.
-- **Behavior change: seeded weight builders record their seed and draw at `build`,** so inserting a seeded layer no longer shifts the random stream of the layers after it.
-- **Behavior change: the "input must not be shorter than the kernel" rule now applies only under `Valid` padding and runs at build time,** matching Keras.
+- **Behavior change: seeded weight builders record their seed and draw at `build`.** A seeded layer no longer shifts the random stream for later layers.
+- **Behavior change: only `Valid` padding requires an input at least as long as the kernel.** The check runs at build time, as in Keras.
 - **`SimpleRNN`, `LSTM`, and `GRU` share 1 internal recurrent layer over 3 cells.** The public API and every drawn value are unchanged.
 - **Tuning cleanup.** `tuning::norm` merges 7 gates into `col_fold` and `row_pass`. `CACHE_RESIDENT_MAX_BYTES` drops to 32 MiB, the per-core L3 slice. The calibration takeaway rule no longer hides crossovers. `cargo bench --bench parallel_gates` writes to `target/` unless `RUSTYML_WRITE_RESULTS=1` is set.
 
 ### Removed
+
 - **`Layer::predict`, `set_training`, the `training` field, and the per-layer gradient and cache fields.** `Ctx` replaces all of them.
 - **`LayerWeight`, its 20 container structs, `ApplyWeights`, `SerializableSequential`, and `get_weights`.** Named checkpoints replace them, about 1000 lines in total.
 - **Unused tuning items:** the BN plane-stats, exp-reduce, and silhouette setters. Also `math::matmul::gemm_chunk_rows` and `cache_resident`, which are now crate-internal, and the `matmul_kernels` benchmark.
 
 ### Fixed
+
 - **A layer that gave 2 arrays the same name had their gradients and optimizer state silently merged.** A gradient stored under an address no parameter reads was also silently dropped. Both are now refused with an error that names the address.
 - **`SimpleRNN::set_weights` panicked on the first training step when given a non-standard-layout array.** It now normalizes the layout, as `LSTM` and `GRU` already did.
 - **`BatchNormalization`'s parallel and serial paths differed in the last bit.** Moving the gate therefore changed results, and it no longer does.
 - **An upsampling layer's output shape could overflow on a large factor,** and `Reshape` named a batch extent of 0 in its errors.
-- **Performance fixes.** Activation forward passes no longer copy the tensor first (1.9 to 3.9x faster). `BatchNormalization` drops a per-element integer division. Several parallel gates in k-means, pooling backward, softmax, sigmoid, and tanh no longer fork rayon for 1 task or far too early.
+- **Performance fixes.** Activation forward passes no longer copy the tensor first. Recorded comparisons showed a speedup of 1.9 to 3.9x. `BatchNormalization` drops a per-element integer division. Several parallel gates in k-means, pooling backward, softmax, sigmoid, and tanh no longer fork rayon for 1 task or far too early.
 
 ## [v0.15.0] - 2026-08-20
+
 ### Added
-- **7 new `Activation` variants: `LeakyReLU`, `ELU`, `SELU`, `Softplus`, `Softsign`, `HardSigmoid`, and `Exponential`.** Each one also ships as a thin standalone layer of the same name in `neural_network::layers::activation`. `LeakyReLU::new(negative_slope)` and `ELU::new(alpha)` return a `Result` and default to `0.3` and `1.0`, and the other 5 take no argument. The new `Activation::validate` runs in all 14 trainable layer constructors. A `negative_slope` or `alpha` that is not finite and above 0 is now `Error::InvalidParameter` at construction, not at the first forward pass.
+- **7 new `Activation` variants: `LeakyReLU`, `ELU`, `SELU`, `Softplus`, `Softsign`, `HardSigmoid`, and `Exponential`.** Each one also ships as a standalone layer of the same name in `neural_network::layers::activation`. `LeakyReLU::new(negative_slope)` and `ELU::new(alpha)` return a `Result` and default to `0.3` and `1.0`, and the other 5 take no argument. The new `Activation::validate` runs in all 14 trainable layer constructors. A `negative_slope` or `alpha` that is not finite and above 0 is now `Error::InvalidParameter` at construction, not at the first forward pass.
   - `LeakyReLU` takes the positive branch at `x >= 0`, while `ELU` and `SELU` take it at `x > 0`. The derivative at exactly 0 is therefore 1 for `LeakyReLU`, `alpha` for `ELU`, and `scale * alpha` for `SELU`.
 - **3 new transposed convolution layers: `Conv1DTranspose`, `Conv2DTranspose`, and `Conv3DTranspose`.** Each one runs a convolution backwards over its spatial axes, so it grows a tensor instead of shrinking one. The constructors mirror their plain counterparts, plus `with_padding`, `with_random_state`, and `set_weights`. Output size is `input * stride + max(kernel - stride, 0)` under `PaddingType::Valid` and `input * stride` under `PaddingType::Same`. Unlike the plain convolution layers, these put no lower bound on the input spatial size. Verified against Keras 3.15, forward and backward.
   - The kernel is `[k..., filters, channels]`, with the filter axis **before** the input-channel axis. That is the reverse of the plain convolution kernel, so `set_weights` refuses a kernel laid out for the matching `Conv2D` whenever the 2 counts differ.
   - There is no `output_padding` argument, so a convolution followed by its transpose recovers the original size only under a condition on each axis. Under `PaddingType::Valid` the kernel must be at least the stride, and the stride must divide `input - kernel`. Under `PaddingType::Same` the stride must divide the input. Resize afterwards with a border layer when a condition does not hold.
   - The shared `conv_transpose_engine` is the existing `convolution_engine` with its 2 halves exchanged. Every geometry helper, the offset table, and the block copy are reused, and the existing `tuning::conv::set_parallel_min_flops` gate covers both engines.
 - **2 new convolution layers: `DepthwiseConv1D` and `SeparableConv1D`,** which complete the depthwise and separable family at rank 1. The constructors mirror their 2D counterparts with scalar arguments instead of tuples. The depthwise kernel is `[kernel_size, channels, depth_multiplier]` and the pointwise kernel is `[1, channels * depth_multiplier, filters]`. Verified against Keras 3.15, forward and backward.
-  - Neither layer adds a loop nest. Both set the height terms of the shared depthwise geometry to 1 and pass the flat slices of their own rank-3 arrays. Nothing is repacked, and the existing `tuning::conv::set_naive_parallel_min_flops` gate covers them.
-- **New `Embedding` layer, a trainable lookup table that turns whole-number indices into dense vectors.** `Embedding::new(input_dim, output_dim)` appends `output_dim` as a trailing axis, so `[N, T]` indices give `[N, T, output_dim]`, at any input rank of 1 or more. The table starts from a uniform draw over `[-0.05, 0.05]`, and `.with_random_state(seed)` makes that draw reproducible. The backward pass adds the upstream gradient into the row each index selected, so a repeated index accumulates and the result reproduces bit for bit. Verified against Keras 3.15, forward and backward.
-  - A `Tensor` holds `f32`, so an index arrives as a floating-point value. It is truncated toward zero and then range-checked. An index outside `0..input_dim`, and any non-finite value, gives an `Error::InvalidInput` that names it.
+  - Neither layer adds a loop nest. Both set the height terms of the shared depthwise geometry to 1 and pass the flat slices of their own rank-3 arrays. The layers do not repack data, and the existing `tuning::conv::set_naive_parallel_min_flops` gate covers them.
+- **New `Embedding` layer, a trainable lookup table that turns whole-number indices into dense vectors.** `Embedding::new(input_dim, output_dim)` appends an axis of size `output_dim` to inputs of rank 1 or higher. For example, `[N, T]` becomes `[N, T, output_dim]`. The table starts from a uniform draw over `[-0.05, 0.05]`, and `.with_random_state(seed)` makes that draw reproducible. The backward pass adds the upstream gradient to each selected row.
+
+  Repeated indices add to the same row in a fixed order. Verified against Keras 3.15, forward and backward.
+  - A `Tensor` holds `f32`, so an index arrives as a floating-point value. It is truncated toward 0 and then range-checked. An index outside `0..input_dim`, and any non-finite value, gives an `Error::InvalidInput` that names it.
   - `mask_zero` has no counterpart, because this crate propagates no mask. The flag would change nothing, so it is omitted rather than accepted and ignored.
 - **New `PReLU` layer, a ReLU whose negative-side slope is trainable.** `PReLU::new(input_shape, alpha)` holds 1 slope per position of `input_shape` with the batch axis removed, all starting at `alpha`. The slopes are ordinary trainable parameters, so `parameters()`, `get_weights()`, `set_weights(alpha)`, and `param_count()` all cover them. Decoupled weight decay skips them, because a slope of 0 turns the layer back into `ReLU` and would erase what it learns. Verified against Keras 3.15, forward and backward.
   - **`with_shared_axes(axes)` cuts the slope count, and it is what makes the layer usable after a convolution.** Each named axis drops to extent 1 in the slope array and broadcasts back over the input. `[batch, height, width, channels]` with `[1, 2]` holds 1 slope per channel instead of 1 per pixel. A shared axis is also no longer checked at forward time, so 1 such layer serves images of several sizes.
-  - **The derivative at exactly 0 is 0, and neither 1 nor `alpha`.** That is what makes an `alpha` of 0 give the exact `ReLU` gradient as well as the exact `ReLU` transform. `LeakyReLU` differs here, so a `PReLU` with a frozen uniform slope matches it everywhere except at exactly 0.
-  - There is no `Activation::PReLU` variant, and there cannot be one. An `Activation` value carries no state, and this layer carries a trainable array. Place `PReLU` after the layer whose output it activates.
-- **3 new upsampling layers: `UpSampling1D`, `UpSampling2D`, and `UpSampling3D`.** Each one multiplies the extent of every spatial axis by its factor, leaves the batch axis and the channel axis untouched, and holds no parameter. The family is the decoder counterpart of the pooling family, so an autoencoder and a segmentation decoder become expressible without a transposed convolution. New `Factor2D` and `Factor3D` argument types take an integer for a shared factor or a tuple for 1 factor per axis. All 3 constructors return a `Result` and reject a factor of 0 with `Error::InvalidParameter`.
+  - **The derivative at exactly 0 is 0.** That is what makes an `alpha` of 0 give the exact `ReLU` gradient as well as the exact `ReLU` transform. `LeakyReLU` differs here, so a `PReLU` with a frozen uniform slope matches it everywhere except at exactly 0.
+  - There is no `Activation::PReLU` variant. An `Activation` value carries no state, and this layer carries a trainable array. Place `PReLU` after the layer whose output it activates.
+- **3 new upsampling layers: `UpSampling1D`, `UpSampling2D`, and `UpSampling3D`.** Each layer multiplies every spatial extent by its factor. It preserves the batch and channel axes and holds no parameter. The family is the decoder counterpart of the pooling family, so an autoencoder and a segmentation decoder become expressible without a transposed convolution. New `Factor2D` and `Factor3D` argument types take an integer for a shared factor or a tuple for 1 factor per axis. All 3 constructors return a `Result` and reject a factor of 0 with `Error::InvalidParameter`.
   - **`UpSampling2D` takes a new `Interpolation` argument with 5 modes: `Nearest`, `Bilinear`, `Bicubic`, `Lanczos3`, and `Lanczos5`.** `Nearest` is the default, and it repeats each pixel into a block. The other 4 resample with a separable kernel. The weights of 1 output pixel always sum to 1, including at an edge, so a constant image stays constant. The weight table is computed in `f64` and rounded to `f32` once, because the Lanczos kernels have large lobes that cancel. `UpSampling1D` and `UpSampling3D` repeat and take no interpolation.
   - **New `tuning::upsampling::set_parallel_min_ops` gate, defaulting to 2,000,000.** It gates 1 axis pass on `destination elements * taps` rather than on the element count. The taps run from 1 for the repeat mode up to 11 for `Lanczos5`. Moving the gate never changes a result.
-- **6 new border layers: `ZeroPadding1D/2D/3D` and `Cropping1D/2D/3D`.** A zero-padding layer adds zero positions at the ends of the spatial axes, and a cropping layer removes them. Both leave the batch axis and the channel axis untouched, and neither holds a parameter. Each half is the backward pass of the other half, so a pad and a crop with the same amounts cancel. A `Cropping*` amount that leaves a spatial axis with no positions is `Error::InvalidInput` at forward time.
+- **6 new border layers: `ZeroPadding1D/2D/3D` and `Cropping1D/2D/3D`.** A zero-padding layer adds positions with value 0 at the ends of the spatial axes, and a cropping layer removes them. Both leave the batch axis and the channel axis untouched, and neither holds a parameter. Each half is the backward pass of the other half, so a pad and a crop with the same amounts cancel. A `Cropping*` amount that leaves a spatial axis with no positions is `Error::InvalidInput` at forward time.
   - New `Border1D`, `Border2D`, and `Border3D` argument types, taken as `impl Into<..>` and returned with no `Result`. An integer sets every end. A tuple sets 1 equal amount per axis. A tuple of `(before, after)` pairs names every end on its own.
   - Read the 2D and 3D tuple form with care. `ZeroPadding2D::new((1, 2))` gives 1 row at the top and the bottom, plus 2 columns at the left and the right. It does not give 1 row at the top and 2 at the bottom.
 - **New `UnitNormalization` layer, which scales each group of elements to an L2 norm of 1.** The new `UnitNormalizationAxis` picks the axes the norm reduces over. `Default` names the last axis, `Custom(a)` names 1 axis, and `Multiple(axes)` names a joint norm. It holds no parameter and behaves the same in training and in inference, which makes it the first layer in `regularization` that is not mode-dependent. `UnitNormalization::new` returns `Error::InvalidParameter` for an empty axis list or a duplicate axis, at construction.
-  - The scale is capped at `1e12`, so an all-zero group stays all zero instead of dividing by zero. The backward pass returns the derivative of the cap at such a group, which is a real number. The derivative of the reciprocal square root itself overflows there and would give `NaN`. The 2 approaches agree everywhere else.
-- **4 new shape layers: `Reshape`, `Permute`, `RepeatVector`, and `Identity`.** None of them holds a parameter, and each constructor names only the axes after the batch axis, so 1 instance serves every batch size.
+  - The scale is capped at `1e12`, so an group of 0 values stays at 0. The backward pass returns the derivative of the cap at such a group, which is a real number. The derivative of the reciprocal square root itself overflows there and would give `NaN`. The 2 approaches agree everywhere else.
+- **4 new shape layers: `Reshape`, `Permute`, `RepeatVector`, and `Identity`.** None holds a parameter. Each constructor names only axes after the batch axis, so 1 instance serves every batch size.
   - `Reshape::new(target_shape)` accepts at most 1 `-1` entry, which takes the extent that makes the element count match. `vec![-1]` is exactly `Flatten`, but the constructor takes no input shape. A `0` entry is rejected at construction, not at the first forward pass.
   - `Permute::new(dims)` names the new order of the axes, counting from 1 and never including the batch axis. A permute moves data rather than relabeling it, so the layer copies, and the output is always in C order. An empty `dims` is `Error::InvalidParameter`.
   - `RepeatVector::new(n)` turns a `[batch, features]` input into `[batch, n, features]`, with the same vector at every step, and sums over the step axis on the way back. This bridges 1 recurrent layer to the next, since a recurrent layer here returns a rank-2 state and needs a rank-3 input.
   - `Identity::new()` passes its input through unchanged at every rank, and returns the gradient it receives. Its use is a placeholder, for a builder that must return a layer when the choice is "no operation".
-- **New `LayerWeight` variants for every new trainable layer:** `Embedding`, `Conv1DTranspose`, `Conv2DTranspose`, `Conv3DTranspose`, `PReLU`, `DepthwiseConv1D`, and `SeparableConv1D`, each with its weight container. The variants are appended at the end of the enum. postcard writes the variant index, so every existing index stays put, `MODEL_FORMAT_VERSION` stays at 1, and a model file written before this release still loads.
+- **New `LayerWeight` variants for every new trainable layer:** `Embedding`, `Conv1DTranspose`, `Conv2DTranspose`, `Conv3DTranspose`, `PReLU`, `DepthwiseConv1D`, and `SeparableConv1D`, each with its weight container. The variants are appended at the end of the enum. Postcard writes the variant index. Existing indices stay fixed, and `MODEL_FORMAT_VERSION` stays at 1. Files from before this release still load.
 
 ### Fixed
-- **`DepthwiseConv2D::output_shape` reported the input channel count instead of `channels * depth_multiplier`.** It read the trailing axis of the shared 2D output-shape calculator, which is right for a plain convolution but not for a depthwise one. `model.summary()` therefore printed the wrong output width above the default multiplier of 1, while the forward pass emitted the correct one. Only the printed description was wrong, so no stored weight, forward value, or gradient changes.
+
+- **`DepthwiseConv2D::output_shape` reported the input channel count instead of `channels * depth_multiplier`.** It read the trailing axis of the shared 2D output-shape calculator. That axis gives the correct count for plain convolution, but not depthwise convolution. `model.summary()` therefore printed the wrong output width above the default multiplier of 1, while the forward pass emitted the correct one. Only the printed description was wrong, so no stored weight, forward value, or gradient changes.
 - **`SeparableConv2D` returned a panic, not an error, for an input carrying more channels than it was built for.** Its depthwise kernel is sized from the declared channel count, so the shared kernel indexed past the end of it. Both separable layers now check the rank and the channel count at the layer boundary, the way `DepthwiseConv2D` already did. An input with the declared channel count is unaffected.
-- **`Activation::Softmax` no longer fails on an input that is not in C order.** It called `to_owned` and then `into_shape_with_order`, and `to_owned` keeps the strides, so the reshape refused a hand-transposed tensor such as `x.t().to_owned()`. The layer now settles the layout in the 1 copy it already made. Results for an input already in C order are unchanged.
+- **`Activation::Softmax` no longer fails on an input that is not in C order.** It called `to_owned` and then `into_shape_with_order`. Because `to_owned` keeps strides, the reshape refused transposed tensors such as `x.t().to_owned()`. The layer now settles the layout in the 1 copy it already made. Results for an input already in C order are unchanged.
 
 ### Changed
+
 - **Breaking: `Activation` no longer derives `Eq`,** because `LeakyReLU` and `ELU` carry an `f32` parameter. It still derives `PartialEq`. Only code that uses `Activation` as a `HashMap` key or in a `HashSet` needs an edit.
-- **`Flatten` caches only the input shape, not the input tensor.** Its backward pass never read the values, since a flatten moves no data, so every forward pass copied the whole activation for nothing. `Flatten::forward` now makes 1 pass over the activation instead of 2. The public API and every result are unchanged.
+- **`Flatten` caches only the input shape, not the input tensor.** Its backward pass only needs the shape. The old forward pass copied activation values that the backward pass did not use. `Flatten::forward` now makes 1 pass over the activation instead of 2. The public API and every result are unchanged.
 - **All 4 depthwise and separable layers share 1 forward and 1 backward driver loop** in `conv_op_helpers`, instead of each carrying its own copy. The parallel gate, the task split, and the batch-order reduction are unchanged, so every value is the same as before.
 
 ## [v0.14.0] - 2026-07-29
+
 ### Added
-- **New `utils::scaler` module: `StandardScaler`, `MinMaxScaler`, `MaxAbsScaler`, `RobustScaler`, and `Normalizer`** — the scikit-learn transformer family, with a shared `fit` / `transform` / `inverse_transform` contract, the `Fit`/`Transform`/`FitTransform` traits, `partial_fit` wherever the statistics merge exactly, and `save_to_path` persistence. `StandardScaler` reproduces `standardize` bit-for-bit.
-- **`fit` and `fit_with_batches` return a `History`** carrying one loss entry per epoch whether or not `show_progress` is on, so early stopping, learning-rate schedules, and best-checkpoint loops become expressible as user code.
-- **`Sequential::evaluate` scores a model without training it** (Keras' `evaluate`): one inference-mode forward pass through the compiled loss, updating nothing and drawing from no RNG.
-- **`Sequential::train_batch` is public** (Keras' `train_on_batch`), so a caller can own the epoch structure; it now validates its own inputs.
-- **The learning rate is readable as well as writable** through the new `Optimizer::learning_rate` and `Sequential::learning_rate()`, so a schedule is a read-scale-write instead of a shadow copy that goes stale.
+- **New `utils::scaler` module: `StandardScaler`, `MinMaxScaler`, `MaxAbsScaler`, `RobustScaler`, and `Normalizer`.** These follow scikit-learn transformer conventions through `fit`, `transform`, `inverse_transform`, and the `Fit`/`Transform`/`FitTransform` traits. They support `save_to_path`. Scalers also provide `partial_fit` where statistics can merge exactly. `StandardScaler` reproduces `standardize` bit-for-bit.
+- **`fit` and `fit_with_batches` return a `History` with 1 loss per epoch.** This works with or without `show_progress`. Callers can use it for early stopping, learning-rate schedules, and checkpoint selection.
+- **`Sequential::evaluate` scores a model without training it** (Keras' `evaluate`): 1 inference-mode forward pass through the compiled loss, updating nothing and drawing from no RNG.
+- **`Sequential::train_batch` is public** (Keras' `train_on_batch`), so a caller can own the epoch structure. It now validates its own inputs.
+- **Read the learning rate through `Optimizer::learning_rate` or `Sequential::learning_rate()`.** A schedule can read and update the actual rate.
 
 ### Fixed
+
 - **The per-epoch loss `fit_with_batches` reports no longer over-weights a short trailing batch.** It is now `sum(loss_i * n_i) / n_samples` as in Keras, rather than a mean over the batch count.
-- **A rank-0 input tensor no longer panics `fit`, `fit_with_batches`, `train_batch`, or `evaluate`;** it is rejected with `Error::InvalidInput`.
-- **`r2_score` and `explained_variance_score` no longer score `1.0` for a genuinely varying target.** An absolute `1e-10` threshold on the sum of squares mistook any low-spread target for a constant one; constancy is now decided from the values themselves.
+- **A rank-0 input tensor no longer panics `fit`, `fit_with_batches`, `train_batch`, or `evaluate`.** It is rejected with `Error::InvalidInput`.
+- **`r2_score` and `explained_variance_score` no longer score `1.0` for a varying target.** An absolute `1e-10` sum-of-squares threshold misclassified targets with small variation as constant. The values themselves now determine constancy.
 - **`precision_recall_curve` no longer appends its closing point to the wrong end of the curve,** which left recall monotone in neither direction. The points now run in scikit-learn's order.
-- **`KMeans` no longer leaves `labels_` and `inertia_` describing different centroids than `cluster_centers_`** after a fit that stopped at `max_iter`; a final assignment pass now runs on that exit path.
-- **`CategoricalCrossEntropy` no longer computes the wrong function above rank 2.** It divided by the batch axis alone and, under `from_logits`, softmaxed across every (position, class) pair at once. The last axis is now the class axis, every leading axis an independent prediction site, and the divisor their product — Keras' `sum_over_batch_size`. **Rank-2 input is bit-for-bit unchanged.**
-- **`fit_with_batches` no longer fails on its first mini-batch for a model containing a dropout, noise, or normalization layer.** The shape check compared axis 0 against the shape declared at construction, so only `batch_size == n_samples` survived; the batch axis is no longer compared.
+- **`KMeans` no longer leaves `labels_` and `inertia_` describing different centroids than `cluster_centers_`** after a fit that stopped at `max_iter`. A final assignment pass now runs on that exit path.
+- **`CategoricalCrossEntropy` no longer computes the wrong function above rank 2.** It divided by the batch axis alone and, under `from_logits`, softmaxed across every (position, class) pair at once. The last axis is now the class axis, every leading axis an independent prediction site, and the divisor their product. This follows Keras' `sum_over_batch_size` rule. **Rank-2 input is bit-for-bit unchanged.**
+- **`fit_with_batches` no longer fails on its first mini-batch for a model containing a dropout, noise, or normalization layer.** The shape check required `batch_size == n_samples` by comparing axis 0 with the construction shape. It no longer compares the batch axis.
 - **`DepthwiseConv2D` and `SeparableConv2D` no longer omit the channel count from `fan_in`,** which widened the Glorot bound by roughly `sqrt(channels)`. **Weights drawn from a given seed change.**
 
 ### Changed
-- **Breaking: gradient clipping is renamed `global_clipnorm`** (`Optimizer::clip_norm`, and `with_clip_norm` → `with_global_clipnorm`), because the crate has always clipped by *global* norm while Keras' `clipnorm` is the per-variable knob. No behaviour changed.
-- **Breaking: `fit` and `fit_with_batches` return `Result<History, Error>`** instead of `Result<&mut Self, Error>`. Statement-position callers still compile; only code chaining another method off `fit` needs an edit.
-- **Breaking: `Optimizer` requires `learning_rate(&self) -> f32`, and `set_learning_rate` lost its default no-op body,** which had let a custom optimizer swallow every schedule call in silence. Only out-of-crate impls need an edit.
-- **Breaking: both categorical cross-entropies renormalize `y_pred` along the class axis before clipping, matching Keras.** The loss is unchanged for an already-normalized head but the gradient is not, since the divisor is differentiated; `Softmax` + `CategoricalCrossEntropy::new(false)` still trains bit-for-bit as before. `SparseCategoricalCrossEntropy`'s probability gradient becomes dense.
-- **Breaking: `RMSprop` and `AdaGrad` move `epsilon` inside the square root,** matching Keras, while `Adam` keeps it outside as Keras' `Adam` does. **Retune it rather than porting your value across** — roughly `eps_inside = eps_outside²`.
+
+- **Breaking: gradient clipping is renamed `global_clipnorm`.** `Optimizer::clip_norm` becomes `Optimizer::global_clipnorm`. `with_clip_norm` becomes `with_global_clipnorm`. The crate clips the global norm, while Keras' `clipnorm` applies per variable. No behavior changed.
+- **Breaking: `fit` and `fit_with_batches` return `Result<History, Error>`** instead of `Result<&mut Self, Error>`. Statement-position callers still compile. Only code chaining another method off `fit` needs an edit.
+- **Breaking: `Optimizer` requires `learning_rate(&self) -> f32`, and `set_learning_rate` lost its default no-op body,** which had let a custom optimizer swallow every schedule call in silence. Custom implementations need an update.
+- **Breaking: both categorical cross-entropies renormalize `y_pred` along the class axis before clipping, matching Keras.** The loss is unchanged for an already-normalized head but the gradient is not, since the divisor is differentiated. `Softmax` + `CategoricalCrossEntropy::new(false)` still trains bit-for-bit as before. `SparseCategoricalCrossEntropy`'s probability gradient becomes dense.
+- **Breaking: `RMSprop` and `AdaGrad` move `epsilon` inside the square root,** matching Keras, while `Adam` keeps it outside as Keras' `Adam` does. **Retune it rather than porting your value across**. Roughly `eps_inside = eps_outside²`.
 - **`Adam` keeps coupled L2 weight decay as a deliberate, now-documented divergence from Keras 3,** matching `torch.optim.Adam` / `AdamW` instead. No code changed.
-- **Breaking: `GRU`'s gate order and update-gate convention now match Keras:** the fused tensors pack as `[z | r | h]`, and `h_t = z_t * h_{t-1} + (1 - z_t) * n_t`. `set_gate_weights` keeps its argument order and repacks internally. **Re-save any GRU checkpoint** — the tensors change meaning, not shape.
+- **Breaking: `GRU`'s gate order and update-gate convention now match Keras:** the fused tensors pack as `[z | r | h]`, and `h_t = z_t * h_{t-1} + (1 - z_t) * n_t`. `set_gate_weights` keeps its argument order and repacks internally. **Re-save any GRU checkpoint**. The tensors change meaning, not shape.
 - **Breaking: the whole `neural_network` module is channels-last, matching Keras.** Tensors are `[batch, spatial..., channels]`, kernels `(spatial..., in_channels, filters)`, and every convolution and `Dense` bias drops to rank 1. The conversion is native, so im2col becomes a contiguous copy and the module lost roughly 500 lines. **Migration: permute your input tensors and saved kernels, and re-save every checkpoint.** Recurrent layers, `Dense`, and `LayerNormalization` are unaffected.
-  - **`DepthwiseConv2D::new` drops `filters` and gains `with_depth_multiplier`;** the output channel count is `channels * depth_multiplier`.
+  - **`DepthwiseConv2D::new` drops `filters` and gains `with_depth_multiplier`.** The output channel count is `channels * depth_multiplier`.
   - **`GroupNormalization::new` and `InstanceNormalization::new` drop `channel_axis`,** which had been implemented by the very permute the new layout avoids.
-  - **`Activation::Softmax` on a convolution now normalizes over channels** rather than image width, so such a layer computes something different — and correct.
+  - **`Activation::Softmax` on a convolution now normalizes over channels** rather than image width, so such a layer computes something different.
 - **Breaking: saved `Sequential` models carry a magic tag and format version,** validated before anything else is decoded and reported as the new `IoError::UnsupportedModelFormat`. The old layer-count and weight-extent checks can be satisfied by coincidence across an incompatible release. **Every existing `.bin` checkpoint must be re-saved.**
 - **The default feature set is now `full`, so `cargo add rustyml` gives the whole crate.** The old default omitted `utils` and `metrics`, so `train_test_split` and `accuracy` did not compile. No dependency is added.
-- **Breaking: the two `Solver` enums are renamed** to **`LeastSquaresSolver`** and **`DiscriminantSolver`**. Only LDA's was re-exported, so after a prelude glob import `Solver::GradientDescent` resolved to the wrong enum; both are now re-exported.
-- **Breaking: `LinearRegression` is exact OLS by default, and its iteration knobs move into the solver payload** (`LeastSquaresSolver::GradientDescent { learning_rate, max_iter, tol }`). `new(fit_intercept)` takes one argument and returns `Self`, `with_solver` returns `Result`, and `get_learning_rate` / `get_max_iterations` / `get_tolerance` are removed — match on `get_solver()`. **The serialized layout changed — re-fit and re-save.**
-- **Breaking: `RegularizationType::L1` now produces exact zeros** through a proximal (soft-thresholding) step, so Lasso finally delivers sparsity. The intercept stays unpenalized; `LinearSVC`'s L1 is unchanged for now.
+- **Breaking: the 2 `Solver` enums are renamed** to **`LeastSquaresSolver`** and **`DiscriminantSolver`**. Only LDA's was re-exported, so after a prelude glob import `Solver::GradientDescent` resolved to the wrong enum. Both are now re-exported.
+- **Breaking: `LinearRegression` is exact OLS by default, and its iteration knobs move into the solver payload** (`LeastSquaresSolver::GradientDescent { learning_rate, max_iter, tol }`). `new(fit_intercept)` takes 1 argument and returns `Self`, `with_solver` returns `Result`, and `get_learning_rate` / `get_max_iterations` / `get_tolerance` are removed. Match on `get_solver()`. **The serialized layout changed. Re-fit and re-save.**
+- **Breaking: `RegularizationType::L1` now produces exact 0 values** through a proximal (soft-thresholding) step, so Lasso produces sparse coefficients. The intercept stays unpenalized. `LinearSVC`'s L1 is unchanged for now.
 - **`RegularizationType` documents how to convert `alpha` from scikit-learn:** 1:1 from `SGDRegressor`/`SGDClassifier`, `Ridge(alpha=a)` → `L2(a / n)`, `LogisticRegression(C=c)` → `alpha = 1 / (c * n)`. No numbers changed.
 - **Breaking: `ConfusionMatrix::new` requires hard `{0.0, 1.0}` labels instead of thresholding both arguments at a hardcoded `0.5`,** as scikit-learn's `confusion_matrix` does. Threshold your scores first, or use the new `new_with_labels(y_true, y_pred, negative_label, positive_label)` for another label pair. Its arguments now take independent storage types.
-- **Breaking: `IsolationForest` adopts scikit-learn's scoring and prediction API.** `predict` returns `-1`/`+1` labels, the old score-returning `predict` becomes `score_samples` with scikit-learn's sign (**lower** is more anomalous), `anomaly_score` becomes `score_sample`, `predict_labels` is removed, and `decision_function` is new. Contamination is a builder-set `Contamination` rule resolved into a stored `offset` at fit time, so a label no longer depends on the batch the sample was scored in. Flip every comparison that ranks or thresholds scores. **Re-save any persisted forests.**
-- **Breaking: `LDA::transform` centers by the training mean and keeps the whitened axis scale,** computing scikit-learn's `(X - xbar_) @ scalings_`; the mean is exposed as `get_overall_mean`. **The format gained a field — re-save any persisted models.**
-- **Breaking: `MeanShift` matches scikit-learn element for element:** a flat kernel for the shift step, intensity-ordered greedy merging of converged modes, and `-1` for unassigned points under `cluster_all = false`. The Gaussian kernel is **removed** — nothing validated it, and the new merge ranks modes by a point count it does not produce. **Re-fit and re-save.**
-- **Breaking: `estimate_bandwidth` returns a local-density statistic,** the mean distance to each point's `(k - 1)`-th nearest neighbour, instead of a quantile of the whole pairwise-distance distribution, which ran far too large on clustered data.
-- **Breaking: cluster labels are `isize` everywhere, and `-1` is the noise value.** `KMeans` and `MeanShift` join `DBSCAN`, and all ten `metrics::clustering` functions take `Data<Elem = isize>`, so any clustering estimator's output now feeds any clustering metric.
-- **`KMeans` gains `n_init`, defaulting to 10 restarts** with the lowest-inertia run winning, so one unlucky k-means++ seeding no longer decides the result. Pass `with_n_init(1)` for literal scikit-learn parity. Fitted results move for seeded models, and the format gained a field.
+- **Breaking: `IsolationForest` adopts scikit-learn's scoring and prediction API.** `predict` returns `-1`/`+1` labels. The old score method becomes `score_samples`, where lower scores indicate more anomalous samples. `anomaly_score` becomes `score_sample`. `predict_labels` is removed, and `decision_function` is new.
+
+  A builder sets the `Contamination` rule. The fit resolves this rule into a stored `offset`, so labels no longer depend on other samples in the prediction batch. Flip every comparison that ranks or thresholds scores. **Re-save any persisted forests.**
+- **Breaking: `LDA::transform` centers by the training mean and keeps the whitened axis scale,** computing scikit-learn's `(X - xbar_) @ scalings_`. The mean is exposed as `get_overall_mean`. **The format gained a field. Re-save any persisted models.**
+- **Breaking: `MeanShift` uses a flat kernel and merges converged modes in descending intensity order.** Unassigned points receive `-1` when `cluster_all = false`. The Gaussian kernel is **removed**. Nothing validated it, and the new merge ranks modes by a point count it does not produce. **Re-fit and re-save.**
+- **Breaking: `estimate_bandwidth` returns a local-density statistic.** It gives the mean distance to each point's `(k - 1)`-th nearest neighbor. The old pairwise-distance quantile gave excessive bandwidths for clustered data.
+- **Breaking: cluster labels are `isize` everywhere, and `-1` is the noise value.** `KMeans` and `MeanShift` join `DBSCAN` with `isize` labels. All 10 `metrics::clustering` functions accept `Data<Elem = isize>`, so their label types match estimator outputs.
+- **`KMeans` gains `n_init`, defaulting to 10 restarts** with the lowest-inertia run winning, so a poor k-means++ start no longer decides the result. Pass `with_n_init(1)` for 1 restart. Fitted results move for seeded models, and the format gained a field.
 - **`roc_curve`'s origin threshold is `f64::INFINITY`** instead of `max_score + 1.0`, matching scikit-learn and staying distinguishable from the top real threshold at large scores.
-- **Breaking: the estimator traits move from `machine_learning::traits` to the crate root as `rustyml::traits`,** since `utils::StandardScaler` implements three of them and `utils` does not depend on `machine_learning`. Both preludes still resolve; only the old module path disappears.
-- **Breaking: the matrix-multiply backend switches from the `gemm` crate to [`gemmkit`](https://crates.io/crates/gemmkit) 0.1.2,** through its zero-copy `gemmkit-ndarray` adapter. Every hand-rolled serial-vs-rayon gate and row split is deleted in favour of the backend's own scheduling.
-  - `tuning::matmul` loses its GEMM/GEMV FLOPs thresholds and `colpar_min_cols_per_thread`; tune through `GEMMKIT_*` environment variables, the new `tuning::matmul::backend` re-export, or a `gemmkit-tune` profile. `chunk_elems` and `cache_resident_max_bytes` are unchanged.
+- **Breaking: estimator traits move from `machine_learning::traits` to `rustyml::traits`.** `utils::StandardScaler` implements 3 traits, and `utils` does not depend on `machine_learning`. Both preludes still resolve. Only the old module path disappears.
+- **Breaking: the matrix-multiply backend switches from the `gemm` crate to [`gemmkit`](https://crates.io/crates/gemmkit) 0.1.2,** through its zero-copy `gemmkit-ndarray` adapter. Every hand-rolled serial-vs-rayon gate and row split is deleted in favor of the backend's own scheduling.
+  - `tuning::matmul` loses its GEMM/GEMV FLOPs thresholds and `colpar_min_cols_per_thread`. Tune through `GEMMKIT_*` environment variables, the new `tuning::matmul::backend` re-export, or a `gemmkit-tune` profile. `chunk_elems` and `cache_resident_max_bytes` are unchanged.
   - The `gemm_calibrate` bench is removed, since it calibrated the deleted gates.
   - Results no longer depend on worker count, and GEMV is bit-identical at any worker count.
-  - The repaired fused epilogue makes `Dense::forward` 32–49% faster, an MLP training epoch 17% faster, and the matvec-bound estimators 13–21% faster; `PCA::fit_transform` regresses 1–2%.
-- **The hot layers fuse their bias adds (and ReLU) into the GEMM epilogue:** `Dense`, the conv forward blocks, the SimpleRNN/LSTM/GRU timestep loops, and `LDA::decision_scores` write their pre-activations in one pass. Bitwise-identical to the unfused form, except that a `NaN` pre-activation under the fused `Relu` now maps to `0.0`.
-- **Breaking: `SVC` takes and returns `{0.0, 1.0}` labels instead of `±1.0`,** matching the other classifiers; the SMO dual's ±1 encoding is now internal to `fit`. Passing `±1.0` is `Error::InvalidInput`, and the serialized format is unchanged.
+  - The recorded comparison showed `Dense::forward` 32 to 49% faster and an MLP training epoch 17% faster. Matvec-bound estimators were 13 to 21% faster. `PCA::fit_transform` was 1 to 2% slower.
+- **Selected layers fuse bias addition and ReLU into the GEMM epilogue.** `Dense`, convolution forward blocks, SimpleRNN/LSTM/GRU timestep loops, and `LDA::decision_scores` write pre-activations in 1 pass. Results match the unfused form bit for bit, except that fused `Relu` maps a `NaN` pre-activation to `0.0`.
+- **Breaking: `SVC` takes and returns `{0.0, 1.0}` labels instead of `±1.0`,** matching the other classifiers. The SMO dual's ±1 encoding is now internal to `fit`. Passing `±1.0` is `Error::InvalidInput`, and the serialized format is unchanged.
 - **Breaking: `LogisticRegression::predict` and `fit_predict` return `Array1<f64>` labels** instead of `Array1<i32>`, so predictions round-trip into `fit` and the `f64` metrics without a conversion. `LDA` is unchanged.
 - **Every supervised estimator accepts `x` and `y` with different storage types,** so an owned matrix pairs with a borrowed label view. `DecisionTree::predict` also drops an unnecessary `Send + Sync` bound. Purely relaxations.
 - **Breaking: `PCA` and `KernelPCA` move to `machine_learning::decomposition` and `TSNE` to `machine_learning::manifold`,** mirroring scikit-learn, so they are gated by `machine_learning` rather than `utils`. They also implement `Transform` / `FitTransform`.
-- **Removed the `nalgebra` runtime dependency.** A crate-internal `machine_learning::linalg` module provides `symmetric_eigen`, a one-sided Jacobi `svd` (with `solve` / `pseudo_inverse`), and a Gram-Schmidt `qr_q` over `ndarray` arrays; `nalgebra` drops to a dev-dependency that only cross-checks them in tests.
+- **Removed the `nalgebra` runtime dependency.** The internal `machine_learning::linalg` module provides `symmetric_eigen`, a one-sided Jacobi `svd`, and a Gram-Schmidt `qr_q` over `ndarray` arrays. SVD also provides `solve` and `pseudo_inverse`. `nalgebra` remains a dev-dependency for test comparisons.
 
 ## [v0.13.0] - 2026-06-23
+
 ### Added
-- **Breaking: kernel `gamma` is now a `Gamma` enum supporting data-dependent rules instead of a bare `f64`.** New `Gamma` type with `Gamma::Value(f64)`, `Gamma::Scale` (scikit-learn `'scale'`) and `Gamma::Auto` (`'auto'`), resolved at fit time. Every `KernelType::{Poly, RBF, Sigmoid}` construction site must switch (e.g. `KernelType::RBF { gamma: 0.5 }` → `KernelType::RBF { gamma: Gamma::Value(0.5) }`).
-- **New public `tuning` module: the crate's parallel/serial gate thresholds are now overridable at runtime.** A flat `set_*`/`get_*` facade (grouped into `matmul`, `elementwise`, `reduction`, `tree`, `conv`, `pool`, `norm`, `metrics`) lets a program retune serial-vs-rayon crossovers per machine without recompiling. Defaults and numerical results are unchanged.
-- **`LDA` gains `decision_function` and `predict_proba`** (per-class discriminant scores and their row-wise softmax); `predict` labels are unchanged.
-- **`LinearRegression` gains a closed-form normal-equation solver and a `score` (R²) method** via a new `Solver` enum (`GradientDescent` default, `Normal` solving the ridge least-squares system through SVD).
+- **Breaking: kernel `gamma` is now a `Gamma` enum supporting data-dependent rules instead of a bare `f64`.** New `Gamma` type with `Gamma::Value(f64)`, `Gamma::Scale` (scikit-learn `'scale'`) and `Gamma::Auto` (`'auto'`), resolved at fit time. Every `KernelType::{Poly, RBF, Sigmoid}` construction site must switch (for example `KernelType::RBF { gamma: 0.5 }` → `KernelType::RBF { gamma: Gamma::Value(0.5) }`).
+- **New public `tuning` module: the crate's parallel/serial gate thresholds are now overridable at runtime.** The `set_*`/`get_*` functions let programs adjust serial and Rayon thresholds at runtime. Groups are `matmul`, `elementwise`, `reduction`, `tree`, `conv`, `pool`, `norm`, and `metrics`. Defaults and numerical results are unchanged.
+- **`LDA` gains `decision_function` and `predict_proba`** (per-class discriminant scores and their row-wise softmax). `predict` labels are unchanged.
+- **`LinearRegression` gains a normal-equation solver and a `score` (R²) method.** The new `Solver` enum defaults to `GradientDescent`. `Normal` solves the ridge least-squares system through SVD.
 - **`IsolationForest::predict_labels(x, contamination)`** classifies samples as inlier (`+1`) or outlier (`-1`), mirroring scikit-learn's `IsolationForest.predict`.
 - **`LinearSVC` gains a squared-hinge loss and inverse-scaling learning-rate decay** via a new `Loss` enum and a `with_learning_rate_decay` builder.
-- **`TSNE` gains `min_grad_norm` early stopping** (default `1e-7`) after the early-exaggeration phase, for scikit-learn parity; pass `0.0` to disable.
+- **`TSNE` gains `min_grad_norm` early stopping** (default `1e-7`) after the early-exaggeration phase, for scikit-learn parity. Pass `0.0` to disable.
 
 ### Changed
-- **Breaking: model persistence switched from JSON to a compact binary format (`postcard`).** `save_to_path`/`load_from_path` on every classical-ML model, `PCA`/`KernelPCA`, and `Sequential` now use postcard (a fitted `KMeans` shrinks ~5x on disk). **Old `.json` model files can no longer be loaded — re-save any persisted models.** `IoError::Json` is renamed `IoError::Serialization`.
-- **Breaking: the matrix-product backend switches from `matrixmultiply` to the pure-Rust `gemm` crate**, with runtime-dispatched SIMD kernels and shape-aware parallelism. Matrix products stay reproducible across runs on the same machine but are **no longer bit-for-bit identical** to the old backend; the public `gemm`/`gemv`/`gemm_par`/`gemv_par` API in `math::matmul` is removed (products are now reached only through crate-internal wrappers).
+
+- **Breaking: model persistence switched from JSON to a compact binary format (`postcard`).** `save_to_path`/`load_from_path` on every classical-ML model, `PCA`/`KernelPCA`, and `Sequential` now use postcard (a fitted `KMeans` shrinks ~5x on disk). **Old `.json` model files can no longer be loaded. Re-save any persisted models.** `IoError::Json` is renamed `IoError::Serialization`.
+- **Breaking: the matrix-product backend switches from `matrixmultiply` to the pure-Rust `gemm` crate**, with runtime-dispatched SIMD kernels and shape-aware parallelism. Matrix products stay reproducible across runs on the same machine but are **no longer bit-for-bit identical** to the old backend. The public `gemm`/`gemv`/`gemm_par`/`gemv_par` API in `math::matmul` is removed (products are now reached only through crate-internal wrappers).
 - **Breaking: `standardize` drops its `epsilon` parameter** and now matches `StandardScaler` exactly (`standardize(&data, axis)`), detecting constant lanes via scikit-learn's `_is_constant_feature` rule.
 - **Breaking: `LDA::get_n_components` returns `Option<usize>` and the default is now `None` (auto)**, resolving at fit time to `min(n_classes - 1, n_features)`.
-- **Breaking: the serialized format for `LinearRegression` and `LinearSVC` changed** (new `solver` / `learning_rate_decay` / `loss` fields) — re-save any persisted models.
-- **KMeans now declares convergence on centroid shift rather than inertia change**, matching scikit-learn; this can change the iteration count and final centroids for a given `tol`.
+- **Breaking: the serialized format for `LinearRegression` and `LinearSVC` changed** (new `solver` / `learning_rate_decay` / `loss` fields). Re-save any persisted models.
+- **KMeans now declares convergence on centroid shift rather than inertia change**, matching scikit-learn. This can change the iteration count and final centroids for a given `tol`.
 - **`DecisionTree` scales the minimum-impurity-decrease threshold by the node's sample fraction**, and enforces `min_samples_leaf` during the split search, matching scikit-learn.
-- **`LogisticRegression` regularization penalty is no longer divided by the sample count** (`alpha * R(w)` rather than `alpha * R(w) / n_samples`), matching scikit-learn's SGD convention; this changes fitted coefficients for any regularized model.
-- **`PCA` now flips principal-axis signs deterministically** so all SVD solvers and repeated runs agree on axis orientation; reconstructions are unaffected.
-- **`silhouette_score` now evaluates each unordered pair once** (symmetric upper-triangle fill), ~33–45% faster; the public signature is unchanged.
-- Aligned numerical guards and constants with scikit-learn/PyTorch/TensorFlow conventions: `math::sigmoid` and the softmax forward drop their input clamp / denominator floor; `utils::normalize` leaves near-zero lanes unchanged; `log_loss`/`mean_absolute_percentage_error` raise their epsilon to `f64::EPSILON`; and t-SNE's numerical constants match scikit-learn.
+- **`LogisticRegression` regularization penalty is no longer divided by the sample count** (`alpha * R(w)` rather than `alpha * R(w) / n_samples`), matching scikit-learn's SGD convention. This changes fitted coefficients for any regularized model.
+- **`PCA` now flips principal-axis signs deterministically** so all SVD solvers and repeated runs agree on axis orientation. Reconstructions are unaffected.
+- **`silhouette_score` now evaluates each unordered pair once** with a symmetric upper-triangle fill. Recorded comparisons showed a speedup of about 33 to 45%. The public signature is unchanged.
+- Aligned numerical guards and constants with scikit-learn/PyTorch/TensorFlow conventions: `math::sigmoid` and the softmax forward drop their input clamp / denominator floor. `utils::normalize` leaves lanes near 0 unchanged. `log_loss`/`mean_absolute_percentage_error` raise their epsilon to `f64::EPSILON`. The t-SNE numerical constants match scikit-learn.
 
 ### Fixed
-- **`LinearSVC::fit` now rejects labels other than `0.0`/`1.0`** instead of silently mishandling more than two classes.
-- **MeanShift keeps the current center on a zero-weight window** instead of resetting it to the origin (which previously injected a spurious cluster center).
+
+- **`LinearSVC::fit` now rejects labels other than `0.0`/`1.0`** instead of silently mishandling more than 2 classes.
+- **MeanShift keeps the current center on a 0-weight window** instead of resetting it to the origin (which previously injected a spurious cluster center).
 - **`IsolationForest::predict` handles non-contiguous input rows** instead of panicking on sliced/transposed matrices.
 
 ## [v0.12.0] - 2026-06-14
+
 ### Added
-- **Reproducible pseudo-random number generation.** A new crate-level `random` module with `set_global_seed`/`clear_global_seed`, plus a `random_state: Option<u64>` parameter on every `neural_network` layer and every seedable estimator, giving one-call whole-crate reproducibility with per-component override (local-over-global, mirroring Keras).
-- **Major neural-network training features:** the `AdamW` optimizer; opt-in clip-by-global-norm gradient clipping across all optimizers; SGD momentum / Nesterov and decoupled weight decay; external learning-rate scheduling (`Optimizer::set_learning_rate`); `from_logits` fused softmax-cross-entropy; and `padding='same'` for the windowed pooling layers.
-- **Major metrics expansion:** multi-class classification (`MulticlassConfusionMatrix`, `log_loss`, `cohen_kappa`, `top_k_accuracy`, `average_precision`, `roc_curve`, `precision_recall_curve`); the regression metrics `explained_variance_score`, `median_absolute_error`, `mean_absolute_percentage_error`; and the clustering metrics `adjusted_rand_index`, `silhouette_score`, `homogeneity_score`, `completeness_score`, `v_measure_score`, `fowlkes_mallows_score`, `davies_bouldin_score`, `calinski_harabasz_score`. `ConfusionMatrix` gains `mcc` and `balanced_accuracy`.
+- **Reproducible pseudo-random number generation.** The new crate-level `random` module provides `set_global_seed` and `clear_global_seed`. Seedable layers and estimators accept `random_state: Option<u64>`. Local seeds override the thread-local global stream.
+- **Neural-network training features.** Add `AdamW` and optional global gradient clipping across all optimizers. Add SGD momentum, Nesterov acceleration, and decoupled weight decay. Add external learning-rate schedules through `Optimizer::set_learning_rate`. Add `from_logits` fused softmax-cross-entropy and `padding='same'` for windowed pooling layers.
+- **More metrics.** Add multiclass classification (`MulticlassConfusionMatrix`, `log_loss`, `cohen_kappa`, `top_k_accuracy`, `average_precision`, `roc_curve`, `precision_recall_curve`). Add regression metrics `explained_variance_score`, `median_absolute_error`, `mean_absolute_percentage_error`. Add clustering metrics `adjusted_rand_index`, `silhouette_score`, `homogeneity_score`, `completeness_score`, `v_measure_score`, `fowlkes_mallows_score`, `davies_bouldin_score`, `calinski_harabasz_score`. `ConfusionMatrix` gains `mcc` and `balanced_accuracy`.
 - **`train_test_split_stratified`**, which splits each class independently so both subsets keep the input's class proportions.
 - **Public block-parallel matrix products and deterministic blocked reductions** (`math::matmul`, `math::reduction`), reproducible across runs on the same machine.
 - An internal kd-tree accelerating DBSCAN/KNN neighbor queries, and benchmark infrastructure under `benches/` (criterion) with a calibration suite for the parallel-gate thresholds.
 
 ### Changed
-- **Breaking: module renames for consistency** — `metric` → `metrics`, `utility` → `utils` (both the modules **and** their Cargo features), and under `neural_network` `layer`/`optimizer`/`loss_function` → `layers`/`optimizers`/`losses` (the `LossFunction` trait becomes `Loss`).
-- **Breaking: unified `Error` type built on `thiserror`**, replacing the stringly-typed `ModelError` and separate `IoError`, with domain-specific `NnError`/`TreeError`/`IoError` sub-enums, smart constructors, and a `Context` extension trait.
-- **Breaking: `machine_learning`'s models are regrouped by algorithm family** into `clustering`, `linear_model`, `svm`, `tree`, `neighbors`, `discriminant_analysis`, and `ensemble` submodules (mirroring scikit-learn); every estimator is still re-exported flat, so only leaf-path imports break.
-- **Breaking: constructors keep only primary hyperparameters; secondary settings move to chainable `with_*` builders** across every `machine_learning`/`utils` estimator and every `neural_network` layer and optimizer (mirroring scikit-learn's argument ordering). Defaults and serde formats are unchanged.
-- **Full `neural_network` refactor** (~1360 fewer lines while adding features): a serializable `Activation` enum replacing the `T: ActivationLayer` generic; a generic optimizer interface (`Layer::parameters()` + flat-slice kernels) removing all per-layer update code; an inference-mode `predict`; dimension-generic convolution/pooling engines; channel-last Instance/Group normalization and multi-axis `LayerNorm`; and a loss trait returning `Result` instead of panicking.
-- **Breaking: `BatchNormalization` is now genuine spatial batch norm for rank > 2 inputs** (per-channel parameters, statistics reducing over batch and all spatial positions, matching Keras/PyTorch).
-- **Breaking: clone-free model saving** — `LayerWeight` borrows the live layer arrays via `Cow` and is the single weight type for both inspection and serialization; on-disk format is unchanged.
-- **Breaking: LSTM and GRU store their gates fused** (per-gate weights packed into single kernel/recurrent/bias matrices), collapsing each projection to one wide GEMM; older saved models no longer load.
-- **Barnes-Hut t-SNE (now the default, `O(n log n)`) and PCA initialization for t-SNE**, replacing the random-init/exact default; LDA's projection is rewritten to solve the true generalized eigenproblem, and its `Solver::LSQR` becomes a genuine iterative solve.
-- **GEMM-based hot paths:** the ML/utils matrix products, kernel matrices, and per-sample/per-pair distance loops (KMeans, KNN, MeanShift, t-SNE) are rewritten in batched GEMM form via the shared block-parallel helpers, with all parallel/serial gates recalibrated from measurement.
+
+- **Breaking: module names change.** `metric` becomes `metrics`, and `utility` becomes `utils`, including their Cargo features. Under `neural_network`, `layer`, `optimizer`, and `loss_function` become `layers`, `optimizers`, and `losses`. The `LossFunction` trait becomes `Loss`.
+- **Breaking: a unified `Error` type uses `thiserror`.** It replaces string-based `ModelError` and separate `IoError`. It adds domain-specific `NnError`/`TreeError`/`IoError` enums, constructors, and the `Context` extension trait.
+- **Breaking: `machine_learning`'s models are regrouped by algorithm family** into `clustering`, `linear_model`, `svm`, `tree`, `neighbors`, `discriminant_analysis`, and `ensemble` submodules (mirroring scikit-learn). Every estimator is still re-exported flat, so only leaf-path imports break.
+- **Breaking: constructors keep only primary hyperparameters. Secondary settings move to chainable `with_*` builders** across every `machine_learning`/`utils` estimator and every `neural_network` layer and optimizer (mirroring scikit-learn's argument ordering). Defaults and serde formats are unchanged.
+- **`neural_network` refactor removes about 1360 lines while adding features.** A serializable `Activation` enum replaces `T: ActivationLayer`. A generic optimizer interface uses `Layer::parameters()` and slice kernels to replace per-layer update code. The module adds inference-mode `predict`, dimension-generic convolution/pooling engines, channels-last Instance/Group normalization, and multi-axis `LayerNorm`. The loss trait returns `Result` instead of a panic.
+- **Breaking: `BatchNormalization` is now spatial batch normalization for rank > 2 inputs** (per-channel parameters, statistics reducing over batch and all spatial positions, matching Keras/PyTorch).
+- **Breaking: clone-free model saving**. `LayerWeight` borrows the live layer arrays via `Cow` and is the single weight type for both inspection and serialization. On-disk format is unchanged.
+- **Breaking: LSTM and GRU store their gates fused** (per-gate weights packed into single kernel/recurrent/bias matrices), collapsing each projection to 1 wide GEMM. Older saved models no longer load.
+- **Barnes-Hut t-SNE (now the default, `O(n log n)`) and PCA initialization for t-SNE**, replacing the random-init/exact default. LDA's projection is rewritten to solve the true generalized eigenproblem, and its `Solver::LSQR` becomes an iterative solve.
+- **GEMM-based kernels.** ML/utils matrix products, kernel matrices, and distance loops use shared block-parallel helpers. This includes KMeans, KNN, MeanShift, and t-SNE. Measurements set new parallel/serial thresholds.
 - **Behavior change: NaN/Inf values now propagate instead of being silently sanitized.** The `±500`/`±1e6`/`±5` clamps and eager non-finite scans are removed from the activations, standalone activation layers, and recurrent gradients (use the new clip-by-global-norm instead).
 - **Breaking: the prelude root now flattens every category** (so `use rustyml::prelude::*;` brings the actual items into scope) and the `prelude::math` submodule is dropped.
 
 ### Fixed
+
 - **`SimpleRNN::backward` no longer accumulates its gradient across batches** (it previously summed over all prior batches without a `zero_grad`, drifting the direction).
 - **`GaussianDropout` backward now uses the sampled forward noise** (it previously passed the gradient straight through).
-- Numerous scikit-learn-alignment and NaN-handling fixes: the ranking metrics no longer hang or misrank on `NaN` scores; `ConfusionMatrix::recall` returns `0.0` (not `1.0`) with no actual positives; `normalized_mutual_info` uses the arithmetic-mean normalization; Minkowski `p` is validated against `p ≥ 1`; ReLU and max pooling propagate `NaN`; and several layers return recoverable errors where they previously panicked.
+- Align metric behavior and NaN handling with scikit-learn: the ranking metrics no longer hang or misrank on `NaN` scores. `ConfusionMatrix::recall` returns `0.0` (not `1.0`) with no actual positives. `normalized_mutual_info` uses the arithmetic-mean normalization. Minkowski `p` is validated against `p ≥ 1`. ReLU and max pooling propagate `NaN`. Several layers return recoverable errors where they previously panicked.
 
 ## [v0.11.0] - 2026-02-14
+
 ### Added
 - Add `Cosine` kernel support to `KernelType`.
 
 ### Changed
+
 - Refactor and reimplement the `PCA`, `LDA`, `KernelPCA`, and `t-SNE` estimators in the `utility` module.
 - Reorganize the module layout: move each module's prelude into a dedicated `*_prelude` module, relocate `KernelType`, and move the integration tests from `./src/test/` to `./tests/`.
 
 ### Removed
+
 - Remove the `rand` dependency in favor of `ndarray_rand`'s built-in random module.
 
 ## [v0.10.0] - 2026-01-19
+
 ### Changed
 - Introduce comprehensive input validation for the neural-network optimizers and layers.
 - Refactor the metric functions to use a generic `ArrayBase` for greater flexibility.
 
 ### Removed
+
 - Remove the `statrs` dependency, replacing it with custom hypergeometric PMF / log-binomial calculations.
 - Remove the `rand_distr` dependency.
 
 ## [v0.9.1] - 2026-01-16
+
 ### Added
 - Add the Gaussian Dropout, Gaussian Noise, Group Normalization, and Instance Normalization layers.
 
 ## [v0.9.0] - 2025-10-22
+
 ### Added
 - Add the `LayerNormalization`, `BatchNormalization`, Dropout, and SpatialDropout layers.
 - Add the `AdaGrad` optimizer and the `GRU` recurrent layer.
@@ -256,23 +292,28 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - Introduce adaptive parallel-processing thresholds across the neural-network layers.
 
 ### Changed
+
 - Enhance error handling and input validation across the ML models and the `utility` module.
 - Include `machine_learning` and `neural_network` in the default feature set.
 
 ### Removed
+
 - Remove the `Result` return type from the numerical functions.
 
 ## [v0.8.0] - 2025-10-11
+
 ### Added
 - Add serialization/deserialization support (`save_to_path` / `load_from_path`) across the ML models, the utility module, and the `Sequential` neural network.
 - Add the `normalize` (L1/L2/Lp/Max) and `standardize` (Row/Column/Global) utilities.
 - Introduce progress-bar support across the ML models, utility module, and neural network.
 
 ### Changed
+
 - Introduce parallelization thresholds across the machine-learning implementations, and reconstruct the `DecisionTree` and `IsolationForest` implementations.
 - Refactor the distance-computation methods to return `Result`.
 
 ## [v0.7.0] - 2025-09-26
+
 ### Added
 - Add feature flags for selective compilation.
 - Add batch processing for `fit` in the `Sequential` model.
@@ -280,83 +321,102 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - Add the raw-data dataset loaders (Boston housing, Titanic, diabetes) and cost calculation/reporting for the ML models.
 
 ## [v0.6.3] - 2025-09-16
+
 ### Changed
 - Improve input validation, edge-case handling, and error reporting across the `Sequential` model, the mathematical utilities, and the clustering/classification algorithms.
 - Refactor the `utility` and `machine_learning` models for efficiency and maintainability.
 
 ## [v0.6.2] - 2025-06-05
+
 ### Added
 - Add the `Conv1D`, `Conv3D`, `DepthwiseConv2D`, and `SeparableConv2D` convolutional layers.
 - Add the `MaxPooling1D/3D`, `AveragePooling1D/3D`, `GlobalMaxPooling1D/3D`, and `GlobalAveragePooling1D/3D` pooling layers.
 - Add input-dimensionality checks for the convolutional and pooling layers, and Flatten support for 3D/4D/5D tensors.
 
 ### Changed
+
 - Replace `HashMap`/`HashSet` with `AHashMap`/`AHashSet`.
 
 ## [v0.6.1] - 2025-05-22
+
 ### Added
 - Add the `Conv2D`, `MaxPooling2D`, `AveragePooling2D`, `GlobalMaxPooling2D`, `GlobalAveragePooling2D`, and `Flatten` layers.
 - Add comprehensive weight structs for the neural-network layers.
 
 ### Changed
+
 - Parallelize the `Conv2D` and pooling-layer parameter updates.
 
 ## [v0.6.0] - 2025-05-05
+
 ### Added
 - Add the `LSTM` layer and the `get_weights` method with the `LayerWeight` enum.
 - Add L1/L2 regularization support to linear and logistic regression.
 
 ### Changed
+
 - Refactor the layers to enforce explicit activation usage, and unify the optimizer state handling into a single cache.
 
 ## [v0.5.1] - 2025-04-23
+
 ### Added
 - Add the `SimpleRNN` layer.
 
 ### Changed
+
 - Modularize the activation functions, optimizers, and loss functions into separate modules, and parallelize the neural-network computations.
 
 ## [v0.5.0] - 2025-04-13
+
 ### Added
 - Add activation-function support to the `Dense` layer, plus getter methods for key struct properties.
 
 ### Changed
+
 - Replace `ndarray-linalg` with `nalgebra` for `PCA`, `LDA`, and `KernelPCA`.
 - Refactor the metrics API to remove `Result` in favor of panics, and encapsulate previously public struct fields.
 
 ## [v0.4.0] - 2025-04-09
+
 ### Added
 - Add the neural-network module (initial implementation).
 - Add the `Adam` and `RMSprop` optimizers.
 - Add the `CategoricalCrossEntropy`, `SparseCategoricalCrossEntropy`, and MAE loss functions.
 
 ## [v0.3.0] - 2025-04-06
+
 ### Added
 - Add the `dataset` module with the iris and diabetes datasets.
 
 ### Changed
+
 - Refactor the data handling to use `ArrayView` for memory efficiency.
 
 ## [v0.2.1] - 2025-04-04
+
 ### Added
 - Add the `SVC`, `LinearSVC`, `KernelPCA`, and `LDA` models.
 - Add the t-SNE (t-Distributed Stochastic Neighbor Embedding) implementation.
 - Integrate Rayon for parallel computation across modules.
 
 ## [v0.2.0] - 2025-04-01
+
 ### Added
 - Add the `train_test_split` utility, the AUC-ROC calculation, and the `normalized_mutual_info` / `adjusted_mutual_info` metrics.
 
 ### Changed
+
 - Split the algorithm functions (`math`) from the model-evaluation functions (`metric`) into separate modules.
 
 ## [v0.1.1] - 2025-03-31
+
 ### Added
 - Add the `preliminary_check` input-validation helper and the confusion matrix in the `math` module.
 
 ## [v0.1.0] - 2025-03-30
 Initial release (crate renamed from `rust_ai` to `rustyml`).
 ### Added
+
 - Add the core machine-learning models: `KMeans`, `MeanShift`, `DBSCAN`, `KNN`, `DecisionTree`, `IsolationForest`, and `PCA`.
 - Add the `math` module (entropy, Gini, MSE, variance, standard deviation, Gaussian/RBF kernel) and the `metric` module.
 - Add the unified `fit` / `predict` / `fit_predict` API and the prelude module.

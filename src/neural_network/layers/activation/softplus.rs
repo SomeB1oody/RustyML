@@ -35,22 +35,22 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::MeanSquaredError;
 /// use ndarray::Array2;
 ///
-/// // Create a 2D input tensor
+/// // Create a 2D input tensor.
 /// let x = Array2::from_shape_vec((2, 3), vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0])
 ///     .unwrap()
 ///     .into_dyn();
 ///
-/// // Build a model with Softplus activation
+/// // Build a model with Softplus activation.
 /// let mut model = SequentialBuilder::new()
 ///     .add(Softplus::new())
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Forward propagation
+/// // Forward propagation.
 /// let output = model.predict(&x);
 ///
-/// // Output will be: [[0.31326169, 2.1269281, 0.048587352], [4.0181499, 0.0067153485, 6.0024757]]
+/// // Output will be: [[0.31326169, 2.1269281, 0.048587352], [4.0181499, 0.0067153485, 6.0024757]].
 /// ```
 #[derive(Debug)]
 pub struct Softplus {
@@ -70,6 +70,15 @@ impl Softplus {
 }
 
 impl Default for Softplus {
+    /// Creates the default Softplus layer.
+    ///
+    /// # Default Values
+    ///
+    /// Uses the configuration from [`Self::new`].
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The default layer.
     fn default() -> Self {
         Self::new()
     }

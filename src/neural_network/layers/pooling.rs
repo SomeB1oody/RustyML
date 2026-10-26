@@ -6,10 +6,11 @@
 //! `validation` checks its constructor and build-time parameters
 //!
 //! This module also defines the macros that generate the shared `UnaryLayer` and `LayerBase`
-//! trait implementations. A macro exists for each spatial rank (1, 2, or 3) and 1 more for the
-//! global variants, because the window shape and the field types differ by rank. Every generated
-//! `build()` and `compute_output_shape()` pair follows the same pattern: check the input rank,
-//! validate the window against the input extent, then compute the output shape
+//! trait implementations. Each spatial rank has a macro because window shapes and field types
+//! differ by rank. Global
+//! variants share another macro. The generated methods check the input rank and compute the
+//! output shape. Windowed variants
+//! also check that the window fits the input.
 
 /// 1D average pooling layer
 pub mod average_pooling_1d;
@@ -67,9 +68,8 @@ pub use max_pooling_3d::MaxPooling3D;
 ///
 /// # Notes
 ///
-/// Generates `build()`, which records the shape the layer serves and refuses a rank it cannot
-/// pool, and `compute_output_shape()`, which drops every spatial axis and keeps the batch axis
-/// and the channel axis
+/// Generates `build()` to record the input shape and reject an invalid rank. Generates
+/// `compute_output_shape()` to keep only the batch and channel axes.
 ///
 /// The struct that invokes this macro needs a `built: Option<Shape>` field, which holds the
 /// shape the layer was built for
@@ -114,9 +114,9 @@ macro_rules! layer_functions_global_pooling {
 ///
 /// # Notes
 ///
-/// Generates `known_input_shapes()`, which reports the shape the layer was built for,
-/// `is_built()`, which reports whether the layer holds a build, and `build_config()`, which
-/// gives the same shape with the batch axis freed for a checkpoint. Also generates every
+/// Generates `known_input_shapes()` to report the built shape and `is_built()` to report the
+/// build state. Generates `build_config()` to return checkpoint input shapes with a free batch
+/// axis. Also generates every
 /// function from the `no_trainable_parameters_layer_functions!()` macro
 ///
 /// The struct that invokes this macro needs a `built: Option<Shape>` field, which holds the
@@ -142,9 +142,9 @@ pub(in crate::neural_network::layers::pooling) use layer_base_functions_pooling;
 ///
 /// # Notes
 ///
-/// Generates `build()`, which records the shape the window runs over and refuses a shape the
-/// window does not fit, and `compute_output_shape()`, which applies the pooling window to the
-/// spatial axis and keeps the batch axis and the channel axis
+/// Generates `build()` to record the input shape and check the window fit. Generates
+/// `compute_output_shape()` to compute the pooled spatial extent and keep batch and channel
+/// axes.
 ///
 /// The struct that invokes this macro needs these fields:
 /// - `built: Option<Shape>` - the shape the layer was built for
@@ -204,9 +204,8 @@ macro_rules! layer_functions_1d_pooling {
 ///
 /// # Notes
 ///
-/// Generates `build()`, which records the shape the window runs over and refuses a shape the
-/// window does not fit, and `compute_output_shape()`, which applies the pooling window to every
-/// spatial axis and keeps the batch axis and the channel axis
+/// Generates `build()` to record the input shape and check the window fit. Generates
+/// `compute_output_shape()` to compute pooled spatial extents and keep batch and channel axes.
 ///
 /// The struct that invokes this macro needs these fields:
 /// - `built: Option<Shape>` - the shape the layer was built for
@@ -270,9 +269,8 @@ macro_rules! layer_functions_2d_pooling {
 ///
 /// # Notes
 ///
-/// Generates `build()`, which records the shape the window runs over and refuses a shape the
-/// window does not fit, and `compute_output_shape()`, which applies the pooling window to every
-/// spatial axis and keeps the batch axis and the channel axis
+/// Generates `build()` to record the input shape and check the window fit. Generates
+/// `compute_output_shape()` to compute pooled spatial extents and keep batch and channel axes.
 ///
 /// The struct that invokes this macro needs these fields:
 /// - `built: Option<Shape>` - the shape the layer was built for

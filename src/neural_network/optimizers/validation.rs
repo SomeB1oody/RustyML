@@ -1,4 +1,6 @@
-//! Shared parameter validators for optimizer constructors
+//! Shared parameter validators for optimizer constructors.
+//!
+//! The checks cover finite rates, decay coefficients, epsilon values, and global gradient norm limits.
 
 use crate::error::Error;
 

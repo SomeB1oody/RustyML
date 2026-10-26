@@ -76,7 +76,7 @@ struct GroupStats {
 /// second read walks the same batch item again. Accumulating `sum(x - K)` and `sum((x - K)^2)`
 /// together gets both statistics from 1 walk, and `var = s2/n - (s1/n)^2` recovers the variance.
 ///
-/// `K` is the group's first element rather than zero. That choice keeps `s1/n` a small
+/// `K` is the group's first element rather than 0. That choice keeps `s1/n` a small
 /// residual (`mean - K`) instead of the mean itself. As a result, `s2/n` and `(s1/n)^2` differ by
 /// about the variance rather than by the square of the mean. A plain `E[x^2] - E[x]^2` would
 /// cancel catastrophically in f32 on the inputs a normalization layer sees, where the mean often
@@ -160,7 +160,7 @@ fn per_channel_stats(
     let mut inv_std_c = vec![0.0f32; layout.channels];
     for gr in 0..layout.num_groups {
         let m = stats.s1[gr] / n;
-        // Rounding can leave the difference a hair below zero on a near-constant batch item. The
+        // Rounding can leave the difference a hair below 0 on a near-constant batch item. The
         // clamp keeps the square root real without changing a well-conditioned result
         let var = (stats.s2[gr] / n - m * m).max(0.0);
         let inv = 1.0 / (var + epsilon).sqrt();
@@ -465,8 +465,6 @@ pub use instance_normalization::InstanceNormalization;
 pub use layer_normalization::{LayerNormalization, LayerNormalizationAxis};
 pub use unit_normalization::{UnitNormalization, UnitNormalizationAxis};
 
-// The macro below needs a `pub(in ...) use` re-export because it is defined after the `mod`
-// declarations that use it, so callers import it explicitly rather than by declaration order
 /// Common implementation of the pure output-shape method of a normalization layer
 ///
 /// A normalization layer changes values and not extents, so its output shape repeats its input
@@ -489,6 +487,7 @@ macro_rules! normalization_layer_output_shape_function {
 pub(in crate::neural_network::layers::regularization::normalization) use normalization_layer_output_shape_function;
 
 /// Unit tests for the group-normalization core and its deterministic fold kernels
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::*;

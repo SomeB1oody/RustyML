@@ -47,11 +47,17 @@ pub enum LayerNormalizationAxis {
     #[default]
     Default,
     /// Normalize along a single custom specified axis
-    Custom(usize),
+    Custom(
+        /// Axis index in the full input shape.
+        usize,
+    ),
     /// Normalize jointly over several axes, given as a list. Statistics are computed over the
     /// combined elements of those axes. `gamma` and `beta` are 1-D, with length equal to the
     /// product of those axes' sizes
-    Multiple(Vec<usize>),
+    Multiple(
+        /// Axis indices to normalize together, in parameter order.
+        Vec<usize>,
+    ),
 }
 
 /// Validates a `Multiple` axis list against the input rank and returns the merge permutation
@@ -91,15 +97,26 @@ fn multiple_axes_perm(ndim: usize, axes: &[usize]) -> Result<Vec<usize>, Error> 
 enum LayoutPlan {
     /// The normalized elements form the contiguous trailing block of each group. The input is
     /// logically `[R, N]`, and takes the fused row path with no layout transform
-    Rows { n: usize },
+    Rows {
+        /// Number of normalized elements per row.
+        n: usize,
+    },
     /// `Multiple` axes need a genuine permutation before they form a trailing block. The layer
     /// runs 1 transpose copy in, the row path on the merged layout, then 1 transpose copy back
     /// out
-    MergedRows { axes: Vec<usize>, n: usize },
+    MergedRows {
+        /// Axis indices to move into the trailing block.
+        axes: Vec<usize>,
+        /// Number of normalized elements per row.
+        n: usize,
+    },
     /// A non-trailing `Custom` axis stays on the broadcast ndarray path. Its groups are strided
     /// mid-axis lanes, and ndarray reduces them in place. A transpose would add the 2 copies the
     /// row path exists to avoid
-    Strided { axis: usize },
+    Strided {
+        /// Axis index reduced by the strided path.
+        axis: usize,
+    },
 }
 
 /// Runs a fused per-row normalization over a standard-layout `[R, N]` slice
@@ -331,13 +348,13 @@ fn unmerge_normalized_axes(
 /// use rustyml::neural_network::traits::UnaryLayer;
 /// use ndarray::Array2;
 ///
-/// // Create a LayerNormalization layer
+/// // Create a LayerNormalization layer.
 /// let mut ln = LayerNormalization::new(1e-5).unwrap();
 ///
-/// // Create input tensor
+/// // Create input tensor.
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
-/// // A training pass normalizes the input
+/// // A training pass normalizes the input.
 /// let mut ctx = Ctx::training();
 /// let output = ln.forward_mut(&input, &mut ctx).unwrap();
 /// ```
@@ -358,7 +375,7 @@ pub struct LayerNormalization {
     /// Shift parameter (trainable)
     ///
     /// The array stays allocated and holds every element at 0 when `center` is false. A shift
-    /// of 0 changes every value except a negative zero, which it turns into a positive zero.
+    /// of 0 changes every value except a negative 0, which it turns into a positive 0.
     /// `weights` hides the array and `parameters_mut` never yields it
     beta: Tensor,
     /// Whether the layer adds the shift `beta`
@@ -1096,6 +1113,7 @@ impl LayerNormalization {
 }
 
 /// Tests for axis merging, the fused row path, and LayerNormalization forward/backward parity
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1325,7 +1343,7 @@ mod tests {
         );
     }
 
-    /// A trailing-and-in-order Multiple axis list resolves to the zero-copy row path, which
+    /// A trailing-and-in-order Multiple axis list resolves to the no-copy row path, which
     /// must match an explicit Default-axis layer on the reshaped input exactly
     #[test]
     fn multiple_identity_perm_matches_default_on_reshaped_input() {

@@ -1,6 +1,6 @@
 //! Integration tests for the neural-network loss functions.
 //!
-//! Covers hand-computed forward and gradient values, perfect-prediction zero loss and gradient,
+//! Covers hand-computed forward and gradient values, perfect-prediction 0 loss and gradient,
 //! numerical stability under clipping, shape-mismatch errors, and SCCE label validation.
 //!
 //! Also covers the from_logits path, row-scaling invariance of CCE and SCCE, renormalization
@@ -18,8 +18,6 @@ use rustyml::neural_network::traits::{Loss, UnaryLayer};
 use rustyml::neural_network::{Ctx, Tensor};
 
 use crate::common::assert_allclose;
-
-// Mean Squared Error
 
 /// MSE forward value equals the mean of squared element-wise differences
 #[test]
@@ -94,8 +92,6 @@ fn mse_shape_mismatch_returns_err() {
     ));
 }
 
-// Mean Absolute Error
-
 /// MAE forward value equals the mean of absolute element-wise differences
 #[test]
 fn mae_forward_value() {
@@ -112,7 +108,7 @@ fn mae_forward_value() {
     assert_abs_diff_eq!(loss, 0.75_f32, epsilon = 1e-6);
 }
 
-/// MAE gradient equals sign(pred - true) / n, with a zero (not +/-1/n) at exact ties
+/// MAE gradient equals sign(pred - true) / n, with a 0 (not +/-1/n) at exact ties
 #[test]
 fn mae_gradient_value_including_zero_tie() {
     let mae = MeanAbsoluteError::new();
@@ -168,8 +164,6 @@ fn mae_shape_mismatch_returns_err() {
     ));
 }
 
-// Binary Cross-Entropy
-
 /// BCE forward value equals the mean of -[y*ln(p) + (1-y)*ln(1-p)]
 #[test]
 fn bce_forward_value() {
@@ -207,7 +201,7 @@ fn bce_gradient_value() {
     assert_allclose(&grad, &expected, 1e-5_f32);
 }
 
-/// Perfect binary prediction gives near-zero BCE loss and finite gradient under clipping
+/// Perfect binary prediction gives near-0 BCE loss and finite gradient under clipping
 #[test]
 fn bce_perfect_prediction_near_zero_loss_and_finite_grad() {
     let bce = BinaryCrossEntropy::new();
@@ -292,8 +286,6 @@ fn bce_shape_mismatch_returns_err() {
     ));
 }
 
-// Categorical Cross-Entropy
-
 /// CCE forward value is the mean per-sample cross-entropy, divided by batch size, not element
 /// count
 #[test]
@@ -361,7 +353,7 @@ fn cce_gradient_value() {
     assert_abs_diff_eq!(flat[8], (1.0_f32 - 1.0 / 0.7) / 3.0, epsilon = 1e-5);
 }
 
-/// Perfect one-hot prediction gives near-zero CCE loss (< 1e-4) and finite gradient under clipping
+/// Perfect one-hot prediction gives near-0 CCE loss (< 1e-4) and finite gradient under clipping
 #[test]
 fn cce_perfect_prediction_near_zero_loss_and_finite_grad() {
     let cce = CategoricalCrossEntropy::new(false);
@@ -447,7 +439,7 @@ fn cce_shape_mismatch_returns_err() {
 fn cce_empty_input_returns_err() {
     let cce = CategoricalCrossEntropy::new(false);
 
-    // Shape [0, 3] is a valid shape but has zero elements
+    // Shape [0, 3] is a valid shape but has 0 elements
     let y_true: Tensor = Array::from_shape_vec(vec![0, 3], vec![])
         .unwrap()
         .into_dyn();
@@ -524,8 +516,6 @@ fn cce_from_logits_loss_and_grad() {
         epsilon = 1e-5
     );
 }
-
-// Sparse Categorical Cross-Entropy
 
 /// SCCE forward value with integer labels equals CCE on the equivalent one-hot encoding
 #[test]
@@ -766,8 +756,6 @@ fn scce_non_2d_predictions_returns_err() {
     );
 }
 
-// Cross-loss consistency: SCCE loss == CCE loss (batch normalization)
-
 /// SCCE(integer labels) loss equals CCE(equivalent one-hot) loss, confirming a shared
 /// divide-by-batch_size convention
 #[test]
@@ -830,8 +818,6 @@ fn scce_from_logits_loss_and_grad() {
         .into_dyn();
     assert_allclose(&grad, &expected, 1e-5_f32);
 }
-
-// Keras' probability-path renormalization
 
 /// CCE renormalizes each row along the class axis before clipping. Scaling a row by a positive
 /// constant leaves the loss unchanged, because the row is scored as the distribution it implies

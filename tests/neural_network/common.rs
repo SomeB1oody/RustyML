@@ -32,6 +32,14 @@ use std::sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 /// A deterministically seeded RNG, for reproducible tests
 ///
 /// Always seed test RNGs. Never seed the thread RNG. This keeps failures reproducible.
+///
+/// # Parameters
+///
+/// - `seed` - Seed for the test random number generator.
+///
+/// # Returns
+///
+/// - `StdRng` - Generator with a repeatable sequence.
 pub fn seeded_rng(seed: u64) -> StdRng {
     StdRng::seed_from_u64(seed)
 }
@@ -52,6 +60,14 @@ pub struct GlobalSeedGuard;
 
 impl GlobalSeedGuard {
     /// Installs `seed` as the thread-local global seed. Clears it when the returned guard drops
+    ///
+    /// # Parameters
+    ///
+    /// - `seed` - Thread-local seed to install.
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Guard that clears the seed on drop.
     pub fn set(seed: u64) -> Self {
         rustyml::set_global_seed(seed);
         GlobalSeedGuard
@@ -63,8 +79,6 @@ impl Drop for GlobalSeedGuard {
         rustyml::clear_global_seed();
     }
 }
-
-// The process-global tuning gates
 
 /// Reads 1 tuning gate
 pub type GateGetter = fn() -> usize;
@@ -168,12 +182,19 @@ static GATE_LOCK: RwLock<()> = RwLock::new(());
 /// whose path a gate selects. It holds the shared side of the lock, so any number of such tests
 /// run together. None of them runs while a [`GateGuard`] holds the exclusive side.
 #[must_use = "bind the guard to a variable; an unbound guard releases the lock immediately"]
-pub struct GateReadGuard(RwLockReadGuard<'static, ()>);
+pub struct GateReadGuard(
+    /// Shared lock held for the lifetime of the guard.
+    RwLockReadGuard<'static, ()>,
+);
 
 /// Takes the shared side of the tuning-gate lock. See [`GateReadGuard`]
 ///
 /// Never call this while a [`GateGuard`] of the same test is alive. The lock takes no upgrade,
-/// so the test would stop for ever.
+/// so the test would wait forever.
+///
+/// # Returns
+///
+/// - `GateReadGuard` - Shared lock guard for the tuning gates.
 pub fn read_gates() -> GateReadGuard {
     // A test that panics under the lock poisons it. The gate values are still correct, because
     // every writer restores them on its unwind path, so the poison carries no information here
@@ -204,6 +225,10 @@ pub struct GateGuard {
 
 impl GateGuard {
     /// Takes the exclusive side of the lock, and saves every gate and every cap
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Guard that restores all saved gates and caps on drop.
     pub fn acquire() -> Self {
         let lock = GATE_LOCK.write().unwrap_or_else(PoisonError::into_inner);
         let saved: Vec<usize> = NEURAL_NETWORK_GATES
@@ -229,6 +254,14 @@ impl GateGuard {
     ///
     /// This moves no cap. A parallel branch that a gate opens still builds 1 task for a small
     /// input. Add [`GateGuard::with_split_cap`] to split it.
+    ///
+    /// # Parameters
+    ///
+    /// - `value` - Threshold to assign to every gate.
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Guard that restores all saved gates and caps on drop.
     pub fn set_all(value: usize) -> Self {
         let guard = Self::acquire();
         for (_, _, set) in NEURAL_NETWORK_GATES {
@@ -246,6 +279,14 @@ impl GateGuard {
     /// channels for the pooling backward pass. It also counts destination rows for the resize
     /// and the embedding gather. A `value` of 0 is the production value, and it restores the
     /// calibrated task size.
+    ///
+    /// # Parameters
+    ///
+    /// - `value` - Task-size cap, or 0 for the calibrated size.
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Guard with the requested caps applied.
     pub fn with_split_cap(self, value: usize) -> Self {
         for (_, _, set) in NEURAL_NETWORK_SPLIT_CAPS {
             set(value);
@@ -258,7 +299,15 @@ impl GateGuard {
     /// Use this after [`GateGuard::with_split_cap`] for a driver that is not invariant to its
     /// task size. The value 0 is the production value, so that driver keeps its calibrated task
     /// size while every other driver stays capped. `rustyml::bench_internals` names the 1 driver
-    /// that needs the exception today, and a caller that reaches that driver must take it.
+    /// that needs the exception and a caller that reaches that driver must take it.
+    ///
+    /// # Parameters
+    ///
+    /// - `name` - Name of the cap to reset to its calibrated size.
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Guard with the selected cap reset.
     ///
     /// # Panics
     ///
@@ -289,6 +338,16 @@ impl Drop for GateGuard {
 ///
 /// For single scalars, use the `assert_abs_diff_eq!` or `assert_relative_eq!` macro from
 /// `approx` directly.
+///
+/// # Parameters
+///
+/// - `actual` - Array to check.
+/// - `expected` - Reference array.
+/// - `eps` - Maximum absolute difference per element.
+///
+/// # Panics
+///
+/// Panics if shapes differ or an element exceeds the tolerance.
 pub fn assert_allclose<A, S1, S2, D>(actual: &ArrayBase<S1, D>, expected: &ArrayBase<S2, D>, eps: A)
 where
     A: approx::AbsDiffEq<Epsilon = A> + Copy + std::fmt::Debug,
@@ -316,6 +375,19 @@ where
 /// The checkpoint format addresses every array by name, so a test that reads a weight reads it
 /// by the same name. A wrong name is a test defect, and the panic lists the names the layer
 /// gives, so the report says what to write instead.
+///
+/// # Parameters
+///
+/// - `layer` - Layer that holds the weight.
+/// - `name` - Weight name to find.
+///
+/// # Returns
+///
+/// - `ArrayViewD<f32>` - View of the named weight.
+///
+/// # Panics
+///
+/// Panics if the layer has no weight with this name.
 pub fn named<'a>(layer: &'a dyn Layer, name: &str) -> ArrayViewD<'a, f32> {
     layer.weight(name).unwrap_or_else(|| {
         let held: Vec<&str> = layer.weights().iter().map(|entry| entry.name).collect();

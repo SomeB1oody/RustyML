@@ -2,7 +2,7 @@
 //!
 //! Groups the 2 noise-injection layers and re-exports them. Multiplicative
 //! [`GaussianDropout`] scales inputs by `N(1, rate/(1 - rate))` during training. Additive
-//! [`GaussianNoise`] adds zero-mean `N(0, stddev^2)` noise during training. Both are identity maps
+//! [`GaussianNoise`] adds `N(0, stddev^2)` noise with mean 0 during training. Both are identity maps
 //! at inference.
 //!
 //! This file defines no shared infrastructure of its own. The 2 layers read the training flag

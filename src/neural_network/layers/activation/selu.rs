@@ -38,22 +38,22 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::MeanSquaredError;
 /// use ndarray::Array2;
 ///
-/// // Create a 2D input tensor
+/// // Create a 2D input tensor.
 /// let x = Array2::from_shape_vec((2, 3), vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0])
 ///     .unwrap()
 ///     .into_dyn();
 ///
-/// // Build a model with SELU activation
+/// // Build a model with SELU activation.
 /// let mut model = SequentialBuilder::new()
 ///     .add(SELU::new())
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Forward propagation
+/// // Forward propagation.
 /// let output = model.predict(&x);
 ///
-/// // Output will be: [[-1.1113307, 2.101402, -1.6705688], [4.2028041, -1.7462534, 6.3042059]]
+/// // Output will be: [[-1.1113307, 2.101402, -1.6705688], [4.2028041, -1.7462534, 6.3042059]].
 /// ```
 #[derive(Debug)]
 pub struct SELU {
@@ -73,6 +73,15 @@ impl SELU {
 }
 
 impl Default for SELU {
+    /// Creates the default SELU layer.
+    ///
+    /// # Default Values
+    ///
+    /// Uses the configuration from [`Self::new`].
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The default layer.
     fn default() -> Self {
         Self::new()
     }

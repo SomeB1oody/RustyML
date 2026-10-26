@@ -239,7 +239,7 @@ fn avg_pool_2d_build_rejects_oversized_pool() {
     assert!(result.is_err(), "pool_h > input_h must be rejected");
 }
 
-/// The build rejects a zero spatial extent, because no window fits it
+/// The build rejects a 0 spatial extent, because no window fits it
 #[test]
 fn avg_pool_2d_build_rejects_a_zero_spatial_extent() {
     assert!(
@@ -338,7 +338,7 @@ fn avg_pool_3d_constructor_rejects_zero_stride() {
     assert!(result.is_err(), "zero depth stride must be rejected");
 }
 
-/// The build rejects a zero spatial extent, because no window fits it
+/// The build rejects a 0 spatial extent, because no window fits it
 #[test]
 fn avg_pool_3d_build_rejects_a_zero_spatial_extent() {
     assert!(
@@ -441,7 +441,7 @@ fn global_avg_pool_1d_layer_type() {
     assert_eq!(layer.layer_type(), "GlobalAveragePooling1D");
 }
 
-/// output_shape() returns "Unknown" before forward and "(batch, channels)" after
+/// `output_shape` is "Unknown" before the build, then reports a free batch axis and channel count.
 #[test]
 fn global_avg_pool_1d_output_shape() {
     let layer_new = GlobalAveragePooling1D::new();
@@ -544,7 +544,7 @@ fn global_avg_pool_2d_layer_type() {
     assert_eq!(layer.layer_type(), "GlobalAveragePooling2D");
 }
 
-/// output_shape() returns "Unknown" before forward and "(batch, channels)" after
+/// `output_shape` is "Unknown" before the build, then reports a free batch axis and channel count.
 #[test]
 fn global_avg_pool_2d_output_shape() {
     let layer_new = GlobalAveragePooling2D::new();
@@ -638,7 +638,7 @@ fn global_avg_pool_3d_layer_type() {
     assert_eq!(layer.layer_type(), "GlobalAveragePooling3D");
 }
 
-/// output_shape() returns "Unknown" before forward and "(batch, channels)" after
+/// `output_shape` is "Unknown" before the build, then reports a free batch axis and channel count.
 #[test]
 fn global_avg_pool_3d_output_shape() {
     let layer_new = GlobalAveragePooling3D::new();

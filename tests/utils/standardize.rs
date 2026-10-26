@@ -6,8 +6,6 @@ use ndarray::{Array1, Array2, Array3, array};
 use rustyml::error::Error;
 use rustyml::utils::standardize::{StandardizationAxis, standardize};
 
-// Global axis
-
 /// Global standardization of a 1-D array yields population z-scores
 #[test]
 fn test_global_closed_form_1d() {
@@ -26,8 +24,8 @@ fn test_global_closed_form_2d() {
     assert_allclose(&result, &expected, 1e-7);
 }
 
-/// A healthy feature divides by the raw sqrt(variance), giving exact z-scores. The
-/// constant-feature stability clamp never touches a feature with real variance
+/// This feature divides by sqrt(variance), which gives exact z-scores.
+/// The constant-feature check does not change this divisor.
 #[test]
 fn test_healthy_feature_exact_zscores() {
     let data: Array1<f64> = array![1.0, 3.0];
@@ -47,7 +45,7 @@ fn test_small_but_real_variance_is_normalized_like_sklearn() {
     assert_allclose(&result, &expected, 1e-4);
 }
 
-/// All-identical values give zero variance and all-zero output without NaN
+/// All-identical values give variance 0 and output filled with 0 without NaN
 #[test]
 fn test_global_zero_variance_all_zeros() {
     let data: Array2<f64> = array![[3.0, 3.0], [3.0, 3.0]];
@@ -57,7 +55,7 @@ fn test_global_zero_variance_all_zeros() {
     assert!(result.iter().all(|v| v.is_finite()));
 }
 
-/// Single-element array standardizes to zero (variance = 0)
+/// Single-element array standardizes to 0 (variance = 0)
 #[test]
 fn test_global_single_element() {
     let data: Array2<f64> = array![[5.0]];
@@ -90,8 +88,6 @@ fn test_global_3d_array() {
     assert_eq!(result.shape(), data.shape());
 }
 
-// Column axis
-
 /// Column standardization computes per-column population z-scores
 #[test]
 fn test_column_axis_closed_form() {
@@ -122,7 +118,7 @@ fn test_column_axis_invariants() {
     }
 }
 
-/// A zero-variance column standardizes to all zeros while other columns are unaffected
+/// A column with variance 0 standardizes to all 0 while other columns are unaffected
 #[test]
 fn test_column_axis_zero_variance_column() {
     let data: Array2<f64> = array![[3.0, 1.0], [3.0, 3.0], [3.0, 5.0]];
@@ -142,8 +138,6 @@ fn test_column_axis_zero_variance_column() {
     let actual_col1: Array1<f64> = result.column(1).to_owned();
     assert_allclose(&actual_col1, &expected_col1, 1e-7);
 }
-
-// Row axis
 
 /// Row standardization computes per-row population z-scores
 #[test]
@@ -174,7 +168,7 @@ fn test_row_axis_invariants() {
     }
 }
 
-/// A zero-variance row standardizes to all zeros while other rows are unaffected
+/// A row with variance 0 standardizes to all 0 while other rows are unaffected
 #[test]
 fn test_row_axis_zero_variance_row() {
     let data: Array2<f64> = array![[3.0, 3.0, 3.0], [1.0, 3.0, 5.0]];
@@ -190,8 +184,6 @@ fn test_row_axis_zero_variance_row() {
     let expected_row1: Array1<f64> = array![-1.2247448714, 0.0, 1.2247448714];
     assert_allclose(&row1, &expected_row1, 1e-7);
 }
-
-// Immutability
 
 /// standardize does not mutate its input array
 #[test]
@@ -212,8 +204,6 @@ fn test_original_array_not_mutated_column() {
     let _result = standardize(&data, StandardizationAxis::Column).unwrap();
     assert_eq!(data, original);
 }
-
-// Error paths
 
 /// Empty array returns EmptyInput
 #[test]

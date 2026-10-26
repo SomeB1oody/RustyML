@@ -13,8 +13,8 @@
 //!     constructor and in a trainable layer that embeds the activation
 //!   - Default() equals the layer's own default value, and a standalone layer equals the
 //!     matching Activation variant
-//!   - GELU, SiLU, and Mish: the layer equals the enum, the backward pass matches the analytic
-//!     derivative, the GELU flag selects the form, and the training pass parks 1 cache
+//!   - GELU, SiLU, and Mish equal their enum variants and match analytic backward derivatives.
+//!     The GELU flag selects the form. Each training pass stores 1 cache.
 
 // The pinned float32 values in this file are reference values. Keep them as written, so a
 // reader can compare them to the reference output character by character.
@@ -53,8 +53,6 @@ fn tensor2(rows: usize, cols: usize, data: Vec<f32>) -> Tensor {
         .into_dyn()
 }
 
-// ReLU layer
-
 /// ReLU(x) = max(0, x) on known values
 #[test]
 fn relu_forward_known_values() {
@@ -68,7 +66,7 @@ fn relu_forward_known_values() {
     assert_allclose(&output, &expected, 1e-6_f32);
 }
 
-/// All-negative input maps to zeros
+/// All-negative input maps to 0s
 #[test]
 fn relu_forward_all_negative() {
     let mut layer = ReLU::new();
@@ -106,8 +104,6 @@ fn relu_non_finite_input_propagates() {
     assert!(v[1].is_infinite() && v[1] > 0.0, "+inf passes through");
     assert_eq!(v[2], 0.0, "-inf maps to 0");
 }
-
-// Sigmoid layer
 
 /// sigmoid(x) = 1 / (1 + exp(-x)) on known values
 #[test]
@@ -182,8 +178,6 @@ fn sigmoid_nan_input_propagates() {
     );
 }
 
-// Tanh layer
-
 /// tanh(x) = (e^x - e^-x) / (e^x + e^-x) on known values
 #[test]
 fn tanh_forward_known_values() {
@@ -256,8 +250,6 @@ fn tanh_non_finite_input_propagates() {
     assert_eq!(v[1], -1.0, "tanh(-inf) saturates to -1");
     assert_eq!(v[2], 1.0, "tanh(+inf) saturates to +1");
 }
-
-// Softmax layer
 
 /// softmax([0,1,2]) ~= [0.09003, 0.24473, 0.66524]
 #[test]
@@ -367,8 +359,6 @@ fn softmax_nan_input_propagates() {
     );
 }
 
-// Linear layer
-
 /// Linear is the identity: output == input exactly
 #[test]
 fn linear_forward_is_identity() {
@@ -471,8 +461,6 @@ fn leaky_relu_backward_derivative_at_zero_is_one() {
     assert_allclose(&grad_in, &expected, 1e-6_f32);
 }
 
-// ELU layer
-
 /// ELU(x) = x for x > 0, and alpha * (e^x - 1) at 0 and below, on known values
 #[test]
 fn elu_forward_known_values() {
@@ -547,8 +535,6 @@ fn selu_backward_derivative_at_zero_is_scale_times_alpha() {
     assert_allclose(&grad_in, &expected, 1e-6_f32);
 }
 
-// Softplus layer
-
 /// Softplus(x) = ln(1 + e^x) on known values
 #[test]
 fn softplus_forward_known_values() {
@@ -586,8 +572,6 @@ fn softplus_forward_outputs_positive() {
     }
 }
 
-// Softsign layer
-
 /// Softsign(x) = x / (1 + |x|) on known values
 #[test]
 fn softsign_forward_known_values() {
@@ -620,8 +604,6 @@ fn softsign_forward_outputs_bounded() {
         );
     }
 }
-
-// HardSigmoid layer
 
 /// HardSigmoid(x) = clip(x/6 + 0.5, 0, 1) on known values
 #[test]
@@ -764,8 +746,6 @@ fn activation_enum_softmax_rejects_an_out_of_range_axis() {
     }
 }
 
-// From<Layer> -> Activation conversions (confirms the enum round-trips)
-
 #[test]
 fn from_linear_yields_activation_linear() {
     let act: Activation = Linear::new().into();
@@ -897,7 +877,7 @@ fn all_layers_backward_propagates_non_finite_grad() {
 }
 
 // ReLU derivative: ReLU'(x) = 1 for x > 0 and 0 for x <= 0.
-// backward passes grad_output through where the input was positive, and zeroes it elsewhere.
+// backward passes grad_output through where the input was positive, and sets it to 0 elsewhere.
 
 /// ReLU backward passes the gradient through positive inputs and blocks the rest
 #[test]

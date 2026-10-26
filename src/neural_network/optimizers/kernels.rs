@@ -97,7 +97,7 @@ pub fn sgd_momentum_step(
 
 /// Decoupled (AdamW/SGDW-style) weight decay
 ///
-/// Shrinks each parameter toward zero by the factor `(1 - lr * weight_decay)`, independent of the
+/// Shrinks each parameter toward 0 by the factor `(1 - lr * weight_decay)`, independent of the
 /// gradient. A no-op when `weight_decay == 0`. Apply this before the optimizer's gradient step, so
 /// the shrink uses the pre-step parameter. This matches the AdamW formulation
 /// `theta = theta - lr*(update + wd*theta)`
@@ -319,8 +319,6 @@ mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
 
-    // scaled_grad
-
     /// A scale of exactly 1.0 borrows the original gradient without allocating or changing values
     #[test]
     fn scaled_grad_unit_scale_borrows_unchanged() {
@@ -340,8 +338,6 @@ mod tests {
         assert_abs_diff_eq!(out[1], -2.0_f32, epsilon = 1e-6);
         assert_abs_diff_eq!(out[2], 3.0_f32, epsilon = 1e-6);
     }
-
-    // SGD momentum / weight decay
 
     /// Plain (non-Nesterov) momentum accumulates velocity across steps: v = momentum*v + g,
     /// p -= lr*v
@@ -397,8 +393,6 @@ mod tests {
         assert_abs_diff_eq!(out[2], 0.0 - 0.6, epsilon = 1e-6); // 0 + 0.1*(-6)
     }
 
-    // SGD
-
     /// SGD small path applies `param -= lr * grad`
     #[test]
     fn sgd_step_small_path() {
@@ -434,9 +428,7 @@ mod tests {
         assert_abs_diff_eq!(param[1], -1.5_f32, epsilon = 1e-6);
     }
 
-    // Adam
-
-    /// Adam step t=1 from zero moments produces the canonical first update
+    /// Adam step t=1 from moments of 0 produces the canonical first update
     #[test]
     fn adam_step_t1_from_zero() {
         let mut param = vec![0.0_f32];
@@ -477,7 +469,7 @@ mod tests {
         assert_abs_diff_eq!(param[0], expected, epsilon = 1e-5);
     }
 
-    /// Adam step with zero gradient leaves moments at zero and param unchanged
+    /// Adam step with gradient of 0 leaves moments at 0 and param unchanged
     #[test]
     fn adam_step_zero_gradient() {
         let mut param = vec![5.0_f32];
@@ -493,9 +485,7 @@ mod tests {
         assert_abs_diff_eq!(param[0], 5.0_f32, epsilon = 1e-9);
     }
 
-    // RMSprop
-
-    /// RMSprop 1 step from zero cache produces the expected single-element update
+    /// RMSprop 1 step from cache of 0 produces the expected single-element update
     #[test]
     fn rmsprop_step_single_element() {
         let mut param = vec![2.0_f32];
@@ -534,7 +524,7 @@ mod tests {
         assert_abs_diff_eq!(param[1], expected_p1, epsilon = 1e-6);
     }
 
-    /// RMSprop with a non-zero initial cache carries state forward
+    /// RMSprop with an initial cache other than 0 carries state forward
     #[test]
     fn rmsprop_step_nonzero_initial_cache() {
         let mut param = vec![1.0_f32];
@@ -550,9 +540,7 @@ mod tests {
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
 
-    // AdaGrad
-
-    /// AdaGrad 1 step from zero accumulator produces the expected single-element update
+    /// AdaGrad 1 step from accumulator of 0 produces the expected single-element update
     #[test]
     fn adagrad_step_single_element() {
         let mut param = vec![3.0_f32];
@@ -608,7 +596,7 @@ mod tests {
     // The 1024-element tests below stay under that gate. They run the same serial branch as the
     // small-path tests above and do not exercise the rayon branch.
 
-    /// Adam at 1024 elements applies the same t=1-from-zero update everywhere (below the
+    /// Adam at 1024 elements applies the same t=1-from-0 update everywhere (below the
     /// parallel gate)
     #[test]
     fn adam_step_parallel_path() {

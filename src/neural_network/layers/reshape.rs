@@ -1,5 +1,8 @@
 //! Reshape layer that rewrites the axes after the batch axis into a target shape, and parks
 //! the input shape for backpropagation
+//!
+//! The batch axis stays first. Shape checks preserve the element count, and the backward
+//! pass restores the cached input shape.
 
 use crate::error::{Context, Error};
 use crate::neural_network::layers::ParamCounts;
@@ -41,23 +44,23 @@ use ndarray::IxDyn;
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array2;
 ///
-/// // A rank-2 input: 2 samples of 12 features each
+/// // A rank-2 input: 2 samples of 12 features each.
 /// let x = Array2::ones((2, 12)).into_dyn();
 ///
-/// // Fold the 12 features into a 2x3x2 volume. The -1 axis takes the leftover extent
+/// // Fold the 12 features into a 2x3x2 volume. The -1 axis takes the leftover extent.
 /// let mut model = SequentialBuilder::new()
 ///     .add(Reshape::new(vec![-1, 3, 2]).unwrap())
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
-/// // Forward propagation
+/// // Forward propagation.
 /// let folded = model.predict(&x).unwrap();
 ///
-/// // The batch axis passes through, and -1 resolves to 2
+/// // The batch axis passes through, and -1 resolves to 2.
 /// assert_eq!(folded.shape(), &[2, 2, 3, 2]);
 /// ```
 #[derive(Debug)]

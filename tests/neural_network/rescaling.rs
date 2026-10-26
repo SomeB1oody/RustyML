@@ -294,8 +294,7 @@ fn rescaling_rejects_a_0d_and_an_empty_input() {
 
 /// The backward pass needs no cache, so it runs before any forward pass
 ///
-/// This pins the design decision that the layer stores nothing. Every other shape-preserving
-/// layer here answers `ForwardPassNotRun` in this position
+/// The derivative is the scale, so it needs no saved input or output.
 #[test]
 fn rescaling_backward_runs_before_any_forward() {
     let layer = Rescaling::new(4.0).with_offset(9.0);

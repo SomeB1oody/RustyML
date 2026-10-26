@@ -5,8 +5,6 @@ use approx::assert_abs_diff_eq;
 use ndarray::array;
 use rustyml::metrics::*;
 
-// mean_squared_error
-
 /// MSE of a 4-sample case equals 0.375
 #[test]
 fn test_mse_four_samples() {
@@ -68,8 +66,6 @@ fn test_mse_empty_panics() {
     let y_pred: ndarray::Array1<f64> = array![];
     let _ = mean_squared_error(&y_true, &y_pred);
 }
-
-// root_mean_squared_error
 
 /// RMSE of the 4-sample case equals sqrt(MSE) = sqrt(0.375)
 #[test]
@@ -142,8 +138,6 @@ fn test_rmse_empty_panics() {
     let _ = root_mean_squared_error(&y_true, &y_pred);
 }
 
-// mean_absolute_error
-
 /// MAE of the 4-sample case equals 0.5
 #[test]
 fn test_mae_four_samples() {
@@ -206,8 +200,6 @@ fn test_mae_empty_panics() {
     let _ = mean_absolute_error(&y_true, &y_pred);
 }
 
-// r2_score
-
 /// Perfect predictions give R2 = 1
 #[test]
 fn test_r2_perfect_fit() {
@@ -264,7 +256,7 @@ fn test_r2_not_symmetric() {
     assert_abs_diff_eq!(r2_ba, 0.0, epsilon = 1e-9);
 }
 
-/// Constant y_true with zero SSE returns 1.0 by convention
+/// Constant y_true with SSE of 0 returns 1.0 by convention
 #[test]
 fn test_r2_constant_y_true_perfect_sse() {
     let y_true = array![3.0, 3.0, 3.0, 3.0];
@@ -272,7 +264,7 @@ fn test_r2_constant_y_true_perfect_sse() {
     assert_abs_diff_eq!(r2_score(&y_true, &y_pred), 1.0, epsilon = 1e-12);
 }
 
-/// Constant y_true with non-zero SSE returns 0.0 by convention
+/// Constant y_true with SSE above 0 returns 0.0 by convention
 #[test]
 fn test_r2_constant_y_true_nonzero_sse() {
     let y_true = array![3.0, 3.0, 3.0];
@@ -325,8 +317,6 @@ fn test_r2_empty_panics() {
     let _ = r2_score(&y_true, &y_pred);
 }
 
-// explained_variance_score
-
 /// Perfect predictions give EVS = 1
 #[test]
 fn test_evs_perfect_predictions() {
@@ -376,7 +366,7 @@ fn test_evs_known_fractional() {
     );
 }
 
-/// Constant y_true with zero residual variance returns 1.0
+/// Constant y_true with residual variance 0 returns 1.0
 #[test]
 fn test_evs_constant_y_true_zero_residual_variance() {
     let y_true = array![5.0, 5.0, 5.0];
@@ -388,7 +378,7 @@ fn test_evs_constant_y_true_zero_residual_variance() {
     );
 }
 
-/// Constant y_true with non-zero residual variance returns 0.0
+/// Constant y_true with residual variance above 0 returns 0.0
 #[test]
 fn test_evs_constant_y_true_nonzero_residual_variance() {
     let y_true = array![5.0, 5.0, 5.0];
@@ -424,7 +414,7 @@ fn test_evs_constant_target_that_does_not_round_trip() {
         1.0,
         epsilon = 1e-12
     );
-    // A constant bias leaves zero residual variance, so EVS still scores 1.0 here (unlike R2)
+    // A constant bias leaves residual variance 0, so EVS still scores 1.0 here (unlike R2)
     let y_pred = array![0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2];
     assert_abs_diff_eq!(
         explained_variance_score(&y_true, &y_pred),
@@ -458,8 +448,6 @@ fn test_evs_empty_panics() {
     let y_pred: ndarray::Array1<f64> = array![];
     let _ = explained_variance_score(&y_true, &y_pred);
 }
-
-// median_absolute_error
 
 /// Odd sample count: median is the middle sorted absolute error (2.0)
 #[test]
@@ -558,8 +546,6 @@ fn test_medae_empty_panics() {
     let y_pred: ndarray::Array1<f64> = array![];
     let _ = median_absolute_error(&y_true, &y_pred);
 }
-
-// mean_absolute_percentage_error
 
 /// MAPE of the 3-sample case equals 1/6
 #[test]

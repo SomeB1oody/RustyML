@@ -1,10 +1,10 @@
-//! Integration tests for the GaussianNoise and GaussianDropout layers
+//! Integration tests for GaussianNoise and GaussianDropout.
 //!
-//! GaussianNoise adds N(0, stddev) to the input. GaussianDropout multiplies the input by
-//! N(1, stddev), where stddev = sqrt(rate / (1 - rate)).
+//! GaussianNoise adds normal noise with mean 0. GaussianDropout multiplies the input by normal
+//! noise with mean 1. Its standard deviation is sqrt(rate / (1 - rate)).
 //!
-//! Statistical assertions use large (10,000-element) all-ones tensors, so the sample mean
-//! and sample std converge tightly to the population parameters, within a +/-0.05 tolerance.
+//! Statistical checks use 10,000 input values of 1. Sample means and standard deviations must
+//! stay within 0.05 of the expected values.
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
@@ -16,8 +16,6 @@ use rustyml::neural_network::layers::regularization::noise_injection::gaussian_d
 use rustyml::neural_network::layers::regularization::noise_injection::gaussian_noise::GaussianNoise;
 use rustyml::neural_network::traits::{Layer, LayerBase, UnaryLayer};
 use rustyml::{error::Error, neural_network::NnError};
-
-// helpers
 
 /// Sample mean of every element in a Tensor
 fn tensor_mean(t: &Tensor) -> f64 {
@@ -32,8 +30,6 @@ fn tensor_std(t: &Tensor) -> f64 {
     let var: f64 = t.iter().map(|&v| (v as f64 - mean).powi(2)).sum::<f64>() / n;
     var.sqrt()
 }
-
-// GaussianNoise: constructor validation
 
 /// An invalid stddev (negative, or non-finite NaN or +Inf) is rejected at construction
 /// instead of panicking later inside `Normal::new`
@@ -58,8 +54,6 @@ fn gaussian_noise_zero_stddev_construction_ok() {
 fn gaussian_noise_positive_stddev_construction_ok() {
     assert!(GaussianNoise::new(0.5).is_ok());
 }
-
-// GaussianNoise: identity paths
 
 /// In eval mode the layer returns a tensor element-wise equal to the input
 #[test]
@@ -117,8 +111,6 @@ fn gaussian_noise_zero_stddev_training_is_identity() {
     let output = layer.forward_mut(&input, &mut Ctx::training()).unwrap();
     crate::common::assert_allclose(&output, &input, 1e-6f32);
 }
-
-// GaussianNoise: statistical properties in training mode
 
 /// E[output] ~= input when training, since output = input + N(0, stddev)
 #[test]
@@ -218,8 +210,6 @@ fn gaussian_noise_training_consecutive_calls_differ() {
     );
 }
 
-// GaussianNoise: error paths
-
 /// forward() accepts a shape that the build shape does not name
 ///
 /// The layer owns no array and reads no extent, so nothing about the build shape reaches the
@@ -283,8 +273,6 @@ fn gaussian_noise_accepts_any_rank() {
     assert!(layer.forward(&b, &mut Ctx::inference()).is_ok());
 }
 
-// GaussianNoise: metadata
-
 #[test]
 fn gaussian_noise_layer_type_and_output_shape() {
     let mut layer = GaussianNoise::new(0.3).unwrap();
@@ -299,12 +287,8 @@ fn gaussian_noise_unbuilt_output_shape_is_unknown() {
     assert_eq!(layer.output_shape(), "Unknown");
 }
 
-// GaussianDropout
-
-// GaussianDropout: constructor validation
-
-/// An out-of-range rate is rejected. The valid interval is [0, 1), so a rate of 1.0 (the
-/// excluded upper bound), a rate above 1.0, and a negative rate all fail
+/// The constructor rejects rates outside [0, 1). A negative rate, 1.0, or a rate above 1.0
+/// fails.
 #[test]
 fn gaussian_dropout_invalid_rate_returns_err() {
     for bad in [1.0f32, 1.5, -0.1] {
@@ -327,8 +311,6 @@ fn gaussian_dropout_rate_zero_construction_ok() {
 fn gaussian_dropout_rate_near_one_construction_ok() {
     assert!(GaussianDropout::new(0.999).is_ok());
 }
-
-// GaussianDropout: identity paths
 
 /// In eval mode the layer returns a tensor element-wise equal to the input
 #[test]
@@ -385,8 +367,6 @@ fn gaussian_dropout_rate_zero_training_is_identity() {
     let output = layer.forward_mut(&input, &mut Ctx::training()).unwrap();
     crate::common::assert_allclose(&output, &input, 1e-6f32);
 }
-
-// GaussianDropout: statistical properties in training mode
 
 /// E[output] ~= input when training, since output = input * N(1, stddev)
 #[test]
@@ -473,8 +453,6 @@ fn gaussian_dropout_training_consecutive_calls_differ() {
         "two consecutive training forward() calls must differ"
     );
 }
-
-// GaussianDropout: error paths
 
 /// forward() accepts a shape that the build shape does not name
 ///
@@ -628,8 +606,6 @@ fn gaussian_dropout_backward_inference_is_passthrough() {
     }
 }
 
-// GaussianDropout: metadata
-
 #[test]
 fn gaussian_dropout_layer_type_and_output_shape() {
     let mut layer = GaussianDropout::new(0.3).unwrap();
@@ -643,8 +619,6 @@ fn gaussian_dropout_empty_input_shape_output_shape_unknown() {
     let layer = GaussianDropout::new(0.3).unwrap();
     assert_eq!(layer.output_shape(), "Unknown");
 }
-
-// Mode-switching symmetry
 
 /// A training context enables the noise, and an inference context disables it
 #[test]
@@ -703,6 +677,6 @@ fn gaussian_noise_backward_passes_gradient_through_unchanged() {
         .into_dyn();
     let grad_in = layer.backward(&grad, &mut ctx).unwrap();
 
-    // Pure pass-through => byte-identical gradient (zero epsilon)
+    // Pure pass-through => byte-identical gradient (0 epsilon)
     crate::common::assert_allclose(&grad_in, &grad, 0.0f32);
 }

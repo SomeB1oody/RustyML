@@ -16,8 +16,12 @@ use std::hint::black_box;
 
 // conv engine: CONV_PARALLEL_MIN_FLOPS
 
-/// Runs the conv engine forward pass, serial and forced-parallel, across a batch-1 ladder of
-/// channel, filter, image, and kernel sizes, to calibrate CONV_PARALLEL_MIN_FLOPS
+/// Measures serial and forced-parallel convolution forward passes with batch size 1.
+/// The ladder varies channels, filters, image sizes, and kernel sizes to calibrate `CONV_PARALLEL_MIN_FLOPS`.
+///
+/// # Returns
+///
+/// - `Section` - Timing tables for the measured size ladder
 pub fn calibrate_conv_forward() -> Section {
     let mut rows = Vec::new();
     // (cin, filters, img, k) at batch == 1, the case the gate must serve hardest. Tensors are
@@ -71,6 +75,10 @@ pub fn calibrate_conv_forward() -> Section {
 
 /// Runs the max-pooling engine, serial and forced-parallel, across image, batch, and channel
 /// ladders, to calibrate POOL_PARALLEL_MIN_OPS
+///
+/// # Returns
+///
+/// - `Section` - Timing tables for the measured size ladder
 pub fn calibrate_pooling() -> Section {
     let mut rows = Vec::new();
     let run = |input: &Tensor, force: bool| {
@@ -96,7 +104,7 @@ pub fn calibrate_pooling() -> Section {
             parallel_ns: p,
         });
     }
-    // Many tiny images, single channel
+    // Many tiny images, 1 channel
     for &bc in &[16usize, 64, 256, 1024] {
         let input = Tensor::from_elem(IxDyn(&[bc, 16, 16, 1]), 1.0f32);
         let work = bc * 8 * 8 * 4;
@@ -143,6 +151,10 @@ pub fn calibrate_pooling() -> Section {
 
 /// Runs the f32 elementwise kernel classes, serial and forced-parallel, across an element-count
 /// ladder, to calibrate the activation, dropout, and optimizer parallel thresholds
+///
+/// # Returns
+///
+/// - `Vec<Section>` - Timing tables for the measured size ladder
 pub fn calibrate_elementwise() -> Vec<Section> {
     let sizes = [
         512usize, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 1048576,
@@ -297,6 +309,10 @@ pub fn calibrate_elementwise() -> Vec<Section> {
 /// against forced parallel of the same per-segment scale. Each element is independent, so the
 /// flag never changes the bits, and the gate is a pure performance knob. The ladder varies the
 /// segment count (`B * C`) and the segment length (`spatial`) across the crossover.
+///
+/// # Returns
+///
+/// - `Section` - Timing tables for the measured size ladder
 pub fn calibrate_spatial_dropout_scale() -> Section {
     let mut rows = Vec::new();
     for &(n_seg, seg) in &[

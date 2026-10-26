@@ -36,22 +36,22 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::MeanSquaredError;
 /// use ndarray::Array2;
 ///
-/// // Create a 2D input tensor
+/// // Create a 2D input tensor.
 /// let x = Array2::from_shape_vec((2, 3), vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0])
 ///     .unwrap()
 ///     .into_dyn();
 ///
-/// // Build a model with SiLU activation
+/// // Build a model with SiLU activation.
 /// let mut model = SequentialBuilder::new()
 ///     .add(SiLU::new())
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Forward propagation
+/// // Forward propagation.
 /// let output = model.predict(&x);
 ///
-/// // Output will be: [[-0.26894143, 1.761594, -0.14227763], [3.928055, -0.033464253, 5.9851646]]
+/// // Output will be: [[-0.26894143, 1.761594, -0.14227763], [3.928055, -0.033464253, 5.9851646]].
 /// ```
 #[derive(Debug)]
 pub struct SiLU {
@@ -71,6 +71,15 @@ impl SiLU {
 }
 
 impl Default for SiLU {
+    /// Creates the default SiLU layer.
+    ///
+    /// # Default Values
+    ///
+    /// Uses the configuration from [`Self::new`].
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The default layer.
     fn default() -> Self {
         Self::new()
     }

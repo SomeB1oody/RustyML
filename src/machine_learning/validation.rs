@@ -1,8 +1,7 @@
 //! Internal input-validation helpers shared across machine-learning estimators
 //!
-//! Provides checks for feature/target matrices and common hyperparameters
-//! (learning rate, max iterations, tolerance, regularization) plus a fitted-state
-//! guard, each returning a consistent [`Error`] on failure
+//! This module checks feature matrices, target lengths, and shared hyperparameters.
+//! Each helper returns a consistent [`Error`] when a check fails.
 
 use super::RegularizationType;
 use crate::error::Error;
@@ -11,7 +10,7 @@ use ndarray::{ArrayBase, Data, Dimension, Ix2};
 /// Performs validation checks on the input data matrices
 ///
 /// Validates that:
-/// - The input data matrix is not empty
+/// - The feature matrix has at least 1 row
 /// - The input data does not contain NaN or infinite values
 /// - When a target vector is provided:
 ///   - The target vector is not empty
@@ -20,8 +19,7 @@ use ndarray::{ArrayBase, Data, Dimension, Ix2};
 /// # Parameters
 ///
 /// - `x` - A 2D array of feature values where rows represent samples and columns represent features
-/// - `y_len` - The length of the target vector, when the caller has one to check. Taking the
-///   length rather than the array keeps `x` and `y` free to use different storage types
+/// - `y_len` - Optional target length. The helper compares this length with the row count of `x`
 ///
 /// # Returns
 ///
@@ -65,8 +63,7 @@ where
 
 /// Validates that the learning rate parameter is positive and finite
 ///
-/// The learning rate controls the step size in gradient descent optimization. It must be
-/// positive and finite so training converges correctly
+/// The learning rate sets the step size in gradient descent. This check requires a positive, finite value.
 ///
 /// # Parameters
 ///
@@ -119,9 +116,7 @@ pub(super) fn validate_max_iterations(max_iterations: usize) -> Result<(), Error
 
 /// Validates that the tolerance parameter is positive and finite
 ///
-/// The tolerance parameter defines the convergence criterion for iterative algorithms.
-/// Training stops when the change in loss between iterations falls below this threshold.
-/// The value must be positive and finite for meaningful convergence detection
+/// Iterative estimators use this threshold in their convergence checks. This helper requires a positive, finite value.
 ///
 /// # Parameters
 ///
@@ -184,8 +179,7 @@ pub(super) fn validate_regularization_type(
 
 /// Returns [`Error::NotFitted`] when a model has not been fitted yet
 ///
-/// Centralizes the "is this model fitted?" guard so every estimator emits the
-/// same error instead of hand-rolling the check at each call site
+/// This helper checks the fitted state and creates a consistent error.
 ///
 /// # Parameters
 ///
@@ -257,13 +251,16 @@ where
 
 /// Validates 1 sample before a single-sample prediction
 ///
-/// This is the single-sample form of [`validate_predict_input`]. A slice holds exactly 1
-/// sample, so no empty-dataset check applies. A slice of length 0 is a dimension mismatch
+/// This helper checks the feature count and finite values. An empty slice is valid only when `expected_features` is 0.
 ///
 /// # Parameters
 ///
 /// - `sample` - The feature values of 1 sample
 /// - `expected_features` - The feature count of the fitted model
+///
+/// # Returns
+///
+/// - `Result<(), Error>` - Success when the feature count and values are valid.
 ///
 /// # Errors
 ///
@@ -286,6 +283,14 @@ pub(super) fn validate_predict_sample(
 
 /// Returns an error if `x` contains no elements
 ///
+/// # Parameters
+///
+/// - `x` - Array to check.
+///
+/// # Returns
+///
+/// - `Result<(), Error>` - Success when the array contains elements.
+///
 /// # Errors
 ///
 /// - [`Error::EmptyInput`] - If `x` is empty
@@ -301,6 +306,14 @@ where
 }
 
 /// Returns an error if `x` contains any NaN or infinite value
+///
+/// # Parameters
+///
+/// - `x` - Array to check.
+///
+/// # Returns
+///
+/// - `Result<(), Error>` - Success when all values are finite.
 ///
 /// # Errors
 ///
@@ -320,6 +333,16 @@ where
 ///
 /// `model` names the estimator so the message reads naturally (e.g. `"PCA
 /// requires at least 2 samples"`)
+///
+/// # Parameters
+///
+/// - `x` - Feature matrix with samples as rows.
+/// - `min_samples` - Minimum allowed row count.
+/// - `model` - Estimator name for the error message.
+///
+/// # Returns
+///
+/// - `Result<(), Error>` - Success when the row count meets the minimum.
 ///
 /// # Errors
 ///
@@ -343,16 +366,20 @@ where
 
 /// Validates a feature matrix passed to a `fit`-style method
 ///
-/// Checks, in order, that the matrix is non-empty, has at least one feature
+/// Checks, in order, that the matrix is non-empty, has at least 1 feature
 /// column, and contains only finite values
 ///
 /// # Parameters
 ///
 /// - `x` - Feature matrix with samples as rows and features as columns
 ///
+/// # Returns
+///
+/// - `Result<(), Error>` - Success when the training matrix is valid.
+///
 /// # Errors
 ///
-/// - [`Error::EmptyInput`] - If `x` is empty or has zero columns
+/// - [`Error::EmptyInput`] - If `x` is empty or has 0 columns
 /// - [`Error::NonFinite`] - If `x` contains non-finite values
 pub(super) fn validate_fit_matrix<S>(x: &ArrayBase<S, Ix2>) -> Result<(), Error>
 where
@@ -377,6 +404,10 @@ where
 /// - `x` - Feature matrix with samples as rows and features as columns
 /// - `expected_features` - Number of features the fitted model was trained on
 ///
+/// # Returns
+///
+/// - `Result<(), Error>` - Success when the matrix matches the fitted feature count.
+///
 /// # Errors
 ///
 /// - [`Error::EmptyInput`] - If `x` is empty
@@ -396,6 +427,7 @@ where
     check_finite(x)
 }
 
+/// Tests for the module helpers and model behavior.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -638,7 +670,7 @@ mod tests {
         assert!(validate_regularization_type(None).is_ok());
     }
 
-    /// validate_regularization_type with a zero L1 alpha returns Ok
+    /// validate_regularization_type with a L1 alpha of 0 returns Ok
     #[test]
     fn validate_regularization_type_l1_zero_gives_ok() {
         assert!(validate_regularization_type(Some(RegularizationType::L1(0.0))).is_ok());
@@ -772,7 +804,7 @@ mod tests {
 
     // validate_fit_matrix
 
-    /// A matrix with zero feature columns produces EmptyInput
+    /// A matrix with 0 feature columns produces EmptyInput
     #[test]
     fn validate_fit_matrix_zero_cols_gives_empty_input() {
         let a: Array2<f64> = Array2::zeros((3, 0));

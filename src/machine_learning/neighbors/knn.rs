@@ -62,7 +62,7 @@ pub enum WeightingStrategy {
 /// use ndarray::{array, Array1, Array2};
 /// use rustyml::machine_learning::KNN;
 ///
-/// // Create a simple dataset
+/// // Create a simple dataset.
 /// let x_train = array![
 ///     [1.0, 2.0],
 ///     [2.0, 3.0],
@@ -71,16 +71,16 @@ pub enum WeightingStrategy {
 ///     [6.0, 7.0]
 /// ];
 ///
-/// // Target values (classification)
+/// // Target values (classification).
 /// let y_train = array!["A", "A", "A", "B", "B"];
 ///
-/// // Create KNN model with k=3 and default settings (uniform weighting, Euclidean distance)
+/// // Create KNN model with k=3 and default settings (uniform weighting, Euclidean distance).
 /// let mut knn = KNN::new(3).unwrap();
 ///
-/// // Fit the model
+/// // Fit the model.
 /// knn.fit(&x_train, &y_train).unwrap();
 ///
-/// // Predict new samples
+/// // Predict new samples.
 /// let x_test = array![
 ///     [1.5, 2.5],  // Closer to class "A" points
 ///     [5.5, 6.5]   // Closer to class "B" points
@@ -127,6 +127,10 @@ impl<T: Clone + std::hash::Hash + Eq> Default for KNN<T> {
     /// - `k` - 5
     /// - `weighting_strategy` - WeightingStrategy::Uniform
     /// - `metric` - DistanceCalculationMetric::Euclidean
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - An instance with default settings.
     fn default() -> Self {
         KNN {
             k: 5,
@@ -222,7 +226,6 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         Ok(self)
     }
 
-    // Getters
     get_field!(get_k, k, usize);
     get_field!(
         get_weighting_strategy,
@@ -264,9 +267,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     {
         preliminary_check(x, None)?;
 
-        // `preliminary_check` cannot validate generic labels `T`, so this checks row counts here.
-        // Otherwise `fit` stores a mismatched `y` silently, and `predict` panics later with an
-        // out-of-bounds index.
+        // Check the label count separately because the labels have a generic element type.
         if y.len() != x.nrows() {
             return Err(Error::dimension_mismatch(x.nrows(), y.len()));
         }
@@ -317,6 +318,10 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// - `Result<Array1<T>, Error>` - Predicted labels for each input sample
     ///
+    /// # Notes
+    ///
+    /// Equal vote scores favor the class that first appears in the training labels.
+    ///
     /// # Errors
     ///
     /// - `Error::NotFitted` - If the model has not been trained using `fit`
@@ -347,7 +352,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
             self.euclidean_train_sq_norms(x_train)
         };
 
-        // Sequential prediction on encoded indices
+        // Predict encoded class indices with sequential query traversal
         let encoded_results: Result<Vec<usize>, Error> = if let Some(train_sq_norms) =
             train_sq_norms.as_ref()
         {
@@ -402,8 +407,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
 impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
     /// Predicts class labels for input samples (parallel version)
     ///
-    /// This method uses parallel computation for large datasets. It requires `T` to implement
-    /// `Sync + Send` for thread safety.
+    /// This method processes query samples in parallel. Labels must implement `Sync + Send`.
     ///
     /// # Parameters
     ///
@@ -412,6 +416,10 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
     /// # Returns
     ///
     /// - `Result<Array1<T>, Error>` - Predicted labels for each input sample
+    ///
+    /// # Notes
+    ///
+    /// Equal vote scores favor the class that first appears in the training labels.
     ///
     /// # Errors
     ///
@@ -655,7 +663,11 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Errors
     ///
-    /// Returns any error produced by [`fit`](Self::fit) or [`predict`](Self::predict)
+    /// - `Error::EmptyInput` - If the feature matrix has no rows.
+    /// - `Error::DimensionMismatch` - If target lengths or feature counts differ.
+    /// - `Error::NonFinite` - If input features contain non-finite values.
+    /// - `Error::InvalidInput` - If fewer than `k` training samples are available.
+    /// - `Error::Computation` - If no neighbor class can be selected.
     pub fn fit_predict<S1, S2>(
         &mut self,
         x_train: &ArrayBase<S1, Ix2>,

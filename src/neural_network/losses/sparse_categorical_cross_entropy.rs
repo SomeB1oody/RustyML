@@ -1,4 +1,7 @@
-//! Sparse Categorical Cross Entropy loss for multi-class classification with integer labels.
+//! Sparse categorical cross-entropy loss for class labels.
+//!
+//! Predictions have shape `[batch, classes]`, and labels have shape `[batch, 1]`.
+//! The loss accepts logits or probability scores and averages over the batch.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -7,14 +10,14 @@ use crate::neural_network::traits::Loss;
 use ndarray::{Array2, Ix2};
 
 /// Sparse Categorical Cross Entropy loss for multi-class classification where true labels are
-/// integers instead of one-hot vectors.
+/// integers instead of 1-hot vectors.
 ///
 /// # Probability path
 ///
 /// This matches
 /// [`CategoricalCrossEntropy`](crate::neural_network::losses::CategoricalCrossEntropy). The
-/// integer label implies the one-hot target. The loss renormalizes each row along the class
-/// axis before the clip, as in Keras. Because `compute_grad` also differentiates that division,
+/// integer label implies the 1-hot target. The loss renormalizes each row along the class
+/// axis before the clip. Because `compute_grad` also differentiates that division,
 /// it returns a dense gradient. Every class picks up a shared `1 / (batch * row_sum)` term,
 /// instead of a gradient supported only on the labeled class.
 ///
@@ -25,10 +28,10 @@ use ndarray::{Array2, Ix2};
 /// use ndarray::ArrayD;
 /// use rustyml::neural_network::traits::Loss;
 ///
-/// // Pass `true` for `from_logits` to feed raw logits instead of probabilities
+/// // Pass `true` for `from_logits` to feed raw logits instead of probabilities.
 /// let scce = SparseCategoricalCrossEntropy::new(false);
 ///
-/// // True class labels (as integers) and predicted probabilities
+/// // True class labels (as integers) and predicted probabilities.
 /// let y_true = ArrayD::from_shape_vec(
 ///     vec![3, 1],
 ///     vec![0.0, 1.0, 2.0]  // Class indices: 0, 1, 2
@@ -46,17 +49,15 @@ use ndarray::{Array2, Ix2};
 /// let loss = scce.compute_loss(&y_true, &y_pred).unwrap();
 /// println!("Sparse Categorical Cross Entropy Loss: {:.4}", loss);
 ///
-/// // Gradients for backpropagation
+/// // Gradients for backpropagation.
 /// let gradients = scce.compute_grad(&y_true, &y_pred).unwrap();
 /// println!("Gradients shape: {:?}", gradients.shape());
 /// println!("Gradients: {:?}", gradients);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SparseCategoricalCrossEntropy {
-    /// When `true`, the loss treats `y_pred` as raw logits. It applies a stable log-softmax
-    /// internally, and `compute_grad` returns the fused `(softmax(z) - one_hot(label)) / batch`
-    /// gradient. When `false` (default), `y_pred` must already be a probability distribution
-    /// per row.
+    /// Whether predictions are logits. `false` selects row normalization and probability
+    /// clipping.
     from_logits: bool,
 }
 
@@ -67,7 +68,7 @@ impl SparseCategoricalCrossEntropy {
     ///
     /// - `from_logits` - if `true`, the loss treats `y_pred` as raw logits and applies softmax
     ///   internally. This is more numerically stable, and the gradient uses 1 fused step. If
-    ///   `false`, `y_pred` must already be a normalized probability distribution per row.
+    ///   `false`, the loss normalizes probability scores by row.
     ///
     /// # Returns
     ///
@@ -79,9 +80,9 @@ impl SparseCategoricalCrossEntropy {
 
 /// Validates the inputs and extracts the integer class index for every sample.
 ///
-/// Predictions must be 2D `[batch, num_classes]` and labels must be 2D `[batch, 1]` with
-/// non-negative integer values strictly less than `num_classes`. Without these checks an
-/// out-of-range label would cause an opaque index-out-of-bounds panic.
+/// Predictions must have shape `[batch, num_classes]`, and labels must have shape `[batch, 1]`.
+/// The validator accepts finite nonnegative labels and rounds them to the nearest integer. The
+/// rounded index must be less than `num_classes`.
 ///
 /// # Parameters
 ///
@@ -90,7 +91,7 @@ impl SparseCategoricalCrossEntropy {
 ///
 /// # Returns
 ///
-/// - `Vec<usize>` - the class index selected for each sample
+/// - `Result<Vec<usize>, Error>` - The rounded class index for each sample
 ///
 /// # Errors
 ///
@@ -157,11 +158,8 @@ impl Loss for SparseCategoricalCrossEntropy {
             return Ok(total / batch_size as f32);
         }
 
-        // Probability path. As in Keras, it renormalizes each row before the clip, so it scores
-        // an unnormalized head as the distribution that head implies. This sum runs serially,
-        // like the logits path above. A bare Rayon sum groups its partials by work-stealing, so
-        // the reported loss would vary with thread scheduling. Also, 1 indexed `ln` per sample is
-        // too little work to parallelize.
+        // Normalize each row before the clip. Sum in sample order so the reported loss has a
+        // fixed reduction order.
         let probs = y_pred.view().into_dimensionality::<Ix2>().map_err(|_| {
             Error::invalid_input("SparseCategoricalCrossEntropy expects 2D predictions")
         })?;
@@ -192,9 +190,8 @@ impl Loss for SparseCategoricalCrossEntropy {
             return Ok(grad.into_dyn());
         }
 
-        // Probability path. The row-normalizer's derivative adds `1 / s` to every class, not just
-        // the labeled one, so unlike the pre-normalization form this gradient is dense. The extra
-        // term stays constant across the row, which a softmax backward pass cancels.
+        // The row normalization adds `1 / s` to every class before the batch average. A softmax
+        // backward pass cancels this constant row term.
         let probs = y_pred.view().into_dimensionality::<Ix2>().map_err(|_| {
             Error::invalid_input("SparseCategoricalCrossEntropy expects 2D predictions")
         })?;

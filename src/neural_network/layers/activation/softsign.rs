@@ -19,7 +19,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// Applies `f(x) = x / (1 + |x|)` elementwise to the input tensor, keeping the original shape.
 /// Common inputs include 2D tensors for dense layers and 4D tensors for convolutional layers
 ///
-/// Softsign is a bounded, zero-centered activation with the range `(-1, 1)`, like tanh. It
+/// Softsign is a bounded activation centered at 0 with the range `(-1, 1)`, like tanh. It
 /// approaches its limits polynomially and not exponentially, so the tails saturate more slowly
 ///
 /// [`Activation::Softsign`] provides the activation math. This layer only adds boundary
@@ -35,22 +35,22 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::MeanSquaredError;
 /// use ndarray::Array2;
 ///
-/// // Create a 2D input tensor
+/// // Create a 2D input tensor.
 /// let x = Array2::from_shape_vec((2, 3), vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0])
 ///     .unwrap()
 ///     .into_dyn();
 ///
-/// // Build a model with Softsign activation
+/// // Build a model with Softsign activation.
 /// let mut model = SequentialBuilder::new()
 ///     .add(Softsign::new())
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Forward propagation
+/// // Forward propagation.
 /// let output = model.predict(&x);
 ///
-/// // Output will be: [[-0.5, 0.66666669, -0.75], [0.80000001, -0.83333331, 0.85714287]]
+/// // Output will be: [[-0.5, 0.66666669, -0.75], [0.80000001, -0.83333331, 0.85714287]].
 /// ```
 #[derive(Debug)]
 pub struct Softsign {
@@ -70,6 +70,15 @@ impl Softsign {
 }
 
 impl Default for Softsign {
+    /// Creates the default Softsign layer.
+    ///
+    /// # Default Values
+    ///
+    /// Uses the configuration from [`Self::new`].
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The default layer.
     fn default() -> Self {
         Self::new()
     }

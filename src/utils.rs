@@ -1,24 +1,7 @@
-//! Utilities for preprocessing and dataset splitting
+//! Data preprocessing and dataset splits.
 //!
-//! Preprocessing covers normalization, standardization, and label encoding. Dataset splitting
-//! covers train-test partitioning.
-//!
-//! # Preprocessing
-//! - **normalize**: scale samples to unit norm along a chosen axis (L1, L2, or max order)
-//! - **standardize**: z-score standardization (zero mean, unit variance) for feature scaling
-//! - **scalers**: the stateful form of the above. Fit on the training matrix, then reuse those
-//!   statistics for every later batch. The set is `StandardScaler` (z-score), `MinMaxScaler`
-//!   (bounded range), `MaxAbsScaler` (magnitude, keeping zeros and signs), `RobustScaler` (median
-//!   and IQR, resists outliers), and `Normalizer` (per-sample norm)
-//! - **label encoding**: convert between dense labels and one-hot or sparse categorical formats
-//!
-//! # Dataset splitting
-//! - **train_test_split**: split into train and test sets with a configurable ratio, optionally
-//!   stratified
-//!
-//! # Key features
-//! - **Parallel processing**: uses rayon for parallel computation above a size gate
-//! - **Input validation**: reports descriptive errors on malformed input
+//! The submodules provide label encoding, array normalization, standardization, and train-test splits.
+//! Stateful scalers store training statistics for later data batches.
 //!
 //! # Examples
 //!
@@ -29,7 +12,7 @@
 //!
 //! let x = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
 //!
-//! // One-shot, stateless: the statistics come from `x` itself
+//! // Stateless normalization: the statistics come from `x` itself
 //! let standardized = standardize(&x, StandardizationAxis::Column).unwrap();
 //! assert_eq!(standardized.dim(), (3, 2));
 //!
@@ -47,7 +30,7 @@ pub mod label_encoding;
 pub mod normalize;
 /// Stateful feature scalers that store their training statistics
 pub mod scaler;
-/// Standardize data to have zero mean and unit variance
+/// Standardize data to have mean 0 and variance 1
 pub mod standardize;
 /// Split datasets into training and test sets
 pub mod train_test_split;

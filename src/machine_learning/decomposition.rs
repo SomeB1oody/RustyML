@@ -1,10 +1,7 @@
 //! Matrix-decomposition estimators for linear and kernel dimensionality reduction
 //!
-//! Houses the unsupervised "decomposition" family, mirroring scikit-learn's
-//! `sklearn.decomposition`: [`PCA`] for linear dimensionality reduction and
-//! [`KernelPCA`] for its nonlinear, kernelized counterpart. Both learn their
-//! components from a feature matrix at `fit` time and project new data through
-//! `transform`. Both implement the shared [`Fit`], [`Transform`], and [`FitTransform`] traits
+//! [`PCA`] provides linear dimensionality reduction. [`KernelPCA`] provides kernel dimensionality reduction.
+//! Both models fit components from training samples and transform new samples with those components.
 //!
 //! [`Fit`]: crate::traits::Fit
 //! [`Transform`]: crate::traits::Transform

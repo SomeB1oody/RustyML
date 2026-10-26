@@ -1,76 +1,8 @@
-//! # RustyML: Machine Learning and Deep Learning in Pure Rust
+//! Machine learning estimators, neural networks, numeric kernels, and data utilities.
 //!
-//! RustyML is a machine learning and deep learning library written entirely in Rust. It
-//! implements classical ML algorithms, neural networks, and data-processing utilities
-//!
-//! ## Overview
-//!
-//! The crate covers a full workflow: preprocessing, feature engineering, model training, and
-//! evaluation. It validates input and reports errors
-//!
-//! Estimator defaults, score orientations, and metric conventions follow scikit-learn and are
-//! checked numerically against it, so a ported pipeline produces the same numbers. Where the
-//! crate departs from scikit-learn, the item's own documentation says so. Known departures:
-//!
-//! - `metrics` panics instead of returning `Result`
-//! - `roc_curve` always returns the full threshold sweep
-//!
-//! ## Architecture
-//!
-//! The crate splits into 5 modules. A feature flag gates each one:
-//!
-//! ### [`machine_learning`]
-//! Classical machine learning algorithms for supervised and unsupervised learning:
-//! - **Regression**: Linear Regression with L1/L2 regularization, solved in closed form by default
-//!   or by gradient descent
-//! - **Classification**: Logistic Regression, KNN, Decision Tree, SVC, Linear SVC, LDA
-//! - **Clustering**: KMeans, DBSCAN, MeanShift. All 3 label samples as `Array1<isize>`, with
-//!   `-1` for noise or unassigned points
-//! - **Dimensionality Reduction**: PCA, Kernel PCA, t-SNE
-//! - **Anomaly Detection**: Isolation Forest, scoring in `[-1, 0)` where lower is more anomalous
-//!   and predicting `-1` (outlier) / `+1` (inlier)
-//!
-//! ### [`neural_network`]
-//! Neural network framework with a sequential model and a graph model. Tensors and kernel
-//! shapes are channels-last, so a channels-last layout needs no permutation:
-//! - **Layers**: Dense, Embedding, SimpleRNN, LSTM, GRU, Convolution, Pooling, Upsampling,
-//!   Border, Shape, Normalization, Dropout, Merge
-//! - **Merge Layers**: Add, Subtract, Multiply, Average, Maximum, Minimum, and Concatenate. Each
-//!   one takes several inputs and gives 1 output, so a graph model joins its branches with them
-//! - **Optimizers**: SGD, Adam, AdamW, RMSprop, AdaGrad
-//! - **Loss Functions**: MSE, MAE, Binary/Categorical/Sparse Categorical Cross-Entropy
-//! - **Models**: `Sequential` holds a chain of layers, and `Graph` holds a directed graph of
-//!   them. A graph model takes several inlets and gives several outlets, and several of its
-//!   nodes can call 1 layer, which is how it shares weights. `fit` and `fit_with_batches` return a
-//!   `History` of 1 loss per epoch. A hand-written loop can call the public `train_batch`
-//!   instead, and `evaluate` scores the model without training it
-//! - **Passes**: a layer computes, and it holds no cache and no gradient. `forward` and
-//!   `backward` take `&self` and a `Ctx`. That context carries the training flag, the caches of
-//!   the pass, every parameter gradient, and the non-trainable state that a training pass
-//!   changes
-//!
-//! ### [`utils`]
-//! Data preprocessing and dataset-splitting utilities:
-//! - **Preprocessing**: one-shot `standardize` / `normalize`, the stateful scaler family
-//!   (`StandardScaler`, `MinMaxScaler`, `MaxAbsScaler`, `RobustScaler`, `Normalizer`) for reusing
-//!   training statistics on later batches, and label encoding
-//! - **Dataset Splitting**: train/test split (optionally stratified)
-//!
-//! ### [`metrics`]
-//! Evaluation metrics for model performance. Unlike the rest of the crate, these functions panic
-//! on a precondition violation instead of returning a `Result`, which keeps this leaf module
-//! dependency-light:
-//! - **Regression**: MSE, RMSE, MAE, R^2 score
-//! - **Classification**: Accuracy, Confusion Matrix, AUC-ROC, F1-score
-//! - **Clustering**: Adjusted Rand Index, Normalized/Adjusted Mutual Information, Silhouette
-//!   Score. Every 1 of them takes `isize` labels, the type the clustering estimators return
-//!
-//! ### [`math`]
-//! Low-level numeric primitives shared across modules:
-//! - **Distance Metrics**: Euclidean, Manhattan, Minkowski, plus the `DistanceCalculationMetric`
-//!   dispatcher
-//! - **Matrix Products**: `gemmkit`-backed GEMM/GEMV with automatic parallelism
-//! - **Reductions**: deterministic blocked parallel reductions
+//! Feature flags select each category and its common prelude exports.
+//! The crate includes model serialization and thread-local random seed controls.
+//! Evaluation metrics return scores directly and panic when input checks fail.
 //!
 //! ## Quick Start
 //!
@@ -81,7 +13,7 @@
 //! [dependencies]
 //! rustyml = "*"
 //! # The default feature set is `full`. To slim the build, set `default-features = false` and
-//! # list the features you need, e.g. `features = ["machine_learning"]`
+//! # list the features you need, for example `features = ["machine_learning"]`
 //! # Add `"show_progress"` to show progress bars during training
 //! ```
 //!
@@ -91,37 +23,37 @@
 //! use rustyml::machine_learning::linear_model::LeastSquaresSolver;
 //! use ndarray::{Array1, Array2};
 //!
-//! // Create a linear regression model
+//! // Create a linear regression model.
 //! let mut model = LinearRegression::new(true).with_solver(LeastSquaresSolver::GradientDescent { learning_rate: 0.01, max_iter: 1000, tol: 1e-6 }).unwrap();
 //!
-//! // Prepare training data
+//! // Prepare training data.
 //! let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];
 //! let raw_y = vec![6.0, 9.0, 12.0];
 //!
-//! // Convert Vec to ndarray types
+//! // Convert Vec to ndarray types.
 //! let x = Array2::from_shape_vec((3, 2), raw_x.into_iter().flatten().collect()).unwrap();
 //! let y = Array1::from_vec(raw_y);
 //!
-//! // Train the model
+//! // Train the model.
 //! model.fit(&x.view(), &y.view()).unwrap();
 //!
-//! // Make predictions
+//! // Make predictions.
 //! let new_data = Array2::from_shape_vec((1, 2), vec![4.0, 5.0]).unwrap();
 //! let _predictions = model.predict(&new_data.view());
 //!
-//! // Save the trained model to a file
+//! // Save the trained model to a file.
 //! model.save_to_path("linear_regression_model.bin").unwrap();
 //!
-//! // Load the model from the file
+//! // Load the model from the file.
 //! let loaded_model = LinearRegression::load_from_path("linear_regression_model.bin").unwrap();
 //!
-//! // Use the loaded model for predictions
+//! // Use the loaded model for predictions.
 //! let _loaded_predictions = loaded_model.predict(&new_data.view());
 //!
-//! // Clone is implemented
+//! // Clone is implemented.
 //! let _model_copy = model.clone();
 //!
-//! // Debug is implemented
+//! // Debug is implemented.
 //! println!("{:?}", model);
 //! ```
 //!
@@ -132,7 +64,7 @@
 //! [dependencies]
 //! rustyml = "*"
 //! # The default feature set is `full`. To slim the build, set `default-features = false` and
-//! # list the features you need, e.g. `features = ["neural_network"]`
+//! # list the features you need, for example `features = ["neural_network"]`
 //! # Add `"show_progress"` to show progress bars during training
 //! ```
 //!
@@ -147,11 +79,11 @@
 //! };
 //! use ndarray::Array;
 //!
-//! // Create training data
+//! // Create training data.
 //! let x = Array::ones((32, 784)).into_dyn(); // 32 samples, 784 features
 //! let y = Array::ones((32, 10)).into_dyn();  // 32 samples, 10 classes
 //!
-//! // Build a neural network
+//! // Build a neural network.
 //! let mut model = SequentialBuilder::new()
 //!     .add(Dense::new(128, Activation::ReLU).unwrap())
 //!     .add(Dense::new(64, Activation::ReLU).unwrap())
@@ -160,21 +92,21 @@
 //!     .unwrap();
 //! model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 //!
-//! // Display model structure
+//! // Display model structure.
 //! model.summary();
 //!
-//! // Train the model
-//! // The returned History holds one loss per epoch, measured during that epoch, not after it
+//! // Train the model.
+//! // The returned History holds 1 loss per epoch, measured during that epoch, not after it.
 //! let history = model.fit(&x, &y, 10).unwrap();
 //! println!("Per-epoch loss: {:?}", history.loss());
 //!
-//! // Score the model's current weights, an inference-mode pass that changes nothing
+//! // Score the model's current weights, an inference-mode pass that changes nothing.
 //! println!("Loss after training: {}", model.evaluate(&x, &y).unwrap());
 //!
-//! // Save model weights to file
+//! // Save model weights to file.
 //! model.save_to_path("model.bin").unwrap();
 //!
-//! // Create a new model with the same architecture
+//! // Create a new model with the same architecture.
 //! let mut new_model = SequentialBuilder::new()
 //!     .add(Dense::new(128, Activation::ReLU).unwrap())
 //!     .add(Dense::new(64, Activation::ReLU).unwrap())
@@ -182,13 +114,13 @@
 //!     .build(&Shape::known(x.shape()))
 //!     .unwrap();
 //!
-//! // Load weights from file
+//! // Load weights from file.
 //! new_model.load_from_path("model.bin").unwrap();
 //!
-//! // Compile before using (required for training, optional for prediction)
+//! // Compile before using (required for training, optional for prediction).
 //! new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 //!
-//! // Make predictions with loaded model
+//! // Make predictions with loaded model.
 //! let predictions = new_model.predict(&x).unwrap();
 //! println!("Predictions shape: {:?}", predictions.shape());
 //! ```
@@ -210,10 +142,8 @@
 //!
 //! `machine_learning`, `neural_network`, `utils`, and `metrics` each enable `math`.
 //!
-//! The default enables everything. A scikit-learn workflow reaches across modules
-//! (`utils::train_test_split` -> `machine_learning` -> `metrics`), so a fresh `cargo add rustyml`
-//! should have all of it. Features are additive. Naming 1 does not turn the rest off, so to
-//! restrict a build, set `default-features = false` and list what you need.
+//! The default enables every category. Features are additive.
+//! Set `default-features = false` to select only the features you need.
 
 #[cfg(any(
     feature = "machine_learning",
@@ -257,15 +187,15 @@ fn create_progress_bar(total: u64, template: &str) -> ProgressBar {
 ///
 /// # Parameters
 ///
-/// - `$method_name` - the name of the getter method (e.g. get_fit_intercept)
-/// - `$field_name` - the name of the field to access (e.g. fit_intercept)
+/// - `$method_name` - the name of the getter method (for example get_fit_intercept)
+/// - `$field_name` - the name of the field to access (for example fit_intercept)
 /// - `$return_type` - the return type of the getter method
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 macro_rules! get_field {
     ($method_name:ident, $field_name:ident, $return_type:ty) => {
         #[doc = concat!("Gets the `", stringify!($field_name), "` field.\n\n")]
         #[doc = "# Returns\n\n"]
-        #[doc = concat!("* `", stringify!($return_type), "` - The value of the `", stringify!($field_name), "` field")]
+        #[doc = concat!("- `", stringify!($return_type), "` - The value of the `", stringify!($field_name), "` field")]
         #[inline]
         pub fn $method_name(&self) -> $return_type {
             self.$field_name
@@ -287,7 +217,7 @@ macro_rules! get_field_as_ref {
     ($method_name:ident, $field_name:ident, $return_type:ty) => {
         #[doc = concat!("Gets the `", stringify!($field_name), "` field.\n\n")]
         #[doc = "# Returns\n\n"]
-        #[doc = concat!("* `", stringify!($return_type), "` - The value of the `", stringify!($field_name), "` field as a reference")]
+        #[doc = concat!("- `", stringify!($return_type), "` - The value of the `", stringify!($field_name), "` field as a reference")]
         #[inline]
         pub fn $method_name(&self) -> $return_type {
             self.$field_name.as_ref()
@@ -302,7 +232,7 @@ macro_rules! get_field_as_ref {
 ///
 /// # Parameters
 ///
-/// - `$model_type` - the type of the model struct (e.g. LinearRegression, LogisticRegression)
+/// - `$model_type` - the type of the model struct (for example LinearRegression, LogisticRegression)
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 macro_rules! model_save_and_load_methods {
     ($model_type:ty) => {
@@ -313,7 +243,7 @@ macro_rules! model_save_and_load_methods {
         ///
         /// # Parameters
         ///
-        /// - `path` - file path where the model is saved (e.g. "stored_model.bin")
+        /// - `path` - file path where the model is saved (for example "stored_model.bin")
         ///
         /// # Returns
         ///
@@ -345,7 +275,7 @@ macro_rules! model_save_and_load_methods {
         ///
         /// # Parameters
         ///
-        /// - `path` - file path from which to load the model (e.g. "stored_model.bin")
+        /// - `path` - file path from which to load the model (for example "stored_model.bin")
         ///
         /// # Returns
         ///
@@ -368,12 +298,10 @@ macro_rules! model_save_and_load_methods {
 /// Generates a runtime-tunable `usize` parallelism gate: a private atomic backing store plus a
 /// `pub(crate)` getter and setter
 ///
-/// The backing store is an [`AtomicUsize`](std::sync::atomic::AtomicUsize) initialized to a
-/// default value, so the gate can be overridden at runtime without a recompile. Every leading
-/// attribute (`#[cfg(...)]`, doc comments) is applied to all 3 generated items, so the getter and
-/// setter keep the exact feature-gating written at the invocation. The read is a single
-/// `Relaxed` load, and the gate only selects a strategy and never changes a result. The public
-/// [`crate::tuning`] facade wraps the generated setters into 1 discoverable surface
+/// The atomic store starts with the given default and accepts runtime changes.
+/// All 3 generated items receive the leading attributes, including feature gates.
+/// Reads and writes use relaxed atomic order.
+/// The public [`crate::tuning`] module forwards to selected getters and setters.
 ///
 /// # Syntax
 ///
@@ -425,12 +353,20 @@ macro_rules! tunable_gate {
         $(#[$attr])*
         #[doc(hidden)]
         #[inline]
+        ///
+        /// # Returns
+        ///
+        /// - `usize` - Current gate threshold
         $vis fn $get() -> usize {
             $store.load(::std::sync::atomic::Ordering::Relaxed)
         }
 
         $(#[$attr])*
         #[doc(hidden)]
+        ///
+        /// # Parameters
+        ///
+        /// - `value` - New gate threshold
         $vis fn $set(value: usize) {
             $store.store(value, ::std::sync::atomic::Ordering::Relaxed);
         }
@@ -491,8 +427,7 @@ pub mod math;
 #[cfg(feature = "machine_learning")]
 pub mod machine_learning;
 
-/// Every model and stateful transformer in the crate implements the shared estimator contract
-/// (`Fit`, `Predict`, `Transform`, `FitTransform`)
+/// Shared fit, predict, and transform traits for estimators and stateful preprocessing tools.
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 pub mod traits;
 

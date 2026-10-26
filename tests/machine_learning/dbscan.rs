@@ -1,16 +1,13 @@
 //! Integration tests for [`rustyml::machine_learning::DBSCAN`], covering
 //! constructor validation, fit/predict error paths, cluster correctness across
-//! metrics, edge cases, serialization, and the large-dataset parallel branches
+//! metrics, edge cases, serialization, and larger datasets.
 
 use ndarray::{Array2, array};
 use rustyml::error::Error;
 use rustyml::machine_learning::DBSCAN;
 use rustyml::machine_learning::DistanceCalculationMetric;
 
-// Helpers
-
-/// Builds a 9-point dataset: blob A near (0,0) (rows 0-3), blob B near (10,10) (rows 4-7),
-/// and 1 isolated noise point at (5,5) (row 8).
+/// Builds 9 points: rows 0-3 near (0,0), rows 4-7 near (10,10), and isolated row 8 at (5,5).
 fn two_blobs_noise() -> Array2<f64> {
     Array2::from_shape_vec(
         (9, 2),
@@ -24,9 +21,7 @@ fn two_blobs_noise() -> Array2<f64> {
     .unwrap()
 }
 
-// Constructor validation
-
-/// Invalid eps values (zero, negative, NaN, +inf) are all rejected
+/// Invalid eps values (0, negative, NaN, +inf) are all rejected
 #[test]
 fn constructor_rejects_invalid_eps() {
     for eps in [0.0, -1.0, f64::NAN, f64::INFINITY] {
@@ -88,12 +83,10 @@ fn constructor_default_values() {
     assert!(m.get_core_sample_indices().is_none());
 }
 
-// predict() after fit: empty input and error paths
-
 /// predict refuses a 0-row matrix, also when its feature count differs from the model
 ///
-/// A 0-row matrix of 3 features against a model of 2 features must not return `Ok`. The
-/// row check and the feature check run before any work, so neither one can be skipped
+/// A 0-row matrix of 3 features against a model of 2 features must not return `Ok`. This
+/// test rejects this input even though it also has the wrong feature count.
 #[test]
 fn predict_on_a_0_row_matrix_returns_empty_input() {
     let train = two_blobs_noise(); // 2 features
@@ -122,8 +115,6 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
         "expected DimensionMismatch for wrong feature count"
     );
 }
-
-// Correctness: fit + cluster structure (Euclidean metric)
 
 /// Fitting the 2-blob+noise dataset assigns each blob a distinct, non-negative cluster
 /// (blob A -> 0, blob B -> 1). The isolated point gets noise (-1).
@@ -239,8 +230,6 @@ fn fit_euclidean_core_indices_sorted_and_non_noise() {
     );
 }
 
-// Correctness: predict on training data (self-consistency)
-
 /// predict on the exact training rows of core points returns the same cluster
 /// labels that fit stored
 #[test]
@@ -308,7 +297,7 @@ fn predict_far_point_returns_noise() {
     let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&data).unwrap();
 
-    // (5, 5) is far from both blobs. The Euclidean distance to the nearest core point is about 7.07
+    // (5, 5) lies far from both blobs. Its nearest core point is about 6.93 units away.
     let far_point = array![[5.0f64, 5.0]];
     let preds = m.predict(&far_point).unwrap();
     assert_eq!(
@@ -350,8 +339,6 @@ fn predict_point_just_beyond_eps_is_noise() {
         "point 0.65 away from core, beyond eps=0.5, must be -1"
     );
 }
-
-// Correctness: distance metrics (Euclidean, Manhattan, Minkowski(p))
 
 /// Euclidean metric clusters the 2 blobs into 0, 1, and noise
 #[test]
@@ -461,8 +448,6 @@ fn minkowski_p1_same_structure_as_manhattan() {
     );
 }
 
-// Correctness: fit_predict consistency
-
 /// fit_predict returns the same label array as fit + get_labels
 #[test]
 fn fit_predict_equals_fit_then_get_labels() {
@@ -482,8 +467,6 @@ fn fit_predict_equals_fit_then_get_labels() {
         "fit_predict must return the same labels as fit + get_labels"
     );
 }
-
-// Edge cases
 
 /// A single-point dataset with min_samples=1 yields 1 core point and 1 cluster (0)
 #[test]
@@ -559,8 +542,6 @@ fn default_constructor_model_is_usable() {
     );
 }
 
-// predict: nearest-wins semantics (not any-within-eps)
-
 /// predict assigns the nearest core's label, not an arbitrary within-eps core.
 /// With cores A=(0,0) and B=(2,0) both within eps of query (0.6,0), A wins (cluster 0).
 #[test]
@@ -584,8 +565,7 @@ fn predict_assigns_nearest_core_label_not_arbitrary() {
     );
 }
 
-/// predict labels a query beyond eps from the nearest core as noise (-1):
-/// core A=(0,0), eps=1.5, query at (2,0) gives dist 2.0 > 1.5
+/// A query at (2,0) lies 2.0 units from the core at (0,0). With eps=1.5, predict returns noise (-1).
 #[test]
 fn predict_nearest_core_outside_eps_returns_noise() {
     // Single core at origin. Query sits 2 units away, beyond eps=1.5
@@ -600,8 +580,6 @@ fn predict_nearest_core_outside_eps_returns_noise() {
         "nearest core is at dist=2.0 > eps=1.5; predict must return -1"
     );
 }
-
-// Serialization round-trip
 
 /// save_to_path then load_from_path preserves all fitted state and produces
 /// identical predictions on new data
@@ -659,8 +637,6 @@ fn save_load_round_trip_preserves_state_and_predictions() {
     let _ = std::fs::remove_file(path);
 }
 
-// Label domain: labels are isize, cluster ids >= 0, noise = -1
-
 /// predict returns the correct label values for the canonical 3-case scenario
 #[test]
 fn predict_label_values_canonical_three_cases() {
@@ -668,8 +644,8 @@ fn predict_label_values_canonical_three_cases() {
     let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&data).unwrap();
 
-    // 3 test points with unambiguous labels. (0.05,0.05) is in blob A (label 0),
-    // (10.05,10.05) is in blob B (label 1), and (5,5) is far from all cores (noise).
+    // The query (0.05,0.05) belongs to blob A (label 0). The query (10.05,10.05) belongs to blob B (label 1).
+    // The query (5,5) lies far from all cores and receives the noise label.
     let test_points = array![[0.05f64, 0.05], [10.05, 10.05], [5.0, 5.0]];
     let preds = m.predict(&test_points).unwrap();
 
@@ -700,7 +676,6 @@ fn all_three_metric_variants_stored_correctly() {
         DistanceCalculationMetric::Minkowski(4.0)
     );
 }
-// Large-dataset coverage (>= 1000 samples)
 
 /// Builds 1200 points in 3 tight, row-contiguous blobs of 400, with deterministic jitter.
 /// Blobs are far enough apart that discovery order maps blob i to cluster i.
@@ -762,8 +737,8 @@ fn fit_parallel_branch_three_blobs_1200_correct_structure() {
     assert_eq!(core.len(), 1200, "all 1200 points should be core points");
 }
 
-/// predict's parallel branch on 1200 held-out points labels each blob-contiguous
-/// block 0/1/2 and an isolated query at (100,100) as noise (-1)
+/// Predict labels 1200 held-out points by blob, with labels 0, 1, and 2.
+/// An isolated query at (100,100) receives noise (-1).
 #[test]
 fn predict_parallel_branch_large_heldout_matches_blobs() {
     let data = three_blobs_1200();

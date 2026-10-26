@@ -25,7 +25,10 @@ pub enum Values {
     /// Real values in [-1, 1], with no 2 neighbors equal
     Real,
     /// Whole numbers in [0, n), for a layer that reads its input as indices
-    Index(usize),
+    Index(
+        /// The exclusive upper bound of the sample indices.
+        usize,
+    ),
 }
 
 /// 1 roster case: the input shapes a layer takes, and the output shape it gives for them
@@ -44,6 +47,10 @@ impl Case {
     ///
     /// The values are a fixed function of the element index. 2 calls therefore give equal
     /// tensors
+    ///
+    /// # Returns
+    ///
+    /// - `Vec<Tensor>` - Fixed sample tensors for the input shapes.
     pub fn sample(&self) -> Vec<Tensor> {
         self.inputs
             .iter()
@@ -70,6 +77,10 @@ impl Case {
     }
 
     /// A gradient of ones in the shape of the output, with a batch of 2
+    ///
+    /// # Returns
+    ///
+    /// - `Tensor` - A tensor of 1 values with the output shape and batch size 2.
     pub fn output_grad(&self) -> Tensor {
         let dims: Vec<usize> = self
             .output
@@ -93,6 +104,10 @@ pub trait LayerVisitor {
 }
 
 /// Hands every roster case to `visitor`, in a fixed order
+///
+/// # Parameters
+///
+/// - `visitor` - Receives each case and its layer constructor.
 pub fn visit_every_layer(visitor: &mut impl LayerVisitor) {
     let flat = Shape::with_free_batch(&[1, 4]);
     let sequence = Shape::with_free_batch(&[1, 5, 2]);

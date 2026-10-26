@@ -40,7 +40,7 @@ const DBSCAN_KD_TREE_MAX_DIMS: usize = 8;
 ///     2.0, 2.0,
 /// ]).unwrap();
 ///
-/// // Euclidean distance is the default. Override it via `with_metric`
+/// // Euclidean distance is the default. Override it via `with_metric`.
 /// let mut dbscan = DBSCAN::new(0.5, 2).unwrap();
 /// let labels = dbscan.fit_predict(&data).unwrap();
 /// ```
@@ -71,6 +71,10 @@ impl Default for DBSCAN {
     /// - `eps` = 0.5
     /// - `min_samples` = 5
     /// - `metric` = Euclidean
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - An instance with default settings.
     fn default() -> Self {
         DBSCAN {
             eps: 0.5,
@@ -94,7 +98,7 @@ impl DBSCAN {
     ///
     /// # Returns
     ///
-    /// - `Ok(DBSCAN)` - A new instance with the specified parameters
+    /// - `Result<Self, Error>` - A new instance with the specified parameters
     ///
     /// # Notes
     ///
@@ -140,7 +144,7 @@ impl DBSCAN {
     ///
     /// # Returns
     ///
-    /// - `Ok(Self)` - the updated instance, for method chaining
+    /// - `Result<Self, Error>` - the updated instance, for method chaining
     ///
     /// # Errors
     ///
@@ -172,7 +176,7 @@ impl DBSCAN {
 
     /// Finds all neighbors of point `p`, meaning all points within `eps` distance
     ///
-    /// Uses the kd-tree when the caller provides one. Otherwise, it falls back to a
+    /// Uses the kd-tree when the caller provides 1. Otherwise, it falls back to a
     /// brute-force scan that runs in parallel above the calibrated scan-class gate. Both paths
     /// return indices in ascending order, so cluster expansion order stays identical
     fn region_query<S>(
@@ -225,7 +229,11 @@ impl DBSCAN {
     ///
     /// # Returns
     ///
-    /// - `Ok(&mut Self)` - The trained instance holding cluster labels and core sample indices
+    /// - `Result<&mut Self, Error>` - The trained instance holding cluster labels and core sample indices
+    ///
+    /// # Panics
+    ///
+    /// Panics if `data` has rows but no feature columns, because the spatial index requires a split axis.
     ///
     /// # Errors
     ///
@@ -374,7 +382,7 @@ impl DBSCAN {
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<isize>)` - Array of predicted cluster labels (`-1` for noise)
+    /// - `Result<Array1<isize>, Error>` - Array of predicted cluster labels (`-1` for noise)
     ///
     /// # Errors
     ///
@@ -430,7 +438,7 @@ impl DBSCAN {
         Ok(Array1::from(predictions))
     }
 
-    /// Performs clustering and returns the labels in one step
+    /// Performs clustering and returns the labels in 1 step
     ///
     /// # Parameters
     ///
@@ -438,11 +446,18 @@ impl DBSCAN {
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<isize>)` - Array of cluster labels for each sample
+    /// - `Result<Array1<isize>, Error>` - Array of cluster labels for each sample
+    ///
+    ///
+    /// # Panics
+    ///
+    /// Panics if `data` has rows but no feature columns, because the spatial index requires a split axis.
     ///
     /// # Errors
     ///
-    /// - `Error` - If fitting fails due to validation or processing errors
+    /// - `Error::EmptyInput` - If the feature matrix has no rows.
+    /// - `Error::NonFinite` - If features contain non-finite values.
+    /// - `Error::Computation` - If the cluster count reaches `isize::MAX` or a region query fails.
     ///
     /// # Performance
     ///

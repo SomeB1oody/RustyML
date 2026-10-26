@@ -41,7 +41,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::traits::Layer;
 /// use rustyml::neural_network::{Ctx, Tensor};
 ///
-/// // 2 samples of 3 features, and 1 offset per sample that broadcasts over the 3 features
+/// // 2 samples of 3 features, and 1 offset per sample that broadcasts over the 3 features.
 /// let features =
 ///     Tensor::from_shape_vec(IxDyn(&[2, 3]), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
 /// let offset = Tensor::from_shape_vec(IxDyn(&[2, 1]), vec![10.0, 20.0]).unwrap();
@@ -56,8 +56,8 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///     Tensor::from_shape_vec(IxDyn(&[2, 3]), vec![11.0, 12.0, 13.0, 24.0, 25.0, 26.0]).unwrap()
 /// );
 ///
-/// // Each input takes its gradient back at its own shape, and the offset sums over the 3
-/// // positions of axis 1 that it reached
+/// // Each input takes its gradient back at its own shape, and the offset sums over the 3.
+/// // positions of axis 1 that it reached.
 /// let grads = layer
 ///     .backward_many(&Tensor::ones(IxDyn(&[2, 3])), &mut ctx)
 ///     .unwrap();
@@ -173,6 +173,7 @@ impl Layer for Add {
 }
 
 /// Unit tests of the sum, of the gradient of every input, and of the refusals of the layer
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::*;

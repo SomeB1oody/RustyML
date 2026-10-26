@@ -29,14 +29,17 @@ use std::fmt;
 /// ```rust
 /// use rustyml::neural_network::Shape;
 ///
-/// // A batch of 3 feature vectors of 4 elements each
+/// // A batch of 3 feature vectors of 4 elements each.
 /// assert_eq!(Shape::known(&[3, 4]).to_string(), "(3, 4)");
 ///
-/// // The same layer, described for every batch size
+/// // The same layer, described for every batch size.
 /// assert_eq!(Shape::with_free_batch(&[3, 4]).to_string(), "(None, 4)");
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
-pub struct Shape(Vec<Option<usize>>);
+pub struct Shape(
+    /// Axis extents in order. `None` marks an axis with no fixed extent.
+    Vec<Option<usize>>,
+);
 
 impl Shape {
     /// Builds a shape from 1 entry per axis
@@ -252,8 +255,8 @@ impl fmt::Display for Shape {
                 None => formatter.write_str("None")?,
             }
         }
-        // A rank-1 shape whose only axis is free keeps the trailing comma of a 1-element
-        // Python tuple, and a rank-1 shape with a fixed extent does not
+        // A rank-1 shape with a free axis has a trailing comma. A rank-1 shape with a fixed
+        // extent has no trailing comma.
         if self.0.len() == 1 && self.0[0].is_none() {
             formatter.write_str(",")?;
         }
@@ -359,7 +362,7 @@ mod tests {
         assert!(message.contains("(None, 3)"), "{message}");
     }
 
-    /// `check_min_rank` accepts every rank at or above the lowest one
+    /// `check_min_rank` accepts every rank at or above the minimum
     #[test]
     fn check_min_rank_accepts_a_higher_rank() {
         let shape = Shape::with_free_batch(&[2, 3, 4]);

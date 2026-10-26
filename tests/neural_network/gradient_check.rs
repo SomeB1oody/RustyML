@@ -5,8 +5,7 @@
 //! shape-only check or a "loss decreased" convergence test would miss.
 //!
 //! Most checks use L = sum(output), so the input gradient is what `backward(ones)` gives. A
-//! layer whose output sum stays constant in the input, such as Softmax or a zero-mean
-//! normalizer, is degenerate under that loss. Those checks use a weighted loss
+//! layer whose output sum stays constant in the input, such as Softmax or a normalizer with mean 0, is degenerate under that loss. Those checks use a weighted loss
 //! L = sum(W * output) instead, with a fixed, non-uniform weight tensor.
 //!
 //! `check_input_gradient` and `check_input_gradient_weighted` perturb 1 input value at a time.
@@ -609,7 +608,7 @@ fn depthwise_conv2d_weight_gradient_matches_finite_difference() {
 }
 
 // Weighted-loss checks: L = sum(output) is degenerate for a layer whose output sum stays
-// constant in the input (softmax, zero-mean normalizers). These use L = sum(W * output) instead.
+// constant in the input (softmax, normalizers with mean 0). These use L = sum(W * output) instead.
 
 /// A fixed, non-uniform weight tensor shaped like `like`, with all entries in [0.7, 1.3]
 fn loss_weights(like: &Tensor) -> Tensor {
@@ -627,7 +626,7 @@ fn ramp(shape: &[usize]) -> Tensor {
 }
 
 /// Like [`check_input_gradient`] but with a weighted loss L = sum(W * output), so it is
-/// non-degenerate for softmax and zero-mean normalization layers
+/// non-degenerate for softmax and normalization layers with mean 0
 fn check_input_gradient_weighted(layer: &mut dyn UnaryLayer, x: &Tensor, eps: f32, tol: f32) {
     let mut ctx = Ctx::training();
     let out = layer.forward_mut(x, &mut ctx).unwrap();
@@ -791,8 +790,6 @@ fn exponential_input_gradient_matches_finite_difference() {
     check_input_gradient(&mut exponential, &x, 1e-3, 1e-2);
 }
 
-// Pooling layers (no trainable parameters -> input gradient only)
-
 #[test]
 fn max_pooling_1d_input_gradient_matches_finite_difference() {
     let mut pool = MaxPooling1D::new(2);
@@ -904,7 +901,7 @@ fn reshape_merge_input_gradient_matches_finite_difference() {
     check_input_gradient(&mut reshape, &x, 1e-3, 1e-2);
 }
 
-// Border layers (no trainable parameters, input gradient only). Zero-padding drops the gradient
+// Border layers have no trainable parameters. Padding with 0 drops the gradient
 // of every padded position, and cropping drops it for every removed position, leaving the rest
 // unchanged. The weighted loss catches a border that lands 1 position off, which a symmetric
 // border would hide. All 6 layers are exactly linear, so the tolerance stays tight.
@@ -1156,7 +1153,7 @@ fn conv3d_same_padding_weight_gradient_matches_finite_difference() {
 
 // SeparableConv2D `Same` padding, depth_multiplier=2, 3x3 (symmetric) kernel. Every other `Same`
 // check in this file uses depth_multiplier=1. Only this one guards the depthwise stage's
-// zero-padding at the border while each input channel fans out to several output channels.
+// padding with 0 at the border while each input channel fans out to several output channels.
 #[test]
 fn separable_conv2d_same_padding_3x3_dm2_gradients_match_finite_difference() {
     // 3x3 (symmetric padding) + depth_multiplier=2: input and weight gradients together
@@ -1229,7 +1226,7 @@ fn embedding_repeated_index_weight_gradient_matches_finite_difference() {
 }
 
 /// Like [`check_weight_gradient`] but with the weighted loss L = sum(W * output). This avoids
-/// the near-zero gamma gradient that an all-ones upstream gives normalization layers.
+/// the near-0 gamma gradient that an all-ones upstream gives normalization layers.
 fn check_weight_gradient_weighted(layer: &mut dyn UnaryLayer, x: &Tensor, eps: f32, tol: f32) {
     let mut ctx = Ctx::training();
     let out = layer.forward_mut(x, &mut ctx).unwrap();
@@ -1257,7 +1254,7 @@ fn check_weight_gradient_weighted(layer: &mut dyn UnaryLayer, x: &Tensor, eps: f
 }
 
 // Normalization layers in training mode (the grad_mean / grad_var path), using the weighted
-// loss, since a zero-mean normalizer's output sums to ~0. Checks both the input and the
+// loss, since a normalizer with mean 0's output sums to ~0. Checks both the input and the
 // gamma/beta gradients.
 
 #[test]
@@ -1305,7 +1302,7 @@ fn layer_normalization_trailing_custom_weight_gradient_matches_finite_difference
 
 #[test]
 fn layer_normalization_multiple_trailing_input_gradient_matches_finite_difference() {
-    // Trailing in-order Multiple axes resolve to the zero-copy row path
+    // Trailing in-order Multiple axes resolve to the 0-copy row path
     let mut ln = LayerNormalization::new(1e-5)
         .unwrap()
         .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![1, 2]))
@@ -1549,8 +1546,6 @@ fn conv3d_transpose_same_padding_weight_gradient_matches_finite_difference() {
     check_weight_gradient(&mut conv, &x, 1e-3, 2e-2);
 }
 
-// Merge layers: the same finite-difference rule, over a layer that takes several inputs
-
 /// Compares the analytic gradient of every input of a merge layer against a central difference
 ///
 /// The rule is the one every check above uses: `L = sum(output)`, so `dL/dx` is what the
@@ -1738,20 +1733,23 @@ fn reverse_input_gradient_matches_finite_difference() {
 // `z`, and the backward pass of each host reads it through the activation cache. Each test
 // below runs 1 activation through a table of the 14 host layers. A host must pass the input
 // check and the weight check. Each check uses the weighted loss, so a wrong scale at 1 output
-// position can not cancel against another position.
+// position cannot cancel against another position.
 //
 // The derivative of these 3 activations is not a function of the output alone. Most of the
 // difference is in the negative region. Thus every fixture must put pre-activations on both
-// sides of 0. The parameters get a fixed signed pattern, and each check first asserts that the
-// pre-activation of the host is negative at some position and positive at another.
+// sides of 0. The parameters get a fixed signed pattern. Each check requires both negative
+// and positive pre-activation values.
 
 /// Builds 1 host layer around the activation
 type HostBuilder = fn(Activation) -> Box<dyn UnaryLayer>;
 
 /// A host layer and the input that its checks use
 struct Host {
+    /// Layer name for assertion messages.
     name: &'static str,
+    /// Constructor that installs the activation under test.
     build: HostBuilder,
+    /// Input tensor for the gradient checks.
     input: Tensor,
     /// `true` for a recurrent host. It returns the full sequence, `[batch, steps, units]`
     recurrent: bool,
@@ -1794,11 +1792,12 @@ fn prepared_host(host: &Host, activation: Activation) -> Box<dyn UnaryLayer> {
 /// The `Linear` twin of the host has the same parameters. For a feed-forward host, the output
 /// of the twin is the pre-activation of the host at every position.
 ///
-/// A recurrent host starts from a zero state. At the first step, the twin gives a value with the
-/// same sign as the pre-activation `z` that the activation reads, and a magnitude that is not
-/// larger. SimpleRNN gives `z`. LSTM gives `o * i * z`, and GRU gives 1 gate times `z`. Each
-/// gate is in (0, 1). Thus the sign check on the first step is exact. The check skips the later
-/// steps, because there the activation also feeds the state.
+/// A recurrent host starts from a 0 state. At step 1, the twin has the same sign as the
+/// pre-activation `z`. Its magnitude is no larger.
+///
+/// SimpleRNN gives `z`. LSTM gives `o * i * z`, and GRU gives 1 gate times `z`.
+/// Each gate is in (0, 1). Thus the sign check on step 1 is exact.
+/// The check skips later steps because the activation also feeds the state.
 fn assert_pre_activation_straddles_zero(host: &Host) {
     let twin = prepared_host(host, Activation::Linear);
     let out = twin.forward(&host.input, &mut Ctx::inference()).unwrap();
@@ -1906,8 +1905,8 @@ fn hosts() -> Vec<Host> {
     ]
 }
 
-/// Runs the input check and the weight check of every host with the activation, and the input
-/// check of the standalone layer of the same activation
+/// Checks input and weight gradients for each host with the activation.
+/// Checks input gradients for the standalone activation layer.
 fn check_pre_activation_hosts(activation: Activation, standalone: &mut dyn UnaryLayer) {
     let table = hosts();
     assert_eq!(table.len(), 14, "the table must cover every host layer");

@@ -37,22 +37,22 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use ndarray::{Array, IxDyn};
 /// use approx::assert_relative_eq;
 ///
-/// // Create test input tensor: [batch_size, depth, height, width, channels]
+/// // Create test input tensor: [batch_size, depth, height, width, channels].
 /// let input_data = Array::from_elem(IxDyn(&[2, 4, 5, 5, 3]), 1.0);
 ///
-/// // Build a model that holds 1 GlobalMaxPooling3D layer
+/// // Build a model that holds 1 GlobalMaxPooling3D layer.
 /// let model = SequentialBuilder::new()
 ///     .add(GlobalMaxPooling3D::new())
 ///     .build(&Shape::known(input_data.shape()))
 ///     .unwrap();
 ///
-/// // Forward propagation
+/// // Forward propagation.
 /// let output = model.predict(&input_data).unwrap();
 ///
-/// // Check output shape - should be [2, 3]
+/// // Check output shape - should be [2, 3].
 /// assert_eq!(output.shape(), &[2, 3]);
 ///
-/// // Since all input values are 1.0, all output values should also be 1.0
+/// // Since all input values are 1.0, all output values should also be 1.0.
 /// for b in 0..2 {
 ///     for c in 0..3 {
 ///         assert_relative_eq!(output[[b, c]], 1.0);
@@ -62,7 +62,8 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///
 /// # Performance
 ///
-/// The pass runs in parallel when its estimated element count (`batch * positions * channels`)
+/// The forward pass runs in parallel when its estimated element count (`batch * positions *
+/// channels`)
 /// clears the gate in [`tuning::pool`](crate::tuning::pool). The gate does not depend on any
 /// fixed shape.
 #[derive(Debug)]
@@ -83,6 +84,15 @@ impl GlobalMaxPooling3D {
 }
 
 impl Default for GlobalMaxPooling3D {
+    /// Creates a layer with no recorded input shape.
+    ///
+    /// # Default Values
+    ///
+    /// The layer has no build until it receives an input shape.
+    ///
+    /// # Returns
+    ///
+    /// - `GlobalMaxPooling3D` - The new layer
     fn default() -> Self {
         Self::new()
     }

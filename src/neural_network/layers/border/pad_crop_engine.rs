@@ -1,8 +1,8 @@
 //! Pad and crop kernels shared by every border layer
 //!
-//! A zero-padding layer and a cropping layer move no data. One grows the spatial axes and
-//! writes zeros in the new positions. The other returns the interior and drops the rest. Each
-//! one is the backward pass of the other, so 1 pair of kernels serves all 6 layers.
+//! Padding with 0 copies input values into a larger tensor of 0 values. Cropping copies the interior into
+//! a smaller tensor. Each operation supplies the other operation's backward pass. Thus, 1 pair
+//! of kernels serves all 6 border layers.
 //!
 //! Every function here indexes `borders` by spatial axis. Entry `i` of `borders` describes
 //! axis `i + 1` of the tensor. The batch axis and the channel axis have no entry, because a
@@ -32,7 +32,7 @@ fn cropped_shape(input_shape: &[usize], borders: &[(usize, usize)]) -> Vec<usize
     shape
 }
 
-/// Copies `input` into a zero tensor whose spatial axes each grow by their border
+/// Copies `input` into a tensor of 0 values whose spatial axes each grow by their border
 fn pad_into(input: &Tensor, borders: &[(usize, usize)]) -> Tensor {
     let input_shape = input.shape();
     let mut output = Tensor::zeros(IxDyn(&padded_shape(input_shape, borders)));
@@ -62,7 +62,7 @@ fn crop_out(input: &Tensor, borders: &[(usize, usize)]) -> Tensor {
         }
     });
 
-    // The output must be in C order. Assigning into a zero tensor keeps that order, and
+    // The output must be in C order. Assigning into a tensor of 0 values keeps that order, and
     // `to_owned` on this view does not always.
     let mut output = Tensor::zeros(interior.raw_dim());
     output.assign(&interior);
@@ -116,12 +116,12 @@ fn validate_crop_fits(
     Ok(())
 }
 
-/// Runs the forward pass of a zero-padding layer
+/// Runs the forward pass of a layer that pads with 0
 ///
 /// # Parameters
 ///
 /// - `input` - Tensor entering the layer
-/// - `borders` - Zero positions to add at each end of each spatial axis
+/// - `borders` - Positions with value 0 to add at each end of each spatial axis
 /// - `rank` - Rank the layer accepts, batch and channel axes included
 /// - `layer` - Layer name, used in error messages
 ///
@@ -143,7 +143,7 @@ pub(super) fn pad_forward(
     Ok(pad_into(input, borders))
 }
 
-/// Runs the backward pass of a zero-padding layer
+/// Runs the backward pass of a layer that pads with 0
 ///
 /// The gradient of a padded position goes nowhere, so the pass returns the interior of the
 /// incoming gradient.
@@ -152,7 +152,7 @@ pub(super) fn pad_forward(
 ///
 /// - `grad_output` - Gradient from the next layer
 /// - `input_shape` - Shape of the most recent forward input, or `None` if none has run
-/// - `borders` - Zero positions the forward pass added
+/// - `borders` - Positions with value 0 the forward pass added
 /// - `layer` - Layer name, used in error messages
 ///
 /// # Returns
@@ -181,12 +181,12 @@ pub(super) fn pad_backward(
     Ok(crop_out(grad_output, borders))
 }
 
-/// The shape a zero-padding layer gives for an input of the given shape
+/// The shape a layer that pads with 0 gives for an input of the given shape
 ///
 /// # Parameters
 ///
 /// - `input` - Shape of the tensor entering the layer, batch axis first
-/// - `borders` - Zero positions the layer adds at each end of each spatial axis
+/// - `borders` - Positions with value 0 the layer adds at each end of each spatial axis
 /// - `layer` - Layer name, used in error messages
 ///
 /// # Returns
@@ -242,7 +242,7 @@ pub(super) fn crop_forward(
 /// Runs the backward pass of a cropping layer
 ///
 /// A removed position takes no part in the output, so its gradient is 0. The pass writes the
-/// incoming gradient into the interior of a zero tensor of the input shape.
+/// incoming gradient into the interior of a tensor of 0 values of the input shape.
 ///
 /// # Parameters
 ///

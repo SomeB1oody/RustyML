@@ -20,7 +20,7 @@
 //! use rustyml::neural_network::optimizers::SGD;
 //! use rustyml::neural_network::Shape;
 //!
-//! // A residual block: the input of the block reaches its output twice
+//! // A residual block: the input of the block reaches its output twice.
 //! let mut builder = GraphBuilder::new();
 //! let x = builder.input(Shape::known(&[4, 8]));
 //! let hidden = builder.add(Dense::new(8, Activation::ReLU).unwrap(), &[x]);
@@ -85,7 +85,7 @@ enum Node {
 }
 
 impl Node {
-    /// The nodes whose outputs enter this one, which is empty for an inlet
+    /// The input nodes of this node, or an empty slice for an inlet
     fn inputs(&self) -> &[NodeId] {
         match self {
             Self::Input { .. } => &[],
@@ -96,10 +96,8 @@ impl Node {
 
 /// Collects the layers and the topology of a graph, and builds them against the inlet shapes
 ///
-/// This is the only way to reach a [`Graph`]. [`input`](GraphBuilder::input),
-/// [`layer`](GraphBuilder::layer), [`apply`](GraphBuilder::apply) and
-/// [`add`](GraphBuilder::add) never fail, so a whole model reads as a sequence of `let`
-/// bindings. [`build`](GraphBuilder::build) is the 1 fallible call
+/// This is the only way to reach a [`Graph`]. The `input`, `layer`, `apply`, and `add` methods never return errors. They let the caller
+/// describe the graph with `let` bindings. [`build`](GraphBuilder::build) is the only fallible call
 ///
 /// # Examples
 ///
@@ -108,7 +106,7 @@ impl Node {
 /// use rustyml::neural_network::graph::GraphBuilder;
 /// use rustyml::neural_network::layers::{Activation, Concatenate, Dense};
 ///
-/// // 2 inlets, 1 shared tower, and 1 outlet
+/// // 2 inlets, 1 shared tower, and 1 outlet.
 /// let mut builder = GraphBuilder::new();
 /// let left = builder.input(Shape::known(&[4, 5]));
 /// let right = builder.input(Shape::known(&[4, 5]));
@@ -120,7 +118,7 @@ impl Node {
 /// let joined = builder.add(Concatenate::new(-1), &[a, b]);
 /// let model = builder.build(&[joined]).unwrap();
 ///
-/// // 1 shared layer holds 1 set of arrays, whatever number of nodes call it
+/// // 1 shared layer holds 1 set of arrays, whatever number of nodes call it.
 /// assert_eq!(model.weight_paths(), vec!["0.kernel", "0.bias"]);
 /// assert_eq!(model.output_shapes()[0].to_string(), "(4, 6)");
 /// ```
@@ -240,16 +238,19 @@ impl GraphBuilder {
     ///
     /// - `Result<Graph, Error>` - The built model
     ///
+    /// # Panics
+    ///
+    /// - If a call node names a layer index outside the arena.
+    ///
     /// # Errors
     ///
     /// - `Error::NeuralNetwork(NnError::EmptyModel)` - If the graph holds no node
-    /// - `Error::InvalidInput` - If `outputs` is empty, if an id names no node, if a node reads
-    ///   a node at or after its own position, if the graph holds no input node, if the input
-    ///   count of a node does not match the arity of its layer, if a node or an inlet reaches
-    ///   no output, if a layer refuses the shapes that reach it, or if a layer tree breaks an
-    ///   address rule. The rules refuse 2 arrays or 2 sublayers of 1 layer with 1 name. They
-    ///   also refuse an empty name, a name that holds a `.`, 2 sublayer rosters that disagree,
-    ///   and 1 layer at 2 nodes of 1 layer tree
+    /// - `Error::InvalidInput` - If outputs are empty, node references are invalid, or a node reads itself or a later node.
+    ///   The graph must contain an input, and every node must reach an output.
+    ///   Layer input counts and shapes must match.
+    ///   Layer trees must use unique valid names and matching sublayer rosters.
+    ///   A layer cannot occupy 2 nodes within the same layer tree.
+    ///
     pub fn build(mut self, outputs: &[NodeId]) -> Result<Graph, Error> {
         if self.nodes.is_empty() {
             return Err(Error::NeuralNetwork(NnError::EmptyModel));
@@ -298,7 +299,7 @@ impl GraphBuilder {
         }
 
         // Every node an output reaches, found by walking the graph backwards from the outputs.
-        // A node reads only earlier nodes, so the position order is already a topological one
+        // A node reads only earlier nodes, so position order is a topological order.
         let mut reaches_output = vec![false; self.nodes.len()];
         for &output in outputs {
             reaches_output[output] = true;
@@ -349,9 +350,8 @@ impl GraphBuilder {
             }
         }
 
-        // The arrays are real now, so every roster is the one the model will address. The walk
-        // is the arena, because the arena index is the model position of every address. A layer
-        // that several nodes share holds 1 entry, so it is checked once
+        // The build has allocated the arrays. Check each arena entry once, because its index is
+        // the root of its parameter addresses.
         for (index, layer) in self.layers.iter_mut().enumerate() {
             check_addresses(index, &mut **layer)?;
         }
@@ -382,7 +382,7 @@ fn node_refusal(node: NodeId, layer: LayerId, layer_type: &str, source: Error) -
 
 /// A model whose layers form a directed graph
 ///
-/// [`GraphBuilder::build`] is the only way to reach one. See the
+/// [`GraphBuilder::build`] creates the model. See the
 /// [module documentation](self)
 pub struct Graph {
     /// The arena. 1 entry per layer, whatever number of nodes call it
@@ -592,7 +592,7 @@ impl Graph {
         }
     }
 
-    /// Moves the non-trainable state that the pass proposed into every layer that proposed one
+    /// Applies the non-trainable state that the pass proposed to each layer
     ///
     /// The walk reaches every sublayer of every arena entry
     ///
@@ -627,8 +627,8 @@ impl Graph {
     ///   has no batch axis
     /// - `Error::EmptyInput` - If a tensor is empty
     /// - `Error::DimensionMismatch` - If 2 tensors disagree on the sample count
-    /// - `Error::Computation` - If a gradient lands at an address that no parameter reads, or
-    ///   if a state value stays in the context because no layer takes it back
+    /// - `Error::Computation` - If a gradient has no parameter, or a layer leaves proposed
+    ///   state in the context.
     /// - `Error::Computation` - If a layer calls a sublayer under a name that its roster gives
     ///   to another layer
     /// - `Error` - Whatever a layer reports from its forward or backward pass
@@ -688,9 +688,8 @@ impl Graph {
         }
 
         // Every gradient of the pass must reach a parameter. The optimizer walk below skips an
-        // address that holds no gradient. A gradient at an address no parameter reads would
-        // otherwise vanish without a word
-        // Every sublayer call of the backward pass must reach the sublayer that its path names
+        // address that holds no gradient. An unclaimed gradient would otherwise be lost. Each backward sublayer call must also
+        // match the layer at its path.
         check_sublayer_calls(&self.layers, &ctx)?;
         check_every_gradient_is_claimed(&mut self.layers, ctx.grads())?;
 
@@ -982,7 +981,7 @@ impl Graph {
                     *count += 1;
                     let counts = total_param_count(&*self.layers[*layer]);
                     let shown = if counted[*layer] {
-                        // A shared layer counts once, which is the whole point of sharing
+                        // Count the parameters of a shared layer once.
                         "shared".to_string()
                     } else {
                         counted[*layer] = true;
@@ -1011,7 +1010,7 @@ impl Graph {
         print!("{output}");
     }
 
-    /// Refuses a model that holds no loss, and no optimizer when one is needed
+    /// Rejects a model without a loss or a required optimizer
     fn check_compiled(&self, needs_optimizer: bool) -> Result<(), Error> {
         if needs_optimizer && self.optimizer.is_none() {
             return Err(Error::NeuralNetwork(NnError::NotCompiled("optimizer")));

@@ -32,10 +32,10 @@ use ndarray_rand::rand_distr::Normal;
 ///
 /// # Shape freedom
 ///
-/// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of any
-/// shape at rank 1 or higher. [`UnaryLayer::build`] records the shape it is given, and
-/// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape) reports it, but no
-/// later input is checked against it. See the "Shape freedom" section of
+/// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of
+/// any shape at rank 1 or higher. [`UnaryLayer::build`] records the input shape.
+/// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape) reports that
+/// shape, but later inputs need not match it. See the "Shape freedom" section of
 /// [`Dropout`](crate::neural_network::layers::regularization::dropout::dropout::Dropout)
 ///
 /// # Examples
@@ -46,12 +46,12 @@ use ndarray_rand::rand_distr::Normal;
 /// use rustyml::neural_network::Ctx;
 /// use ndarray::Array2;
 ///
-/// // Create a GaussianDropout layer with dropout rate of 0.3
+/// // Create a GaussianDropout layer with dropout rate of 0.3.
 /// let mut gaussian_dropout = GaussianDropout::new(0.3).unwrap();
 ///
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
-/// // The forward pass multiplies values by Gaussian noise (mean 1, variance rate/(1 - rate))
+/// // The forward pass multiplies values by Gaussian noise (mean 1, variance rate/(1 - rate)).
 /// let mut ctx = Ctx::training();
 /// let output = gaussian_dropout.forward_mut(&input, &mut ctx).unwrap();
 /// ```
@@ -169,8 +169,8 @@ impl UnaryLayer for GaussianDropout {
         // Noise stddev grows from 0 at rate 0 toward infinity as rate approaches 1
         let stddev = (self.rate / (1.0 - self.rate)).sqrt();
 
-        // The stream lives in the context for the length of the pass, so the layer stays
-        // read-only and the draws of 2 calls follow each other
+        // The context holds the stream for the pass. The layer stays read-only while each call
+        // continues from the prior draw
         let mut rng = ctx
             .take_state::<StdRng>("rng")
             .unwrap_or_else(|| self.rng.clone());
@@ -188,7 +188,7 @@ impl UnaryLayer for GaussianDropout {
     }
 
     fn backward(&self, grad_output: &Tensor, ctx: &mut Ctx) -> Result<Tensor, Error> {
-        // During inference or zero rate, forward was the identity, so pass the gradient through
+        // During inference or 0 rate, forward was the identity, so pass the gradient through
         if !ctx.is_training() || self.rate == 0.0 {
             return Ok(grad_output.clone());
         }

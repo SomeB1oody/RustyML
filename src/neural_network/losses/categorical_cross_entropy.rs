@@ -1,4 +1,7 @@
-//! Categorical cross entropy loss for multi-class classification with one-hot targets.
+//! Categorical cross-entropy loss for multiclass classification.
+//!
+//! The loss uses the last axis for classes and averages over the remaining prediction sites.
+//! It accepts logits or probability scores and supplies the corresponding gradient.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -8,32 +11,17 @@ use crate::neural_network::losses::{
 use crate::neural_network::traits::Loss;
 use ndarray::{Array2, Zip};
 
-/// Categorical cross entropy loss function for multi-class classification.
+/// Categorical cross-entropy loss for multiclass classification.
 ///
-/// # Input rank
+/// The last axis holds classes. Each position on the other axes is an independent prediction site.
+/// The loss sums over classes and averages over sites.
+/// Targets normally contain a 1-hot distribution or another distribution with total mass 1.
+/// The logits gradient assumes that target mass is 1 at each site.
 ///
-/// The last axis is always the class axis. Every axis before it indexes an independent
-/// prediction site. So `[batch, classes]` is 1 prediction per sample. The `[batch, height,
-/// width, classes]` output of a channels-last `Conv2D` softmax head is 1 prediction per pixel.
-/// The loss sums over the class axis and divides by the total number of sites (`batch * height *
-/// width`). This is what Keras' default `sum_over_batch_size` reduction computes. Under
-/// `from_logits`, the softmax also normalizes within a site only, never across sites.
-///
-/// # Probability path
-///
-/// With `from_logits == false`, the loss renormalizes each row along the class axis, using
-/// `y_pred / sum(y_pred, axis=-1)`. It then clips the row away from 0 and 1. This order matches
-/// Keras.
-///
-/// A genuine softmax row already sums to 1, so the division does not change the loss value. The
-/// division is still part of what `compute_grad` differentiates, so it adds a row-constant term
-/// to the gradient. A softmax backward pass cancels any row-constant vector, so a normal softmax
-/// head trains the same either way. The term only matters when the loss reads an unnormalized
-/// head directly.
-///
-/// The clip guards against `log(0)`. It does not gate the gradient. Like the loss, `compute_grad`
-/// evaluates at the clipped probability. It does not set clipped positions to zero the way
-/// Keras' autodiff does. Loss and gradient agree wherever `y_pred` is inside `[1e-7, 1 - 1e-7]`.
+/// With `from_logits == false`, the loss divides each score by its row sum before the clip.
+/// The gradient includes the derivative of that division.
+/// The clip guards the logarithm but does not set gradients to 0 at clipped positions.
+/// Loss and gradient agree inside the clip bounds when row sums are nonzero.
 ///
 /// # Examples
 ///
@@ -42,38 +30,35 @@ use ndarray::{Array2, Zip};
 /// use rustyml::neural_network::traits::Loss;
 /// use ndarray::array;
 ///
-/// // Create the loss function (pass `true` for `from_logits` to feed raw logits instead)
+/// // Create the loss function (pass `true` for `from_logits` to feed raw logits instead).
 /// let loss_fn = CategoricalCrossEntropy::new(false);
 ///
-/// // Ground truth labels (one-hot encoded)
-/// // Class 0: [1, 0, 0], Class 1: [0, 1, 0], Class 2: [0, 0, 1]
+/// // Ground truth labels (1-hot encoded).
+/// // Class 0: [1, 0, 0], Class 1: [0, 1, 0], Class 2: [0, 0, 1].
 /// let y_true = array![
 ///     [1.0f32, 0.0f32, 0.0f32],  // Sample 1: belongs to class 0
 ///     [0.0f32, 1.0f32, 0.0f32],  // Sample 2: belongs to class 1
 ///     [0.0f32, 0.0f32, 1.0f32]   // Sample 3: belongs to class 2
 /// ].into_dyn();
 ///
-/// // Predicted probabilities (softmax output)
+/// // Predicted probabilities (softmax output).
 /// let y_pred = array![
 ///     [0.8f32, 0.1f32, 0.1f32],  // Sample 1: high confidence for class 0
 ///     [0.2f32, 0.7f32, 0.1f32],  // Sample 2: good confidence for class 1
 ///     [0.1f32, 0.2f32, 0.7f32]   // Sample 3: good confidence for class 2
 /// ].into_dyn();
 ///
-/// // Compute loss
+/// // Compute loss.
 /// let loss = loss_fn.compute_loss(&y_true, &y_pred).unwrap();
 /// println!("Categorical Cross Entropy Loss: {:.4}", loss);
 ///
-/// // Compute gradient for backpropagation
+/// // Compute gradient for backpropagation.
 /// let gradient = loss_fn.compute_grad(&y_true, &y_pred).unwrap();
 /// println!("Gradient shape: {:?}", gradient.shape());
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CategoricalCrossEntropy {
-    /// When `true`, the loss treats `y_pred` as raw logits. It applies a numerically stable
-    /// log-softmax over the class axis, and `compute_grad` returns the fused
-    /// `(softmax(z) - y) / prediction_sites` gradient. When `false` (default), `y_pred` must
-    /// already be a probability distribution along its last axis.
+    /// Whether predictions are logits. `false` selects row normalization and probability clipping.
     from_logits: bool,
 }
 
@@ -82,10 +67,7 @@ impl CategoricalCrossEntropy {
     ///
     /// # Parameters
     ///
-    /// - `from_logits` - if `true`, the loss treats `y_pred` as raw logits and applies softmax
-    ///   internally. This is more numerically stable, and `compute_grad` fuses the gradient into
-    ///   1 `softmax(z) - y` step, so the last layer should output logits, not probabilities.
-    ///   If `false`, `y_pred` must already be a normalized probability distribution per row.
+    /// - `from_logits` - Whether predictions contain raw logits. Otherwise, the loss normalizes probability scores by row.
     ///
     /// # Returns
     ///
@@ -100,8 +82,7 @@ impl CategoricalCrossEntropy {
 ///
 /// The class axis is always the last one. Every leading axis (batch, plus any spatial or
 /// temporal positions) indexes an independent prediction site. It contributes to the site
-/// count, not to the class count. This matches Keras' `sum_over_batch_size` reduction: it
-/// reduces the last axis, then divides by the element count of what remains.
+/// count, not to the class count. The loss reduces the class axis, then divides by the number of prediction sites.
 fn leading_and_classes(t: &Tensor) -> (usize, usize) {
     let ndim = t.ndim();
     let classes = t.shape()[ndim - 1];
@@ -109,7 +90,7 @@ fn leading_and_classes(t: &Tensor) -> (usize, usize) {
     (sites, classes)
 }
 
-/// Validates that one-hot targets and predictions are non-empty, at least 2D, and
+/// Validates that 1-hot targets and predictions are non-empty, at least 2D, and
 /// shape-compatible.
 ///
 /// The 2 tensors must share the same shape. The input must also be at least 2D, so a class axis
@@ -150,9 +131,8 @@ impl Loss for CategoricalCrossEntropy {
             return Ok(-(&labels * &log_sm).sum() / n);
         }
 
-        // Probability path. The reshape is the same as above, because Keras' renormalizer runs
-        // over the class axis alone. A `[batch, h, w, classes]` head, for example, is 1
-        // distribution per pixel.
+        // The probability path normalizes the class axis at each site. A `[batch, h, w,
+        // classes]` tensor holds 1 distribution per pixel.
         let probs = y_pred
             .to_shape((sites, classes))
             .map_err(|e| Error::computation(format!("CCE probability reshape failed: {e}")))?;
@@ -202,7 +182,7 @@ impl Loss for CategoricalCrossEntropy {
             .and(labels.rows())
             .and(&row_sums)
             .for_each(|mut grad_row, normalized_row, label_row, &sum| {
-                // One-hot targets make this 1, but the loss also works for any target mass.
+                // 1-hot targets make this 1, but the loss also works for any target mass.
                 let target_mass = label_row.sum();
                 Zip::from(&mut grad_row)
                     .and(normalized_row)

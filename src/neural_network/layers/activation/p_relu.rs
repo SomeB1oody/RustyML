@@ -52,10 +52,9 @@ use ndarray::{ArrayD, Axis, Zip};
 /// pulls a parameter toward 0. A slope of 0 turns this layer back into `ReLU`, which would
 /// fight what the layer learns.
 ///
-/// [`Activation`](crate::neural_network::layers::activation::Activation) has no PReLU variant,
-/// and it cannot get one. A variant carries no state, and this layer carries a trainable array.
-/// Place it after the layer whose output it activates, which is the split form that every
-/// activation layer supports.
+/// [`Activation`](crate::neural_network::layers::activation::Activation) has no PReLU variant.
+/// This layer stores the trainable slope array. Place it after the layer whose output it
+/// activates, which is the split form that every activation layer supports.
 ///
 /// # Examples
 ///
@@ -69,13 +68,13 @@ use ndarray::{ArrayD, Axis, Zip};
 /// use rustyml::neural_network::sequential::SequentialBuilder;
 /// use rustyml::neural_network::traits::UnaryLayer;
 ///
-/// // 2 samples of 3 features, with negative values that exercise the learned branch
+/// // 2 samples of 3 features, with negative values that exercise the learned branch.
 /// let x = Array2::from_shape_vec((2, 3), vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0])
 ///     .unwrap()
 ///     .into_dyn();
 /// let y = Array2::zeros((2, 1)).into_dyn();
 ///
-/// // The layer alone starts from a slope of 0.25 on each of the 3 features
+/// // The layer alone starts from a slope of 0.25 on each of the 3 features.
 /// let mut slopes = PReLU::new(0.25).unwrap();
 /// slopes.build(&Shape::known(x.shape())).unwrap();
 /// let mut ctx = Ctx::inference();
@@ -83,7 +82,7 @@ use ndarray::{ArrayD, Axis, Zip};
 /// assert_eq!(out[[0, 0]], -0.25);
 /// assert_eq!(out[[0, 1]], 2.0);
 ///
-/// // Inside a model the 3 slopes train together with the dense weights
+/// // Inside a model the 3 slopes train together with the dense weights.
 /// let mut model = SequentialBuilder::new()
 ///     .add(Dense::new(3, Activation::Linear).unwrap())
 ///     .add(PReLU::new(0.25).unwrap())
@@ -368,8 +367,8 @@ impl UnaryLayer for PReLU {
             ));
         }
 
-        // The slope array reads an extent by position, and the batch axis is not part of it, so
-        // a placeholder stands in for the batch axis
+        // The slope array excludes the batch axis. A placeholder keeps each feature axis at its
+        // input position
         let mut dims = vec![1];
         dims.extend(tail);
         self.input_shape = dims;

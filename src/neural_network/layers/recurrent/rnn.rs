@@ -198,8 +198,7 @@ impl<C: RnnCell> LayerBase for Rnn<C> {
     }
 
     fn param_count(&self) -> ParamCounts {
-        // Read the arrays the layer holds rather than the configuration, so a change to
-        // the roster corrects the count with no second formula to keep in step
+        // Count the stored arrays to keep the total consistent with the weight roster
         ParamCounts::trainable(
             self.gates.kernel.len() + self.gates.recurrent_kernel.len() + self.gates.bias.len(),
         )
@@ -381,8 +380,8 @@ impl<C: RnnCell> UnaryLayer for Rnn<C> {
                 &records[k * record_slots..(k + 1) * record_slots],
                 &mut grad_state,
             )?;
-            // The reductions below pair this step's gate gradients with the input row they came
-            // from, so the scatter uses the input timestep, not the processing step
+            // The reductions pair gate gradients with their input rows. The scatter therefore
+            // uses the input timestep
             dz3.index_axis_mut(Axis(1), input_step(k, timesteps, self.go_backwards))
                 .assign(&dz_t);
         }

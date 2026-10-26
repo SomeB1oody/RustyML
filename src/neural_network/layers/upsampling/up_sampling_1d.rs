@@ -42,7 +42,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array3;
 ///
-/// // A rank-3 input: 1 sample, 2 steps, 2 features
+/// // A rank-3 input: 1 sample, 2 steps, 2 features.
 /// let x = Array3::from_shape_vec((1, 2, 2), vec![1.0, 2.0, 3.0, 4.0])
 ///     .unwrap()
 ///     .into_dyn();
@@ -53,12 +53,12 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
 /// let longer = model.predict(&x).unwrap();
 ///
-/// // 2 steps become 6, and each input step covers 3 of them
+/// // 2 steps become 6, and each input step covers 3 of them.
 /// assert_eq!(longer.shape(), &[1, 6, 2]);
 /// assert_eq!(longer[[0, 0, 0]], 1.0);
 /// assert_eq!(longer[[0, 2, 0]], 1.0);

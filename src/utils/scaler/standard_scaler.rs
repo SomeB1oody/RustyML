@@ -1,14 +1,7 @@
-//! Standardization that remembers its training statistics
+//! Feature standardization with stored training statistics.
 //!
-//! Provides [`StandardScaler`], the fit and transform counterpart to the stateless
-//! [`standardize`] function. It learns the per-feature
-//! mean and standard deviation once, on the training matrix. It reuses those frozen numbers
-//! for every later batch: the test split, a validation fold, or a single sample arriving at
-//! inference time. This is the scikit-learn `StandardScaler` contract, and it keeps a
-//! train-test boundary honest. Rescaling a test set by its own column statistics applies a
-//! different linear map than the one the model was trained under
-//!
-//! [`standardize`]: crate::utils::standardize::standardize
+//! [`StandardScaler`] stores population means and variances for later transforms.
+//! Incremental fits merge each batch's moments into the stored state.
 
 use super::{fitted, for_each_row, validate_matrix, validate_transform_matrix};
 use crate::error::Error;
@@ -18,30 +11,16 @@ use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Axis, Data, Ix2};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-/// Standardizes features by removing the mean and scaling to unit variance
+/// Standardizes each feature with stored population statistics.
 ///
-/// Rows are samples and columns are features. [`fit`](Self::fit) computes each feature's mean
-/// and population standard deviation and stores them. [`transform`](Self::transform) applies
-/// `(x - mean) / scale` using those stored values, whatever data it is handed. A feature whose
-/// spread is within floating-point noise gets a scale of `1.0`, so a constant column maps to
-/// zeros instead of `NaN`
+/// Rows are samples and columns are features.
+/// The enabled transform steps subtract the mean and divide by the stored scale.
+/// Constant or near-constant features use a scale of `1.0`.
+/// The population variance divides squared deviations by the sample count.
 ///
-/// The divisor is the **population** standard deviation, variance divided by `n` rather than
-/// `n - 1`, matching scikit-learn's `StandardScaler` (`ddof=0`). The statistics come from the
-/// same numerically stable Welford pass that
-/// [`standardize`](crate::utils::standardize::standardize) uses. This makes
-/// `StandardScaler::default().fit_transform(&x)` bit-for-bit identical to
-/// `standardize(&x, StandardizationAxis::Column)` on a 2-D array
-///
-/// # Deviations from scikit-learn
-///
-/// - This scaler rejects non-finite input up front with [`Error::NonFinite`]. scikit-learn's
-///   scaler instead ignores `NaN` during `fit` and passes it through `transform`. Impute or
-///   drop missing values before scaling
-/// - This scaler computes and keeps `mean_`, `var_`, and `scale_` even when `with_mean` or
-///   `with_std` is `false` (scikit-learn sets the unused ones to `None`). The flags decide
-///   only what [`transform`](Self::transform) applies, so the statistics stay available for
-///   inspection
+/// All mean, variance, and scale values remain stored when a transform step is disabled.
+/// Non-finite input produces [`Error::NonFinite`].
+/// Default `fit_transform` uses the same column moments as the stateless standardization function.
 ///
 /// # Examples
 ///
@@ -68,9 +47,9 @@ pub struct StandardScaler {
     with_mean: bool,
     /// Whether [`transform`](Self::transform) divides by the standard deviation
     with_std: bool,
-    /// Per-feature mean learned during fitting (scikit-learn's `mean_`)
+    /// Per-feature mean learned during fitting
     mean: Option<Array1<f64>>,
-    /// Per-feature population variance learned during fitting (scikit-learn's `var_`)
+    /// Per-feature population variance learned during fitting
     var: Option<Array1<f64>>,
     /// Per-feature divisor: `sqrt(var)`, or `1.0` for a constant feature (`scale_`)
     scale: Option<Array1<f64>>,
@@ -80,6 +59,14 @@ pub struct StandardScaler {
 
 impl Default for StandardScaler {
     /// Creates a scaler that both centers and scales, equivalent to [`StandardScaler::new`]
+    ///
+    /// # Default Values
+    ///
+    /// Center and scale enabled, no fitted statistics
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Unfitted scaler with the default options
     fn default() -> Self {
         Self::new()
     }
@@ -136,7 +123,6 @@ impl StandardScaler {
         self
     }
 
-    // Getters
     get_field!(get_with_mean, with_mean, bool);
     get_field!(get_with_std, with_std, bool);
     get_field!(get_n_samples_seen, n_samples_seen, usize);
@@ -144,7 +130,7 @@ impl StandardScaler {
     get_field_as_ref!(get_var, var, Option<&Array1<f64>>);
     get_field_as_ref!(get_scale, scale, Option<&Array1<f64>>);
 
-    /// Gets the number of features the scaler was fitted on (scikit-learn's `n_features_in_`)
+    /// Gets the number of features the scaler was fitted on
     ///
     /// # Returns
     ///
@@ -175,7 +161,7 @@ impl StandardScaler {
     ///
     /// # Performance
     ///
-    /// One Welford fold per feature, parallelized across features above the calibrated scan
+    /// 1 Welford fold per feature, parallelized across features above the calibrated scan
     /// gate (see `crate::parallel_gates`), so the statistics never depend on the thread count
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
@@ -192,7 +178,7 @@ impl StandardScaler {
     ///
     /// Merges the batch's per-feature moments into the stored ones (Chan et al.). This lets a
     /// scaler fit over data that never exists in memory at once. The data can arrive as
-    /// streaming batches, or one chunk of a file at a time. On an unfitted scaler this behaves
+    /// streaming batches, or 1 chunk of a file at a time. On an unfitted scaler this behaves
     /// exactly like [`fit`](Self::fit). The mean and variance after `n` batches equal what a
     /// single `fit` over their concatenation would produce, up to floating-point rounding
     ///
@@ -254,12 +240,12 @@ impl StandardScaler {
     ///
     /// - [`Error::NotFitted`] - If the scaler has not been fitted
     /// - [`Error::EmptyInput`] - If `x` has no rows or no columns
-    /// - [`Error::DimensionMismatch`] - If `x`'s feature count differs from the fitted one
+    /// - [`Error::DimensionMismatch`] - If `x`'s feature count differs from the fitted 1
     /// - [`Error::NonFinite`] - If `x` contains NaN or infinite values
     ///
     /// # Performance
     ///
-    /// One fused pass per row (subtract and divide together), parallelized across rows above
+    /// 1 fused pass per row (subtract and divide together), parallelized across rows above
     /// the calibrated cheap-map gate (see `crate::parallel_gates`)
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
@@ -320,10 +306,9 @@ impl StandardScaler {
 
     /// Maps standardized data back to the original feature space
     ///
-    /// Applies `x * scale + mean`, the exact inverse of [`transform`](Self::transform). This is
-    /// useful for reading a model's outputs or a reconstruction back in the units the data
-    /// arrived in. A feature that was constant at fit time cannot be recovered from its zeros.
-    /// It comes back as its training mean
+    /// Reverses the enabled scale and center steps with the stored training statistics.
+    /// Floating-point arithmetic can introduce rounding error.
+    /// A input of 0 maps to the training mean when centering is enabled.
     ///
     /// # Parameters
     ///
@@ -337,7 +322,7 @@ impl StandardScaler {
     ///
     /// - [`Error::NotFitted`] - If the scaler has not been fitted
     /// - [`Error::EmptyInput`] - If `x` has no rows or no columns
-    /// - [`Error::DimensionMismatch`] - If `x`'s feature count differs from the fitted one
+    /// - [`Error::DimensionMismatch`] - If `x`'s feature count differs from the fitted 1
     /// - [`Error::NonFinite`] - If `x` contains NaN or infinite values
     pub fn inverse_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
@@ -398,7 +383,7 @@ impl StandardScaler {
     }
 }
 
-/// Computes one Welford accumulator per feature, folding each column over the rows of `x`
+/// Computes 1 Welford accumulator per feature, folding each column over the rows of `x`
 ///
 /// Columns are independent, so the serial and parallel paths produce identical results. The
 /// gate only decides who does the work
@@ -410,7 +395,7 @@ fn column_states(x: &ArrayView2<f64>) -> Vec<WelfordState> {
 
     let lanes: Vec<ArrayView1<f64>> = x.lanes(Axis(0)).into_iter().collect();
 
-    // Scan-class gate: one O(n_samples) Welford pass per feature, so the work is the element count
+    // Scan-class gate: 1 O(n_samples) Welford pass per feature, so the work is the element count
     if x.len() >= scan_f64_parallel_min_elems() {
         lanes.into_par_iter().map(fold_lane).collect()
     } else {
@@ -418,13 +403,14 @@ fn column_states(x: &ArrayView2<f64>) -> Vec<WelfordState> {
     }
 }
 
+/// Unit tests for scaler statistics and transforms.
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::utils::standardize::{StandardizationAxis, standardize};
     use ndarray::array;
 
-    /// `fit_transform` agrees bit-for-bit with the stateless column standardization
+    /// `fit_transform` agrees bit for bit with the stateless column standardization
     #[test]
     fn fit_transform_matches_standardize_column() {
         let x = array![[1.0, 2000.0], [2.0, 3000.0], [3.0, 4000.0], [4.0, 5000.0]];
@@ -482,7 +468,7 @@ mod tests {
         }
     }
 
-    /// `inverse_transform` round-trips back to the original values
+    /// `inverse_transform` round trips back to the original values
     #[test]
     fn inverse_transform_round_trips() {
         let x = array![[1.0, -5.0], [2.0, 7.5], [3.0, 0.5]];
@@ -495,7 +481,7 @@ mod tests {
         }
     }
 
-    /// A constant feature gets a scale of 1.0 and maps to zeros, leaving other features alone
+    /// A constant feature gets a scale of 1.0 and maps to 0 values, leaving other features alone
     #[test]
     fn constant_feature_maps_to_zeros() {
         let x = array![[3.0, 1.0], [3.0, 3.0], [3.0, 5.0]];

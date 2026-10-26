@@ -48,24 +48,24 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::{Array5, ArrayD};
 ///
-/// // Example 3D input data, such as a medical scan volume
-/// // Input: [1 batch, 32x32x32 3D volume, 16 channels]
+/// // Example 3D input data, such as a medical scan volume.
+/// // Input: [1 batch, 32x32x32 3D volume, 16 channels].
 /// let input_data = Array5::from_shape_fn((1, 32, 32, 32, 16), |(b, d, h, w, c)| {
-///     // Generate example data with spatial patterns
+///     // Generate example data with spatial patterns.
 ///     ((d + h + w) as f32 * 0.1) + (c as f32 * 0.01)
 /// }).into_dyn();
 ///
-/// // Create target data for training (output shape: [1, 16, 16, 16, 16])
+/// // Create target data for training (output shape: [1, 16, 16, 16, 16]).
 /// let target_data = Array5::ones((1, 16, 16, 16, 16)).into_dyn();
 ///
-/// // Build a model that holds 1 AveragePooling3D layer
-/// // strides default to pool_size (2, 2, 2) and padding defaults to Valid
+/// // Build a model that holds 1 AveragePooling3D layer.
+/// // strides default to pool_size (2, 2, 2) and padding defaults to Valid.
 /// let mut model = SequentialBuilder::new()
 ///     .add(AveragePooling3D::new((2, 2, 2)))
 ///     .build(&Shape::known(input_data.shape()))
 ///     .unwrap();
 ///
-/// // Compile the model with an optimizer and a loss function
+/// // Compile the model with an optimizer and a loss function.
 /// model.compile(
 ///     RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(),
 ///     MeanSquaredError::new()
@@ -77,7 +77,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///
 /// let predictions = model.predict(&input_data).unwrap();
 /// println!("Output shape after average pooling: {:?}", predictions.shape());
-/// // Expected output: [1, 16, 16, 16, 16], spatial dimensions halved
+/// // Expected output: [1, 16, 16, 16, 16], spatial dimensions halved.
 /// ```
 ///
 /// # Performance
@@ -131,7 +131,7 @@ impl AveragePooling3D {
     ///
     /// # Returns
     ///
-    /// - `Self` - The updated layer
+    /// - `Result<Self, Error>` - The updated layer
     ///
     /// # Errors
     ///

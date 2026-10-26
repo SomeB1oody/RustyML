@@ -37,7 +37,7 @@ fn dense_forward(c: &mut Criterion) {
     });
 }
 
-/// Conv2D forward at batch == 1: a single-sample pass through a training-mode context
+/// Conv2D forward at batch == 1: a pass with 1 sample through a training-mode context
 fn conv2d_forward_batch1(c: &mut Criterion) {
     let mut layer = Conv2D::new(64, (3, 3), (1, 1), Activation::ReLU)
         .unwrap()

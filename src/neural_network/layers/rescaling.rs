@@ -1,4 +1,7 @@
 //! Rescaling layer that applies a fixed affine map to every element of its input
+//!
+//! The fixed scale and offset do not train. The backward pass multiplies the input gradient
+//! by the scale and needs no forward cache.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -45,7 +48,7 @@ use ndarray::Zip;
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array2;
 ///
-/// // A rank-2 input: 2 samples of 3 features each
+/// // A rank-2 input: 2 samples of 3 features each.
 /// let x = Array2::from_shape_vec((2, 3), vec![0.0, 51.0, 102.0, 153.0, 204.0, 255.0])
 ///     .unwrap()
 ///     .into_dyn();
@@ -56,12 +59,12 @@ use ndarray::Zip;
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
 /// let scaled = model.predict(&x).unwrap();
 ///
-/// // Every value lands in [0, 1]
+/// // Every value lands in [0, 1].
 /// assert!(scaled.iter().all(|v| (0.0..=1.0).contains(v)));
 /// assert!((scaled[[0, 1]] - 0.2).abs() < 1e-6);
 /// ```

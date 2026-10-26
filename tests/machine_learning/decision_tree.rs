@@ -1,7 +1,7 @@
 //! Integration tests for `rustyml::machine_learning::tree::decision_tree`
 //!
-//! Expected values are derived from problem design or closed-form results,
-//! never by running the model and recording its output
+//! Checks constructor limits, classification, regression, pruning, and model persistence.
+//! Expected values follow the test data or closed-form results.
 
 use crate::common::assert_allclose;
 use approx::assert_abs_diff_eq;
@@ -11,8 +11,8 @@ use rustyml::machine_learning::{Node, NodeType};
 use rustyml::{clear_global_seed, set_global_seed};
 use rustyml::{error::Error, machine_learning::TreeError};
 
-// A tiny linearly-separable binary dataset. Feature 0 is 0.x for class 0
-// and 1.x for class 1, so any default-param tree reaches zero training error
+/// A tiny linearly-separable binary dataset. Feature 0 is 0.x for class 0
+/// and 1.x for class 1, so any default-param tree reaches training error 0
 fn linearly_separable_binary() -> (Array2<f64>, Array1<f64>) {
     let x = array![
         [0.0_f64, 0.0],
@@ -25,8 +25,6 @@ fn linearly_separable_binary() -> (Array2<f64>, Array1<f64>) {
     let y = array![0.0_f64, 0.0, 0.0, 1.0, 1.0, 1.0];
     (x, y)
 }
-
-// Constructor validation
 
 /// Default params are accepted for CART classifier
 #[test]
@@ -83,7 +81,7 @@ fn test_constructor_min_samples_out_of_range() {
 }
 
 /// fit rejects min_samples_leaf > min_samples_split. The builder sets each independently, so
-/// fit cannot check this cross-field rule earlier
+/// fit checks the relation between these limits.
 #[test]
 fn test_min_samples_leaf_greater_than_split_rejected_at_fit() {
     let mut tree = DecisionTree::new(Algorithm::CART, true)
@@ -138,8 +136,6 @@ fn test_constructor_custom_params_stored_correctly() {
     assert_eq!(stored.random_state, Some(42));
 }
 
-// fit validation
-
 /// Negative class labels must be rejected by fit() for a classifier
 #[test]
 fn test_fit_negative_labels_rejected() {
@@ -182,8 +178,6 @@ fn test_fit_too_few_samples_for_min_samples_split() {
         "Expected InvalidInput when n_samples < min_samples_split, got {err:?}"
     );
 }
-
-// DimensionMismatch error paths
 
 /// predict() with wrong number of features returns DimensionMismatch
 #[test]
@@ -249,8 +243,6 @@ fn test_predict_proba_wrong_n_features_dimension_mismatch() {
     );
 }
 
-// NotClassificationTree error
-
 /// predict_proba() on a CART regressor returns Tree(NotClassificationTree)
 #[test]
 fn test_predict_proba_on_regressor_returns_not_classification_tree() {
@@ -286,9 +278,7 @@ fn test_predict_proba_one_on_unfitted_regressor_returns_not_classification_tree(
     );
 }
 
-// CART classifier - fit and predict correctness
-
-/// CART classifier on linearly-separable binary data achieves zero training error
+/// CART classifier on linearly-separable binary data achieves training error 0
 #[test]
 fn test_cart_classifier_zero_training_error() {
     let (x, y) = linearly_separable_binary();
@@ -321,9 +311,7 @@ fn test_cart_fit_predict_equals_fit_then_predict() {
     assert_allclose(&preds_fp, &preds_sep, 1e-12);
 }
 
-// ID3 classifier - fit and predict correctness
-
-/// ID3 classifier on linearly-separable binary data achieves zero training error
+/// ID3 classifier on linearly-separable binary data achieves training error 0
 #[test]
 fn test_id3_classifier_zero_training_error() {
     let (x, y) = linearly_separable_binary();
@@ -336,9 +324,7 @@ fn test_id3_classifier_zero_training_error() {
     }
 }
 
-// C4.5 classifier - fit and predict correctness
-
-/// C4.5 classifier on linearly-separable binary data achieves zero training error
+/// C4.5 classifier on linearly-separable binary data achieves training error 0
 #[test]
 fn test_c45_classifier_zero_training_error() {
     let (x, y) = linearly_separable_binary();
@@ -351,9 +337,7 @@ fn test_c45_classifier_zero_training_error() {
     }
 }
 
-// 3-class (multi-class) classification
-
-/// CART on a clearly-separated 3-class dataset achieves zero training error
+/// CART on a clearly-separated 3-class dataset achieves training error 0
 #[test]
 fn test_cart_multiclass_zero_training_error() {
     let x = array![
@@ -381,7 +365,7 @@ fn test_cart_multiclass_zero_training_error() {
     }
 }
 
-/// ID3 on the same 3-class dataset achieves zero training error
+/// ID3 on the same 3-class dataset achieves training error 0
 #[test]
 fn test_id3_multiclass_zero_training_error() {
     let x = array![
@@ -407,7 +391,7 @@ fn test_id3_multiclass_zero_training_error() {
     }
 }
 
-/// C4.5 on the same 3-class dataset achieves zero training error
+/// C4.5 on the same 3-class dataset achieves training error 0
 #[test]
 fn test_c45_multiclass_zero_training_error() {
     let x = array![
@@ -432,8 +416,6 @@ fn test_c45_multiclass_zero_training_error() {
         assert_abs_diff_eq!(pred, expected, epsilon = 1e-9);
     }
 }
-
-// predict_proba correctness
 
 /// predict_proba rows sum to 1.0 and argmax(row) == predict for every sample
 #[test]
@@ -499,8 +481,7 @@ fn test_predict_proba_pure_leaf_gives_one_hot() {
     let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
-    // Each leaf here is pure, so the true class actually gets probability 1.0,
-    // though the assertions below only require it to be at least 0.5
+    // Each pure leaf gives the true class probability 1.0. These assertions require at least 0.5.
     let probas = tree.predict_proba(&x).unwrap();
 
     // Rows 0-2 are class 0, so their probabilities must sum to 1.0 and class 0 must dominate
@@ -522,8 +503,6 @@ fn test_predict_proba_pure_leaf_gives_one_hot() {
         );
     }
 }
-
-// CART regression - leaf mean correctness
 
 /// CART regressor on a step function: predicted values equal the group means
 #[test]
@@ -575,8 +554,6 @@ fn test_cart_regression_memorizes_unique_samples() {
     }
 }
 
-// max_depth parameter
-
 /// max_depth=1 cannot fit XOR with a single split, while unlimited depth does
 /// at least as well
 #[test]
@@ -623,7 +600,7 @@ fn test_max_depth_1_cannot_perfectly_fit_xor() {
     );
 }
 
-/// max_depth=1 still achieves zero training error on linearly-separable data,
+/// max_depth=1 still achieves training error 0 on linearly-separable data,
 /// where 1 split suffices
 #[test]
 fn test_max_depth_1_suffices_for_linearly_separable_data() {
@@ -639,10 +616,7 @@ fn test_max_depth_1_suffices_for_linearly_separable_data() {
     }
 }
 
-// All-same-label (pure root) edge case
-
-/// When every training sample has the same label the tree creates a single pure
-/// leaf at depth 0 and predict returns that label for all inputs
+/// Identical training labels produce a pure leaf at depth 0. Predict returns that label for all inputs.
 #[test]
 fn test_pure_training_set_creates_pure_root_leaf() {
     let x = array![
@@ -677,8 +651,6 @@ fn test_pure_regression_set_creates_pure_root_leaf() {
         assert_abs_diff_eq!(*pred, 5.5, epsilon = 1e-9);
     }
 }
-
-// Categorical features (ID3 and C4.5 multi-way splits)
 
 /// C4.5 with a categorical feature separates a category-XOR pattern that no
 /// single binary numeric threshold can resolve
@@ -730,7 +702,7 @@ fn test_id3_categorical_multiway_split_zero_training_error() {
 }
 
 /// CART ignores the categorical designation (it always uses binary splits) and
-/// still achieves zero training error on linearly-separable data
+/// still achieves training error 0 on linearly-separable data
 #[test]
 fn test_cart_ignores_categorical_feature_designation() {
     let (x, y) = linearly_separable_binary();
@@ -788,8 +760,6 @@ fn test_get_categorical_features_reflects_set() {
     assert_eq!(tree.get_categorical_features(), &[0_usize, 2]);
 }
 
-// generate_tree_structure
-
 /// generate_tree_structure() after fit returns a non-empty string
 #[test]
 fn test_generate_tree_structure_returns_nonempty_string_after_fit() {
@@ -803,8 +773,6 @@ fn test_generate_tree_structure_returns_nonempty_string_after_fit() {
         "Expected header in structure output"
     );
 }
-
-// Save / load round-trip
 
 /// save_to_path / load_from_path yields identical predictions on the training
 /// set and a held-out test set
@@ -891,8 +859,6 @@ fn test_save_load_cart_regressor_round_trip() {
     let _ = std::fs::remove_file(&path);
 }
 
-// predict labels are in the expected domain {0.0, 1.0, ...}
-
 /// For a binary classifier every prediction must be either 0.0 or 1.0
 #[test]
 fn test_predict_outputs_are_valid_class_labels() {
@@ -936,10 +902,7 @@ fn test_multiclass_predict_outputs_in_valid_domain() {
     }
 }
 
-// random_state: seeded tie-breaking among equally-scoring splits
-
-/// Data with a guaranteed split tie: features 0 and 1 are identical columns that
-/// perfectly separate the 2 classes, while feature 2 is uninformative (zero gain)
+/// Features 0 and 1 are identical and separate the 2 classes exactly. Feature 2 has gain 0, so the best splits tie.
 fn tie_break_data() -> (Array2<f64>, Array1<f64>) {
     let x = array![
         [0.0, 0.0, 0.0],
@@ -984,8 +947,7 @@ fn random_state_none_is_deterministic() {
     );
 }
 
-/// Seeded tie-breaking varies the chosen split: across a range of seeds the root
-/// does not always split on the same one of the 2 tied features
+/// Across the tested seeds, the root uses both tied features.
 #[test]
 fn random_state_varies_tie_breaking() {
     let distinct: std::collections::HashSet<String> =
@@ -1119,8 +1081,7 @@ fn test_min_samples_leaf_constrains_split_search() {
     assert_abs_diff_eq!(pred_left[0], 0.0, epsilon = 1e-9);
 }
 
-/// min_samples_split stops recursion at an internal node, yielding a strictly
-/// shallower tree (depth 1 with min_samples_split=3 vs depth 2 by default)
+/// min_samples_split=3 stops the 2-sample internal node. The tree has depth 1 instead of the default depth 2.
 #[test]
 fn test_min_samples_split_stops_recursion_shallower_tree() {
     let x = array![[0.0_f64], [1.0_f64], [2.0_f64]];
@@ -1184,8 +1145,6 @@ fn test_predict_proba_exact_impure_leaf_distribution() {
     assert_abs_diff_eq!(probas[[0, 1]], 1.0 / 3.0, epsilon = 1e-12);
 }
 
-// max_depth = Some(0): the root is forced to be an immediate leaf
-
 /// With max_depth = Some(0) no split is made and the root is a single leaf holding
 /// the global majority class. Predict returns that class for every input
 #[test]
@@ -1227,8 +1186,6 @@ fn test_max_depth_zero_root_is_leaf_predicts_global_majority() {
         assert_abs_diff_eq!(p, 0.0, epsilon = 1e-12);
     }
 }
-
-// Categorical (multi-way) save/load round-trip - exercises the AHashMap `children` serde branch
 
 /// A C4.5 tree with a populated categorical `children` map round-trips through
 /// serde losslessly, reproducing predictions on training and unseen categories
@@ -1284,8 +1241,6 @@ fn test_save_load_categorical_multiway_round_trip_identical_predictions() {
     let _ = std::fs::remove_file(&path);
 }
 
-// Global crate seed drives tie-breaking for random_state = None trees
-
 /// RAII guard that clears the thread-local global seed on drop. This way, a panic in the
 /// test body cannot leak a seeded global stream onto this thread
 struct GlobalSeedGuard;
@@ -1296,7 +1251,7 @@ impl Drop for GlobalSeedGuard {
 }
 
 /// Fit a `random_state = None` CART tree on the tie data and return its structure
-/// string. Tie-breaking derives from the thread-local global seed when one is set
+/// string. Tie-breaking uses the thread-local global seed when that seed is set.
 fn tie_break_structure_none() -> String {
     let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     let (x, y) = tie_break_data();
@@ -1325,10 +1280,7 @@ fn global_seed_makes_none_tree_tie_breaking_reproducible() {
     // _guard clears the global seed here (and on any panic above)
 }
 
-// min_samples_leaf must constrain the split search, not merely reject the final pick
-
-/// A split that isolates 1 outlier must not crowd out a valid split whose children
-/// both satisfy min_samples_leaf, so the tree still splits instead of collapsing
+/// A split that isolates 1 outlier violates min_samples_leaf. The tree selects a valid split whose children both meet the limit.
 #[test]
 fn min_samples_leaf_does_not_suppress_a_valid_numeric_split() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
@@ -1377,8 +1329,6 @@ fn min_samples_leaf_does_not_suppress_a_valid_categorical_split() {
     assert_abs_diff_eq!(pred, 1.0, epsilon = 1e-9);
 }
 
-// min_impurity_decrease must use the N_t/N_total node-weight scaling
-
 /// The node-local weighted impurity decrease is scaled by N_t/N_total before
 /// comparing to min_impurity_decrease, matching scikit-learn
 #[test]
@@ -1391,9 +1341,7 @@ fn min_impurity_decrease_uses_sklearn_node_weight_scaling() {
         .unwrap();
     tree.fit(&x, &y).unwrap();
 
-    // Root (N=8) splits at 4.5. The left child {x=1..4} has a raw impurity decrease of 25,
-    // but scaled by 4/8 it is 12.5, so threshold 20.0 rejects it. The unscaled rule would
-    // have accepted 25 >= 20, so x=1 and x=4 must share 1 leaf (mean 5)
+    // The left child {x=1..4} has raw impurity decrease 25. Its sample fraction is 4/8, so the weighted decrease 12.5 fails threshold 20.0.
     let p1 = tree.predict(&array![[1.0]]).unwrap()[0];
     let p4 = tree.predict(&array![[4.0]]).unwrap()[0];
     assert_abs_diff_eq!(p1, 5.0, epsilon = 1e-9);

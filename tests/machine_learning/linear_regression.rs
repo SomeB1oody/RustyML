@@ -1,7 +1,7 @@
 //! Integration tests for [`rustyml::machine_learning::LinearRegression`].
 //!
-//! Every expected value comes from the problem design or a closed-form analytic result,
-//! never from recording the model's output.
+//! Checks constructor limits, solver results, regularization, scores, and model persistence.
+//! Linear test data and closed-form results provide reference values.
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
@@ -10,8 +10,6 @@ use rustyml::machine_learning::linear_model::LeastSquaresSolver;
 use rustyml::machine_learning::{LinearRegression, RegularizationType};
 
 use crate::common::assert_allclose;
-
-// Constructor validation
 
 /// A non-positive or non-finite learning_rate (0.0 / negative / NaN / +inf) -> InvalidParameter
 #[test]
@@ -124,8 +122,6 @@ fn constructor_getters_round_trip() {
     assert!(model.get_actual_iterations().is_none());
 }
 
-// fit() input-validation errors
-
 /// fit() with mismatched y length -> DimensionMismatch
 #[test]
 fn fit_y_length_mismatch_returns_dimension_mismatch() {
@@ -146,8 +142,6 @@ fn fit_y_length_mismatch_returns_dimension_mismatch() {
         result
     );
 }
-
-// predict() input-validation errors (after fit)
 
 /// predict() with wrong number of columns -> DimensionMismatch
 #[test]
@@ -174,9 +168,8 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
     );
 }
 
-// Correctness: univariate y = 2x + 1
-// OLS on x=[1..5], y=[3,5,7,9,11] gives slope 2.0, intercept 1.0
-
+/// OLS on x=[1..5], y=[3,5,7,9,11] gives slope 2.0, intercept 1.0
+///
 /// After fit, coefficient ~= 2.0 and intercept ~= 1.0 (tight tolerance)
 #[test]
 fn univariate_y_equals_2x_plus_1_coefficient_and_intercept() {
@@ -239,9 +232,8 @@ fn fit_sets_n_iter() {
     assert!(n_iter.unwrap() >= 1, "n_iter must be at least 1");
 }
 
-// Correctness: multivariate y = 2*x1 + 3*x2 + 1
-// Coefficients converge to [2.0, 3.0], intercept to 1.0
-
+/// Coefficients converge to [2.0, 3.0], intercept to 1.0
+///
 /// Multivariate coefficients and intercept converge to known values
 #[test]
 fn multivariate_y_equals_2x1_plus_3x2_plus_1_coefficients() {
@@ -300,9 +292,8 @@ fn multivariate_predictions_match_closed_form() {
     assert_allclose(&preds, &expected, 5e-3);
 }
 
-// fit_intercept = false
-// Data y = 2x through the origin: OLS slope 2.0, stored intercept 0.0 by contract
-
+/// Data y = 2x through the origin: OLS slope 2.0, stored intercept 0.0 by contract
+///
 /// With fit_intercept=false the stored intercept is exactly 0.0
 #[test]
 fn no_intercept_stored_intercept_is_zero() {
@@ -353,9 +344,8 @@ fn no_intercept_getter_returns_false() {
     assert!(!model.get_fit_intercept());
 }
 
-// Analytic OLS sanity: y = 3x + 2
-// OLS on x=[1..5], y=[5,8,11,14,17] gives slope 3.0, intercept 2.0
-
+/// OLS on x=[1..5], y=[5,8,11,14,17] gives slope 3.0, intercept 2.0
+///
 /// OLS converges to slope=3.0, intercept=2.0 on y=3x+2
 #[test]
 fn ols_sanity_y_equals_3x_plus_2_parameters() {
@@ -397,8 +387,6 @@ fn ols_sanity_y_equals_3x_plus_2_predictions() {
     let expected = array![20.0, 32.0];
     assert_allclose(&preds, &expected, 3e-3);
 }
-
-// fit_predict matches separate fit + predict
 
 /// fit_predict() returns the same predictions as fit() + predict() on training data
 #[test]
@@ -448,10 +436,9 @@ fn fit_predict_values_match_known_true_values() {
     assert_allclose(&preds, &expected, 5e-3);
 }
 
-// Regularization: L2 shrinks the coefficient
-// Ridge alpha > 0 makes |w_ridge| strictly smaller than |w_ols|.
-// The test checks only that inequality.
-
+/// Ridge alpha > 0 makes |w_ridge| strictly smaller than |w_ols|.
+/// The test checks only that inequality.
+///
 /// L2 regularization shrinks the L2-norm of coefficients below the unregularized value
 #[test]
 fn l2_regularization_shrinks_coefficient_norm() {
@@ -486,9 +473,8 @@ fn l2_regularization_shrinks_coefficient_norm() {
     );
 }
 
-// Regularization: L1 shrinks the coefficient
-// Lasso alpha drives the coefficient toward zero, so |w_lasso| < |w_ols|
-
+/// Lasso alpha drives the coefficient toward 0, so |w_lasso| < |w_ols|
+///
 /// L1 regularization shrinks the coefficient below the unregularized value
 #[test]
 fn l1_regularization_shrinks_coefficient() {
@@ -540,7 +526,7 @@ fn l2_regularization_intercept_within_reasonable_range() {
         .unwrap();
     ridge.fit(&x, &y).unwrap();
 
-    // alpha=0.1 is small, so it should only mildly shrink the intercept away from 1.0
+    // The fitted intercept stays close to the true intercept 1.0 under this penalty.
     let intercept = ridge.get_intercept().unwrap();
     assert!(
         (intercept - 1.0).abs() < 0.5,
@@ -548,9 +534,8 @@ fn l2_regularization_intercept_within_reasonable_range() {
     );
 }
 
-// Determinism: same data -> identical results
-// Gradient descent has no internal randomness, so identical runs are bit-identical
-
+/// Gradient descent has no internal randomness, so identical runs are bit-identical
+///
 /// 2 identical LinearRegression models trained on the same data produce identical predictions
 #[test]
 fn determinism_same_data_identical_predictions() {
@@ -581,8 +566,6 @@ fn determinism_same_data_identical_predictions() {
     // Gradient descent is deterministic, so results must be bit-identical
     assert_allclose(&preds_a, &preds_b, 0.0);
 }
-
-// Save / load round-trip
 
 /// save_to_path + load_from_path round-trip yields identical predictions
 #[test]
@@ -643,8 +626,6 @@ fn save_load_preserves_model_state() {
     let _ = std::fs::remove_file(path);
 }
 
-// Default constructor
-
 /// `default()` is `new(true)`: fit_intercept = true and the closed-form solver
 #[test]
 fn default_constructor_has_expected_hyperparameters() {
@@ -670,8 +651,6 @@ fn default_constructor_can_fit_and_predict() {
     assert_abs_diff_eq!(preds[0], 9.0, epsilon = 5e-2);
 }
 
-// Clone
-
 /// Clone of a fitted model makes identical predictions
 #[test]
 fn clone_of_fitted_model_makes_identical_predictions() {
@@ -695,9 +674,8 @@ fn clone_of_fitted_model_makes_identical_predictions() {
     assert_allclose(&preds_orig, &preds_clone, 0.0);
 }
 
-// In-loop NonFinite divergence guards
-// A huge learning_rate overshoots to +/- inf inside the loop, tripping the in-loop finiteness guard
-
+/// A huge learning_rate overshoots to +/- inf inside the loop, tripping the in-loop finiteness guard
+///
 /// fit() on finite, valid data with a huge learning_rate diverges to +/- inf inside the loop.
 /// This trips the in-loop guard and returns Error::NonFinite, not the up-front check on x.
 #[test]
@@ -723,9 +701,8 @@ fn fit_huge_learning_rate_diverges_returns_non_finite() {
     );
 }
 
-// L1 regularization with many features (n_features = 200)
-// Column 0 carries the signal (y=3*x0), the remaining 199 columns are noise
-
+/// Column 0 carries the signal (y=3*x0), the remaining 199 columns are noise
+///
 /// L1 regularization with 200 features: the 1 informative feature (column 0, y = 3*x0)
 /// ends up with the dominant coefficient over the noise columns
 #[test]
@@ -795,8 +772,6 @@ fn l1_regularization_many_features_recovers_informative_feature() {
     );
 }
 
-// score (coefficient of determination R^2)
-
 /// On exactly-linear data (y = 3x0 - 2x1 + 5) a converged model achieves R^2 about 1.
 #[test]
 fn score_is_one_on_perfectly_linear_data() {
@@ -854,12 +829,11 @@ fn score_matches_r2_definition() {
     assert!(r2 < 1.0, "noisy data must score strictly below 1, got {r2}");
 }
 
-/// A model that predicts the mean of y scores R^2 = 0. Here zero coefficients plus an
+/// A model that predicts the mean of y scores R^2 = 0. Here coefficients of 0 plus an
 /// intercept fitted on mean-centered features converges to predicting y_bar.
 #[test]
 fn score_mean_predictor_is_about_zero() {
-    // Feature is uninformative about y (y alternates independently of x), so the best
-    // linear fit is y_hat about y_bar and R^2 about 0
+    // The targets alternate across x, so the best linear fit stays near the target mean. R^2 stays near 0.
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]];
     let y = array![1.0, 0.0, 1.0, 0.0, 1.0, 0.0];
     let mut model = LinearRegression::new(true)
@@ -898,11 +872,7 @@ fn score_y_length_mismatch_errors() {
     ));
 }
 
-// Closed-form (normal-equation) solver
-
-/// On exactly-linear data the closed-form solver recovers the true coefficients and
-/// intercept exactly (no iteration / learning-rate tuning), unlike gradient descent which
-/// only approaches them
+/// On exactly linear data, the closed-form solver recovers coefficients and intercept within numerical tolerance.
 #[test]
 fn normal_solver_recovers_exact_coefficients() {
     // y = 3*x0 - 2*x1 + 5, exactly
@@ -1073,8 +1043,6 @@ fn normal_solver_ridge_shrinks_coefficients() {
     );
 }
 
-// scikit-learn parity
-
 /// `LinearRegression::default()` is exact OLS, like Python's `LinearRegression()`. scikit-learn
 /// 1.9.0 gives `coef_ = [1.11666667, 0.93333333]` and `intercept_ = 0.05` on this data.
 #[test]
@@ -1097,7 +1065,7 @@ fn default_solver_is_exact_ols_matching_scikit_learn() {
 
 /// L1 drives an unsupported coefficient to exactly `0.0`, not merely close to it.
 ///
-/// The proximal (soft-thresholding) step makes L1 a feature selector by reaching exact zero.
+/// The proximal (soft-thresholding) step makes L1 a feature selector by reaching exact 0.
 #[test]
 fn l1_regularization_produces_exact_zeros() {
     // Feature 0 explains y exactly. Feature 1 is noise.

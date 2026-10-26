@@ -17,8 +17,6 @@ use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::{GateGuard, assert_allclose, named};
 
-// helpers
-
 /// Build a 2D Tensor from row-major data
 fn t2(rows: usize, cols: usize, data: Vec<f32>) -> Tensor {
     Array2::from_shape_vec((rows, cols), data)
@@ -50,8 +48,6 @@ fn dense_2x2_with_weights(w_flat: Vec<f32>, b_flat: Vec<f32>) -> Dense {
     d
 }
 
-// Dense: constructor validation
-
 #[test]
 fn dense_new_rejects_zero_dim() {
     let result = Dense::new(0, Linear::new());
@@ -62,7 +58,7 @@ fn dense_new_rejects_zero_dim() {
     );
 }
 
-/// `input_dim` is not a constructor parameter, so a zero last axis is refused at build time
+/// `input_dim` is not a constructor parameter, so a last axis of size 0 is refused at build time
 /// instead
 #[test]
 fn dense_build_rejects_zero_input_dim() {
@@ -79,8 +75,6 @@ fn dense_build_rejects_zero_input_dim() {
 fn dense_new_accepts_valid_dims() {
     Dense::new(5, Linear::new()).unwrap();
 }
-
-// Dense: param_count
 
 /// param_count = input_dim * units + units (weights + bias elements)
 #[test]
@@ -101,9 +95,7 @@ fn dense_param_count_3x5() {
     assert_eq!(d.param_count(), ParamCounts::trainable(20));
 }
 
-// Dense: forward, identity weight gives output equal to input
-
-/// Identity weight with zero bias and Linear activation passes input through unchanged
+/// Identity weight with 0 bias and Linear activation passes input through unchanged
 #[test]
 fn dense_forward_identity_weight_output_equals_input() {
     let d = dense_2x2_with_weights(
@@ -115,8 +107,6 @@ fn dense_forward_identity_weight_output_equals_input() {
     let expected = t2(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
     assert_allclose(&out, &expected, 1e-6_f32);
 }
-
-// Dense: forward, known non-identity weight and bias
 
 /// Forward computes X*W + b with a diagonal weight and nonzero bias under Linear activation
 #[test]
@@ -131,9 +121,7 @@ fn dense_forward_known_weights_and_bias() {
     assert_allclose(&out, &expected, 1e-5_f32);
 }
 
-// Dense: forward, ReLU activation zeroes negative pre-activations
-
-/// ReLU activation clamps negative pre-activations to zero
+/// ReLU activation clamps negative pre-activations to 0
 #[test]
 fn dense_forward_relu_zeroes_negative_preactivations() {
     let mut d = Dense::new(2, ReLU::new()).unwrap();
@@ -147,8 +135,6 @@ fn dense_forward_relu_zeroes_negative_preactivations() {
     let expected = t2(2, 2, vec![3.0, 0.0, 4.0, 0.0]);
     assert_allclose(&out, &expected, 1e-6_f32);
 }
-
-// Dense: forward, single batch item (batch_size equal to 1)
 
 /// Forward on a 3 -> 2 Linear layer with a single-row input
 #[test]
@@ -164,8 +150,6 @@ fn dense_forward_3_to_2_linear_single_row() {
     let expected = t2(1, 2, vec![22.0, 29.0]);
     assert_allclose(&out, &expected, 1e-5_f32);
 }
-
-// Dense: input of rank 3 or more, where the last axis is the only contracted axis
 
 /// Dense(2 -> 3, Linear) with the fixed kernel [[1, 2, 3], [4, 5, 6]] and the bias
 /// [0.5, -0.5, 1.0]. Shared by the cases with an input of rank 3 or more
@@ -459,8 +443,6 @@ fn dense_rank_3_matches_across_the_tuning_gates() {
     assert_eq!(serial, parallel, "the branch must not move the values");
 }
 
-// Dense: error paths
-
 #[test]
 fn dense_forward_rejects_rank_1_input() {
     let mut d = Dense::new(2, Linear::new()).unwrap();
@@ -582,8 +564,6 @@ fn dense_set_weights_wrong_bias_shape_returns_err() {
     );
 }
 
-// Dense: the named weights carry the shapes the layer declares
-
 #[test]
 fn dense_weights_carry_the_declared_shapes() {
     let mut d = Dense::new(4, Linear::new()).unwrap();
@@ -609,8 +589,6 @@ fn dense_weights_carry_the_declared_shapes() {
     assert_abs_diff_eq!(bias[[0, 1]], 0.2_f32, epsilon = 1e-6);
 }
 
-// Dense: backward restores the correct grad shape after forward
-
 /// backward returns a gradient matching the input shape (values covered by gradient_check.rs)
 #[test]
 fn dense_backward_output_shape_matches_input() {
@@ -627,15 +605,11 @@ fn dense_backward_output_shape_matches_input() {
     );
 }
 
-// Dense: layer_type string
-
 #[test]
 fn dense_layer_type_is_dense() {
     let d = Dense::new(2, Linear::new()).unwrap();
     assert_eq!(d.layer_type(), "Dense");
 }
-
-// Flatten: constructor validation
 
 /// `Flatten` takes no shape parameter, so the rank rule runs at build time
 #[test]
@@ -666,8 +640,6 @@ fn flatten_build_accepts_a_rank_3_shape() {
     layer.build(&Shape::known(&[2, 3, 4])).unwrap();
 }
 
-// Flatten: forward values, 3D input
-
 /// Flatten of [2, 3, 4] yields [2, 12] with values preserved in row-major order
 #[test]
 fn flatten_forward_3d_correct_shape_and_values() {
@@ -686,8 +658,6 @@ fn flatten_forward_3d_correct_shape_and_values() {
     }
 }
 
-// Flatten: forward values, 4D input
-
 /// Flatten of [2, 2, 3, 4] yields [2, 24] with values preserved in row-major order
 #[test]
 fn flatten_forward_4d_correct_shape_and_values() {
@@ -704,8 +674,6 @@ fn flatten_forward_4d_correct_shape_and_values() {
         assert_abs_diff_eq!(val, i as f32, epsilon = 1e-6);
     }
 }
-
-// Flatten: forward values, 5D input
 
 /// Flatten of [2, 2, 2, 3, 4] yields [2, 48] with values preserved
 #[test]
@@ -726,8 +694,6 @@ fn flatten_forward_5d_correct_shape_and_values() {
         assert_abs_diff_eq!(val, i as f32, epsilon = 1e-6);
     }
 }
-
-// Flatten: backward restores the original shape and values
 
 /// backward returns the original 3D shape with gradient values matching grad_flat reshaped
 #[test]
@@ -775,8 +741,6 @@ fn flatten_backward_restores_4d_shape_and_values() {
     }
 }
 
-// Flatten: error paths
-
 #[test]
 fn flatten_forward_rejects_2d_input() {
     let mut fl = Flatten::new();
@@ -803,15 +767,11 @@ fn flatten_forward_rejects_6d_input() {
     );
 }
 
-// Flatten: the named weight list is empty (no trainable parameters)
-
 #[test]
 fn flatten_weights_is_empty() {
     let fl = Flatten::new();
     assert!(fl.weights().is_empty(), "Flatten must expose no weight");
 }
-
-// Flatten: param_count is NoTrainable
 
 #[test]
 fn flatten_param_count_is_no_trainable() {
@@ -819,8 +779,6 @@ fn flatten_param_count_is_no_trainable() {
     let fl = Flatten::new();
     assert_eq!(fl.param_count(), ParamCounts::none());
 }
-
-// Flatten: layer_type string
 
 #[test]
 fn flatten_layer_type_is_flatten() {

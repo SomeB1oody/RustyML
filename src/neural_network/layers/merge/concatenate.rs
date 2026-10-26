@@ -52,7 +52,7 @@ use ndarray::{Axis, Slice};
 /// use rustyml::neural_network::traits::Layer;
 /// use rustyml::neural_network::{Ctx, Tensor};
 ///
-/// // 2 samples of 2 features, and 1 more feature for each of the same 2 samples
+/// // 2 samples of 2 features, and 1 more feature for each of the same 2 samples.
 /// let left = Tensor::from_shape_vec(IxDyn(&[2, 2]), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
 /// let right = Tensor::from_shape_vec(IxDyn(&[2, 1]), vec![5.0, 6.0]).unwrap();
 ///
@@ -64,7 +64,7 @@ use ndarray::{Axis, Slice};
 ///     Tensor::from_shape_vec(IxDyn(&[2, 3]), vec![1.0, 2.0, 5.0, 3.0, 4.0, 6.0]).unwrap()
 /// );
 ///
-/// // Each input takes the gradient of its own band back, at its own shape
+/// // Each input takes the gradient of its own band back, at its own shape.
 /// let grad =
 ///     Tensor::from_shape_vec(IxDyn(&[2, 3]), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
 /// let grads = layer.backward_many(&grad, &mut ctx).unwrap();
@@ -77,7 +77,7 @@ use ndarray::{Axis, Slice};
 ///     Tensor::from_shape_vec(IxDyn(&[2, 1]), vec![3.0, 6.0]).unwrap()
 /// );
 ///
-/// // The axis 0 is legal, and it joins the batches instead of the features
+/// // The axis 0 is legal, and it joins the batches instead of the features.
 /// let mut batches = Concatenate::new(0);
 /// let mut ctx = Ctx::inference();
 /// let stacked = batches.forward_many_mut(&[&left, &left], &mut ctx).unwrap();
@@ -175,9 +175,9 @@ impl Concatenate {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If `inputs` is empty, if the axis falls outside the rank, if 2
-    ///   inputs hold different ranks, or if 2 extents of another axis differ. Each message
-    ///   names the 2 shapes that disagree
+    /// - `Error::InvalidInput` - If `inputs` is empty, the axis is out of bounds, or input
+    ///   ranks differ. Also returned for unequal extents outside the concatenation axis. Each
+    ///   message names the 2 shapes that disagree
     fn joined_shape(&self, inputs: &[Shape]) -> Result<Shape, Error> {
         let Some((first, rest)) = inputs.split_first() else {
             return Err(Error::invalid_input(
@@ -283,8 +283,8 @@ impl Layer for Concatenate {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If the layer received no input, if the shapes of the tensors
-    ///   cannot join, or if the axis falls outside the rank of the inputs
+    /// - `Error::InvalidInput` - If inputs are absent, their shapes cannot join, or the axis is
+    ///   out of bounds
     /// - `Error::Computation` - If the joined shape leaves an axis free
     fn forward_many(&self, inputs: &[&Tensor], ctx: &mut Ctx) -> Result<Tensor, Error> {
         Arity::AtLeast(1).check("Concatenate", inputs.len())?;
@@ -362,6 +362,7 @@ impl Layer for Concatenate {
 }
 
 /// Unit tests of the join, of the gradient of every input, and of the refusals of the layer
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::*;

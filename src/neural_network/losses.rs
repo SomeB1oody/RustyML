@@ -9,7 +9,7 @@ use crate::neural_network::Tensor;
 use ndarray::{Array1, Array2, ArrayView2, Axis, Zip};
 
 /// Epsilon used to clip predicted probabilities away from 0 and 1, so the cross-entropy losses
-/// avoid `log(0)` and division by zero.
+/// avoid `log(0)` and division by 0.
 const PROB_CLIP_EPS: f32 = 1e-7;
 
 /// Row-wise numerically stable log-softmax and softmax over the last axis of a `[batch, classes]`
@@ -59,10 +59,8 @@ fn clip_probabilities(probs: &Tensor) -> Tensor {
 
 /// Row-normalizes a `[sites, classes]` probability matrix, then clips it away from 0 and 1.
 ///
-/// Matches Keras' probability path. It divides each row by its sum before the clip. The loss
-/// then scores a row that does not sum to 1 as the distribution it implies. A softmax row
-/// already sums to 1, so the division does not change the loss value, but
-/// `CategoricalCrossEntropy`'s gradient still accounts for it.
+/// Divide each row by its sum before the clip. The categorical loss gradient also includes the
+/// derivative of this division.
 ///
 /// # Returns
 ///
@@ -71,8 +69,7 @@ fn clip_probabilities(probs: &Tensor) -> Tensor {
 ///
 /// # Notes
 ///
-/// A row that sums to zero produces a non-finite result, as in Keras. The clip guards against
-/// `log(0)`, not a zero divisor.
+/// A row with a sum of 0 can produce non-finite values. The clip does not guard the divisor.
 fn normalize_and_clip_rows(probs: &ArrayView2<f32>) -> (Array2<f32>, Array1<f32>) {
     let row_sums = probs.sum_axis(Axis(1));
     let mut normalized = probs.to_owned();

@@ -5,8 +5,6 @@ use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
 use rustyml::utils::train_test_split::{train_test_split, train_test_split_stratified};
 
-// Split shapes
-
 /// Default test_size yields 3 test, 7 train rows for 10 samples
 #[test]
 fn test_default_test_size_shapes() {
@@ -53,8 +51,6 @@ fn test_row_count_preserved() {
     );
 }
 
-// Default test_size = None behaves as 0.3
-
 /// test_size=None yields the same shapes as test_size=Some(0.3)
 #[test]
 fn test_none_test_size_defaults_to_0_3() {
@@ -68,8 +64,6 @@ fn test_none_test_size_defaults_to_0_3() {
     assert_eq!(x_train.nrows(), x_train_explicit.nrows());
     assert_eq!(x_test.nrows(), x_test_explicit.nrows());
 }
-
-// Determinism: seed behavior
 
 /// Same random_state yields byte-identical splits
 #[test]
@@ -111,8 +105,6 @@ fn test_different_seeds_different_splits() {
     );
 }
 
-// Row-value determinism: verify actual values, not just counts
-
 /// Every output row traces back to exactly 1 input row, with no cross-partition duplicates
 #[test]
 fn test_output_rows_are_subsets_of_input() {
@@ -148,8 +140,6 @@ fn test_output_rows_are_subsets_of_input() {
     }
 }
 
-// Row-label alignment: x[i] and y[i] must land in the same partition
-
 /// x[i] and y[i] stay paired after the split, in both partitions
 #[test]
 fn test_x_y_alignment() {
@@ -183,8 +173,6 @@ fn test_x_y_alignment() {
         );
     }
 }
-
-// n_samples == 2: always 1 test regardless of test_size
 
 /// With 2 samples, the split is always 1 test and 1 train, regardless of test_size
 #[test]
@@ -234,8 +222,6 @@ fn test_two_samples_always_one_test() {
     );
 }
 
-// Clamping: test_size near 1.0 or near 0.0
-
 /// test_size=0.99 over 10 samples clamps to 9 test, leaving at least 1 train row
 #[test]
 fn test_large_test_size_keeps_at_least_one_train() {
@@ -263,8 +249,6 @@ fn test_small_test_size_keeps_at_least_one_test() {
     assert_eq!(y_test.len(), 1);
     assert_eq!(y_train.len(), 9);
 }
-
-// Generic label type: &str
 
 /// The generic A: Clone path works with string-slice labels
 #[test]
@@ -295,8 +279,6 @@ fn test_str_labels() {
     }
 }
 
-// None random_state: non-deterministic but valid
-
 /// None seed produces a valid split with the correct total row count
 #[test]
 fn test_none_seed_produces_valid_split() {
@@ -310,8 +292,6 @@ fn test_none_seed_produces_valid_split() {
     assert_eq!(x_test.nrows(), 3);
     assert_eq!(y_train.len() + y_test.len(), 10);
 }
-
-// Error paths
 
 /// Empty dataset (0 rows) yields EmptyInput
 #[test]
@@ -373,8 +353,6 @@ fn test_error_single_sample() {
         err
     );
 }
-
-// Stratified split
 
 /// Every class keeps at least 1 sample on each side, even when classes are imbalanced
 #[test]

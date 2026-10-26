@@ -7,10 +7,19 @@
 
 use ndarray::{ArrayBase, Data, Dimension};
 
-/// Asserts 2 arrays are equal element by element within `eps` (absolute difference).
+/// Checks that arrays have equal shapes and absolute element differences within `eps`.
 ///
-/// Use this for array comparisons. For a single scalar, use one of approx's
-/// `assert_abs_diff_eq!` or `assert_relative_eq!` macros directly.
+/// Use approx's scalar assertion macros for scalar values.
+///
+/// # Parameters
+///
+/// - `actual` - array under test
+/// - `expected` - reference array
+/// - `eps` - maximum absolute difference for each element
+///
+/// # Panics
+///
+/// Panics if shapes differ or any element exceeds the tolerance.
 pub fn assert_allclose<A, S1, S2, D>(actual: &ArrayBase<S1, D>, expected: &ArrayBase<S2, D>, eps: A)
 where
     A: approx::AbsDiffEq<Epsilon = A> + Copy + std::fmt::Debug,

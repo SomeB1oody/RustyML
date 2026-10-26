@@ -327,8 +327,7 @@ pub(super) fn validate_valid_kernel_fits(
 ///
 /// Under `Valid` padding the layer reads only complete windows. An effective kernel longer than
 /// the input axis leaves no complete window, so the axis would carry 0 positions. The shape
-/// algebra refuses that configuration rather than report a 0 extent, because a build must not
-/// hand an empty axis to the next layer of the stack
+/// algebra rejects that case to prevent an empty input axis in the next layer.
 ///
 /// The rule belongs to `Valid` padding alone. `Same` and `Causal` padding add the missing cells on
 /// the borders, so an oversized kernel stays legal there, and those branches never call this

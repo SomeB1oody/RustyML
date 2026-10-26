@@ -34,9 +34,11 @@ pub enum Contamination {
     Auto,
     /// The expected proportion of outliers in the training data, in `(0.0, 0.5]`
     ///
-    /// The cutoff becomes the `100 * fraction`-th percentile of the training scores, using
-    /// NumPy's default linear interpolation so it equals scikit-learn's `offset_`
-    Fraction(f64),
+    /// The cutoff uses linear interpolation at position `(n_samples - 1) * fraction` in the sorted training scores.
+    Fraction(
+        /// Expected outlier fraction in `(0, 0.5]`.
+        f64,
+    ),
 }
 
 /// Average path-length normalization factor `c(n)` for isolation trees
@@ -73,10 +75,7 @@ const DEFAULT_PARALLEL_THRESHOLD_TREES: usize = 10;
 /// `c(256)` is about 10, the value at the default subsample size of 256
 const ISOLATION_TREE_AVG_PATH: usize = 10;
 
-/// Score cutoff for [`Contamination::Auto`]: the threshold from Liu et al. A raw
-/// normalized score above `0.5` means the sample isolates faster than the forest average.
-/// Negated to match the sign convention of [`IsolationForest::score_samples`], and identical
-/// to scikit-learn's `offset_` under `contamination='auto'`
+/// The automatic cutoff is `-0.5`, consistent with the negative score convention.
 const AUTO_CONTAMINATION_OFFSET: f64 = -0.5;
 
 /// A node in an isolation tree
@@ -91,7 +90,7 @@ pub enum IsolationTree {
         /// Number of samples that reached this leaf, used by the average-path-length correction
         size: usize,
     },
-    /// A split node that directs samples to one of the 2 children
+    /// A split node that directs samples to 1 of the 2 children
     Internal {
         /// Index of the feature this node splits on
         feature: usize,
@@ -121,7 +120,7 @@ pub enum IsolationTree {
 /// let data = array![[1.0, 2.0], [2.0, 3.0], [10.0, 15.0]];
 /// model.fit(&data).unwrap();
 ///
-/// // Anomaly scores in [-1, 0). Lower means more anomalous, as in scikit-learn.
+/// // Anomaly scores in [-1, 0). Lower means more anomalous.
 /// let scores = model.score_samples(&data).unwrap();
 ///
 /// // Same scores, shifted by the fitted offset. Negative marks an outlier.
@@ -150,8 +149,8 @@ pub struct IsolationForest {
     sample_size: usize,
     /// Rule for choosing the inlier/outlier cutoff, resolved into `offset` at fit time
     contamination: Contamination,
-    /// Score cutoff separating inliers from outliers, `None` before training.
-    /// [`IsolationForest::predict`] labels a sample `-1` when it scores at or above this value.
+    /// Score cutoff separating inliers from outliers, or `None` before fit.
+    /// Samples below this cutoff are outliers.
     offset: Option<f64>,
 }
 
@@ -167,6 +166,10 @@ impl Default for IsolationForest {
     /// - `random_state` - None
     /// - `n_features` - 0
     /// - `contamination` - `Contamination::Auto` (the paper's 0.5 cutoff)
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - An instance with default settings.
     fn default() -> Self {
         Self {
             trees: None,
@@ -307,7 +310,6 @@ impl IsolationForest {
         Ok(self)
     }
 
-    // Getters
     get_field!(get_n_estimators, n_estimators, usize);
     get_field!(get_max_samples, max_samples, usize);
     get_field!(get_sample_size, sample_size, usize);
@@ -331,11 +333,15 @@ impl IsolationForest {
     ///
     /// - `Result<&mut Self, Error>` - A mutable reference to self if successful
     ///
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x` has no feature columns and a tree attempts to split multiple samples.
+    ///
     /// # Errors
     ///
-    /// Returns `Error` if:
-    /// - Input data is empty
-    /// - Input contains NaN or infinite values
+    /// - `Error::EmptyInput` - If the feature matrix has no rows.
+    /// - `Error::NonFinite` - If the feature matrix contains a non-finite value.
     ///
     /// # Performance
     ///
@@ -360,7 +366,7 @@ impl IsolationForest {
         };
 
         let build_tree = |i: usize| -> Result<IsolationTree, Error> {
-            // An independent RNG per tree keeps results reproducible
+            // Each tree uses its own RNG. A fixed base seed makes the tree seeds repeatable.
             let mut rng =
                 crate::random::make_rng(self.random_state.map(|s| s.wrapping_add(i as u64)));
 
@@ -395,9 +401,7 @@ impl IsolationForest {
         self.offset = Some(match self.contamination {
             Contamination::Auto => AUTO_CONTAMINATION_OFFSET,
             Contamination::Fraction(c) => {
-                // scikit-learn resolves the cutoff as `percentile(score_samples(X), 100 * c)`
-                // with NumPy's default linear interpolation, so `offset` matches its `offset_`
-                // numerically rather than merely flagging the same count
+                // Interpolate the training-score percentile at the requested contamination fraction.
                 let scores = self.score_samples(x)?;
                 let mut sorted = scores.to_vec();
                 sorted.sort_unstable_by(f64::total_cmp);
@@ -553,7 +557,7 @@ impl IsolationForest {
     /// recomputing it for every sample.
     fn normalized_score(&self, sample: &[f64], trees: &[IsolationTree], c_n: f64) -> f64 {
         // Average path length across all trees. Each tree contributes 1 term, which stays
-        // below any parallel reduction gate. The per-sample batch loop parallelizes one level up.
+        // below any parallel reduction gate. The per-sample batch loop parallelizes 1 level up.
         let avg_path_length: f64 = trees
             .iter()
             .map(|tree| self.path_length(sample, tree, 0))
@@ -565,18 +569,16 @@ impl IsolationForest {
             return -1.0;
         }
 
-        // Liu et al.'s score is s(x, n) = 2^(-E(h(x)) / c(n)), which rises toward 1 for more
-        // anomalous samples. This function returns the negated score, matching scikit-learn's
-        // convention where *lower* means more anomalous and negative marks the rejected class.
+        // Return the negative of the isolation score `2^(-E[h(x)] / c(n))`.
+        // Lower scores indicate samples with shorter mean isolation paths.
         -(2.0_f64.powf(-avg_path_length / c_n))
     }
 
     /// Computes the anomaly score for each sample
     ///
-    /// Scores lie in `[-1, 0)`, and *lower* means more anomalous. The formula is
-    /// `-(2^(-E[h(x)] / c(n)))`, exactly scikit-learn's `score_samples`. For the same values
-    /// shifted by the fitted cutoff, use [`decision_function`](Self::decision_function). For a
-    /// hard inlier/outlier label, use [`predict`](Self::predict).
+    /// Scores use `-(2^(-E[h(x)] / c(n)))`. Lower scores indicate more anomalous samples.
+    /// Use [`decision_function`](Self::decision_function) for scores relative to the fitted cutoff.
+    /// Use [`predict`](Self::predict) for labels.
     ///
     /// # Parameters
     ///
@@ -588,11 +590,10 @@ impl IsolationForest {
     ///
     /// # Errors
     ///
-    /// Returns `Error` if:
-    /// - Model has not been fitted
-    /// - Input data is empty
-    /// - Feature dimension does not match training data
-    /// - Input contains NaN or infinite values
+    /// - `Error::EmptyInput` - If the feature matrix has no rows.
+    /// - `Error::NonFinite` - If the feature matrix contains a non-finite value.
+    /// - `Error::NotFitted` - If the model has no fitted trees or cutoff.
+    /// - `Error::DimensionMismatch` - If the feature count differs from training.
     ///
     /// # Performance
     ///
@@ -633,10 +634,7 @@ impl IsolationForest {
 
     /// Shifts each sample's score by the fitted cutoff, so that negative means outlier
     ///
-    /// `score_samples(x) - offset`, matching scikit-learn's `decision_function`. The
-    /// [`offset`](Self::get_offset) is model state rather than a quantile of `x`. A given
-    /// sample gets the same decision value whether the caller scores it alone or inside a
-    /// larger batch.
+    /// Each decision value is `score_samples(x) - offset`. The fitted offset stays fixed across prediction batches.
     ///
     /// # Parameters
     ///
@@ -654,8 +652,7 @@ impl IsolationForest {
     where
         S: Data<Elem = f64>,
     {
-        // `score_samples` validates the fitted state, so `offset` is Some by the time this
-        // function reads it.
+        // `score_samples` validates the trees and input. Read the fitted cutoff separately.
         let scores = self.score_samples(x)?;
         let offset = self
             .offset
@@ -666,9 +663,7 @@ impl IsolationForest {
 
     /// Classifies each sample as an inlier (`+1`) or outlier (`-1`)
     ///
-    /// Exactly the sign of [`decision_function`](Self::decision_function): a sample is an outlier
-    /// when its decision value is strictly negative. A sample landing exactly on the cutoff is
-    /// therefore an inlier, as in scikit-learn
+    /// A strictly negative decision value indicates an outlier. A sample on the cutoff is an inlier.
     ///
     /// # Parameters
     ///
@@ -706,7 +701,10 @@ impl IsolationForest {
     ///
     /// # Errors
     ///
-    /// Returns `Error` if fitting or prediction fails
+    /// - `Error::EmptyInput` - If the feature matrix has no rows.
+    /// - `Error::NonFinite` - If the feature matrix contains a non-finite value.
+    /// - `Error::NotFitted` - If the model has no fitted trees or cutoff.
+    /// - `Error::DimensionMismatch` - If the feature count differs from training.
     pub fn fit_predict<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -775,9 +773,7 @@ mod tests {
         assert!(f51 < f52, "factor(51)={f51} should be < factor(52)={f52}");
     }
 
-    /// For n>50 the ln(n-1)+gamma+1/(2(n-1)) approximation stays within a tight error bound of the
-    /// exact value c(n) = 2*H_{n-1} - 2(n-1)/n. The `1/(2(n-1))` correction term shrinks the error
-    /// from ~2e-2 (ln+gamma only) to ~1e-5, so a `1e-3` tolerance now comfortably holds
+    /// For the tested sample counts above 50, the harmonic approximation differs from the exact factor by less than `1e-3`.
     #[test]
     fn test_average_path_length_factor_matches_exact_harmonic_within_tolerance() {
         for &n in &[51usize, 100, 1000] {

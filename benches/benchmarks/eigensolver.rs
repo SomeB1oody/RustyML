@@ -3,7 +3,7 @@
 //! Isolates `machine_learning::linalg::top_eigenpairs_power_iteration` (power iteration with
 //! Hotelling deflation). It runs through the 2 public APIs that select it: the PCA
 //! `PowerIteration` SVD solver and the KernelPCA `PowerIteration` eigen solver. Configs are
-//! chosen so the iterative inner loop, not the single covariance or kernel GEMM, dominates the
+//! chosen so the iterative inner loop, not the 1 covariance or kernel GEMM, dominates the
 //! wall clock. A change to the per-iteration matvec count or the deflation step then shows up
 //! cleanly.
 //!
@@ -31,7 +31,7 @@ fn random_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f64> {
 
 /// KernelPCA with the `PowerIteration` eigen solver: the centered kernel matrix is `n x n`, so
 /// each power-iteration step is an `n x n` GEMV. With a small feature count, the iterative solve
-/// dwarfs the single kernel GEMM (`O(n^2 d)`). That solve runs `n_components` deflation
+/// dwarfs the 1 kernel GEMM (`O(n^2 d)`). That solve runs `n_components` deflation
 /// rounds, each running many `O(n^2)` matvecs, which isolates the deflated power-iteration inner
 /// loop.
 fn bench_kernel_pca_power_iteration(c: &mut Criterion) {

@@ -42,7 +42,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::layers::Multiply;
 /// use rustyml::neural_network::traits::Layer;
 ///
-/// // 2 samples of 3 features, and 1 scale per sample
+/// // 2 samples of 3 features, and 1 scale per sample.
 /// let features = Array::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
 ///     .unwrap()
 ///     .into_dyn();
@@ -52,20 +52,20 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// let mut ctx = Ctx::training();
 /// let output = layer.forward_many_mut(&[&features, &scales], &mut ctx).unwrap();
 ///
-/// // The scale of each sample reaches all 3 features
+/// // The scale of each sample reaches all 3 features.
 /// assert_eq!(output.shape(), &[2, 3]);
 /// assert_eq!(output[[0, 1]], 4.0);
 /// assert_eq!(output[[1, 2]], 60.0);
 ///
-/// // 1 gradient per input, each at the shape of that input
+/// // 1 gradient per input, each at the shape of that input.
 /// let grads = layer.backward_many(&Array::ones(output.raw_dim()), &mut ctx).unwrap();
 /// assert_eq!(grads[0].shape(), &[2, 3]);
 /// assert_eq!(grads[1].shape(), &[2, 1]);
 ///
-/// // The features take the scale of their own sample
+/// // The features take the scale of their own sample.
 /// assert_eq!(grads[0][[0, 0]], 2.0);
 ///
-/// // The scale broadcast over 3 features, so its gradient sums those 3 features
+/// // The scale broadcast over 3 features, so its gradient sums those 3 features.
 /// assert_eq!(grads[1][[0, 0]], 6.0);
 /// ```
 #[derive(Debug, Default)]
@@ -188,6 +188,7 @@ impl Layer for Multiply {
 }
 
 /// Unit tests of the forward product, the leave-1-out gradient, and the refusals
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::*;

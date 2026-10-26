@@ -1,8 +1,8 @@
-//! 2D zero-padding layer that adds zero rows and columns at the edges of an image
+//! 2D layer that adds rows and columns with value 0 at the edges of an image
 //!
-//! [`ZeroPadding2D`] adds zero rows and columns to the height axis and the width axis of a
+//! [`ZeroPadding2D`] adds rows and columns with value 0 to the height axis and the width axis of a
 //! `[batch, height, width, channels]` tensor. It holds no parameter. The forward pass and the
-//! backward pass both run through `pad_crop_engine`, which also backs this layer's inverse,
+//! backward pass both run through `pad_crop_engine`, which also backs the matching border layer,
 //! [`Cropping2D`].
 //!
 //! [`Cropping2D`]: crate::neural_network::layers::border::Cropping2D
@@ -20,7 +20,7 @@ use crate::neural_network::layers::{
 use crate::neural_network::traits::{LayerBase, UnaryLayer};
 use crate::neural_network::{Ctx, Shape, Tensor};
 
-/// Adds zero rows and columns at the edges of a rank-4 tensor
+/// Adds rows and columns with value 0 at the edges of a rank-4 tensor
 ///
 /// The input shape is `[batch_size, height, width, channels]`. The output shape is
 /// `[batch_size, height + top + bottom, width + left + right, channels]`. The batch axis and
@@ -44,7 +44,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array4;
 ///
-/// // A rank-4 input: 2 samples, 4x4 pixels, 3 channels
+/// // A rank-4 input: 2 samples, 4x4 pixels, 3 channels.
 /// let x = Array4::ones((2, 4, 4, 3)).into_dyn();
 ///
 /// let mut model = SequentialBuilder::new()
@@ -53,17 +53,17 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
 /// let padded = model.predict(&x).unwrap();
 ///
-/// // 1 zero row and 1 zero column at every edge, so 4x4 becomes 6x6
+/// // 1 row of 0 values and 1 column of 0 values at every edge, so 4x4 becomes 6x6.
 /// assert_eq!(padded.shape(), &[2, 6, 6, 3]);
 /// ```
 #[derive(Debug)]
 pub struct ZeroPadding2D {
-    /// Zero rows and columns to add at each of the 4 edges
+    /// Rows and columns with value 0 to add at each of the 4 edges
     padding: Border2D,
     /// Shape the layer was built for, batch axis first. `None` before the build.
     built: Option<Shape>,
@@ -74,7 +74,7 @@ impl ZeroPadding2D {
     ///
     /// # Parameters
     ///
-    /// - `padding` - Zero rows and columns to add. An integer gives the same amount at all 4
+    /// - `padding` - Rows and columns with value 0 to add. An integer gives the same amount at all 4
     ///   edges. A `(height, width)` pair gives 1 amount per axis. A pair of pairs
     ///   `((top, bottom), (left, right))` names all 4 edges. See [`Border2D`]
     ///

@@ -43,14 +43,14 @@ use ndarray::{Array1, Array4};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array4;
 ///
-/// // Create a simple 4D input tensor: [batch_size, height, width, channels]
-/// // Batch size=2, 5x5 pixels, 1 input channel
+/// // Create a simple 4D input tensor: [batch_size, height, width, channels].
+/// // Batch size=2, 5x5 pixels, 1 input channel.
 /// let x = Array4::ones((2, 5, 5, 1)).into_dyn();
 ///
-/// // Create target tensor (assuming 3 filters with output size 3x3)
+/// // Create target tensor (assuming 3 filters with output size 3x3).
 /// let y = Array4::ones((2, 3, 3, 3)).into_dyn();
 ///
-/// // Build model: add a Conv2D layer with 3 filters and 3x3 kernel
+/// // Build model: add a Conv2D layer with 3 filters and 3x3 kernel.
 /// let mut model = SequentialBuilder::new()
 ///     .add(Conv2D::new(
 ///         3,                      // Number of filters
@@ -62,17 +62,17 @@ use ndarray::{Array1, Array4};
 ///     .unwrap();
 /// model.compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Print model structure
+/// // Print model structure.
 /// model.summary();
 ///
-/// // Train the model (run a few epochs)
+/// // Train the model (run a few epochs).
 /// model.fit(&x, &y, 3).unwrap();
 ///
-/// // Use predict for forward propagation prediction
+/// // Use predict for forward propagation prediction.
 /// let prediction = model.predict(&x).unwrap();
 /// println!("Convolution layer prediction results: {:?}", prediction);
 ///
-/// // Check if output shape is correct (should be [2, 3, 3, 3])
+/// // Check if output shape is correct (should be [2, 3, 3, 3]).
 /// assert_eq!(prediction.shape(), &[2, 3, 3, 3]);
 /// ```
 #[derive(Debug)]
@@ -91,9 +91,8 @@ pub struct Conv2D {
     weights: Array4<f32>,
     /// 1D array of bias values with shape \[filters\]
     ///
-    /// The array stays allocated when `use_bias` is false, and nothing reads it in that case.
-    /// The forward pass adds nothing: it reads `weights` alone, and `parameters` never yields
-    /// the bias array, so a bias-free layer holds it and no more
+    /// The array stays allocated when `use_bias` is false. The forward pass and weight rosters
+    /// exclude it.
     bias: Array1<f32>,
     /// Activation applied to the convolution output
     activation: Activation,
@@ -228,7 +227,7 @@ impl Conv2D {
     /// By default, the draw takes the global seed or entropy (see [`crate::random`]). An
     /// unbuilt layer holds no kernel, so this records the seed and draws nothing. A layer that
     /// is already built draws its kernel again from the new seed, so the order of the 2 calls
-    /// does not matter. The bias stays zero-initialized
+    /// does not matter. A built layer also resets its bias to 0
     ///
     /// # Parameters
     ///
@@ -247,8 +246,8 @@ impl Conv2D {
 
     /// Draws the kernel and zeroes the bias, at the extents the build settled
     ///
-    /// The layer names its own channel count and filter count, so the fan pair does not depend
-    /// on the order of the 2 channel axes in the stored kernel
+    /// The layer supplies its channel count and filter count. The fan pair does not depend on
+    /// the order of the stored channel axes.
     fn draw_parameters(&mut self) {
         let mut rng = crate::random::make_rng(self.random_state);
         self.weights = Initializer::GlorotUniform.draw(
@@ -480,8 +479,7 @@ impl UnaryLayer for Conv2D {
                 .expect("weight gradient shape matches weights")
                 .into_dyn(),
         )?;
-        // A bias-free layer computes no bias gradient, so the store holds none and no
-        // optimizer state is ever keyed on a bias that the layer does not hold
+        // A layer without bias has no stored bias gradient or bias optimizer state.
         if self.use_bias {
             ctx.add_grad(
                 "bias",

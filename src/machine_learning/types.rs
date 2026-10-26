@@ -14,36 +14,11 @@ use crate::{Deserialize, Serialize};
 use gemmkit_ndarray::dot;
 use ndarray::{Array2, ArrayBase, ArrayView1, Axis, Data, Ix2, Zip};
 
-/// Regularization techniques used in machine learning models
+/// Penalty types for linear models and the linear support vector classifier.
 ///
-/// Regularization helps prevent overfitting by adding a penalty term to the model's
-/// loss function during training. The `f64` in each variant is the penalty coefficient
-///
-/// # What `alpha` means here
-///
-/// Every estimator that accepts this enum minimizes a **mean** data term plus an undivided
-/// penalty, with `n` the number of training samples:
-///
-/// ```text
-/// L1:  (1 / n) * sum(loss) + alpha * ||w||_1
-/// L2:  (1 / n) * sum(loss) + alpha * 0.5 * ||w||^2
-/// ```
-///
-/// That is exactly scikit-learn's `SGDRegressor` / `SGDClassifier` objective
-/// `E(w) = (1/n) * sum(L) + alpha * R(w)`, so `alpha` transfers **1:1** from either of those.
-/// This penalty never applies to the intercept, as in scikit-learn
-///
-/// # Converting an `alpha` from scikit-learn's closed-form estimators
-///
-/// Those use their own conventions, which differ from each other. Convert as follows, where `a`
-/// is the scikit-learn value and `n` the number of training samples:
-///
-/// | scikit-learn | RustyML |
-/// |---|---|
-/// | `Lasso(alpha=a)` | `L1(a)` (identical objective, both scale the data term by `1 / 2n`) |
-/// | `Ridge(alpha=a)` | `L2(a / n)` (`Ridge` does not divide the data term by `n`) |
-/// | `SGDRegressor(alpha=a)` / `SGDClassifier(alpha=a)` | `L1(a)` or `L2(a)` (no conversion) |
-/// | `LogisticRegression(C=c)` | `L1(1 / (c * n))` or `L2(1 / (c * n))` (`c = 1 / (n * alpha)`) |
+/// The coefficient scales a penalty added to the mean data loss.
+/// L1 adds `alpha * sum(abs(w))`. L2 adds `0.5 * alpha * sum(w^2)`.
+/// These penalties exclude the intercept.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum RegularizationType {
     /// L1 regularization (Lasso): adds the sum of absolute parameter values times the
@@ -51,10 +26,16 @@ pub enum RegularizationType {
     /// [`LinearRegression`](crate::machine_learning::LinearRegression) and
     /// [`LogisticRegression`](crate::machine_learning::LogisticRegression) apply it through a
     /// proximal (soft-thresholding) step, so unsupported coefficients reach exactly `0.0`
-    L1(f64),
+    L1(
+        /// Non-negative penalty coefficient.
+        f64,
+    ),
     /// L2 regularization (Ridge): adds half the sum of squared parameter values times the
     /// coefficient. Discourages large parameter values but does not produce sparse solutions
-    L2(f64),
+    L2(
+        /// Non-negative penalty coefficient.
+        f64,
+    ),
 }
 
 /// Kernel coefficient `gamma`, either an explicit value or a data-dependent rule
@@ -70,7 +51,10 @@ pub enum Gamma {
     /// `'auto'`: `1 / n_features`
     Auto,
     /// An explicit coefficient
-    Value(f64),
+    Value(
+        /// Explicit kernel coefficient.
+        f64,
+    ),
 }
 
 impl Gamma {
@@ -88,7 +72,7 @@ impl Gamma {
     /// # Errors
     ///
     /// - [`Error::InvalidInput`](crate::error::Error::InvalidInput) - If `Scale` is requested but
-    ///   the data variance is zero (constant features), or `n_features` is zero
+    ///   the variance is non-positive or non-finite, or `n_features` is 0
     pub fn resolve(self, n_features: usize, x_variance: f64) -> Result<f64, crate::error::Error> {
         if n_features == 0 {
             return Err(crate::error::Error::invalid_input(
@@ -126,6 +110,10 @@ impl Gamma {
     }
 
     /// Whether an explicit value is finite, or the gamma is an (always-valid) `Scale`/`Auto` rule
+    ///
+    /// # Returns
+    ///
+    /// - `bool` - Whether the explicit coefficient is finite, or the value is a rule.
     pub(crate) fn explicit_is_finite(self) -> bool {
         match self {
             Gamma::Value(v) => v.is_finite(),
@@ -134,6 +122,10 @@ impl Gamma {
     }
 
     /// Whether an explicit value is finite and positive, or an (always-valid) `Scale`/`Auto` rule
+    ///
+    /// # Returns
+    ///
+    /// - `bool` - Whether the explicit coefficient is positive and finite, or the value is a rule.
     pub(crate) fn explicit_is_positive(self) -> bool {
         match self {
             Gamma::Value(v) => v.is_finite() && v > 0.0,
@@ -190,7 +182,7 @@ impl KernelType {
     ///
     /// # Errors
     ///
-    /// - Propagates [`Gamma::resolve`] errors (zero variance with `Scale`, or zero features)
+    /// - Propagates [`Gamma::resolve`] errors (non-positive or non-finite variance with `Scale`, or 0 features)
     pub fn resolve_gamma(
         &self,
         n_features: usize,
@@ -221,8 +213,7 @@ impl KernelType {
 impl KernelType {
     /// Computes the kernel function value between 2 vectors
     ///
-    /// SVC and Kernel PCA both call this as the single source of truth for kernel dispatch,
-    /// instead of each re-implementing the `match` over variants
+    /// SVC and Kernel PCA use this method to evaluate each supported kernel.
     ///
     /// # Parameters
     ///
@@ -232,6 +223,10 @@ impl KernelType {
     /// # Returns
     ///
     /// - `f64` - The kernel function value between `x1` and `x2`
+    ///
+    /// # Panics
+    ///
+    /// Panics if vector lengths differ or a kernel coefficient uses an unresolved `Gamma::Scale` or `Gamma::Auto`.
     #[inline]
     pub fn compute(&self, x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
         match *self {
@@ -258,13 +253,10 @@ impl KernelType {
         }
     }
 
-    /// Computes the full kernel matrix `K[i, j] = K(x_i, y_j)` between 2 sample
-    /// sets in one shot. It routes the dominant cost through a single parallel GEMM
+    /// Computes the kernel matrix `K[row, col] = K(x_row, y_col)` for 2 sample sets.
     ///
-    /// Batched counterpart of [`compute`](Self::compute). Every kernel reduces to the
-    /// cross-Gram matrix `G = X*Y^T` (one rayon-parallel, cache-blocked matrix
-    /// multiply on the gemmkit backend). A cheap elementwise transform over the
-    /// `[n, m]` result then gives each kernel:
+    /// The matrix product `X * Y^T` provides dot products for all sample pairs.
+    /// Each kernel applies its elementwise formula to those products.
     ///
     /// - `Linear`  - `K = G`
     /// - `Poly`    - `K = (gamma*G + coef0)^degree`
@@ -272,23 +264,25 @@ impl KernelType {
     /// - `RBF`     - `K = exp(-gamma*D)`, `D[i,j] = ||x_i||^2 + ||y_j||^2 - 2*G[i,j]`
     /// - `Cosine`  - `K = G / (||x_i||*||y_j||)`
     ///
-    /// SVC's Gram matrix and Kernel PCA's (cross-)kernel matrix both call this instead
-    /// of looping [`compute`](Self::compute) over every pair. This turns an `n*m` swarm
-    /// of scalar dot products into one GEMM
+    /// SVC and Kernel PCA use this method for training and cross-kernel matrices.
     ///
     /// The result is numerically equivalent to filling each entry with
     /// [`compute`](Self::compute) up to floating-point rounding. The `RBF` distance is
-    /// clamped at zero to absorb the tiny negatives that the `||x||^2 + ||y||^2 - 2x*y`
+    /// clamped at 0 to absorb the tiny negatives that the `||x||^2 + ||y||^2 - 2x*y`
     /// identity can produce by cancellation
     ///
     /// # Parameters
     ///
-    /// - `x` - Left sample set, shape `[n, d]` (one sample per row)
-    /// - `y` - Right sample set, shape `[m, d]` (one sample per row)
+    /// - `x` - Left sample set, shape `[n, d]` (1 sample per row)
+    /// - `y` - Right sample set, shape `[m, d]` (1 sample per row)
     ///
     /// # Returns
     ///
     /// - `Array2<f64>` - The `[n, m]` kernel matrix
+    ///
+    /// # Panics
+    ///
+    /// Panics if feature counts differ or a kernel coefficient uses an unresolved `Gamma::Scale` or `Gamma::Auto`.
     pub fn compute_matrix<S1, S2>(
         &self,
         x: &ArrayBase<S1, Ix2>,
@@ -370,6 +364,7 @@ impl KernelType {
     }
 }
 
+/// Tests for the module helpers and model behavior.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -401,7 +396,7 @@ mod tests {
         assert_abs_diff_eq!(g, 0.73, epsilon = 1e-12);
     }
 
-    /// `Gamma::Scale` errors when the data variance is zero (constant features)
+    /// `Gamma::Scale` errors when the data variance is 0 (constant features)
     #[test]
     fn gamma_scale_errors_on_zero_variance() {
         assert!(Gamma::Scale.resolve(3, 0.0).is_err());
@@ -515,7 +510,7 @@ mod tests {
     }
 
     // Cosine kernel: K(x,y) = (x*y) / (||x|| * ||y||)
-    // zero vector -> norm_product=0, epsilon guard -> 0.0
+    // vector of 0 values -> norm_product=0, epsilon guard -> 0.0
     #[test]
     fn kernel_cosine_zero_vector() {
         let k = KernelType::Cosine;
@@ -550,7 +545,7 @@ mod tests {
     fn compute_matrix_matches_pairwise() {
         use ndarray::Array2;
 
-        // Deterministic, varied, non-degenerate rows (no all-zero row, so the
+        // Deterministic, varied, non-degenerate rows (no row with all values 0, so the
         // Cosine guard is not the only thing under test)
         let x = Array2::from_shape_fn((5, 3), |(i, j)| ((i * 3 + j) as f64) * 0.3 - 1.1);
         let y = Array2::from_shape_fn((4, 3), |(i, j)| ((i + 2 * j) as f64) * 0.2 + 0.4);
@@ -614,7 +609,7 @@ mod tests {
         }
     }
 
-    // Cosine guard: a zero row yields a full row/column of zeros, matching `compute`
+    // Cosine guard: a row of 0 values yields a full row/column of 0 values, matching `compute`
     #[test]
     fn compute_matrix_cosine_zero_row_guard() {
         use ndarray::Array2;

@@ -1,4 +1,7 @@
-//! Mean Absolute Error (MAE) loss function and its gradient.
+//! Mean absolute error loss and its prediction gradient.
+//!
+//! Both operations require equal tensor shapes and average over all elements.
+//! The gradient is 0 where the prediction equals the target.
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -15,7 +18,7 @@ use crate::neural_network::traits::Loss;
 /// use rustyml::neural_network::traits::Loss;
 /// use ndarray::ArrayD;
 ///
-/// // Sample data
+/// // Sample data.
 /// let y_true: Tensor = ArrayD::from_shape_vec(
 ///     vec![4],
 ///     vec![1.0, 2.0, 3.0, 4.0]
@@ -26,14 +29,14 @@ use crate::neural_network::traits::Loss;
 ///     vec![1.2, 1.8, 3.2, 3.9]
 /// ).unwrap();
 ///
-/// // Initialize MAE loss function
+/// // Initialize MAE loss function.
 /// let mae = MeanAbsoluteError::new();
 ///
-/// // Compute loss
+/// // Compute loss.
 /// let loss = mae.compute_loss(&y_true, &y_pred).unwrap();
 /// println!("MAE Loss: {:.4}", loss); // Expected: about 0.175
 ///
-/// // Compute gradients
+/// // Compute gradients.
 /// let gradients = mae.compute_grad(&y_true, &y_pred).unwrap();
 /// println!("Gradients: {:?}", gradients);
 /// ```

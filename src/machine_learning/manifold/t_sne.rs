@@ -93,9 +93,9 @@ const INITIAL_MOMENTUM: f64 = 0.5;
 const FINAL_MOMENTUM: f64 = 0.8;
 /// Scale for random initialization of the embedding
 const INIT_SCALE: f64 = 1e-4;
-/// Additive step for the adaptive gain when the gradient keeps its direction
+/// Gain increase when the gradient and previous update have different signs
 const GAIN_INCREASE: f64 = 0.2;
-/// Multiplicative decay for the adaptive gain when the step oscillates
+/// Gain multiplier when the gradient and previous update have equal signs
 const GAIN_DECAY: f64 = 0.8;
 /// Floor for the per-parameter adaptive gain
 const MIN_GAIN: f64 = 0.01;
@@ -105,8 +105,7 @@ const MIN_Q: f64 = f64::EPSILON;
 /// stopping
 const DEFAULT_MIN_GRAD_NORM: f64 = 1e-7;
 
-/// serde default for [`TSNE::min_grad_norm`], so models serialized before the field existed
-/// deserialize with the standard threshold instead of `0.0`
+/// Default gradient threshold for deserialization when the field is absent.
 fn default_min_grad_norm() -> f64 {
     DEFAULT_MIN_GRAD_NORM
 }
@@ -114,8 +113,8 @@ fn default_min_grad_norm() -> f64 {
 /// Strategy for initializing the low-dimensional embedding before optimization
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Init {
-    /// Initialize from the top principal components of the input. This method is deterministic
-    /// and gives a stable, well-spread layout. It is the default, and it ignores `random_state`
+    /// Use the top principal components when PCA supplies a non-degenerate embedding.
+    /// Otherwise, use the random initialization path.
     #[default]
     PCA,
     /// Initialize from small random noise seeded by `random_state`
@@ -138,7 +137,15 @@ pub enum TSNEMethod {
 }
 
 impl Default for TSNEMethod {
-    /// Returns the default method, Barnes-Hut with `angle = 0.5`
+    /// Returns the default gradient method.
+    ///
+    /// # Default Values
+    ///
+    /// - `angle` - `0.5` for the Barnes-Hut method.
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - An instance with default settings.
     fn default() -> Self {
         TSNEMethod::BarnesHut { angle: 0.5 }
     }
@@ -200,6 +207,10 @@ impl Default for TSNE {
     /// - `init` - [`Init::PCA`]
     /// - `method` - [`TSNEMethod::BarnesHut`] with `angle = 0.5`
     /// - `min_grad_norm` - 1e-7
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - An instance with default settings.
     fn default() -> Self {
         TSNE::new(2, 30.0, 200.0, 1000).expect("Default TSNE parameters should be valid")
     }
@@ -289,8 +300,8 @@ impl TSNE {
         })
     }
 
-    /// Sets a fixed RNG seed for the random initialization path, so it becomes reproducible.
-    /// The default is `None`, and PCA initialization stays deterministic regardless
+    /// Sets the seed for random initialization. The default is `None`.
+    /// PCA uses this seed only when it falls back to random initialization.
     ///
     /// # Parameters
     ///
@@ -501,7 +512,7 @@ impl TSNE {
         angle: f64,
     ) -> Result<Array2<f64>, Error> {
         let n_samples = x.nrows();
-        // Scan-class gate: the dominant gated work is the one-off neighbor search, n tasks of an
+        // Scan-class gate: the dominant gated work is the initial neighbor search, n tasks of an
         // O(n) projection-row scan each
         let use_parallel = n_samples.saturating_mul(n_samples) >= scan_f64_parallel_min_elems();
 
@@ -839,7 +850,7 @@ impl TSNE {
     ///
     /// This rescales the result so the leading component has standard deviation [`INIT_SCALE`],
     /// which keeps early gradients small. Returns `None` when PCA cannot supply `n_components`
-    /// directions or the leading component has zero spread. The caller then falls back to random
+    /// directions or the leading component has spread 0. The caller then falls back to random
     /// initialization
     fn pca_init(&self, x: &Array2<f64>) -> Option<Array2<f64>> {
         if x.ncols() < self.n_components {
@@ -987,7 +998,7 @@ impl TSNE {
             }
         }
 
-        // The diagonal is zero in both paths, so this sums only off-diagonal affinities
+        // The diagonal is 0 in both paths, so this sums only off-diagonal affinities
         let sum_num = num.sum();
         (num, sum_num)
     }
@@ -1289,7 +1300,7 @@ mod tests {
     use ndarray::array;
 
     /// `binary_search_sigma` returns a normalized P that hits the target perplexity, with the
-    /// zero-distance entry mapped to exactly 0
+    /// entry with distance 0 mapped to exactly 0
     #[test]
     fn binary_search_sigma_distribution_and_perplexity() {
         let distances = array![0.0_f64, 1.0, 1.0, 4.0, 9.0, 16.0];
@@ -1300,7 +1311,7 @@ mod tests {
         // P is a probability distribution: sums to 1
         assert_abs_diff_eq!(p.sum(), 1.0_f64, epsilon = 1e-9);
 
-        // Self or zero-distance entry must be exactly 0 (the `d == 0.0` branch)
+        // Self or entry with distance 0 must be exactly 0 (the `d == 0.0` branch)
         assert_abs_diff_eq!(p[0], 0.0_f64, epsilon = 1e-12);
 
         // Achieved perplexity, exp(-sum p ln p), must be within tolerance of the target. The

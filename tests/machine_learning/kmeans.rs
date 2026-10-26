@@ -8,8 +8,6 @@ use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
 use rustyml::machine_learning::KMeans;
 
-// Helpers
-
 /// Builds 3 blobs of 5 points near (0,0), (10,0), and (5,10).
 /// Blobs sit far enough apart that k=3 centers each within 0.1 of its true mean.
 fn three_blob_data() -> Array2<f64> {
@@ -75,8 +73,6 @@ fn assert_blob_structure(labels: &Array1<isize>, blob_size: usize) {
     }
 }
 
-// Constructor validation
-
 /// Rejects invalid constructor arguments with `Error::InvalidParameter`.
 /// Covers n_clusters=0, max_iterations=0, and tolerance of 0, negative, NaN, or +Inf.
 #[test]
@@ -124,8 +120,6 @@ fn default_constructor_has_documented_defaults() {
     assert_eq!(km.get_random_state(), None);
 }
 
-// fit error paths
-
 /// `fit` with `n_samples < n_clusters` must yield `Error::InvalidInput`
 #[test]
 fn fit_fewer_samples_than_clusters_is_error() {
@@ -138,8 +132,6 @@ fn fit_fewer_samples_than_clusters_is_error() {
         "expected InvalidInput, got {err:?}"
     );
 }
-
-// predict error paths
 
 /// `predict` with wrong number of features must yield `Error::DimensionMismatch`
 #[test]
@@ -156,8 +148,6 @@ fn predict_wrong_feature_count_is_dimension_mismatch() {
         "expected DimensionMismatch, got {err:?}"
     );
 }
-
-// Correctness on designed data
 
 /// After fitting k=3 on `three_blob_data()`, each blob's true mean has a matching
 /// centroid within tol 0.1 (cluster index ordering is arbitrary)
@@ -269,8 +259,6 @@ fn fit_predict_equals_fit_then_get_labels() {
     }
 }
 
-// Inertia invariants
-
 /// Inertia is strictly positive on non-degenerate data (points are not all identical)
 #[test]
 fn inertia_is_positive_on_blob_data() {
@@ -299,8 +287,6 @@ fn inertia_decreases_as_k_grows() {
         "k=1 inertia ({inertia_k1}) should be >= k=3 inertia ({inertia_k3})"
     );
 }
-
-// Boundary cases: k=1 and k=n_samples
 
 /// With k=1, the single centroid equals the global mean of the data
 #[test]
@@ -375,8 +361,6 @@ fn k_equals_n_samples_boundary() {
     );
 }
 
-// Determinism (seeded reproducibility)
-
 /// 2 KMeans instances with the same seed produce identical centroids, labels,
 /// inertia, and n_iter after fitting the same data.
 #[test]
@@ -429,8 +413,6 @@ fn different_seeds_still_converge_to_same_partition_on_blob_data() {
     assert_blob_structure(km_b.get_labels().unwrap(), 5);
 }
 
-// n_iter is populated after fit
-
 /// After a successful fit, `get_actual_iterations` returns `Some(n)` with
 /// `1 <= n <= max_iter`
 #[test]
@@ -448,8 +430,6 @@ fn actual_iterations_is_in_valid_range_after_fit() {
         "n_iter {n_iter:?} exceeds max_iter {max_iter}"
     );
 }
-
-// Save / load round-trip
 
 /// Saving a fitted model to disk and loading it back yields identical predictions
 /// and bit-for-bit equal centroids
@@ -478,8 +458,6 @@ fn save_load_round_trip_preserves_predictions() {
     let cl = km_loaded.get_centroids().unwrap();
     assert_allclose(co, cl, 0.0_f64);
 }
-
-// Larger-dataset fit: a correctness check at 1200 points
 
 /// Build 1200 points (3 tight, well-separated blobs of 400 each) with fully
 /// deterministic jitter (no RNG)
@@ -597,8 +575,6 @@ fn fit_parallel_accumulate_matches_serial_means_exactly() {
     }
 }
 
-// centroid-shift convergence: a converged solution is a fixed point
-
 /// A converged fit's centroids satisfy the fixed-point property: each centroid equals the mean
 /// of the points assigned to it, within the test's tolerance.
 #[test]
@@ -629,8 +605,6 @@ fn converged_centroids_equal_their_cluster_means() {
         }
     }
 }
-
-// n_init and the final assignment pass
 
 /// `n_init` defaults to 10 restarts and is settable
 #[test]

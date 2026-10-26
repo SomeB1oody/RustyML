@@ -21,16 +21,12 @@ use rustyml::{error::Error, neural_network::NnError};
 
 use crate::common::assert_allclose;
 
-// Helpers
-
 /// Build a 1-D Tensor (parameter vector) from a slice
 fn param1d(vals: &[f32]) -> Tensor {
     Array::from_shape_vec(vec![vals.len()], vals.to_vec())
         .unwrap()
         .into_dyn()
 }
-
-// GroupNormalization - forward value tests
 
 /// GN with num_groups=1 folds all channels into 1 group, normalizing across the
 /// whole (positions * channels) volume
@@ -78,9 +74,7 @@ fn group_norm_two_groups_forward_values() {
 
     let output = gn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
-    // Group 0: mean 2.5. Group 1: mean 6.5. Both have the same spread.
-    // Population variance is (1.5^2 + 0.5^2 + 0.5^2 + 1.5^2) / 4 = 1.25, and both center to
-    // [-1.5,-0.5,0.5,1.5]
+    // Both groups center to [-1.5, -0.5, 0.5, 1.5]. Their population variance is 1.25.
     let std_val = (1.25_f32 + 1e-5).sqrt();
     let expected_flat = vec![
         -1.5 / std_val, // pos0 ch0: 1 - 2.5
@@ -124,9 +118,8 @@ fn group_norm_two_batches_forward_values() {
 
     let output = gn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
-    // Group 0 (channels 0-1) is {1,2,3,4,5,6} (mean 3.5), and group 1 (channels 2-3) is
-    // {7..12} (mean 9.5). Both groups, in both batches, share the population variance
-    // (2.5^2 + 1.5^2 + 0.5^2 + 0.5^2 + 1.5^2 + 2.5^2) / 6 = 17.5 / 6.
+    // Each group in each batch has population variance 17.5 / 6. The centered values range from
+    // -2.5 to 2.5 in steps of 1.
     let std_val = (17.5_f32 / 6.0 + 1e-5).sqrt();
     let n = [-2.5_f32, -1.5, -0.5, 0.5, 1.5, 2.5].map(|c| c / std_val);
 
@@ -187,7 +180,7 @@ fn group_norm_custom_gamma_beta_forward_values() {
     assert_allclose(&output, &expected, 1e-5_f32);
 }
 
-/// A constant input has zero variance, so GN output is all zero (x_norm=0, beta=0)
+/// A constant input has 0 variance, so GN output is all 0 (x_norm=0, beta=0)
 #[test]
 fn group_norm_constant_input_yields_zero_output() {
     // [batch=1, positions=3, channels=4], 1 group over all 4 channels
@@ -240,10 +233,8 @@ fn group_norm_channel_axis_is_last() {
     assert_allclose(&output, &expected, 1e-5_f32);
 }
 
-// GroupNormalization - constructor / forward error paths
-
 /// Constructor rejects each invalid hyperparameter with InvalidParameter. Each row
-/// makes exactly 1 argument bad: num_groups (zero) or epsilon (zero or negative)
+/// makes exactly 1 argument bad: num_groups (0) or epsilon (0 or negative)
 #[test]
 fn group_norm_constructor_invalid_parameter_errors() {
     // (num_groups, epsilon, description)
@@ -308,8 +299,6 @@ fn group_norm_set_weights_shape_mismatch() {
     );
 }
 
-// InstanceNormalization - forward value tests
-
 /// IN normalizes each (batch, channel) pair independently over the spatial positions
 #[test]
 fn instance_norm_forward_values() {
@@ -324,8 +313,8 @@ fn instance_norm_forward_values() {
 
     let output = inn.forward_mut(&input, &mut Ctx::training()).unwrap();
 
-    // ch0 mean 2.5, ch1 mean 6.5. Both have population variance
-    // (1.5^2 + 0.5^2 + 0.5^2 + 1.5^2) / 4 = 1.25 and center to [-1.5,-0.5,0.5,1.5]
+    // Both channels have population variance 1.25. Each channel centers to [-1.5, -0.5, 0.5,
+    // 1.5].
     let std_val = (1.25_f32 + 1e-5).sqrt();
     let c = [-1.5_f32, -0.5, 0.5, 1.5].map(|v| v / std_val);
     let expected_flat = vec![c[0], c[0], c[1], c[1], c[2], c[2], c[3], c[3]];
@@ -414,7 +403,7 @@ fn instance_norm_multiple_batches_forward_values() {
     assert_allclose(&output, &expected, 1e-5_f32);
 }
 
-/// Constant input gives zero output (var=0, x_norm=0, beta=0)
+/// Constant input gives 0 output (var=0, x_norm=0, beta=0)
 #[test]
 fn instance_norm_constant_input_yields_zero_output() {
     let mut inn = InstanceNormalization::new(1e-5).unwrap();
@@ -456,8 +445,6 @@ fn instance_norm_channel_axis_is_last() {
 
     assert_allclose(&output, &expected, 1e-5_f32);
 }
-
-// Equivalence: GroupNorm(num_groups == num_channels) == InstanceNorm
 
 /// GroupNorm with num_groups == num_channels matches InstanceNorm: each channel of
 /// each sample is normalized independently
@@ -524,9 +511,7 @@ fn group_norm_full_groups_equals_instance_norm_with_affine() {
     assert_allclose(&out_gn, &out_in, 1e-6_f32);
 }
 
-// InstanceNormalization - constructor / forward error paths
-
-/// Constructor rejects a non-positive epsilon (zero / negative) with InvalidParameter
+/// Constructor rejects a non-positive epsilon (0 / negative) with InvalidParameter
 #[test]
 fn instance_norm_constructor_invalid_parameter_errors() {
     // (epsilon, description)

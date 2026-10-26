@@ -201,13 +201,11 @@ impl Algorithm {
 /// These parameters help prevent overfitting and shape the tree structure during training
 #[derive(Debug, Copy, Clone, PartialEq, Deserialize, Serialize)]
 pub struct DecisionTreeParams {
-    /// Maximum depth of the tree. If `None`, the tree grows until all leaves are pure or
-    /// hold fewer than `min_samples_split` samples
+    /// Maximum depth, or no depth limit when `None`. Other split constraints can stop growth before this depth.
     pub max_depth: Option<usize>,
     /// Minimum number of samples required to split an internal node. Must be at least 2
     pub min_samples_split: usize,
-    /// Minimum number of samples required at a leaf node. The tree rejects splits that
-    /// produce leaves with fewer samples
+    /// Minimum child size for numeric splits. Categorical splits require at least 2 children that meet this size.
     pub min_samples_leaf: usize,
     /// Minimum impurity decrease required for a split
     pub min_impurity_decrease: f64,
@@ -225,6 +223,10 @@ impl Default for DecisionTreeParams {
     /// - `min_samples_leaf` - `1`
     /// - `min_impurity_decrease` - `0.0`
     /// - `random_state` - `None`
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - An instance with default settings.
     fn default() -> Self {
         Self {
             max_depth: None,
@@ -366,7 +368,7 @@ impl Node {
 /// use rustyml::machine_learning::{DecisionTree, Algorithm};
 /// use ndarray::{array, Array1, Array2};
 ///
-/// // Classification example with Iris dataset
+/// // Classification example with Iris dataset.
 /// let x_train = array![
 ///     [5.1, 3.5, 1.4, 0.2],
 ///     [4.9, 3.0, 1.4, 0.2],
@@ -377,23 +379,23 @@ impl Node {
 /// ];
 /// let y_train = array![0.0, 0.0, 1.0, 1.0, 2.0, 2.0];
 ///
-/// // Create and train a CART classifier with custom parameters
+/// // Create and train a CART classifier with custom parameters.
 /// let mut tree = DecisionTree::new(Algorithm::CART, true)
 ///     .unwrap()
 ///     .with_max_depth(5)
 ///     .with_random_state(42);
 /// tree.fit(&x_train, &y_train).unwrap();
 ///
-/// // Make predictions
+/// // Make predictions.
 /// let x_test = array![[5.0, 3.2, 1.2, 0.2], [6.5, 3.0, 5.2, 2.0]];
 /// let predictions = tree.predict(&x_test).unwrap();
 ///
-/// // Get probability estimates for classification
+/// // Get probability estimates for classification.
 /// let probabilities = tree.predict_proba(&x_test).unwrap();
 ///
-/// // Categorical features: mark which columns hold discrete category codes
-/// // ID3 and C4.5 then split them multi-way (1 branch per distinct value),
-/// // which can separate classes a single binary threshold cannot
+/// // Categorical features: mark which columns hold discrete category codes.
+/// // ID3 and C4.5 then split them multi-way (1 branch per distinct value),.
+/// // which can separate classes a single binary threshold cannot.
 /// let x_cat = array![[0.0], [0.0], [1.0], [1.0], [2.0], [2.0]];
 /// let y_cat = array![0.0, 0.0, 1.0, 1.0, 0.0, 0.0]; // value 1 -> class 1, values 0/2 -> class 0
 ///
@@ -492,6 +494,14 @@ impl DecisionTree {
 
     /// Sets the minimum number of samples required to split an internal node (default: `2`)
     ///
+    /// # Parameters
+    ///
+    /// - `min_samples_split` - Minimum sample count needed to split a node.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated model.
+    ///
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - if `min_samples_split` is less than 2
@@ -508,6 +518,14 @@ impl DecisionTree {
 
     /// Sets the minimum number of samples required at a leaf node (default: `1`)
     ///
+    /// # Parameters
+    ///
+    /// - `min_samples_leaf` - Minimum sample count allowed in each child.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated model.
+    ///
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - if `min_samples_leaf` is less than 1
@@ -523,6 +541,14 @@ impl DecisionTree {
     }
 
     /// Sets the minimum impurity decrease required for a split (default: `0.0`)
+    ///
+    /// # Parameters
+    ///
+    /// - `min_impurity_decrease` - Minimum impurity decrease allowed for a split.
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated model.
     ///
     /// # Errors
     ///
@@ -544,16 +570,19 @@ impl DecisionTree {
     /// Sets a fixed seed for breaking ties between equally-scoring splits
     /// (default: `None`, deterministic tie-breaking that always picks the last tied candidate)
     ///
+    /// # Parameters
+    ///
+    /// - `seed` - Seed for random split tie resolution.
+    ///
     /// # Returns
     ///
-    /// - `Self` - the updated instance, for method chaining
+    /// - `Self` - The updated instance.
     #[inline]
     pub fn with_random_state(mut self, seed: u64) -> Self {
         self.params.random_state = Some(seed);
         self
     }
 
-    // Getters
     get_field!(get_algorithm, algorithm, Algorithm);
     get_field!(get_n_features, n_features, usize);
     get_field!(get_n_classes, n_classes, Option<usize>);
@@ -610,6 +639,10 @@ impl DecisionTree {
     /// # Returns
     ///
     /// - `Result<&mut Self, Error>` - A mutable reference to `self` for method chaining
+    ///
+    /// # Panics
+    ///
+    /// Panics if a classification target contains NaN and the maximum-label comparison reaches that value.
     ///
     /// # Errors
     ///
@@ -1054,8 +1087,8 @@ impl DecisionTree {
 
     /// Evaluates a multi-way categorical split for a single feature (1 branch per value)
     ///
-    /// Returns `(selection_score, split, impurity_decrease)`, or `None` when the feature
-    /// has fewer than 2 distinct values or the split does not reduce impurity
+    /// Returns the selection score, split, and impurity decrease.
+    /// Returns `None` when fewer than 2 categories exist or the algorithm cannot score the split.
     fn evaluate_categorical_split<S1, S2>(
         &self,
         x: &ArrayBase<S1, Ix2>,
@@ -1130,9 +1163,8 @@ impl DecisionTree {
 
     /// Calculates mean squared error for regression samples
     ///
-    /// MSE impurity is the population variance of the node's targets. `preliminary_check`
-    /// validates that inputs are finite. This function uses a plain 2-pass mean/squared-deviation
-    /// calculation, with no NaN handling or extra allocation
+    /// MSE impurity is the population variance of the node targets.
+    /// The calculation uses 2 passes and does not filter non-finite target values.
     fn calculate_mse<S>(&self, y: &ArrayBase<S, Ix1>, indices: &[usize]) -> f64
     where
         S: Data<Elem = f64>,
@@ -1288,10 +1320,11 @@ impl DecisionTree {
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model has not been trained yet
-    /// - `Error::EmptyInput` - If input data is empty
-    /// - `Error::DimensionMismatch` - If feature dimensions mismatch
-    /// - `Error::NonFinite` - If input data contains NaN or infinite values
+    /// - `Error::NotFitted` - If the model has no fitted tree.
+    /// - `Error::EmptyInput` - If the input matrix contains no elements.
+    /// - `Error::DimensionMismatch` - If the feature count differs from training.
+    /// - `Error::NonFinite` - If input features contain non-finite values.
+    /// - `Error::Tree` - If traversal finds a missing child or categorical fallback.
     ///
     /// # Performance
     ///
@@ -1337,9 +1370,19 @@ impl DecisionTree {
     ///
     /// - `Result<Array1<f64>, Error>` - A 1D array of predictions for the training data
     ///
+    ///
+    /// # Panics
+    ///
+    /// Panics if a classification target contains NaN and the maximum-label comparison reaches that value.
+    ///
     /// # Errors
     ///
-    /// Propagates any error from [`fit`](Self::fit) or [`predict`](Self::predict)
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If input data is empty or target lengths differ.
+    /// - `Error::NonFinite` - If input features contain non-finite values.
+    /// - `Error::InvalidInput` - If sample counts, features, or classification labels are not valid.
+    /// - `Error::InvalidParameter` - If `min_samples_leaf` exceeds `min_samples_split`.
+    /// - `Error::Computation` - If the model cannot determine class information.
+    /// - `Error::Tree` - If tree traversal encounters an invalid structure.
     pub fn fit_predict<S1, S2>(
         &mut self,
         x_train: &ArrayBase<S1, Ix2>,
@@ -1576,7 +1619,7 @@ impl DecisionTree {
                         feature_index
                     ));
 
-                    // One branch per category value (sorted by key for stable output), plus a
+                    // 1 branch per category value (sorted by key for stable output), plus a
                     // default branch for unseen values
                     let mut branches: Vec<(String, &Node)> = node
                         .children

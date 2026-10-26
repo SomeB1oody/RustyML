@@ -1,9 +1,7 @@
 //! Logistic regression for binary classification
 //!
-//! Provides the [`LogisticRegression`] model, trained by full-batch gradient descent on the
-//! logistic loss, with optional L1 or L2 regularization. Fitting never panics: every precondition
-//! failure and numerical issue during training surfaces as an [`Error`] from
-//! [`LogisticRegression::fit`].
+//! Provides [`LogisticRegression`] for binary classification with full-batch gradient descent.
+//! The model supports an optional intercept and L1 or L2 penalties.
 //!
 //! Also provides the [`generate_polynomial_features`] helper, which expands a feature
 //! matrix into its polynomial combinations up to a chosen degree. Use it to fit a
@@ -26,7 +24,7 @@ use gemmkit_ndarray::Parallelism;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Axis, Data, Ix1, Ix2, s};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
-/// Computes the logistic sigmoid `1 / (1 + e^-z)`, mapping any real number into `(0, 1)`
+/// Computes the logistic sigmoid `1 / (1 + e^-z)`. Floating-point results can reach 0 or 1.
 #[inline]
 fn sigmoid(z: f64) -> f64 {
     1.0 / (1.0 + (-z).exp())
@@ -42,10 +40,10 @@ fn sigmoid(z: f64) -> f64 {
 /// use rustyml::machine_learning::LogisticRegression;
 /// use ndarray::{Array1, Array2};
 ///
-/// // Create a logistic regression model
+/// // Create a logistic regression model.
 /// let mut model = LogisticRegression::default();
 ///
-/// // Training data with 2 features (x1, x2) for a logical AND function
+/// // Training data with 2 features (x1, x2) for a logical AND function.
 /// let x_train = Array2::from_shape_vec((4, 2), vec![
 ///     0.0, 0.0,  // [0,0] -> 0
 ///     0.0, 1.0,  // [0,1] -> 0
@@ -55,16 +53,16 @@ fn sigmoid(z: f64) -> f64 {
 ///
 /// let y_train = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.0]);
 ///
-/// // Train the model
+/// // Train the model.
 /// model.fit(&x_train, &y_train).unwrap();
 ///
-/// // Create test data
+/// // Create test data.
 /// let x_test = Array2::from_shape_vec((2, 2), vec![
 ///     1.0, 0.0,  // Should predict 0
 ///     1.0, 1.0,  // Should predict 1
 /// ]).unwrap();
 ///
-/// // Make predictions
+/// // Make predictions.
 /// let predictions = model.predict(&x_test);
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -91,8 +89,7 @@ impl Default for LogisticRegression {
     /// # Default Values
     ///
     /// - `fit_intercept` - `true`, so training adds an intercept term (bias)
-    /// - `learning_rate` - `0.01`, a moderate rate that gives stable convergence for most
-    ///   problems
+    /// - `learning_rate` - `0.01`, the gradient step size
     /// - `max_iter` - `100`, the maximum number of gradient descent iterations
     /// - `tol` - `1e-4`, the loss-change threshold that stops training
     /// - `regularization_type` - `None`, so training applies no L1 or L2 penalty
@@ -185,7 +182,6 @@ impl LogisticRegression {
         Ok(self)
     }
 
-    // Getters
     get_field!(get_fit_intercept, fit_intercept, bool);
     get_field!(get_learning_rate, learning_rate, f64);
     get_field!(get_max_iterations, max_iter, usize);
@@ -302,8 +298,7 @@ impl LogisticRegression {
                 return Err(Error::non_finite("gradient calculation"));
             }
 
-            // L1 is absent here. The proximal operator below applies it after the step, so
-            // penalized coefficients reach exactly 0.0 instead of only approaching it.
+            // The L1 proximal step follows the gradient update. Only L2 contributes to this gradient.
             if let Some(RegularizationType::L2(regularization_strength)) = &self.regularization_type
             {
                 let start_idx = if self.fit_intercept { 1 } else { 0 };
@@ -351,10 +346,8 @@ impl LogisticRegression {
             // In-place gradient step, avoiding a fresh weight array every iteration
             weights.scaled_add(-self.learning_rate, &gradients);
 
-            // Proximal step for L1 (ISTA). Soft-thresholding by `learning_rate * alpha` is the
-            // exact minimizer of `0.5 * ||w - v||^2 + learning_rate * alpha * ||w||_1`. An
-            // unsupported coefficient lands on exactly 0.0. This loop skips the intercept at
-            // index 0, since it carries no penalty.
+            // Apply the L1 proximal step with threshold `learning_rate * alpha`.
+            // Skip the intercept coefficient when the model includes an intercept.
             if let Some(RegularizationType::L1(regularization_strength)) = &self.regularization_type
             {
                 let start_idx = if self.fit_intercept { 1 } else { 0 };
@@ -433,9 +426,7 @@ impl LogisticRegression {
     ///
     /// # Notes
     ///
-    /// Labels are `f64` rather than an integer type so they round-trip back into
-    /// [`fit`](Self::fit) and feed the `f64` classification metrics
-    /// (`ConfusionMatrix`, `accuracy`) without a conversion
+    /// Labels use `f64`, as required by [`fit`](Self::fit) and the classification metrics.
     ///
     /// # Errors
     ///
@@ -456,8 +447,7 @@ impl LogisticRegression {
 
     /// Predicts the positive-class probability for each sample
     ///
-    /// Applies the sigmoid function to the linear decision values to produce
-    /// probabilities in the range (0, 1)
+    /// Applies the sigmoid to the linear scores. Floating-point results lie in `[0, 1]`.
     ///
     /// # Parameters
     ///
@@ -601,17 +591,21 @@ impl LogisticRegression {
 /// use ndarray::array;
 /// use rustyml::machine_learning::{generate_polynomial_features, LogisticRegression};
 ///
-/// // A simple dataset for binary classification
+/// // A simple dataset for binary classification.
 /// let training_x = array![[0.5, 1.0], [1.0, 2.0], [1.5, 3.0], [2.0, 2.0], [2.5, 1.0]];
 /// let training_y = array![0.0, 0.0, 1.0, 1.0, 0.0];
 ///
-/// // Transform features to polynomial features
+/// // Transform features to polynomial features.
 /// let poly_training_x = generate_polynomial_features(&training_x, 2);
 ///
-/// // Train a logistic regression model with polynomial features
+/// // Train a logistic regression model with polynomial features.
 /// let mut model = LogisticRegression::default();
 /// model.fit(&poly_training_x, &training_y).unwrap();
 /// ```
+///
+/// # Panics
+///
+/// Panics when `degree` is 0 and `x` has rows and feature columns.
 pub fn generate_polynomial_features<S>(x: &ArrayBase<S, Ix2>, degree: usize) -> Array2<f64>
 where
     S: Data<Elem = f64> + Send + Sync,
@@ -660,8 +654,7 @@ where
     if degree >= 2 {
         let mut col_idx = n_features;
 
-        // Recursive combination helper. The recursion needs this many arguments, so the
-        // attribute below allows the lint.
+        // The recursive helper writes each feature combination into its output column.
         #[allow(clippy::too_many_arguments)]
         fn add_combinations<S>(
             x: &ArrayBase<S, Ix2>,

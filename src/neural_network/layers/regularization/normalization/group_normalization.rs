@@ -40,14 +40,14 @@ const MIN_RANK: usize = 2;
 /// use rustyml::neural_network::traits::UnaryLayer;
 /// use ndarray::Array3;
 ///
-/// // Create a GroupNormalization layer for input shape [batch, spatial, channels]
-/// // with 4 groups dividing 8 channels
+/// // Create a GroupNormalization layer for input shape [batch, spatial, channels].
+/// // with 4 groups dividing 8 channels.
 /// let mut gn_layer = GroupNormalization::new(4, 1e-5).unwrap();
 ///
-/// // Create input tensor
+/// // Create input tensor.
 /// let input = Array3::ones((4, 32, 8)).into_dyn();
 ///
-/// // A training pass normalizes within each group independently
+/// // A training pass normalizes within each group independently.
 /// let mut ctx = Ctx::training();
 /// let output = gn_layer.forward_mut(&input, &mut ctx).unwrap();
 /// ```
@@ -68,7 +68,7 @@ pub struct GroupNormalization {
     /// Shift parameter (trainable)
     ///
     /// The array stays allocated and holds every element at 0 when `center` is false. A shift
-    /// of 0 changes every value except a negative zero, which it turns into a positive zero.
+    /// of 0 changes every value except a negative 0, which it turns into a positive 0.
     /// `weights` hides the array and `parameters_mut` never yields it
     beta: Tensor,
     /// Whether the layer adds the shift `beta`
@@ -164,7 +164,14 @@ impl GroupNormalization {
     /// - `beta` - Shift parameter (trainable), or `None` for a layer built with
     ///   [`with_center(false)`](Self::with_center)
     ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - `Ok(())` after all supplied weights are assigned.
+    ///
     /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::NotBuilt)` - If the layer has not been built.
+    /// - `Error::InvalidParameter` - If an optional array conflicts with its scale or center flag.
     ///
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `gamma` or `beta` does not match the
     ///   stored parameter shape
@@ -208,8 +215,7 @@ impl LayerBase for GroupNormalization {
     }
 
     fn param_count(&self) -> ParamCounts {
-        // Read the arrays the layer holds rather than the configuration, so dropping
-        // `gamma` or `beta` corrects the count with no second formula to keep in step
+        // Count stored arrays so the total stays correct when `gamma` or `beta` is absent
         let gamma = if self.scale { self.gamma.len() } else { 0 };
         let beta = if self.center { self.beta.len() } else { 0 };
         ParamCounts::trainable(gamma + beta)

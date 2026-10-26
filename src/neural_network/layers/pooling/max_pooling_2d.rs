@@ -51,16 +51,16 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array4;
 ///
-/// // 4D input tensor: [batch_size, height, width, channels]
-/// // batch size 2, 6x6 pixels, 3 input channels
+/// // 4D input tensor: [batch_size, height, width, channels].
+/// // batch size 2, 6x6 pixels, 3 input channels.
 /// let mut input_data = Array4::zeros((2, 6, 6, 3));
 ///
-/// // Set values that make the max pooling result predictable
+/// // Set values that make the max pooling result predictable.
 /// for b in 0..2 {
 ///     for c in 0..3 {
 ///         for i in 0..6 {
 ///             for j in 0..6 {
-///                 // Easily observable pattern
+///                 // Easily observable pattern.
 ///                 input_data[[b, i, j, c]] = (i * j) as f32 + b as f32 * 0.1 + c as f32 * 0.01;
 ///             }
 ///         }
@@ -70,13 +70,13 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// let x = input_data.clone().into_dyn();
 ///
 /// let mut model = SequentialBuilder::new()
-///     // strides default to pool_size (2, 2) and padding defaults to Valid
+///     // strides default to pool_size (2, 2) and padding defaults to Valid.
 ///     .add(MaxPooling2D::new((2, 2)))
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Target tensor matching the pooled shape
+/// // Target tensor matching the pooled shape.
 /// let y = Array4::ones((2, 3, 3, 3)).into_dyn();
 ///
 /// model.summary();
@@ -140,7 +140,7 @@ impl MaxPooling2D {
     ///
     /// # Returns
     ///
-    /// - `Self` - The updated layer
+    /// - `Result<Self, Error>` - The updated layer
     ///
     /// # Errors
     ///

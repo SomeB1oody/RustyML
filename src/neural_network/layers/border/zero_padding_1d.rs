@@ -1,8 +1,8 @@
-//! 1D zero-padding layer that adds zero steps at each end of the step axis
+//! 1D layer that adds steps with value 0 at each end of the step axis
 //!
-//! [`ZeroPadding1D`] adds zero steps to the step axis of a `[batch, steps, features]` tensor. It
+//! [`ZeroPadding1D`] adds steps with value 0 to the step axis of a `[batch, steps, features]` tensor. It
 //! holds no parameter. The forward pass and the backward pass both run through
-//! `pad_crop_engine`, which also backs this layer's inverse,
+//! `pad_crop_engine`, which also backs the matching border layer,
 //! [`Cropping1D`].
 //!
 //! [`Cropping1D`]: crate::neural_network::layers::border::Cropping1D
@@ -20,13 +20,13 @@ use crate::neural_network::layers::{
 use crate::neural_network::traits::{LayerBase, UnaryLayer};
 use crate::neural_network::{Ctx, Shape, Tensor};
 
-/// Adds zero steps at each end of the step axis of a rank-3 tensor
+/// Adds steps with value 0 at each end of the step axis of a rank-3 tensor
 ///
 /// The input shape is `[batch_size, steps, features]`. The output shape is
 /// `[batch_size, steps + before + after, features]`. The batch axis and the feature axis pass
 /// through unchanged.
 ///
-/// The layer holds no parameter. It writes zeros in the new steps, so a later layer sees a
+/// The layer holds no parameter. It writes 0 values in the new steps, so a later layer sees a
 /// longer sequence whose ends carry no signal. A convolution over the padded sequence then
 /// keeps its output length, without the layer itself choosing a padding mode.
 ///
@@ -43,7 +43,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array3;
 ///
-/// // A rank-3 input: 2 samples, 4 steps, 3 features
+/// // A rank-3 input: 2 samples, 4 steps, 3 features.
 /// let x = Array3::ones((2, 4, 3)).into_dyn();
 ///
 /// let mut model = SequentialBuilder::new()
@@ -52,17 +52,17 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
 /// let padded = model.predict(&x).unwrap();
 ///
-/// // 1 zero step before the first step and 2 after the last, so 4 steps become 7
+/// // 1 step with value 0 before the first step and 2 after the last, so 4 steps become 7.
 /// assert_eq!(padded.shape(), &[2, 7, 3]);
 /// ```
 #[derive(Debug)]
 pub struct ZeroPadding1D {
-    /// Zero steps to add at each end of the step axis
+    /// Steps with value 0 to add at each end of the step axis
     padding: Border1D,
     /// Shape the layer was built for, batch axis first. `None` before the build.
     built: Option<Shape>,
@@ -73,7 +73,7 @@ impl ZeroPadding1D {
     ///
     /// # Parameters
     ///
-    /// - `padding` - Zero steps to add at each end of the step axis. An integer gives an equal
+    /// - `padding` - Steps with value 0 to add at each end of the step axis. An integer gives an equal
     ///   amount at both ends. A `(before, after)` pair names each end. See [`Border1D`]
     ///
     /// # Returns

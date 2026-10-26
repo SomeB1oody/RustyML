@@ -1,41 +1,15 @@
-//! Stateful feature scalers that remember their training statistics
+//! Stateful scalers for 2D feature matrices.
 //!
-//! Houses the `fit` and `transform` counterparts to the stateless [`standardize`] and
-//! [`normalize`] functions, mirroring scikit-learn's `sklearn.preprocessing` scalers. Each
-//! one learns its per-feature statistics once, on the training matrix. It reuses those
-//! frozen numbers for every later batch: the test split, a validation fold, or a single
-//! sample arriving at inference time. This keeps a train-test boundary honest. Rescaling a
-//! test set by its own column statistics applies a different linear map than the one the
-//! model was trained under.
-//!
-//! | Scaler | Maps each feature by | Reach for it when |
-//! |---|---|---|
-//! | [`StandardScaler`] | `(x - mean) / std` | the default for distance- and gradient-based models |
-//! | [`MinMaxScaler`] | `(x - min) / (max - min)`, rescaled into a target range | you need values bounded to `[0, 1]` (or any range) |
-//! | [`MaxAbsScaler`] | `x / max(\|x\|)` | zeros and signs must survive, for example sparse data |
-//! | [`RobustScaler`] | `(x - median) / IQR` | outliers you do not want to remove |
-//! | [`Normalizer`] | each *sample* divided by its own norm | only a sample's direction carries signal |
-//!
-//! [`Normalizer`] is the odd one out. It rescales samples (rows), not features (columns), so
-//! it learns nothing beyond the feature count. It exists so row normalization uses the same
-//! [`Fit`] and [`Transform`] contract as the rest. The other 4 are per-feature and stateful in the
-//! full sense. All but [`RobustScaler`] also support `partial_fit`. Their statistics merge exactly
-//! across batches, but quantiles do not.
-//!
-//! Every scaler here is 2-D and per-feature, exactly like scikit-learn's. The free functions
-//! handle row-wise or whole-array standardization, and N-D arrays.
-//!
-//! [`standardize`]: crate::utils::standardize::standardize
-//! [`normalize`]: crate::utils::normalize::normalize
-//! [`Fit`]: crate::traits::Fit
-//! [`Transform`]: crate::traits::Transform
+//! Feature scalers store training statistics and reuse them for later transforms.
+//! `Normalizer` instead scales each row by its own norm and stores only the feature count.
+//! Shared helpers check matrices, compute column statistics, and apply row transforms.
 
 use crate::error::Error;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, scan_f64_parallel_min_elems};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, ArrayViewMut1, Axis, Data, Ix2};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-/// Scale features by their maximum absolute value, preserving zeros and signs
+/// Scale features by their maximum absolute value, preserving 0 values and signs
 pub mod max_abs_scaler;
 /// Scale features to a `[0, 1]` (or custom) range
 pub mod min_max_scaler;
@@ -43,7 +17,7 @@ pub mod min_max_scaler;
 pub mod normalizer;
 /// Scale features by their median and interquartile range, resisting outliers
 pub mod robust_scaler;
-/// Standardize features to zero mean and unit variance
+/// Standardize features to mean 0 and variance 1
 pub mod standard_scaler;
 
 pub use max_abs_scaler::MaxAbsScaler;
@@ -52,22 +26,17 @@ pub use normalizer::Normalizer;
 pub use robust_scaler::RobustScaler;
 pub use standard_scaler::StandardScaler;
 
-/// A divisor at or below this magnitude is treated as degenerate and replaced by `1.0`
-///
-/// [`normalize`](crate::utils::normalize::normalize) uses the same threshold for a near-zero
-/// lane. It also matches scikit-learn's `_handle_zeros_in_scale` rule
+/// Absolute divisor magnitude below which the scale becomes `1.0`.
 const DEGENERATE_SCALE_THRESHOLD: f64 = 10.0 * f64::EPSILON;
 
 /// Replaces a degenerate divisor with `1.0`
 ///
-/// A feature with no spread otherwise divides by about zero and blows up to `NaN` or `Inf`.
+/// A feature with no spread otherwise divides by about 0 and blows up to `NaN` or `Inf`.
 /// This happens for a constant column in [`MinMaxScaler`] or [`RobustScaler`], and for an
-/// all-zero column in [`MaxAbsScaler`]. A divisor of `1.0` instead leaves the value unchanged
+/// column with all values 0 in [`MaxAbsScaler`]. A divisor of `1.0` instead leaves the value unchanged
 /// after centering
 ///
-/// [`StandardScaler`] does not use this rule. It detects a constant feature from the variance
-/// itself, a magnitude-relative bound. scikit-learn reserves this finer test for the standard
-/// scaler too
+/// [`StandardScaler`] uses a variance-based bound to detect constant features instead.
 #[inline]
 fn handle_zero_scale(scale: f64) -> f64 {
     if scale.abs() < DEGENERATE_SCALE_THRESHOLD {
@@ -91,7 +60,7 @@ fn column_min_max(x: &ArrayView2<f64>) -> Vec<(f64, f64)> {
 
     let lanes: Vec<ArrayView1<f64>> = x.lanes(Axis(0)).into_iter().collect();
 
-    // Scan-class gate: one O(n_samples) pass per feature, so the work is the element count
+    // Scan-class gate: 1 O(n_samples) pass per feature, so the work is the element count
     if x.len() >= scan_f64_parallel_min_elems() {
         lanes.into_par_iter().map(fold_lane).collect()
     } else {
@@ -101,17 +70,16 @@ fn column_min_max(x: &ArrayView2<f64>) -> Vec<(f64, f64)> {
 
 /// Computes the requested quantiles of every feature
 ///
-/// `quantiles` holds fractions in `[0, 1]`. The returned vector has one entry per feature,
+/// `quantiles` holds fractions in `[0, 1]`. The returned vector has 1 entry per feature,
 /// each listing that feature's quantiles in the order requested. The function copies each
 /// column out, sorts it once, and reads it at every requested position. Asking for 3
-/// quantiles this way costs one sort rather than 3 passes
+/// quantiles this way costs 1 sort rather than 3 passes
 ///
 /// Interpolates linearly between the 2 order statistics that bracket a fractional position.
-/// This is NumPy's default `linear` method, the same one scikit-learn's `RobustScaler` uses,
-/// so its quantiles line up with a ported pipeline
+/// Fractional positions use the adjacent sorted values.
 ///
 /// Each column is handled independently, so the serial and parallel paths produce identical
-/// results. The gate only decides who does the work. Each worker copies only one column at a
+/// results. The gate only decides who does the work. Each worker copies only 1 column at a
 /// time, so the extra memory is `threads * n_samples`, not a second copy of the matrix
 fn column_quantiles(x: &ArrayView2<f64>, quantiles: &[f64]) -> Vec<Vec<f64>> {
     let lane_quantiles = |lane: ArrayView1<f64>| {
@@ -126,7 +94,7 @@ fn column_quantiles(x: &ArrayView2<f64>, quantiles: &[f64]) -> Vec<Vec<f64>> {
 
     let lanes: Vec<ArrayView1<f64>> = x.lanes(Axis(0)).into_iter().collect();
 
-    // Scan-class gate: one sort per feature, so the work scales with the element count
+    // Scan-class gate: 1 sort per feature, so the work scales with the element count
     if x.len() >= scan_f64_parallel_min_elems() {
         lanes.into_par_iter().map(lane_quantiles).collect()
     } else {

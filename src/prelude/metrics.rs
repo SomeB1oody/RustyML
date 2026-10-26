@@ -1,4 +1,6 @@
-//! Prelude re-exports for evaluation metrics
+//! Classification, clustering, and regression metric exports.
+//!
+//! The exports include confusion matrices, score functions, and binary threshold curves.
 
 pub use crate::metrics::{
     Average, ConfusionMatrix, MulticlassConfusionMatrix, accuracy, adjusted_mutual_info,

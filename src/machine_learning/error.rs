@@ -19,9 +19,13 @@ pub enum TreeError {
     /// The tree's internal structure violated an invariant (a missing child, an absent
     /// categorical fallback, or a leaf without stored probabilities)
     #[error("corrupt tree structure: {0}")]
-    CorruptStructure(&'static str),
+    CorruptStructure(
+        /// Description of the tree invariant that failed.
+        &'static str,
+    ),
 }
 
+/// Tests for the module helpers and model behavior.
 #[cfg(test)]
 mod tests {
     use super::TreeError;

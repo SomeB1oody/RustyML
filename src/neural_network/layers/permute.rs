@@ -1,5 +1,8 @@
 //! Permute layer that reorders the axes after the batch axis, and parks the input shape for
 //! backpropagation
+//!
+//! The configured order leaves the batch axis first. The backward pass applies the inverse
+//! order to restore the input axes.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -42,22 +45,22 @@ use ndarray::IxDyn;
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array3;
 ///
-/// // A rank-3 input: 2 samples, 5 steps, 3 features
+/// // A rank-3 input: 2 samples, 5 steps, 3 features.
 /// let x = Array3::ones((2, 5, 3)).into_dyn();
 ///
-/// // Swap the step axis and the feature axis
+/// // Swap the step axis and the feature axis.
 /// let mut model = SequentialBuilder::new()
 ///     .add(Permute::new(vec![2, 1]).unwrap())
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
 /// let swapped = model.predict(&x).unwrap();
 ///
-/// // The batch axis stays first, and the other 2 axes trade places
+/// // The batch axis stays first, and the other 2 axes trade places.
 /// assert_eq!(swapped.shape(), &[2, 3, 5]);
 /// ```
 #[derive(Debug)]

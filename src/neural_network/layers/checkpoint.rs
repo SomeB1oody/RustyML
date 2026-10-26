@@ -69,18 +69,17 @@ pub const MODEL_MAGIC: u32 = 0x524D_4C4D;
 /// of these layouts agrees between versions, so a file from an earlier version stops loading,
 /// and the refusal names both versions
 ///
-/// Bump this on any change to a record layout, a field order, or a field meaning. The load
-/// path checks the number of model positions, the layer type of each node, the sublayer names
-/// of each node, and the name, the kind, and the shape of every array. Those checks can all
-/// pass for a file that another release wrote. This number is what makes such a file fail
-/// instead of loading values that mean something else
+/// Bump this on any change to a record layout, a field order, or a field meaning. The load path
+/// checks the model position count, node types, and sublayer names. It also checks each array
+/// name, kind, and shape. Those checks can all pass for a file that another release wrote. This
+/// number is what makes such a file fail instead of loading values that mean something else
 pub const MODEL_FORMAT_VERSION: u32 = 4;
 
 /// The shapes that a layer was built for
 ///
 /// A layer allocates every array it owns in
 /// [`Layer::build_many`], from the shapes of
-/// its inputs. The build shape is therefore the 1 thing a fresh layer does not have, and it
+/// its inputs. The build shape is therefore the shape a fresh layer does not have, and it
 /// decides every extent the layer allocates. A file carries it so that a load can refuse a
 /// model that was built for another input
 ///
@@ -239,7 +238,7 @@ pub struct LoadReport {
 ///
 /// Nothing is copied. Each record borrows the name and the elements of the live array, so the
 /// checkpoint is a view of the model until it is serialized. An array that a layer does not
-/// hold in 1 contiguous run is the 1 exception, and its record owns a C-order copy
+/// hold in 1 contiguous run is the only exception, and its record owns a C-order copy
 ///
 /// # Parameters
 ///
@@ -442,18 +441,17 @@ fn write_layer(layer: &mut dyn LayerBase, saved: &LayerCheckpoint<'_>) {
 
 /// Applies what the file and the model agree on, and reports the rest
 ///
-/// This is the opt-in lenient load. It writes an array only when 3 conditions all hold: the
-/// node holds the same layer type, the 2 sides agree on the build shape, and the file holds
-/// the same name, kind, and shape. Everything else goes into the report and nothing else
-/// fails.
+/// This is the opt-in lenient load. An array must match the layer type, build shape, name,
+/// kind, and array shape before the load writes it. Everything else goes into the report and
+/// nothing else fails.
 ///
 /// A node whose layer type differs contributes every path of its tree to both lists. A name
 /// and a shape cannot tell 2 normalization layers apart
 ///
-/// A node whose build shape differs does the same. [`apply`] refuses such a file, and this
-/// skips the node and its sublayers: the 2 paths agree that a layer built for another input
-/// takes no weights. The per-array shape check cannot stand in for it, because a convolution
-/// kernel is the same shape for every spatial extent
+/// A node whose build shape differs does the same. [`apply`] refuses such a file. This load
+/// skips the node and its sublayers because the layer was built for another input. The
+/// per-array shape check cannot stand in for it, because a convolution kernel is the same shape
+/// for every spatial extent
 ///
 /// A sublayer of the model meets the sublayer of the file with the same name. A sublayer that
 /// only 1 side holds contributes every path of its tree to 1 list

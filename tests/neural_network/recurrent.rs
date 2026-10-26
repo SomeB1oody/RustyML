@@ -47,8 +47,6 @@ fn grad_of<'a>(ctx: &'a Ctx, name: &'static str) -> &'a [f32] {
         .expect("a gradient of the store is in the standard memory order")
 }
 
-// SimpleRNN
-
 /// SimpleRNN forward over 1 timestep, 1 unit with Tanh yields tanh(0.5)
 #[test]
 fn simple_rnn_forward_1step_1unit_tanh() {
@@ -213,8 +211,6 @@ fn simple_rnn_set_weights_wrong_kernel_shape_errors() {
         "expected WeightShape error, got: {err:?}"
     );
 }
-
-// LSTM
 
 /// LSTM forward over 1 timestep, 1 unit with Tanh and forget bias = 1.0
 #[test]
@@ -425,8 +421,6 @@ fn lstm_set_weights_wrong_shape_errors() {
     );
 }
 
-// GRU
-
 /// GRU forward over 1 timestep, 1 unit with Tanh
 #[test]
 fn gru_forward_1step_1unit_tanh() {
@@ -455,8 +449,8 @@ fn gru_forward_1step_1unit_tanh() {
 
     assert_eq!(out.shape(), &[1, 1]);
 
-    // z = sigmoid(0.5) = 0.62245933, candidate = tanh(0.5) = 0.46211716, h_prev = 0
-    // h = z*h_prev + (1-z)*candidate = 0.37754067 * 0.46211716 = 0.17446802
+    // The update gate is sigmoid(0.5), about 0.62245933. The candidate is tanh(0.5), about
+    // 0.46211716. With previous state 0, the result is (1-z)*candidate, about 0.17446802.
     let expected = Array::from_elem((1, 1), 0.174_468_02_f32).into_dyn();
     assert_allclose(&out, &expected, 1e-6);
 }
@@ -491,10 +485,9 @@ fn gru_forward_2step_hidden_state_blending() {
 
     assert_eq!(out.shape(), &[1, 1]);
 
-    // t0: z = sigmoid(0.3) = 0.57444252, cand = tanh(0.3) = 0.29131261, h_prev = 0
-    //     h = 0.42555748 * 0.29131261 = 0.12397026
-    // t1: z = sigmoid(0.7) = 0.66818777, cand = tanh(0.7) = 0.60436778
-    //     h = 0.66818777 * 0.12397026 + 0.33181223 * 0.60436778 = 0.28337203
+    // At step 0, z is about 0.57444252 and the candidate is about 0.29131261. With previous
+    // state 0, h is about 0.12397026. At step 1, z is about 0.66818777 and the candidate is
+    // about 0.60436778. The blend z*h_prev + (1-z)*candidate gives about 0.28337203.
     let expected = Array::from_elem((1, 1), 0.283_372_03_f32).into_dyn();
     assert_allclose(&out, &expected, 1e-5);
 }
@@ -519,7 +512,7 @@ fn gru_update_gate_zero_takes_the_candidate() {
         bias.clone(), // reset
         k_neg.clone(),
         rk.clone(),
-        bias.clone(), // update (near-zero z_t)
+        bias.clone(), // update (z_t near 0)
         k_zero.clone(),
         rk.clone(),
         bias.clone(), // candidate
@@ -529,7 +522,7 @@ fn gru_update_gate_zero_takes_the_candidate() {
     let x = Array::from_elem((1, 1, 1), 1.0_f32).into_dyn();
     let out = gru.forward(&x, &mut Ctx::training()).unwrap();
 
-    // h_prev=0 and the candidate kernel is zero, so h_t = 1 * tanh(0) = 0
+    // h_prev=0 and the candidate kernel is 0, so h_t = 1 * tanh(0) = 0
     assert_eq!(out.shape(), &[1, 1]);
     assert!(
         out[[0, 0]].abs() < 1e-4,
@@ -540,7 +533,7 @@ fn gru_update_gate_zero_takes_the_candidate() {
 
 /// GRU update gate near 1 keeps the previous hidden state, regardless of the candidate value
 ///
-/// The candidate here is tanh(1), a clearly non-zero value, so a flipped `z_t` would show 0.76
+/// The candidate here is tanh(1), a clearly non-0 value, so a flipped `z_t` would show 0.76
 /// instead of 0.
 #[test]
 fn gru_update_gate_one_keeps_previous_hidden() {
@@ -688,8 +681,6 @@ fn gru_set_weights_wrong_shape_errors() {
     );
 }
 
-// Cross-layer: Activation enum interface vs concrete activation types
-
 /// SimpleRNN accepts Activation enum values, not just concrete activation structs
 #[test]
 fn simple_rnn_accepts_activation_enum_tanh() {
@@ -769,13 +760,11 @@ fn gru_accepts_activation_enum_tanh() {
     let x = Array::from_elem((1, 1, 1), 0.5_f32).into_dyn();
     let out = gru.forward(&x, &mut Ctx::training()).unwrap();
 
-    // z = sigmoid(0.5) = 0.62245933, candidate = tanh(0.5) = 0.46211716, h_prev = 0
-    // h = z*h_prev + (1-z)*candidate = 0.37754067 * 0.46211716 = 0.17446802
+    // The update gate is sigmoid(0.5), about 0.62245933. The candidate is tanh(0.5), about
+    // 0.46211716. With previous state 0, the result is (1-z)*candidate, about 0.17446802.
     let expected = Array::from_elem((1, 1), 0.174_468_02_f32).into_dyn();
     assert_allclose(&out, &expected, 1e-6);
 }
-
-// Determinism: same weights + same input => identical outputs
 
 /// SimpleRNN: 2 forward passes with the same weights and input are bit-identical
 #[test]
@@ -830,7 +819,6 @@ fn gru_forward_is_deterministic() {
 
     assert_eq!(out1, out2, "GRU forward passes must be bit-identical");
 }
-// param_count(): trainable parameter formula per recurrent layer
 
 /// SimpleRNN param_count = input_dim*units + units*units + units (1 gate)
 #[test]
@@ -862,10 +850,9 @@ fn lstm_param_count_formula() {
     assert_eq!(lstm.param_count(), ParamCounts::trainable(48));
 }
 
-// return_sequences and go_backwards
-// The 3 layers share the same fixed input and a weight-generating formula (see `flag_input` and
-// `flag_weights`), each sized to that layer's own gate count. Every value is an exact multiple
-// of 1/8, which f32 holds without rounding, so the same numbers pin all 4 flag combinations.
+// The 3 layer types share fixed input and weight formulas in `flag_input` and `flag_weights`.
+// Each weight shape matches its gate count. Values are exact multiples of 1/8 in f32, so the
+// same data checks all 4 flag combinations.
 
 /// The fixed rank-3 input of the flag tests, with shape (batch 2, timesteps 3, features 2)
 ///
@@ -1375,11 +1362,10 @@ const PRE_ACTIVATION_ACTIVATIONS: [Activation; 4] = [
     Activation::Mish,
 ];
 
-/// Every gradient of each cell matches a finite difference for each activation that saves its
-/// pre-activation, for all 4 flag combinations
+/// All 3 recurrent layers match finite differences for activations that save pre-activation values.
 ///
-/// The upstream gradient varies along the time axis, so a record of the wrong step or of the
-/// wrong slot cannot hide behind a constant gradient.
+/// The test checks all 4 flag combinations. A time-varying upstream gradient exposes wrong step
+/// records and lost direct contributions to the carried gradient.
 #[test]
 fn pre_activation_activations_match_finite_difference_for_every_flag_combination() {
     let x = flag_input();
@@ -2105,8 +2091,6 @@ fn gru_return_sequences_go_backwards_matches_keras() {
         "grad_bias",
     );
 }
-
-// The 2 guards that the cell protocol made uniform
 
 /// All 3 layers accept a weight matrix in a non-standard memory order, and store it in the
 /// standard order

@@ -36,22 +36,22 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::MeanSquaredError;
 /// use ndarray::Array2;
 ///
-/// // Create a 2D input tensor
+/// // Create a 2D input tensor.
 /// let x = Array2::from_shape_vec((2, 3), vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0])
 ///     .unwrap()
 ///     .into_dyn();
 ///
-/// // Build a model with Mish activation
+/// // Build a model with Mish activation.
 /// let mut model = SequentialBuilder::new()
 ///     .add(Mish::new())
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Forward propagation
+/// // Forward propagation.
 /// let output = model.predict(&x);
 ///
-/// // Output will be: [[-0.30340147, 1.943959, -0.14564745], [3.997413, -0.033576235, 5.9999266]]
+/// // Output will be: [[-0.30340147, 1.943959, -0.14564745], [3.997413, -0.033576235, 5.9999266]].
 /// ```
 #[derive(Debug)]
 pub struct Mish {
@@ -71,6 +71,15 @@ impl Mish {
 }
 
 impl Default for Mish {
+    /// Creates the default Mish layer.
+    ///
+    /// # Default Values
+    ///
+    /// Uses the configuration from [`Self::new`].
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The default layer.
     fn default() -> Self {
         Self::new()
     }

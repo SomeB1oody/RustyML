@@ -16,12 +16,12 @@ use crate::neural_network::traits::{LayerBase, Optimizer};
 /// AdamW (Adam with decoupled weight decay) optimizer
 ///
 /// Identical adaptive moment math to [`Adam`](crate::neural_network::optimizers::Adam), but its
-/// `weight_decay` is decoupled. AdamW shrinks the parameter directly by the factor
-/// `(1 - learning_rate * weight_decay)` before the gradient step, instead of folding an L2 term
-/// into the gradient. The decay therefore does not flow through the moment estimates, and
-/// the adaptive denominator does not rescale it. This is the Loshchilov and Hutter formulation,
-/// and the better-behaved choice with adaptive optimizers. With `weight_decay == 0.0` it matches
-/// `Adam`. Weight decay applies to weight tensors only, never to biases or normalization
+/// `weight_decay` is decoupled. AdamW multiplies the parameter by `(1 - learning_rate * weight_decay)` before the gradient
+/// step. It adds no L2 term to the gradient. The decay therefore does not flow through the moment estimates, and
+/// the adaptive denominator does not rescale it. This follows the Loshchilov and Hutter formulation. With `weight_decay == 0.0` it matches
+/// `Adam`.
+///
+/// Weight decay applies to weight tensors only, never to biases or normalization
 /// scale/shift parameters
 #[derive(Debug)]
 pub struct AdamW {
@@ -54,8 +54,9 @@ impl AdamW {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - if any hyperparameter is out of range or `weight_decay` is
-    ///   negative or not finite
+    /// - `Error::InvalidParameter` - If the learning rate or epsilon is not positive and finite. Both beta values must be
+    ///   finite in `[0, 1)`.
+    ///   Weight decay must be nonnegative and finite.
     pub fn new(
         learning_rate: f32,
         beta1: f32,
@@ -68,10 +69,10 @@ impl AdamW {
         })
     }
 
-    /// Enables clip-by-global-norm gradient clipping (disabled by default)
+    /// Enables a global gradient norm limit (disabled by default)
     ///
-    /// `global_clipnorm` scales every gradient so the global L2 norm never exceeds it, preserving
-    /// the gradient direction
+    /// The training loop scales gradients when their finite global L2 norm exceeds the
+    /// threshold. A non-finite norm leaves gradients unchanged.
     ///
     /// # Parameters
     ///
@@ -81,6 +82,10 @@ impl AdamW {
     ///
     /// - `Result<Self, Error>` - the updated optimizer, or an error if `global_clipnorm` is not
     ///   positive and finite
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If the threshold is not positive and finite.
     pub fn with_global_clipnorm(self, global_clipnorm: f32) -> Result<Self, Error> {
         Ok(Self {
             core: self.core.with_global_clipnorm(global_clipnorm)?,

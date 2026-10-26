@@ -25,8 +25,6 @@ use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::{assert_allclose, named};
 
-// helpers
-
 /// Build a 2D Tensor from row-major data
 fn t2(rows: usize, cols: usize, data: Vec<f32>) -> Tensor {
     Array2::from_shape_vec((rows, cols), data)
@@ -58,8 +56,6 @@ fn reference_table() -> Vec<f32> {
     ]
 }
 
-// Constructor validation
-
 /// A table needs at least 1 row and at least 1 column
 #[test]
 fn embedding_new_rejects_a_zero_dimension() {
@@ -84,8 +80,6 @@ fn embedding_param_count_is_the_table_size() {
         );
     }
 }
-
-// Forward values
 
 /// A rank-2 index batch gathers the matching rows, matching Keras 3.15 case `rank2_batch`
 #[test]
@@ -131,7 +125,7 @@ fn embedding_forward_adds_exactly_1_axis_at_any_rank() {
     );
 }
 
-/// An index truncates toward zero, exactly as the Keras cast to a whole number does
+/// An index truncates toward 0, exactly as the Keras cast to a whole number does
 #[test]
 fn embedding_forward_truncates_an_index_toward_zero() {
     let table = vec![
@@ -149,8 +143,6 @@ fn embedding_forward_truncates_an_index_toward_zero() {
     }
     assert_allclose(&out, &t2(5, 3, expected), 1e-6_f32);
 }
-
-// Layout
 
 /// An index tensor whose memory is not in C order still gives the right values, in C order
 #[test]
@@ -174,8 +166,6 @@ fn embedding_accepts_an_input_that_is_not_in_c_order() {
     }
     assert_allclose(&out, &t3(3, 2, 3, expected), 0.0_f32);
 }
-
-// Backward
 
 /// The gradient of a row is the sum over every position that selected it
 ///
@@ -221,7 +211,7 @@ fn embedding_backward_matches_the_keras_scatter_add_reference() {
     assert_allclose(&grad, &expected, 1e-6_f32);
 }
 
-/// A row that no index selects gets a zero gradient
+/// A row that no index selects gets a 0 gradient
 #[test]
 fn embedding_backward_leaves_an_unused_row_at_zero() {
     let table = vec![
@@ -320,8 +310,6 @@ fn embedding_backward_returns_a_zero_input_gradient() {
     assert!(grad_input.is_standard_layout());
 }
 
-// Serial and parallel agreement
-
 /// A gather above the parallel gate gives the same bits as the same gather below it
 ///
 /// The whole batch clears the gate. 1 sample of it does not, so the per-sample lookups run on
@@ -363,8 +351,6 @@ fn embedding_parallel_gather_matches_the_serial_gather() {
         assert_allclose(&serial, &expected, 0.0_f32);
     }
 }
-
-// Error paths
 
 /// An index at or above the table height names no row
 #[test]
@@ -443,8 +429,6 @@ fn embedding_set_weights_checks_the_table_shape() {
     ));
 }
 
-// Layer trait surface
-
 /// The layer names itself for `summary()`, and reports the shape that its build settled
 #[test]
 fn embedding_reports_its_type_and_output_shape() {
@@ -518,8 +502,6 @@ fn embedding_with_random_state_is_reproducible_and_bounded() {
         "the table starts inside the uniform range of the Keras default"
     );
 }
-
-// Model integration
 
 /// An embedding front end trains inside a model, and the loss decreases
 #[test]

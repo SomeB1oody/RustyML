@@ -11,8 +11,8 @@
 //! position. A window reduction reads `channels` contiguous floats per tap and folds them into a
 //! `channels`-wide accumulator. This reduces every channel of a position together
 //!
-//! The engine computes the window geometry, the bounds checks, the index arithmetic, and the
-//! in-bounds element count, once per output position, and reuses it for every channel
+//! The engine computes window geometry, bounds checks, index offsets, and the valid element
+//! count once per output position. Each channel uses these results.
 //!
 //! Forward work splits over `(batch item, output-position block)`, each with a disjoint output
 //! slab
@@ -89,7 +89,7 @@ fn row_major_strides(shape: &[usize]) -> Vec<usize> {
 ///
 /// # Returns
 ///
-/// - `bool` - `true` while there are more indices, `false` once it wraps back to all-zero
+/// - `bool` - `true` while there are more indices, `false` once it wraps back to all values 0
 #[inline]
 fn increment_index(idx: &mut [usize], dims: &[usize]) -> bool {
     for k in (0..idx.len()).rev() {
@@ -126,9 +126,9 @@ tunable_gate! {
     /// Test-only cap on the output positions of 1 forward task. See
     /// [`split_cap`](crate::parallel_gates::split_cap)
     ///
-    /// The production value 0 keeps [`POOL_MIN_CHUNK_OUT`]. A small test input holds fewer
-    /// positions than that minimum, so the forward pass would build 1 task per batch item and
-    /// leave the position split unread. A cap of 1 or more splits it
+    /// The production value 0 keeps [`POOL_MIN_CHUNK_OUT`]. A small input below that minimum
+    /// creates 1 task per batch item. A positive cap lets
+    /// tests exercise the position split.
     ///
     /// The same serial window loop folds every position, whatever the task boundaries are, so
     /// the cap changes no value. Reachable outside the crate only through `bench_internals`
@@ -139,9 +139,9 @@ tunable_gate! {
     /// Test-only cap on the channels of 1 backward slab. See
     /// [`split_cap`](crate::parallel_gates::split_cap)
     ///
-    /// The production value 0 keeps [`POOL_MIN_CHUNK_CHANNELS`]. A small test input holds
-    /// fewer channels than that minimum, so the backward pass would build 1 slab per batch item
-    /// and leave the channel split unread. A cap of 1 or more splits it
+    /// The production value 0 keeps [`POOL_MIN_CHUNK_CHANNELS`]. A small input below that
+    /// minimum creates 1 slab per batch item. A positive cap lets
+    /// tests exercise the channel split.
     ///
     /// A slab owns a disjoint set of channels, and it accumulates in output-position order at
     /// every width, so the cap changes no value. Reachable outside the crate only through
@@ -520,9 +520,8 @@ pub(super) fn windowed_pool_backward(
         }
     };
 
-    // One task per (batch item, channel slab). The channel floor can leave 1 slab regardless of
-    // total work, so `parallel` needs a second check beyond the gate: whether the split yields
-    // more than 1 task
+    // 1 task serves each (batch item, channel slab). The channel floor can leave 1 slab at any
+    // workload. Parallel work also requires more than 1 task.
     let total_ops = batch
         .saturating_mul(plane_out)
         .saturating_mul(channels)
@@ -603,7 +602,7 @@ pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Op
         .as_slice()
         .expect("standard-layout array is contiguous");
 
-    // One task per (batch item, block of positions). The block size depends only on the channel
+    // 1 task per (batch item, block of positions). The block size depends only on the channel
     // count. The fold grouping, and with it the float summation order, therefore depends on the
     // input shape and never on the schedule
     let block = rows_per_block(channels);
@@ -648,8 +647,8 @@ pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Op
         (acc, arg)
     };
 
-    // A global pool has 1 output position, so the tap count per item is exactly `item_in` and
-    // this metric is the same element-ops count the windowed passes use
+    // A global pool has 1 output position and `item_in` input elements per item. This uses the same
+    // operation count as the windowed passes.
     let parallel = batch.saturating_mul(item_in) >= pool_parallel_min_ops();
     let partials: Vec<(Vec<f32>, Vec<usize>)> = if parallel {
         tasks.par_iter().map(run).collect()
@@ -657,8 +656,8 @@ pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Op
         tasks.iter().map(run).collect()
     };
 
-    // Merge the block partials in block order. Folding them with the same rule the serial scan
-    // uses reproduces a single pass exactly. A `Max` block that saw a NaN keeps it. Ties still
+    // Merge block partials in block order. For max pooling, the fold reproduces the serial
+    // scan. A `Max` block that saw a NaN keeps it. Ties still
     // resolve to the earliest position
     let mut out_flat = match kind {
         PoolKind::Max => vec![f32::NEG_INFINITY; batch * channels],
@@ -886,8 +885,8 @@ mod tests {
         let (out, argmax) =
             windowed_pool_forward(&data, &[2], &[2], PoolKind::Max, PaddingType::Valid);
         assert_eq!(out.shape(), &[1, 2, 2]);
-        // Window 0 covers positions 0-1: max is 4 on channel 0 and 2 on channel 1
-        // Window 1 covers positions 2-3: max is 2 on channel 0 and 4 on channel 1
+        // Window 0 covers positions 0-1. Its maxima are 4 on channel 0 and 2 on channel 1.
+        // Window 1 covers positions 2-3. Its maxima are 2 on channel 0 and 4 on channel 1.
         assert_eq!(
             out.iter().copied().collect::<Vec<f32>>(),
             vec![4.0, 2.0, 2.0, 4.0]

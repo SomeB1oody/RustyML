@@ -7,8 +7,6 @@ use ndarray::{Array2, array};
 use rustyml::error::Error;
 use rustyml::machine_learning::{MeanShift, estimate_bandwidth};
 
-// helpers
-
 /// Builds 2 well-separated blobs of 5 points each, near (0,0) and (20,20).
 /// With bandwidth=2.0, every intra-blob point sits inside the kernel window.
 fn two_blob_data() -> Array2<f64> {
@@ -22,8 +20,6 @@ fn two_blob_data() -> Array2<f64> {
     )
     .unwrap()
 }
-
-// constructor validation
 
 #[test]
 fn test_new_invalid_bandwidth_is_invalid_parameter() {
@@ -88,8 +84,6 @@ fn test_default_constructor_values() {
     assert!(ms.get_cluster_all());
 }
 
-// pre-fit state
-
 #[test]
 fn test_getters_return_none_before_fit() {
     let ms = MeanShift::default();
@@ -98,8 +92,6 @@ fn test_getters_return_none_before_fit() {
     assert!(ms.get_n_samples_per_center().is_none());
     assert!(ms.get_actual_iterations().is_none());
 }
-
-// predict errors before fitting
 
 #[test]
 fn test_predict_wrong_feature_dimension_returns_dimension_mismatch() {
@@ -119,8 +111,6 @@ fn test_predict_wrong_feature_dimension_returns_dimension_mismatch() {
         result
     );
 }
-
-// fit / predict correctness on designed data
 
 /// fit on 2 tight, well-separated blobs discovers exactly 2 centers numerically
 /// close to the true blob means (0,0) and (20,20)
@@ -148,7 +138,7 @@ fn test_fit_produces_two_centers_near_true_means() {
     );
     assert_eq!(centers.ncols(), 2, "centers must have 2 features");
 
-    // Each center must be within 0.5 units of one true blob mean, matched by
+    // Each center must be within 0.5 units of a true blob mean, matched by
     // whichever fitted center is closest
     let true_centers = [[0.0_f64, 0.0_f64], [20.0_f64, 20.0_f64]];
     for tc in &true_centers {
@@ -217,7 +207,7 @@ fn test_predict_assigns_points_to_correct_cluster() {
     let label_a = labels_train[0]; // label for blob-A region
     let label_b = labels_train[5]; // label for blob-B region
 
-    // 2 canonical predict points, one deep inside each blob
+    // 2 query points lie deep inside their respective blobs.
     let x_new = Array2::from_shape_vec(
         (2, 2),
         vec![
@@ -258,8 +248,6 @@ fn test_fit_predict_consistent_with_fit_then_labels() {
         assert_eq!(a, b);
     }
 }
-
-// cluster_all=false outlier label
 
 /// With cluster_all=false, a point beyond bandwidth from every fitted center is labeled -1,
 /// matching scikit-learn's noise sentinel.
@@ -343,8 +331,6 @@ fn test_fit_labels_cluster_all_true_all_assigned() {
     }
 }
 
-// max_iter respected
-
 #[test]
 fn test_actual_iterations_bounded_by_max_iter() {
     let data = two_blob_data();
@@ -358,8 +344,6 @@ fn test_actual_iterations_bounded_by_max_iter() {
     let actual = ms.get_actual_iterations().unwrap();
     assert_eq!(actual, 1, "with max_iter=1, actual iterations must equal 1");
 }
-
-// n_samples_per_center semantics
 
 /// n_samples_per_center counts converged seeds merged into each center (not points
 /// assigned), so the counts sum to at most n_samples = 10
@@ -391,8 +375,6 @@ fn test_n_samples_per_center_sums_equal_seeds_processed() {
     assert!(total > 0, "at least one seed must have been processed");
 }
 
-// bin_seeding flag
-
 #[test]
 fn test_bin_seeding_produces_valid_centers() {
     let data = two_blob_data();
@@ -415,8 +397,7 @@ fn test_bin_seeding_produces_valid_centers() {
 #[test]
 fn test_no_bin_seeding_produces_valid_centers() {
     let data = two_blob_data();
-    // bin_seeding=false keeps up to 100 shuffled points as seeds. With only 10 samples,
-    // the whole set is kept, so this just checks the non-bin_seeding branch is valid.
+    // bin_seeding=false uses every input point as a seed. This test uses 10 samples.
     let mut ms_no_bin = MeanShift::new(2.0)
         .unwrap()
         .with_max_iter(300)
@@ -476,8 +457,6 @@ fn non_bin_seeding_fit_is_deterministic() {
     crate::common::assert_allclose(&c1, &c2, 1e-12);
     assert_eq!(l1, l2, "deterministic fit must yield identical labels");
 }
-
-// estimate_bandwidth
 
 #[test]
 fn test_estimate_bandwidth_invalid_quantile_is_invalid() {
@@ -551,8 +530,6 @@ fn test_estimate_bandwidth_n_samples_larger_than_rows() {
     assert_abs_diff_eq!(result.unwrap(), 0.999_977_999_757_994_6, epsilon = 1e-12);
 }
 
-// fit on minimal (single-point) dataset
-
 /// A single-point dataset produces 1 cluster center equal to that point
 #[test]
 fn test_fit_single_point_produces_one_center() {
@@ -569,8 +546,6 @@ fn test_fit_single_point_produces_one_center() {
     assert_eq!(labels.len(), 1);
     assert_eq!(labels[0], 0);
 }
-
-// save / load round-trip
 
 #[test]
 fn test_save_load_round_trip_identical_predictions() {
@@ -614,8 +589,6 @@ fn test_save_load_round_trip_identical_predictions() {
 
     let _ = std::fs::remove_file(path);
 }
-
-// determinism of estimate_bandwidth with fixed seed
 
 /// estimate_bandwidth with the same seed and n_samples returns exactly the same
 /// value (random_state wires through to StdRng)
@@ -720,7 +693,6 @@ fn test_bin_seeding_is_deterministic_across_runs() {
         1e-15,
     );
 }
-// Larger-dataset fit: a correctness check at 1200 points
 
 /// 1200 points: 3 tight, well-separated blobs (400 each) with deterministic jitter
 /// around centers (0,0), (10,0), (5,10), separation far exceeding intra-blob spread
@@ -799,8 +771,6 @@ fn test_fit_parallel_branch_three_blobs_1200() {
         }
     }
 }
-
-// scikit-learn parity
 
 /// Reproduces `sklearn.cluster.MeanShift(bandwidth=2.0)` element for element.
 ///

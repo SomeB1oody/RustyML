@@ -47,11 +47,11 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use ndarray::Array4;
 /// use approx::assert_relative_eq;
 ///
-/// // Input tensor: [batch_size, height, width, channels]
-/// // batch size 2, a 4x4 pixel image, 3 input channels
+/// // Input tensor: [batch_size, height, width, channels].
+/// // batch size 2, a 4x4 pixel image, 3 input channels.
 /// let mut input_data = Array4::zeros((2, 4, 4, 3));
 ///
-///  // Set test data to make the average pooling results predictable
+///  // Set test data to make the average pooling results predictable.
 ///  for b in 0..2 {
 ///     for i in 0..4 {
 ///         for j in 0..4 {
@@ -64,29 +64,29 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///
 ///  let x = input_data.clone().into_dyn();
 ///
-///  // Test AveragePooling2D with a Sequential model
+///  // Test AveragePooling2D with a Sequential model.
 ///  let mut model = SequentialBuilder::new()
-///  // strides default to pool_size (2, 2) and padding defaults to Valid
+///  // strides default to pool_size (2, 2) and padding defaults to Valid.
 ///  .add(AveragePooling2D::new((2, 2)))
 ///      .build(&Shape::known(x.shape()))
 ///      .unwrap();
 ///  model.compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
-///  // Output shape should be [2, 2, 2, 3]
+///  // Output shape should be [2, 2, 2, 3].
 ///  let output = model.predict(&x).unwrap();
 ///  assert_eq!(output.shape(), &[2, 2, 2, 3]);
 ///
-///  // Verify the pooling results
-///  // A 2x2 window with stride 2 holds the average of its 4 elements
+///  // Verify the pooling results.
+///  // A 2x2 window with stride 2 holds the average of its 4 elements.
 ///  for b in 0..2 {
 ///     for c in 0..3 {
-///         // 1st window (0, 0), (0, 1), (1, 0), (1, 1): average (0 + 1 + 1 + 2) / 4 = 1.0
+///         // 1st window (0, 0), (0, 1), (1, 0), (1, 1): average (0 + 1 + 1 + 2) / 4 = 1.0.
 ///         assert_relative_eq!(output[[b, 0, 0, c]], 1.0);
-///         // 2nd window (0, 2), (0, 3), (1, 2), (1, 3): average (2 + 3 + 3 + 4) / 4 = 3.0
+///         // 2nd window (0, 2), (0, 3), (1, 2), (1, 3): average (2 + 3 + 3 + 4) / 4 = 3.0.
 ///         assert_relative_eq!(output[[b, 0, 1, c]], 3.0);
-///         // 3rd window (2, 0), (2, 1), (3, 0), (3, 1): average (2 + 3 + 3 + 4) / 4 = 3.0
+///         // 3rd window (2, 0), (2, 1), (3, 0), (3, 1): average (2 + 3 + 3 + 4) / 4 = 3.0.
 ///         assert_relative_eq!(output[[b, 1, 0, c]], 3.0);
-///         // 4th window (2, 2), (2, 3), (3, 2), (3, 3): average (4 + 5 + 5 + 6) / 4 = 5.0
+///         // 4th window (2, 2), (2, 3), (3, 2), (3, 3): average (4 + 5 + 5 + 6) / 4 = 5.0.
 ///         assert_relative_eq!(output[[b, 1, 1, c]], 5.0);
 ///     }
 ///  }
@@ -143,7 +143,7 @@ impl AveragePooling2D {
     ///
     /// # Returns
     ///
-    /// - `Self` - The updated layer
+    /// - `Result<Self, Error>` - The updated layer
     ///
     /// # Errors
     ///

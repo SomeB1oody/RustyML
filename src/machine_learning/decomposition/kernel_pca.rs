@@ -26,7 +26,7 @@ pub enum EigenSolver {
     /// Krylov-subspace Lanczos iteration with full reorthogonalization. Accurate for a few
     /// leading components of a large kernel matrix
     Lanczos,
-    /// Power iteration with Hotelling deflation, extracting one component at a time. The
+    /// Power iteration with Hotelling deflation, extracting 1 component at a time. The
     /// simplest iterative option
     PowerIteration,
 }
@@ -170,6 +170,10 @@ impl Default for KernelPCA {
     /// - `kernel` - RBF kernel with gamma=0.1
     /// - `n_components` - 2
     /// - `eigen_solver` - `EigenSolver::Dense`
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - An instance with default settings.
     fn default() -> Self {
         KernelPCA::new(
             KernelType::RBF {
@@ -243,7 +247,6 @@ impl KernelPCA {
         self
     }
 
-    // Getters
     get_field!(get_kernel, kernel, KernelType);
     get_field!(get_n_components, n_components, usize);
     get_field!(get_eigen_solver, eigen_solver, EigenSolver);
@@ -268,7 +271,7 @@ impl KernelPCA {
     ///
     /// - `Error::EmptyInput` - If `x` has no rows or no feature columns
     /// - `Error::InvalidInput` - If `x` has fewer than 2 samples, or `Gamma::Scale` cannot be
-    ///   resolved because the data has zero variance
+    ///   resolved because the data has variance 0
     /// - `Error::InvalidParameter` - If `n_components` exceeds the number of samples
     /// - `Error::NonFinite` / `Error::Computation` - If kernel computation or eigendecomposition
     ///   fails
@@ -321,7 +324,7 @@ impl KernelPCA {
 
     /// Fits the model to the data and then transforms it
     ///
-    /// Computes eigen components and returns the projected data in one shot
+    /// Computes eigen components and returns the projected data in 1 shot
     ///
     /// # Parameters
     ///
@@ -335,7 +338,7 @@ impl KernelPCA {
     ///
     /// - `Error::EmptyInput` - If `x` has no rows or no feature columns
     /// - `Error::InvalidInput` - If `x` has fewer than 2 samples, or `Gamma::Scale` cannot be
-    ///   resolved because the data has zero variance
+    ///   resolved because the data has variance 0
     /// - `Error::InvalidParameter` - If `n_components` exceeds the number of samples
     /// - `Error::NonFinite` / `Error::Computation` - If kernel computation or eigendecomposition
     ///   fails
@@ -751,7 +754,7 @@ impl KernelPCA {
     ///
     /// Only non-finite eigenvalues (NaN or Inf) indicate a genuine numerical failure.
     /// Non-positive eigenvalues are tolerated. A centered kernel (Gram) matrix is only PSD up to
-    /// round-off, and non-Mercer kernels such as `Sigmoid` produce near-zero or slightly
+    /// round-off, and non-Mercer kernels such as `Sigmoid` produce near 0 or slightly
     /// negative trailing eigenvalues. Those components carry no information and are zeroed out
     /// at projection time (see [`compute_scaling_factors`]), rather than failing the whole fit
     fn validate_eigenvalues(eigenvalues: &Array1<f64>) -> Result<(), Error> {
@@ -768,7 +771,7 @@ impl KernelPCA {
 
     /// Computes the `1/sqrt(lambda)` projection scaling factors from eigenvalues
     ///
-    /// Components whose eigenvalue is not meaningfully positive (near-zero from round-off, or
+    /// Components whose eigenvalue is not meaningfully positive (near 0 from round-off, or
     /// negative from a non-PSD kernel) get a scale of `0.0`. This zeroes the component's
     /// projection instead of producing `Inf` or `NaN`, preserving the requested `n_components`
     /// dimensionality while ignoring degenerate directions

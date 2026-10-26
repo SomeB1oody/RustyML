@@ -2,7 +2,7 @@
 //!
 //! [`Cropping2D`] removes rows and columns from the height axis and the width axis of a
 //! `[batch, height, width, channels]` tensor. It holds no parameter. The forward pass and the
-//! backward pass both run through `pad_crop_engine`, which also backs this layer's inverse,
+//! backward pass both run through `pad_crop_engine`, which also backs the matching border layer,
 //! [`ZeroPadding2D`].
 //!
 //! [`ZeroPadding2D`]: crate::neural_network::layers::border::ZeroPadding2D
@@ -32,8 +32,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// A common use is a decoder that upsamples past the wanted size. The layer then trims the
 /// output to the size of the matching encoder feature map.
 ///
-/// [`ZeroPadding2D`](crate::neural_network::layers::border::ZeroPadding2D) is the inverse
-/// layer, and it is also this layer's backward pass.
+/// [`ZeroPadding2D`](crate::neural_network::layers::border::ZeroPadding2D) supplies the operation for this layer's backward pass.
 ///
 /// # Examples
 ///
@@ -45,7 +44,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array4;
 ///
-/// // A rank-4 input: 2 samples, 8x8 pixels, 3 channels
+/// // A rank-4 input: 2 samples, 8x8 pixels, 3 channels.
 /// let x = Array4::ones((2, 8, 8, 3)).into_dyn();
 ///
 /// let mut model = SequentialBuilder::new()
@@ -54,12 +53,12 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
 /// let cropped = model.predict(&x).unwrap();
 ///
-/// // 1 row off the top and bottom, and 2 columns off the left only
+/// // 1 row off the top and bottom, and 2 columns off the left only.
 /// assert_eq!(cropped.shape(), &[2, 6, 6, 3]);
 /// ```
 #[derive(Debug)]

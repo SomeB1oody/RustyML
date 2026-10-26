@@ -1,15 +1,7 @@
-//! Per-sample unit-norm scaling behind the fit/transform estimator pattern
+//! Row normalization through the estimator traits.
 //!
-//! Provides [`Normalizer`], the `fit`/`transform` face of the stateless
-//! [`normalize`] function restricted to rows. It is the one
-//! transformer in this module that learns nothing statistical, since a sample's norm comes
-//! from that sample alone. It still takes part in the same [`Fit`] and
-//! [`Transform`] contract as the per-feature scalers. It also pins
-//! the feature count, so a mis-shaped batch is an error rather than a silent wrong answer
-//!
-//! [`normalize`]: crate::utils::normalize::normalize
-//! [`Fit`]: crate::traits::Fit
-//! [`Transform`]: crate::traits::Transform
+//! [`Normalizer`] stores a norm choice and the fitted feature count.
+//! Each transform computes row norms from its input and leaves rows with norms near 0 unchanged.
 
 use super::{validate_matrix, validate_transform_matrix};
 use crate::error::Error;
@@ -17,19 +9,12 @@ use crate::utils::normalize::{NormalizationAxis, NormalizationOrder, normalize};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array2, ArrayBase, Data, Ix2};
 
-/// Scales each sample to unit norm
+/// Scales each sample by its own norm.
 ///
-/// Rows are samples and columns are features. [`transform`](Self::transform) divides every row
-/// by its own norm under the configured [`NormalizationOrder`], so only a sample's *direction*
-/// survives. This is the transform a cosine-similarity or dot-product model wants. A row whose
-/// norm is below `10 * f64::EPSILON` has no direction to rescale and is left exactly as it is
-///
-/// Because each row is scaled by its own norm, there is no cross-sample statistic to leak
-/// across a train/test boundary. Fitting is a formality that records the feature count.
-/// Mirrors scikit-learn's `Normalizer`, whose `fit` is likewise a no-op
-///
-/// This is the row-wise counterpart to the per-feature scalers in this module. For column or
-/// whole-array normalization, or for N-D arrays, use the free [`normalize`] function
+/// Rows are samples and columns are features.
+/// A row whose norm is below `10 * f64::EPSILON` stays unchanged.
+/// Fitting stores only the feature count, which later transforms check.
+/// Use the free [`normalize`] function for column, global, or multidimensional normalization.
 ///
 /// # Examples
 ///
@@ -49,12 +34,20 @@ use ndarray::{Array2, ArrayBase, Data, Ix2};
 pub struct Normalizer {
     /// Norm each sample is divided by
     order: NormalizationOrder,
-    /// Number of features seen during fitting (scikit-learn's `n_features_in_`)
+    /// Number of features seen during fitting
     n_features: Option<usize>,
 }
 
 impl Default for Normalizer {
     /// Creates an L2 normalizer, the usual choice for direction-only comparisons
+    ///
+    /// # Default Values
+    ///
+    /// L2 norm and no fitted feature count
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Unfitted scaler with the default options
     fn default() -> Self {
         Self {
             order: NormalizationOrder::L2,
@@ -91,7 +84,6 @@ impl Normalizer {
         })
     }
 
-    // Getters
     get_field!(get_order, order, NormalizationOrder);
     get_field!(get_n_features, n_features, Option<usize>);
 
@@ -137,12 +129,12 @@ impl Normalizer {
     ///
     /// - [`Error::NotFitted`] - If the normalizer has not been fitted
     /// - [`Error::EmptyInput`] - If `x` has no rows or no columns
-    /// - [`Error::DimensionMismatch`] - If `x`'s feature count differs from the fitted one
+    /// - [`Error::DimensionMismatch`] - If `x`'s feature count differs from the fitted 1
     /// - [`Error::NonFinite`] - If `x` contains non-finite values, or a norm overflows
     ///
     /// # Performance
     ///
-    /// One norm pass plus one scaling pass per row, parallelized across rows above the
+    /// 1 norm pass plus 1 scaling pass per row, parallelized across rows above the
     /// calibrated scan gate (see `crate::parallel_gates`)
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
@@ -241,7 +233,7 @@ mod tests {
         assert_eq!(whole.row(2).to_owned(), single.row(0).to_owned());
     }
 
-    /// A zero row has no direction to rescale and is left untouched
+    /// A row of 0 values has no direction to rescale and is left untouched
     #[test]
     fn zero_row_is_left_untouched() {
         let x = array![[3.0, 4.0], [0.0, 0.0]];

@@ -1,41 +1,9 @@
-//! Weight initializers: the value that decides how a layer draws a new array
+//! Weight initializers and fan counts for neural network parameters.
 //!
-//! [`Initializer`] is a closed enum, in the same shape as the
-//! [`Activation`] enum. It is `Copy`, it compares by
-//! value, and it serializes, so a layer holds it by value and a checkpoint can record it.
+//! [`Initializer`] supplies uniform and orthogonal draws from a caller-owned random generator.
+//! [`Fans`] records the input and output counts that set the Glorot uniform range.
+//! Layers supply these counts and control the draw order.
 //!
-//! 13 functions of the module draw a weight array, and all 13 draw through this type. 14 of
-//! their draws are Glorot uniform, and 1 is a fixed uniform range. The 3 recurrent layers draw
-//! their recurrent kernels as square orthogonal matrices. The dropout and noise masks of a
-//! forward pass are not weights, and they do not come from here.
-//!
-//! # The fan comes from the layer, never from the shape of the array
-//!
-//! [`Initializer::GlorotUniform`] scales its range by a fan pair. The pair reaches the draw as a
-//! [`Fans`] value that the layer builds from its own configuration. No function of this module
-//! reads the shape of the array to derive a fan. A transposed convolution kernel stores its last
-//! 2 axes in the reverse order of a plain kernel. A rule that read axis position would therefore
-//! swap the pair.
-//!
-//! # The draw order is part of the contract
-//!
-//! 5 layers thread 1 generator through more than 1 draw.
-//! [`SeparableConv1D`] and
-//! [`SeparableConv2D`] draw the depthwise kernel
-//! first and the pointwise kernel second.
-//! [`FusedGates`] draws the fused
-//! input kernel first and then 1 orthogonal block per gate, in gate order, for the 3 recurrent
-//! layers.
-//!
-//! 1 generator gives 1 stream, and each draw takes the next values of that stream. A different
-//! order changes every value from the second draw onward. Keep the draws of 1 layer in 1
-//! function, against 1 generator.
-//!
-//! [`Activation`]: crate::neural_network::layers::Activation
-//! [`SeparableConv1D`]: crate::neural_network::layers::SeparableConv1D
-//! [`SeparableConv2D`]: crate::neural_network::layers::SeparableConv2D
-//! [`FusedGates`]: crate::neural_network::layers::recurrent::gate::FusedGates
-
 use crate::{Deserialize, Serialize};
 use ndarray::{Array, Array2, Dimension, ShapeBuilder};
 use ndarray_rand::rand::rngs::StdRng;
@@ -43,8 +11,8 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 /// Half-width of the uniform range that an orthogonal draw starts from
 ///
-/// Gram-Schmidt normalizes every column, so the starting range only sets an arbitrary
-/// orientation. Any finite half-width gives an orthonormal result
+/// Gram-Schmidt normalizes each column after the draw. The starting range sets the initial
+/// scale and orientation.
 const ORTHOGONAL_START_LIMIT: f32 = 1.0;
 
 /// Smallest column norm that an orthogonal draw keeps
@@ -60,15 +28,15 @@ const ORTHOGONAL_EPSILON: f32 = 1e-8;
 /// field, because 1 kernel holds 1 weight per tap.
 ///
 /// The layer builds the pair from its own configuration. Nothing derives the pair from the shape
-/// of the array. See the module documentation for the transposed-convolution layout that makes a
-/// shape-derived rule wrong.
+/// of the array. Transposed convolution kernels reverse the final 2 axes of the plain kernel layout. The
+/// named fan counts keep their meaning across layouts.
 ///
 /// # Examples
 ///
 /// ```rust
 /// use rustyml::neural_network::Fans;
 ///
-/// // A convolution of 2 input channels, 4 filters, and 3 taps
+/// // A convolution of 2 input channels, 4 filters, and 3 taps.
 /// assert_eq!(Fans::conv(2, 4, 3), Fans::new(6, 12));
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -155,7 +123,7 @@ impl Fans {
 /// let width = Initializer::GlorotUniform.limit(Fans::new(4, 4));
 /// assert_eq!(width, (6.0_f32 / 8.0).sqrt());
 ///
-/// // A fixed range reads no fan
+/// // A fixed range reads no fan.
 /// assert_eq!(Initializer::Uniform { limit: 0.05 }.limit(Fans::NONE), 0.05);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -163,7 +131,7 @@ pub enum Initializer {
     /// Glorot (Xavier) uniform, over `-sqrt(6 / (fan_in + fan_out))` to the same value positive
     ///
     /// This is the rule of every kernel of the crate except the embedding table and the
-    /// recurrent kernels. The 2 fans come from the layer. See the module documentation
+    /// recurrent kernels. The layer supplies both fan counts.
     GlorotUniform,
     /// A uniform range of a fixed half-width, which reads no fan
     ///
@@ -175,8 +143,8 @@ pub enum Initializer {
     },
     /// A square matrix whose columns are mutually orthonormal
     ///
-    /// The recurrent kernels draw this way. Orthonormal columns keep the hidden-state
-    /// transition norm-preserving, which reduces vanishing and exploding gradients.
+    /// Recurrent kernels use this draw to start with orthogonal columns. Finite precision and
+    /// the basis-vector fallback can limit orthogonality.
     /// [`Initializer::draw_orthogonal`] is the entry point of this variant
     Orthogonal,
 }
@@ -204,9 +172,8 @@ impl Initializer {
 
     /// Draws an array of `shape`, 1 element at a time, over the range of this initializer
     ///
-    /// The elements come from `rng` in the row-major order of `shape`. The draw advances `rng`
-    /// by 1 value per element. A caller that draws twice from 1 generator therefore gets 2
-    /// different results, in a fixed order. See the module documentation
+    /// The draw consumes random values from `rng` and uses the layout that `shape` requests.
+    /// Consecutive draws advance the same stream in call order.
     ///
     /// # Parameters
     ///
@@ -217,7 +184,7 @@ impl Initializer {
     ///
     /// # Returns
     ///
-    /// - `Array<f32, D>` - A new array of `shape`, in row-major memory order
+    /// - `Array<f32, D>` - A new array with the requested shape and memory layout
     ///
     /// # Panics
     ///

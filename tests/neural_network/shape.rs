@@ -5,9 +5,8 @@
 //! second is refusal: an input the layer cannot accept comes back as an error that names the
 //! layer and the problem.
 //!
-//! Purity is what lets a later change walk a whole model at build time and thread each output
-//! shape into the next layer. It also lets that change reject a bad stack before any data
-//! arrives. The last test of this file threads such a stack by hand, with no tensor anywhere.
+//! The model build passes each output shape into the next layer before any data arrives.
+//! These tests also check a stack by hand without tensors.
 
 use crate::roster::{Case, LAYER_TYPE_COUNT, LayerVisitor, visit_every_layer};
 use ndarray::{Array, ArrayD, IxDyn};
@@ -16,8 +15,6 @@ use rustyml::neural_network::sequential::SequentialBuilder;
 use rustyml::neural_network::traits::{Layer, UnaryLayer};
 use rustyml::neural_network::{Ctx, Shape};
 use std::collections::BTreeSet;
-
-// Purity: the answer comes from the configuration and the argument alone
 
 /// Every pooling layer answers before it has seen a single tensor
 ///
@@ -57,7 +54,7 @@ fn the_pooling_family_answers_before_any_forward_pass() {
 /// A layer answers for a shape that differs from the 1 its build took
 ///
 /// A pooling layer built for a length of 8 answers correctly for a length of 20. Nothing in
-/// the answer comes from the build shape except the window and the stride
+/// the answer comes from the build shape. The layer configuration supplies the window and stride
 #[test]
 fn a_layer_answers_for_a_shape_it_was_not_built_for() {
     let mut layer = MaxPooling1D::new(2).with_stride(2).unwrap();
@@ -141,8 +138,6 @@ fn a_data_driven_layer_answers_with_no_data() {
     assert_eq!(computed.to_string(), "(None, 10, 18, 2)");
 }
 
-// Refusal: an input the layer cannot accept comes back as a named error
-
 /// A convolution refuses a rank its forward pass would refuse, and names the rank it wanted
 #[test]
 fn a_convolution_refuses_the_wrong_rank() {
@@ -160,7 +155,7 @@ fn a_convolution_refuses_the_wrong_rank() {
 /// A built dense layer refuses a last axis that its kernel cannot contract
 ///
 /// The kernel is `(input_dim, units)`, and the build reads `input_dim` from the last axis. A
-/// layer built for 7 features therefore holds a kernel that 5 features cannot enter
+/// layer built for 7 features therefore holds a kernel that cannot accept 5 features
 #[test]
 fn a_dense_layer_refuses_the_wrong_feature_count() {
     let mut layer = Dense::new(4, Linear::new()).unwrap();
@@ -269,8 +264,6 @@ fn a_cropping_layer_refuses_a_border_that_removes_everything() {
     assert!(message.contains("Cropping2D"), "{message}");
     assert!(message.contains("at least 1 must remain"), "{message}");
 }
-
-// The `Valid` convolution family: an oversized kernel is refused, and not reported as 0
 
 /// 1 unbuilt convolution of every type that bounds its input, with a shape too small for it
 ///
@@ -481,8 +474,6 @@ fn a_model_build_refuses_an_oversized_valid_kernel() {
     );
 }
 
-// The destination: a whole stack checked with no data
-
 /// A stack of 4 layers reports its final shape before any tensor exists
 ///
 /// This is what the pure method buys. The caller threads the output shape of each layer into
@@ -535,21 +526,18 @@ fn a_bad_stack_names_the_layer_that_refuses() {
     assert!(report.starts_with("layer 1 (MaxPooling2D)"), "{report}");
 }
 
-// The display value stays what it was
-
 /// `output_shape` runs the pure method against the shape the layer holds
 ///
 /// The 3 layers below cover the 3 sources of that shape. The sources are a build the caller
 /// ran, a build that `forward_mut` ran from the tensor, and nothing at all
 #[test]
 fn output_shape_reads_the_shape_the_layer_holds() {
-    // Taken from the build, and reported with the batch extent the build named
+    // The build supplies feature extents. The display reports a free batch axis
     let mut declared = AveragePooling1D::new(2);
     declared.build(&Shape::known(&[1, 6, 1])).unwrap();
     assert_eq!(declared.output_shape(), "(None, 3, 1)");
 
-    // Taken from the build that `forward_mut` ran. That build reads the whole shape of the
-    // tensor, batch extent included, so the report names the batch extent as well
+    // `forward_mut` builds from the tensor. The displayed shape keeps a free batch axis
     let mut learned = UpSampling2D::new(2, Interpolation::Nearest).unwrap();
     assert_eq!(learned.output_shape(), "Unknown");
     learned
@@ -590,8 +578,6 @@ fn a_built_layer_refuses_the_extents_its_summary_does_not_name() {
     assert!(layer.forward(&bigger_batch, &mut Ctx::inference()).is_ok());
 }
 
-// The whole roster: every layer type answers before its build
-
 /// Every layer type answers `compute_output_shape` before its build
 ///
 /// This is the contract that the method exists for. The answer reads the layer configuration
@@ -599,12 +585,14 @@ fn a_built_layer_refuses_the_extents_its_summary_does_not_name() {
 /// answers. That is what lets `SequentialBuilder::build` walk a stack, thread each output
 /// shape into the next layer, and refuse a bad stack before any tensor exists
 ///
-/// A layer that reads a field that only `build` fills breaks this. Such a layer reported the
-/// unset value of that field, and refused every input, including the 1 it was about to be
-/// built for
+/// A layer that reads a field that only `build` fills breaks this. Such a layer reports the
+/// unset value of that field and refuses every input, including its intended build shape
 #[test]
 fn every_layer_type_answers_before_its_build() {
-    struct AnswersUnbuilt(BTreeSet<String>);
+    struct AnswersUnbuilt(
+        /// The distinct layer types that answered before their build.
+        BTreeSet<String>,
+    );
     impl LayerVisitor for AnswersUnbuilt {
         fn visit<L: Layer + 'static>(&mut self, case: Case, make: &dyn Fn() -> L) {
             let layer = make();

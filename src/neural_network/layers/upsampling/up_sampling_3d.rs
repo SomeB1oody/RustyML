@@ -43,7 +43,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array5;
 ///
-/// // A rank-5 input: 1 sample, a 2x1x1 volume, 2 channels
+/// // A rank-5 input: 1 sample, a 2x1x1 volume, 2 channels.
 /// let x = Array5::from_shape_vec((1, 2, 1, 1, 2), vec![1.0, 2.0, 3.0, 4.0])
 ///     .unwrap()
 ///     .into_dyn();
@@ -54,12 +54,12 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
 /// let larger = model.predict(&x).unwrap();
 ///
-/// // Each spatial axis grows by its own factor, and the channel axis stays put
+/// // Each spatial axis grows by its own factor, and the channel axis stays put.
 /// assert_eq!(larger.shape(), &[1, 4, 3, 1, 2]);
 /// assert_eq!(larger[[0, 0, 2, 0, 1]], 2.0);
 /// assert_eq!(larger[[0, 3, 0, 0, 0]], 3.0);

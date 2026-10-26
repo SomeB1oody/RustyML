@@ -33,7 +33,7 @@ const DEGENERATE_DENOM: f64 = 1e-10;
 /// crate's calibrated f64 row-scan gate. The constant is restated here instead of imported because
 /// `metrics` stays a lightweight leaf module
 ///
-/// This gate is not runtime-tunable, and it is the 1 gate in the crate that must not be. The
+/// This gate has no runtime setter. The
 /// parallel fill matches the serial fill numerically but not bit for bit, so moving this value
 /// would change a returned score. Every gate that [`crate::tuning`] exposes selects a strategy
 /// only, and never changes a result
@@ -132,8 +132,8 @@ fn expected_mutual_information(row_sums: &[usize], col_sums: &[usize], n: usize)
     let mut emi = 0.0;
     for &a_i in row_sums {
         for &b_j in col_sums {
-            // Hypergeometric support is max(0, a_i + b_j - n) <= k <= min(a_i, b_j)
-            // k = 0 adds nothing to MI, so the range starts from 1
+            // Hypergeometric support ends at min(a_i, b_j).
+            // The lower bound excludes 0 because its mutual information contribution is 0.
             let lower = (a_i + b_j).saturating_sub(n).max(1);
             let upper = a_i.min(b_j);
 
@@ -153,9 +153,7 @@ fn expected_mutual_information(row_sums: &[usize], col_sums: &[usize], n: usize)
 /// Collects a label array into a contiguous `Vec`, tolerating non-contiguous views
 ///
 /// Labels are `isize` because that is what the crate's clustering estimators emit. `-1` is the
-/// conventional noise marker, the same convention scikit-learn uses. Everything downstream goes
-/// through [`label_index`], which densifies whatever values appear, so a negative label is just
-/// another distinct cluster id here
+/// noise marker. [`label_index`] treats every distinct value, including negative values, as a cluster.
 fn to_label_vec<S>(labels: &ArrayBase<S, Ix1>) -> Vec<isize>
 where
     S: Data<Elem = isize>,
@@ -166,8 +164,8 @@ where
 /// Calculates the Normalized Mutual Information (NMI) between 2 cluster assignments
 ///
 /// NMI normalizes the mutual information by the arithmetic mean of the 2 clusterings' entropies,
-/// giving `0.0` for independent assignments and `1.0` for identical ones. If either clustering has
-/// zero entropy (a single cluster), NMI is defined as `0.0`
+/// giving `0.0` for independent assignments and `1.0` for matching nontrivial partitions.
+/// If either partition has entropy 0, NMI is `0.0`.
 ///
 /// # Parameters
 ///
@@ -412,9 +410,9 @@ fn accumulate_upper_triangle<S>(
 ///
 /// # Notes
 ///
-/// The parallel result matches the serial fill numerically, but not necessarily bit-for-bit.
-/// Rerunning the parallel path on the same machine reproduces the same result bit-for-bit, because
-/// the bucket grouping is fixed
+/// The parallel result matches the serial fill numerically, but not necessarily bit for bit.
+/// The parallel path repeats result bits for a fixed thread count and deterministic metric.
+/// A different thread count changes the bucket grouping and can change rounding.
 fn pairwise_cluster_distances<S>(
     x: &ArrayBase<S, Ix2>,
     cluster: &[usize],
@@ -596,7 +594,7 @@ where
 ///
 /// Both reuse [`mutual_information`] and [`entropy_nats`]. With `C` the classes (`labels_true`) and
 /// `K` the clusters (`labels_pred`), homogeneity is `MI / H(C)` and completeness is `MI / H(K)`. A
-/// zero entropy (single cluster) makes its score 1.0
+/// entropy 0 (single cluster) makes its score 1.0
 fn homogeneity_completeness(labels_true: &[isize], labels_pred: &[isize], n: usize) -> (f64, f64) {
     let (contingency, row_sums, col_sums) = contingency_matrix(labels_true, labels_pred);
     let mi = mutual_information(&contingency, n, &row_sums, &col_sums);
@@ -706,8 +704,9 @@ where
 
 /// Calculates the V-measure: the harmonic mean of [`homogeneity_score`] and [`completeness_score`]
 ///
-/// V-measure is symmetric in the 2 labelings and equals the [`normalized_mutual_info`] computed
-/// with arithmetic-mean normalization. Scores range from 0.0 to 1.0
+/// V-measure is symmetric in the 2 labelings. Scores range from 0.0 to 1.0.
+/// It equals arithmetic-mean NMI except when both partitions have entropy 0.
+/// That case returns 1.0 here and 0.0 from [`normalized_mutual_info`].
 ///
 /// # Parameters
 ///
@@ -757,7 +756,8 @@ where
 ///
 /// FMI is the geometric mean of the pairwise precision and recall over sample pairs. The formula is
 /// `TP / sqrt((TP + FP) * (TP + FN))`, where the counts are pairs grouped together by each
-/// clustering. Scores range from 0.0 to 1.0, with 1.0 for identical clusterings
+/// clustering. Scores range from 0.0 to 1.0.
+/// A denominator of 0 returns 0.0, including identical partitions with only singleton clusters.
 ///
 /// # Parameters
 ///
@@ -890,8 +890,8 @@ where
 ///
 /// It is the ratio of between-cluster dispersion to within-cluster dispersion, scaled by
 /// `(n - k) / (k - 1)`. Higher is better. Well-separated, compact clusters score high. Returns
-/// 1.0 in the degenerate case where every point coincides with its centroid (zero within-cluster
-/// dispersion)
+/// 1.0 in the degenerate case where every point coincides with its centroid (within-cluster
+/// dispersion 0)
 ///
 /// # Parameters
 ///
@@ -951,8 +951,6 @@ mod tests {
     use approx::assert_abs_diff_eq;
     use ndarray::array;
 
-    // label_index
-
     /// First-appearance dense remap of distinct labels to first-seen ordinal positions
     #[test]
     fn test_label_index_first_appearance_order() {
@@ -982,8 +980,6 @@ mod tests {
         assert_eq!(idx[&30], 2);
     }
 
-    // contingency_matrix
-
     /// Every pairing appearing once produces the all-ones 2x2 matrix with row_sums=col_sums=[2,2]
     #[test]
     fn test_contingency_matrix_uniform() {
@@ -1010,8 +1006,6 @@ mod tests {
         assert_eq!(col_sums, vec![2, 2]);
     }
 
-    // entropy_nats
-
     /// 2 equal clusters give H = ln(2)
     #[test]
     fn test_entropy_nats_two_equal_clusters() {
@@ -1034,14 +1028,12 @@ mod tests {
         assert_abs_diff_eq!(h, expected, epsilon = 1e-10);
     }
 
-    /// A zero-count entry contributes nothing to the entropy
+    /// A entry with count 0 contributes nothing to the entropy
     #[test]
     fn test_entropy_nats_zero_count_skipped() {
         let h = entropy_nats(&[0, 4], 4);
         assert_abs_diff_eq!(h, 0.0, epsilon = 1e-10);
     }
-
-    // mutual_information
 
     /// Independent uniform assignment gives MI = 0
     #[test]
@@ -1058,8 +1050,6 @@ mod tests {
         let mi = mutual_information(&mat, 4, &[2, 2], &[2, 2]);
         assert_abs_diff_eq!(mi, std::f64::consts::LN_2, epsilon = 1e-10);
     }
-
-    // homogeneity_completeness
 
     /// Pure clusters (more clusters than classes) give homogeneity 1.0, completeness 0.5, and pin
     /// the tuple order as (homogeneity, completeness)
@@ -1114,7 +1104,6 @@ mod tests {
         let mi = mutual_information(&mat, 4, &[2, 2], &[1, 1, 1, 1]);
         assert_abs_diff_eq!(mi, std::f64::consts::LN_2, epsilon = 1e-10);
     }
-    // expected_mutual_information (EMI hypergeometric kernel)
 
     /// EMI for the symmetric 2x2 case (row_sums=[2,2], col_sums=[2,2], n=4) equals ln(2)/3
     #[test]
@@ -1123,7 +1112,6 @@ mod tests {
         let expected = std::f64::consts::LN_2 / 3.0;
         assert_abs_diff_eq!(emi, expected, epsilon = 1e-12);
     }
-    // ln_factorial_table
 
     /// table[i] = ln(i!) with length n_max + 1
     #[test]
@@ -1134,8 +1122,6 @@ mod tests {
         assert_abs_diff_eq!(table[1], 0.0, epsilon = 1e-12); // ln(1!) = ln(1)
         assert_abs_diff_eq!(table[5], (120.0_f64).ln(), epsilon = 1e-10); // ln(5!) = ln(120)
     }
-
-    // cluster_centroids
 
     /// Per-cluster mean and size are computed from dense cluster indices
     #[test]
@@ -1153,9 +1139,7 @@ mod tests {
         assert_eq!(sizes, vec![2, 1]);
     }
 
-    // pairwise_cluster_distances (symmetric fill, serial and parallel paths)
-
-    /// Deterministic pseudo-random feature matrix (hash-based, no rng dependency)
+    /// Deterministic feature matrix from a sine-based formula, without an RNG
     fn pseudo_random_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f64> {
         Array2::from_shape_fn((rows, cols), |(i, j)| {
             let t = (seed as f64) * 0.731 + (i * cols + j) as f64 * 0.618_033_988_7;

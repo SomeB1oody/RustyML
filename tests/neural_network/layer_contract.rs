@@ -55,7 +55,7 @@ fn built<L: Layer>(case: &Case, make: &dyn Fn() -> L) -> L {
     layer
 }
 
-/// Every layer type refuses a backward pass that no forward pass came before
+/// Every cache-dependent layer type rejects a backward pass before its forward pass
 ///
 /// The refusal names the layer type, so a model error points at the layer at fault. A layer
 /// type in [`CACHE_FREE`] gives the same gradient with no forward pass as after 1. The test
@@ -63,7 +63,11 @@ fn built<L: Layer>(case: &Case, make: &dyn Fn() -> L) -> L {
 /// cache that the forward pass parked, so the context holds no cache after it
 #[test]
 fn every_layer_refuses_a_backward_pass_before_its_forward_pass() {
-    struct BackwardNeedsForward(BTreeSet<String>);
+    /// Records layer types covered by the backward-pass check.
+    struct BackwardNeedsForward(
+        /// Names of the layer types checked.
+        BTreeSet<String>,
+    );
     impl LayerVisitor for BackwardNeedsForward {
         fn visit<L: Layer + 'static>(&mut self, case: Case, make: &dyn Fn() -> L) {
             let layer = built(&case, make);
@@ -119,7 +123,11 @@ fn every_layer_refuses_a_backward_pass_before_its_forward_pass() {
 /// is equal bit for bit
 #[test]
 fn every_layer_infers_without_a_cache() {
-    struct InferenceMatchesTraining(BTreeSet<String>);
+    /// Records layer types covered by the inference check.
+    struct InferenceMatchesTraining(
+        /// Names of the layer types checked.
+        BTreeSet<String>,
+    );
     impl LayerVisitor for InferenceMatchesTraining {
         fn visit<L: Layer + 'static>(&mut self, case: Case, make: &dyn Fn() -> L) {
             let layer = built(&case, make);
@@ -169,8 +177,11 @@ fn every_layer_infers_without_a_cache() {
 /// array, so the checkpoint has nothing of it to keep
 #[test]
 fn every_layer_round_trips_through_a_checkpoint() {
+    /// Counts layer types covered by the checkpoint check.
     struct RoundTrip {
+        /// Names of single-input layer types checked.
         covered: BTreeSet<String>,
+        /// Number of parameter-free merge layer types skipped.
         merge: usize,
     }
     impl LayerVisitor for RoundTrip {

@@ -1,5 +1,8 @@
 //! RepeatVector layer that repeats a feature vector into a sequence, and parks the input shape
 //! for backpropagation
+//!
+//! The layer inserts a step axis after the batch axis. Its backward pass sums gradients
+//! over that new axis.
 
 use crate::error::Error;
 use crate::neural_network::layers::ParamCounts;
@@ -18,7 +21,7 @@ use ndarray::{Axis, IxDyn};
 /// unchanged, so 1 layer instance serves every batch size
 ///
 /// The layer holds no parameter. Its use is the decoder side of an encoder-decoder model. A
-/// recurrent layer in this crate returns only its last hidden state, a rank-2 tensor, and a
+/// recurrent layer returns its last hidden state as a rank-2 tensor by default, and a
 /// recurrent layer needs a rank-3 input. This layer bridges the 2, so an `LSTM` can feed another
 /// `LSTM`
 ///
@@ -32,7 +35,7 @@ use ndarray::{Axis, IxDyn};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array2;
 ///
-/// // A rank-2 input: 2 samples of 4 features each
+/// // A rank-2 input: 2 samples of 4 features each.
 /// let x = Array2::ones((2, 4)).into_dyn();
 ///
 /// let mut model = SequentialBuilder::new()
@@ -41,12 +44,12 @@ use ndarray::{Axis, IxDyn};
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
 /// let sequence = model.predict(&x).unwrap();
 ///
-/// // 1 vector of 4 features becomes 3 steps of the same 4 features
+/// // 1 vector of 4 features becomes 3 steps of the same 4 features.
 /// assert_eq!(sequence.shape(), &[2, 3, 4]);
 /// ```
 #[derive(Debug)]

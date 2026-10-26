@@ -1,19 +1,12 @@
-//! Integration tests for the optional parameters of a layer: `use_bias` on Dense and on the
-//! convolution family, and `center` and `scale` on the normalization layers.
+//! Integration tests for optional bias, center, and scale parameters. The tests cover Dense,
+//! convolution layers, and normalization layers.
 //!
-//! A name-addressed checkpoint can express an array that a layer does not hold. These tests pin
-//! 3 properties that an optional parameter depends on:
+//! A missing parameter must not prevent updates to other parameters. It must not change another
+//! parameter's checkpoint path or optimizer state. Parameter counts must reflect the arrays
+//! that the layer holds.
 //!
-//! 1. **A layer with an absent parameter still trains every other parameter.** A bias gradient
-//!    that is never present must not hold back the kernel gradient of the same layer.
-//! 2. **A dropped array moves no other array's checkpoint path or optimizer state.** On the
-//!    normalization layers the optional array sits at index 0, so dropping it must not shift
-//!    `beta` into the slot `gamma` held.
-//! 3. **The parameter count reads the arrays a layer holds, not its configuration.** A count
-//!    derived from `input_dim` and `units` must not count a bias the layer does not hold.
-//!
-//! The tests also pin both directions of the checkpoint refusal, and the Keras 3 reference
-//! values for a bias-free Dense and a scale-free LayerNormalization.
+//! The tests check checkpoint refusal in both directions. They also compare bias-free Dense and
+//! scale-free LayerNormalization outputs with Keras 3 reference values.
 
 use crate::common::assert_allclose;
 use ndarray::{Array, Array1, Array2, Array3, Array4, Array5, IxDyn};
@@ -44,10 +37,11 @@ use rustyml::neural_network::traits::{
 };
 use rustyml::neural_network::{Ctx, Shape, Tensor};
 
-// Helpers
-
 /// Temporary file that deletes itself when dropped
-struct TempFile(std::path::PathBuf);
+struct TempFile(
+    /// The path to the temporary file.
+    std::path::PathBuf,
+);
 
 impl TempFile {
     /// Builds a path under the OS temp directory, derived from `name`
@@ -121,8 +115,6 @@ fn array_of(layer: &dyn Layer, name: &str) -> Vec<f32> {
         .copied()
         .collect()
 }
-
-// Trap 1: a layer without a bias must still train its kernel
 
 /// A gate that discards every parameter when 1 gradient is absent would strand a bias-free
 /// layer's kernel gradient behind its missing bias gradient. The kernel would then never reach
@@ -370,8 +362,6 @@ fn every_bias_free_layer_yields_its_kernels() {
     }
 }
 
-// Trap 2: on a normalization layer the optional array sits at index 0
-
 /// `scale = false` drops `gamma`, which is the array at index 0. A positional key would then
 /// give `beta` the optimizer state of `gamma`.
 ///
@@ -541,8 +531,6 @@ fn every_normalization_layer_drops_the_array_its_flag_names() {
     }
 }
 
-// Trap 3: the parameter count must read the arrays, not the configuration
-
 /// A count derived from `input_dim` and `units` counts a bias that the layer does not hold.
 /// This compares every count against the arrays that the same layer exposes. A formula that
 /// reads the configuration fails here as soon as an array disappears
@@ -701,8 +689,6 @@ fn param_count_agrees_with_keras_for_the_optional_configurations() {
     assert_eq!(batch.param_count().total(), 12);
 }
 
-// The Keras 3 reference values for the optional-parameter path
-
 /// A bias-free Dense against Keras 3.15.1 on the jax backend, forward and backward. The kernel,
 /// the input, and the upstream gradient come from the same deterministic sequence on both sides
 #[test]
@@ -818,8 +804,6 @@ fn a_scale_free_layer_normalization_matches_keras() {
         );
     }
 }
-
-// A checkpoint of a layer with an optional array, in both directions
 
 /// The message of a structural refusal
 fn refusal(result: Result<(), Error>) -> String {
@@ -1070,9 +1054,7 @@ fn the_conv_setters_refuse_a_bias_that_the_layer_does_not_hold() {
     );
 }
 
-// The defaults move nothing
-
-/// Every default keeps the roster that the layers had before the flags existed
+/// Default flags keep every bias, scale, and shift array.
 #[test]
 fn the_defaults_keep_every_array() {
     let dense = Dense::new(4, Activation::Linear).unwrap();
@@ -1093,8 +1075,6 @@ fn the_defaults_keep_every_array() {
         vec!["gamma", "beta", "moving_mean", "moving_variance"]
     );
 }
-
-// The roster of the parameter walk, over every layer that takes an optional array
 
 /// The 4 settings of `center` and `scale`, in a fixed order
 const CENTER_AND_SCALE: [(bool, bool); 4] =

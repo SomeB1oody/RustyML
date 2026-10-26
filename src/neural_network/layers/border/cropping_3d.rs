@@ -2,7 +2,8 @@
 //!
 //! [`Cropping3D`] removes planes from the depth axis, the height axis, and the width axis of a
 //! `[batch, depth, height, width, channels]` tensor. It holds no parameter. The forward pass and
-//! the backward pass both run through `pad_crop_engine`, which also backs this layer's inverse,
+//! the backward pass both run through `pad_crop_engine`, which also backs the matching border
+//! layer,
 //! [`ZeroPadding3D`].
 //!
 //! [`ZeroPadding3D`]: crate::neural_network::layers::border::ZeroPadding3D
@@ -29,8 +30,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// The layer holds no parameter. Each spatial axis must keep at least 1 position, so the
 /// forward pass fails when the 2 amounts on an axis together reach its extent.
 ///
-/// [`ZeroPadding3D`](crate::neural_network::layers::border::ZeroPadding3D) is the inverse
-/// layer, and it is also this layer's backward pass.
+/// [`ZeroPadding3D`](crate::neural_network::layers::border::ZeroPadding3D) supplies the operation for this layer's backward pass.
 ///
 /// # Examples
 ///
@@ -42,7 +42,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array5;
 ///
-/// // A rank-5 input: 2 samples, a 4x6x6 volume, 1 channel
+/// // A rank-5 input: 2 samples, a 4x6x6 volume, 1 channel.
 /// let x = Array5::ones((2, 4, 6, 6, 1)).into_dyn();
 ///
 /// let mut model = SequentialBuilder::new()
@@ -51,12 +51,12 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // View model structure
+/// // View model structure.
 /// model.summary();
 ///
 /// let cropped = model.predict(&x).unwrap();
 ///
-/// // 1 plane off each of the 6 faces
+/// // 1 plane off each of the 6 faces.
 /// assert_eq!(cropped.shape(), &[2, 2, 4, 4, 1]);
 /// ```
 #[derive(Debug)]

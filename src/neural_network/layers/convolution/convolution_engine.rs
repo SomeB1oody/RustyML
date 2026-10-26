@@ -34,7 +34,8 @@
 //! # Layout
 //!
 //! Tensors are channels-last, `[batch, spatial..., channels]`. Weights are flat row-major
-//! `[k..., Cin, F]`. The channel axis is innermost. This turns im2col into a copy instead of a
+//! `[k..., Cin, F]`. The input channel axis is innermost. This turns im2col into a copy instead
+//! of a
 //! gather. 1 kernel tap at 1 output position is `Cin` contiguous floats, so the pass moves runs
 //! instead of scalars. The flat weight matrix `[k*Cin, F]` needs no permutation to align with it
 //!
@@ -42,6 +43,7 @@
 //! output positions lets a single large image use every core, even when `batch == 1`. Each task
 //! builds its own im2col block and runs 1 serial GEMM directly into its disjoint output region.
 //! Under this layout that region is a contiguous slab of rows, so the product needs no scatter.
+//!
 //! The GEMM applies the per-filter bias as a fused `PerCol` epilogue. Each block then costs 1
 //! pass, with no product temporary and no separate bias sweep. The fused result matches, bit for
 //! bit, the plain product followed by the same scalar bias add.
@@ -83,15 +85,15 @@ tunable_gate! {
     /// Test-only cap on the output positions of 1 forward task. See
     /// [`split_cap`](crate::parallel_gates::split_cap)
     ///
-    /// The production value 0 keeps [`CONV_MIN_CHUNK_POSITIONS`]. A small test input holds
-    /// fewer positions than that minimum, so the forward pass builds 1 task per batch item and
-    /// leaves the position split unread. A cap of 1 or more splits it
+    /// The production value 0 keeps [`CONV_MIN_CHUNK_POSITIONS`]. A small input below that
+    /// minimum creates 1 task per batch item. A positive cap lets
+    /// tests exercise the position split.
     ///
     /// # Determinism
     ///
-    /// The backend picks its accumulation order from the row count of a block, so 2 runs at
-    /// different row-block lengths can differ in the low bits of the result, even at the
-    /// production value 0 once the output plane passes [`CONV_MIN_CHUNK_POSITIONS`]. A caller
+    /// The backend selects its accumulation order from each block's row count. Different block
+    /// lengths can change the low bits. This also applies at the production value 0 when the
+    /// output plane exceeds [`CONV_MIN_CHUNK_POSITIONS`]. A caller
     /// must leave this cap at 0
     ///
     /// Reachable outside the crate only through `bench_internals`
@@ -114,15 +116,15 @@ tunable_gate! {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ConvPadding {
     /// Applies no padding. The convolution runs only where the dilated kernel fully overlaps the
-    /// input, so the output is smaller than the input
+    /// input. The output size depends on the kernel extent and stride
     #[default]
     Valid,
 
-    /// Adds zeros on both borders so the output keeps the input size, when the stride is 1. The
+    /// Adds 0 values on both borders so the output keeps the input size, when the stride is 1. The
     /// extra cell of an odd total goes on the trailing edge
     Same,
 
-    /// Adds all `(k - 1) * dilation` zeros on the leading edge and none on the trailing edge, so
+    /// Adds all `(k - 1) * dilation` 0 values on the leading edge and none on the trailing edge, so
     /// an output position never reads a later input position. The output size is the `Same` one
     Causal,
 }
@@ -289,7 +291,7 @@ pub(super) fn conv_geometry(
     }
 }
 
-/// Builds a zero-padded copy of the flat `[items, sp..., cin]` data
+/// Builds a copy padded with 0 of the flat `[items, sp..., cin]` data
 ///
 /// The copy pads only the spatial axes. The `cin` channels of a position stay contiguous and
 /// travel together, so each step of the walk moves a run rather than a single float
@@ -305,7 +307,7 @@ pub(super) fn conv_geometry(
 ///
 /// # Returns
 ///
-/// - `Vec<f32>` - Flat zero-padded data, `[items, padded_sp..., cin]`
+/// - `Vec<f32>` - Flat data padded with 0, `[items, padded_sp..., cin]`
 pub(super) fn build_padded(
     in_flat: &[f32],
     items: usize,
@@ -453,7 +455,7 @@ pub(super) fn im2col_offsets(
 
 /// Per-pass im2col inputs shared by every task: the padded data and the copy geometry
 pub(super) struct ColContext<'a> {
-    /// Flat zero-padded source `[batch, padded_spatial..., cin]`
+    /// Flat source padded with 0 `[batch, padded_spatial..., cin]`
     pub(super) padded: &'a [f32],
     /// Channels of the padded source, which is also the length of 1 contiguous copy run. The
     /// plain convolution reads the input, so this is `Cin`. The transposed backward pass reads
@@ -546,8 +548,8 @@ pub(super) fn conv_forward(
     )
 }
 
-/// `conv_forward` at dilation 1, with an optional override of the parallel-or-serial gate
-/// decision, so a bench can measure both paths on either side of the gate
+/// Runs `conv_forward` at dilation 1 with an optional parallel gate override. A benchmark can
+/// measure both paths at any workload.
 ///
 /// Reachable outside the crate only through `bench_internals`
 ///
@@ -655,9 +657,9 @@ fn conv_forward_gated(
         let col = build_col_range(&ctx, b, c0, c0 + rows);
         let col_mat = ArrayView2::from_shape((rows, k_total), &col)
             .expect("col block length matches [positions, k*Cin]");
-        // The per-filter bias is a `Bias::PerCol` epilogue applied after the accumulation, so
-        // this matches a plain product followed by a separate bias add, bit for bit. A layer
-        // without a bias passes no epilogue, so the block holds exactly the product
+        // The `Bias::PerCol` epilogue adds bias after accumulation. This matches a plain
+        // product followed by a separate bias add, bit for bit. Without bias, the block holds
+        // only the product.
         gemmkit_ndarray::gemm_fused(
             1.0,
             &col_mat,
@@ -666,8 +668,8 @@ fn conv_forward_gated(
             &mut blk,
             bias.map(Bias::PerCol),
             None,
-            // Serial because `fill_block` already runs as 1 leaf task of the batch-by-position-
-            // chunk par_iters above the gate, and as a plain loop body below it
+            // `fill_block` already runs within a parallel task above the gate and within a
+            // serial loop below it.
             Parallelism::Serial,
         );
     };
@@ -1078,7 +1080,7 @@ mod tests {
 
     // build_padded
 
-    /// A 2x2 block lands at the padded offset and the border stays zero
+    /// A 2x2 block lands at the padded offset and the border stays 0
     #[test]
     fn test_build_padded_2x2_into_4x4() {
         let in_flat = [1.0f32, 2.0, 3.0, 4.0];
@@ -1092,7 +1094,7 @@ mod tests {
         assert_eq!(got[9], 3.0, "padded[9] should be in[1,0]=3.0");
         assert_eq!(got[10], 4.0, "padded[10] should be in[1,1]=4.0");
 
-        // All border positions must be zero
+        // All border positions must be 0
         let non_zero_positions = [5usize, 6, 9, 10];
         for (i, &val) in got.iter().enumerate() {
             if !non_zero_positions.contains(&i) {
@@ -1145,7 +1147,7 @@ mod tests {
         }
     }
 
-    /// 1-D padding shifts the data by pad_before and zeros the ends
+    /// 1-D padding shifts the data by pad_before and fills the ends with 0
     #[test]
     fn test_build_padded_1d() {
         let in_flat = [10.0f32, 20.0, 30.0];
@@ -1159,7 +1161,7 @@ mod tests {
         assert_eq!(got[4], 0.0, "trailing pad must be 0");
     }
 
-    /// Zero padding returns the input unchanged
+    /// Padding width 0 returns the input unchanged
     #[test]
     fn test_build_padded_no_padding() {
         let in_flat = [5.0f32, 6.0, 7.0, 8.0];
@@ -1188,7 +1190,7 @@ mod tests {
         assert_eq!(got, in_flat);
     }
 
-    /// 1-D crop pulls the interior back out and drops the zero ends
+    /// 1-D crop pulls the interior back out and drops the ends with value 0
     #[test]
     fn test_crop_padded_1d() {
         let padded = [0.0f32, 10.0, 20.0, 30.0, 0.0];
@@ -1250,9 +1252,8 @@ mod tests {
         assert_eq!(offsets, vec![0, 2, /*kk0*/ 3, 5 /*kk1*/]);
     }
 
-    // conv_forward: hand-derived values
-    // Checked against numbers worked out by hand from the cross-correlation definition, which
-    // catches an axis-transposition error that a gradient check would miss
+    // Values derived from the cross-correlation definition detect axis swaps that a gradient
+    // check can miss.
 
     /// 2-D, 1 batch item, 3x3 input at 2 channels, a 2x2 all-ones kernel and 1 filter
     ///
@@ -1270,7 +1271,7 @@ mod tests {
             ],
         )
         .unwrap();
-        // [kh, kw, Cin, F] all ones
+        // [kh, kw, Cin, F] all 1
         let w_shape = [2usize, 2, 2, 1];
         let weights = vec![1.0f32; w_shape.iter().product()];
         let bias = [0.5f32];
@@ -1297,7 +1298,7 @@ mod tests {
     #[test]
     fn test_conv_forward_2d_filter_axis_is_innermost() {
         let input = ArrayD::from_shape_vec(IxDyn(&[1, 2, 2, 1]), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
-        // [kh=2, kw=2, Cin=1, F=2]. Filter 0 is all ones, filter 1 is all twos
+        // [kh=2, kw=2, Cin=1, F=2]. Filter 0 is all 1, filter 1 is all 2
         let weights = vec![1.0f32, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0];
         let bias = [0.0f32, 0.0];
 
@@ -1317,12 +1318,12 @@ mod tests {
         assert_eq!(out.iter().copied().collect::<Vec<f32>>(), vec![10.0, 20.0]);
     }
 
-    /// 1-D `Same` padding at stride 1 keeps the length and reads zeros past the edges
+    /// 1-D `Same` padding at stride 1 keeps the length and reads 0 values past the edges
     #[test]
     fn test_conv_forward_1d_same_padding_hand_derived() {
         // [1, 4, 1]
         let input = ArrayD::from_shape_vec(IxDyn(&[1, 4, 1]), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
-        // [k=3, Cin=1, F=1] all ones
+        // [k=3, Cin=1, F=1] all 1
         let weights = vec![1.0f32; 3];
         let bias = [0.0f32];
 

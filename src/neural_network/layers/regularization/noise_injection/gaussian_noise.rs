@@ -1,4 +1,4 @@
-//! Gaussian noise regularization layer that injects zero-mean normal noise during training
+//! Gaussian noise regularization layer that injects normal noise with mean 0 during training
 //!
 //! [`GaussianNoise`] holds the standard deviation, the shape recorded by
 //! [`UnaryLayer::build`], and the random number
@@ -28,10 +28,10 @@ use ndarray_rand::rand_distr::Normal;
 ///
 /// # Shape freedom
 ///
-/// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of any
-/// shape at rank 1 or higher. [`UnaryLayer::build`] records the shape it is given, and
-/// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape) reports it, but no
-/// later input is checked against it. See the "Shape freedom" section of
+/// The layer owns no array and reads no extent of its input. It therefore accepts a tensor of
+/// any shape at rank 1 or higher. [`UnaryLayer::build`] records the input shape.
+/// [`Layer::output_shape`](crate::neural_network::traits::Layer::output_shape) reports that
+/// shape, but later inputs need not match it. See the "Shape freedom" section of
 /// [`Dropout`](crate::neural_network::layers::regularization::dropout::dropout::Dropout)
 ///
 /// # Examples
@@ -42,12 +42,12 @@ use ndarray_rand::rand_distr::Normal;
 /// use rustyml::neural_network::Ctx;
 /// use ndarray::Array2;
 ///
-/// // GaussianNoise layer with standard deviation 0.1
+/// // GaussianNoise layer with standard deviation 0.1.
 /// let mut noise_layer = GaussianNoise::new(0.1).unwrap();
 ///
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
-/// // During training, the layer adds Gaussian noise with stddev=0.1
+/// // During training, the layer adds Gaussian noise with stddev=0.1.
 /// let mut ctx = Ctx::training();
 /// let output = noise_layer.forward_mut(&input, &mut ctx).unwrap();
 /// ```
@@ -161,8 +161,8 @@ impl UnaryLayer for GaussianNoise {
             return Ok(input.clone());
         }
 
-        // The stream lives in the context for the length of the pass, so the layer stays
-        // read-only and the draws of 2 calls follow each other
+        // The context holds the stream for the pass. The layer stays read-only while each call
+        // continues from the prior draw
         let mut rng = ctx
             .take_state::<StdRng>("rng")
             .unwrap_or_else(|| self.rng.clone());

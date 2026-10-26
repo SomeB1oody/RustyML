@@ -33,22 +33,22 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::MeanSquaredError;
 /// use ndarray::Array2;
 ///
-/// // Create a 2D input tensor
+/// // Create a 2D input tensor.
 /// let x = Array2::from_shape_vec((2, 3), vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0])
 ///     .unwrap()
 ///     .into_dyn();
 ///
-/// // Build a model with Sigmoid activation
+/// // Build a model with Sigmoid activation.
 /// let mut model = SequentialBuilder::new()
 ///     .add(Sigmoid::new())
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Forward propagation
+/// // Forward propagation.
 /// let output = model.predict(&x);
 ///
-/// // Output will be approximately: [[0.27, 0.88, 0.05], [0.98, 0.007, 0.998]]
+/// // Output will be approximately: [[0.27, 0.88, 0.05], [0.98, 0.007, 0.998]].
 /// ```
 #[derive(Debug)]
 pub struct Sigmoid {
@@ -68,6 +68,15 @@ impl Sigmoid {
 }
 
 impl Default for Sigmoid {
+    /// Creates the default Sigmoid layer.
+    ///
+    /// # Default Values
+    ///
+    /// Uses the configuration from [`Self::new`].
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The default layer.
     fn default() -> Self {
         Self::new()
     }

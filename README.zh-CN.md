@@ -14,17 +14,21 @@
 
 ## 概述
 
-RustyML 是一个机器学习与深度学习库，完全用 Rust 端到端实现，不依赖任何 C 或 C++ 代码。它覆盖完整的
-工作流程：数据预处理、特征工程、模型训练和评估。它利用了 Rust 的内存安全、安全并发和零成本抽象。
+RustyML 提供数据预处理、机器学习模型、神经网络和评估指标。
+它使用 `ndarray` 数组和 Rust 数值内核。
 
-## 核心亮点
+## 功能
 
-- **纯 Rust，无 FFI**：内存安全、可移植，无需链接任何外部库。
-- **默认并行**：计算密集的内核使用 [Rayon](https://github.com/rayon-rs/rayon) 进行多线程计算。
-- **算法覆盖**：经典的监督与无监督学习、异常检测，以及一个同时提供顺序模型和图模型的神经网络框架。
-- **可复现**：一次 `set_global_seed` 调用即可让调用线程上所有随机化组件变得确定。按组件设置的 `random_state` 覆盖其余情形。
-- **模型持久化**：通过 [Serde](https://serde.rs/) 和 [postcard](https://docs.rs/postcard/)，将训练好的模型和网络权重保存并重新加载为紧凑的二进制格式。
-- **评估指标**：回归、分类（二分类与多分类）、聚类，遵循 scikit-learn 的约定。
+- **并行内核**：部分内核使用 [Rayon](https://github.com/rayon-rs/rayon)。工作量阈值决定使用串行还是并行路径。
+- **模型**：监督学习、无监督学习、异常检测、顺序网络和图网络。
+- **随机种子**：`set_global_seed` 设置调用线程的种子流。支持 `random_state` 的组件可用本地种子覆盖此设置。
+- **二进制文件**：支持持久化的模型使用 [Serde](https://serde.rs/) 和 [postcard](https://docs.rs/postcard/) 保存及加载拟合状态。
+- **网络检查点**：保存模型数组，再将其加载到兼容的已构建模型中。检查点不恢复优化器或损失函数。
+- **评估指标**：回归、二分类、多分类和聚类。各指标的输入规则和分数定义见 API 文档。
+
+重复相同的随机操作序列前，请重置全局种子。
+其他线程有独立的种子流。
+部分分解求解器使用独立的种子。
 
 ## 安装
 
@@ -36,19 +40,19 @@ rustyml = "*"
 ndarray = "0.17"
 ```
 
-想把构建裁小，就关掉默认并显式列出所需模块：
+关闭默认特性后，可单独选择所需模块：
 
 ```toml,ignore
-# 全部模块（ml、nn、utils、metrics、math）
+# Everything (ml, nn, utils, metrics, math)
 rustyml = "*"
 
-# 仅神经网络框架
+# Just the neural-network framework
 rustyml = { version = "*", default-features = false, features = ["neural_network"] }
 
-# 仅评估指标
+# Just the evaluation metrics
 rustyml = { version = "*", default-features = false, features = ["metrics"] }
 
-# 训练时在终端显示进度条
+# Show training progress bars in the terminal
 rustyml = { version = "*", features = ["show_progress"] }
 ```
 
@@ -63,7 +67,7 @@ use rustyml::prelude::machine_learning::*;
 use ndarray::array;
 
 fn main() {
-    // 训练一个不带正则化的线性回归模型
+    // Train a linear regression model without regularization.
     let mut model = LinearRegression::new(true)
         .with_solver(LeastSquaresSolver::GradientDescent { learning_rate: 0.01, max_iter: 1000, tol: 1e-6 }).unwrap();
 
@@ -74,7 +78,7 @@ fn main() {
     let predictions = model.predict(&x).unwrap();
     println!("{:?}", predictions);
 
-    // 保存并重新加载训练好的模型
+    // Save and reload the trained model.
     model.save_to_path("linear_regression.bin").unwrap();
     let restored = LinearRegression::load_from_path("linear_regression.bin").unwrap();
 }
@@ -87,11 +91,13 @@ use rustyml::prelude::neural_network::*;
 use ndarray::Array;
 
 fn main() {
-    // 32 个样本，784 个输入特征，10 个输出类别
+    // 32 samples, 784 input features, 10 output classes
     let x = Array::ones((32, 784)).into_dyn();
-    let y = Array::ones((32, 10)).into_dyn();
+    let mut y = Array::zeros((32, 10));
+    y.column_mut(0).fill(1.0);
+    let y = y.into_dyn();
 
-    // builder 收集各层，build 依据输入形状分配每一个权重
+    // Build the layers from the input shape.
     let mut model = SequentialBuilder::new()
         .add(Dense::new(128, Activation::ReLU).unwrap())
         .add(Dense::new(64, Activation::ReLU).unwrap())
@@ -104,40 +110,40 @@ fn main() {
         CategoricalCrossEntropy::new(false),
     );
 
-    model.summary(); // 打印网络结构
+    model.summary(); // Print the model structure.
 
-    // 每个 epoch 1 个损失值，测的是这个 epoch 运行期间的权重，而不是结束时的
+    // Record 1 loss value during each epoch.
     let history = model.fit(&x, &y, 10).unwrap();
     println!("Per-epoch loss: {:?}", history.loss());
 
-    // 给模型此刻持有的权重打分：推理模式，什么都不更新
+    // Evaluate the current weights in inference mode.
     println!("Loss after training: {}", model.evaluate(&x, &y).unwrap());
 
     let predictions = model.predict(&x).unwrap();
     println!("Predictions shape: {:?}", predictions.shape());
 
-    // 保存训练好的权重
+    // Save all model arrays to a file.
     model.save_to_path("model.bin").unwrap();
 }
 ```
 
 ### 图模型
 
-顺序模型给每一层 1 个输入，而这个输入就是前一层的输出。`GraphBuilder` 取消了这个限制。一个节点
-就是某一层在其他节点输出上的 1 次调用。因此一个模型可以拥有多个入口、多个出口、一座共享的塔，或者
-一条残差连接。合并层族负责汇合这些分支：`Add`、`Subtract`、`Multiply`、`Average`、
-`Maximum`、`Minimum` 和 `Concatenate`。
+顺序模型将每层的输出传给下一层。
+`GraphBuilder` 将层调用连接为图节点。
+图模型支持多个输入、多个输出、共享层和残差连接。
+合并层负责汇合分支：`Add`、`Subtract`、`Multiply`、`Average`、`Maximum`、`Minimum` 和 `Concatenate`。
 
 ```rust
 use rustyml::prelude::neural_network::*;
 use ndarray::Array;
 
 fn main() {
-    // 4 个样本，每个 8 个特征，每个样本 2 个输出值
+    // 4 samples of 8 features, and 2 output values per sample
     let x = Array::ones((4, 8)).into_dyn();
     let y = Array::ones((4, 2)).into_dyn();
 
-    // 一个残差块：块的输入同时到达求和层和隐藏层
+    // A residual block: the input of the block reaches the sum and the hidden layer alike
     let mut builder = GraphBuilder::new();
     let input = builder.input(Shape::known(&[4, 8]));
     let hidden = builder.add(Dense::new(8, Activation::ReLU).unwrap(), &[input]);
@@ -150,7 +156,7 @@ fn main() {
         MeanSquaredError::new(),
     );
 
-    // 每个入口 1 个张量，每个出口 1 个目标
+    // 1 tensor per inlet, and 1 target per outlet
     model.fit(&[&x], &[&y], 10).unwrap();
 
     let predictions = model.predict(&[&x]).unwrap();
@@ -165,12 +171,12 @@ use rustyml::metrics::*;
 use ndarray::array;
 
 fn main() {
-    // 参数顺序始终是 (y_true, y_pred)
-    // ConfusionMatrix::new 只接受 0.0/1.0 硬标签（其他标签取值对用 new_with_labels）
+    // Pass the true labels before the predicted labels.
+    // Use hard 0.0/1.0 labels here. Use new_with_labels for other label pairs.
     let y_true = array![1.0, 0.0, 0.0, 1.0, 1.0];
     let y_pred = array![1.0, 0.0, 1.0, 1.0, 0.0];
 
-    // 2 个参数的存储类型相互独立，持有所有权的数组和视图可以混用
+    // The arguments can use an owned array and a view.
     let cm = ConfusionMatrix::new(&y_true, &y_pred.view());
     println!("Accuracy: {:.3}", cm.accuracy());
     println!("F1 score: {:.3}", cm.f1_score());
@@ -179,7 +185,20 @@ fn main() {
 
 ## 模块
 
-参见 [docs.rs](https://docs.rs/rustyml/latest/rustyml/index.html#architecture)
+公开模块按任务划分 API：
+
+- `machine_learning`：分类、回归、聚类、分解和异常检测模型。
+- `neural_network`：层、模型构建器、损失函数、优化器和检查点。
+- `utils`：预处理、标签转换、缩放器和数据集划分。
+- `metrics`：分类、回归和聚类指标。
+- `math`：距离函数、矩阵运算和归约。
+- `error`：共用的错误类型和结果别名。
+- `random`：线程本地种子控制。
+- `traits`：模型共用的接口。
+- `tuning`：串行与并行工作的运行时阈值。
+- `prelude`：公开类型和接口的分组导入。
+
+参见 [API 文档](https://docs.rs/rustyml/latest/rustyml/)。
 
 ## 特性标志（Feature Flags）
 
@@ -198,7 +217,7 @@ fn main() {
 
 ## 项目状态
 
-RustyML 正在积极开发中。API 正在趋于稳定，但在 `1.0.0` 之前，次要版本更新中仍可能出现破坏性更改。
+RustyML 正在开发中。在 `1.0.0` 之前，次要版本更新仍可能更改 API。
 
 ## 贡献
 

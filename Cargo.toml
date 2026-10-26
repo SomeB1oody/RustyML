@@ -4,7 +4,7 @@ version = "0.16.0"
 edition = "2024"
 rust-version = "1.89.0"
 authors = ["SomeB1oody <stanyin64@gmail.com>"]
-description = "A high-performance machine learning & deep learning library in pure Rust, offering ML algorithms and neural network support"
+description = "Machine learning models, neural networks, metrics, and data utilities in Rust"
 license = "MIT"
 readme = "README.md"
 keywords = ["machine_learning", "ML", "neural_network", "AI"]
@@ -18,17 +18,17 @@ autobenches = false
 [features]
 # Classical machine learning algorithms for supervised and unsupervised learning
 machine_learning = ["math", "dep:ndarray", "dep:rayon", "dep:ndarray-rand", "dep:ahash", "dep:serde", "dep:postcard", "dep:thiserror"]
-# Complete neural network framework with flexible architecture design
+# Neural network layers, models, losses, and optimizers
 neural_network = ["math", "dep:ndarray", "dep:rayon", "dep:ndarray-rand", "dep:indicatif", "dep:libm", "dep:serde", "dep:postcard", "dep:thiserror"]
-# Data preprocessing and dimensionality reduction utilities
+# Data preprocessing and dataset splitting utilities
 utils = ["math", "dep:ndarray", "dep:rayon", "dep:ahash", "dep:serde", "dep:postcard", "dep:ndarray-rand", "dep:thiserror"]
-# Comprehensive evaluation metrics for model performance assessment
+# Model evaluation metrics
 metrics = ["math", "dep:ndarray", "dep:ahash"]
 # Mathematical utilities and statistical functions
 math = ["dep:ndarray", "dep:ahash", "dep:rayon", "dep:gemmkit-ndarray"]
-# Enables every module, so `cargo add rustyml` gives a complete workflow out of the box
+# Enables all public modules by default
 default = ["full"]
-# full access to all modules in the crate
+# Enables all public modules
 full = ["machine_learning", "neural_network", "utils", "math", "metrics"]
 
 # Provides support for progress bars in the command line
@@ -49,7 +49,7 @@ libm = { version = "0.2.16", optional = true }
 [dev-dependencies]
 approx = "0.5.1"
 criterion = "0.8.2"
-# cross-check `math::decomposition` routines
+# Reference results for machine-learning linear algebra tests
 nalgebra = "0.35.0"
 postcard = { version = "1.1.3", features = ["use-std"] }
 

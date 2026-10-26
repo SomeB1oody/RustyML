@@ -143,9 +143,9 @@ impl ParamCounts {
     }
 }
 
-/// A module containing activation layer implementations for neural networks
+/// Activation layers for neural networks
 pub mod activation;
-/// Zero-padding and cropping layers that resize the spatial axes at their ends
+/// Padding with 0 and cropping layers that resize the spatial axes at their ends
 pub mod border;
 /// The named checkpoint format: what a saved model holds, and how a load applies it
 pub mod checkpoint;
@@ -169,7 +169,7 @@ pub mod permute;
 pub mod pooling;
 /// Recurrent layer for neural networks
 pub mod recurrent;
-/// A module containing regularization layers for neural networks
+/// Regularization layers for neural networks
 pub mod regularization;
 /// A layer that repeats a feature vector into a sequence
 pub mod repeat_vector;
@@ -225,14 +225,29 @@ pub use upsampling::*;
 /// [`LayerBase::sublayers`]: crate::neural_network::traits::LayerBase::sublayers
 macro_rules! no_trainable_parameters_layer_functions {
     () => {
+        /// Reports param count.
+        ///
+        /// # Returns
+        ///
+        /// - `ParamCounts` - The counts of trainable and non-trainable parameter elements.
         fn param_count(&self) -> ParamCounts {
             ParamCounts::none()
         }
 
+        /// Reports weights.
+        ///
+        /// # Returns
+        ///
+        /// - `Vec<WeightRef<'_>>` - The named read views of the layer arrays.
         fn weights(&self) -> Vec<$crate::neural_network::traits::WeightRef<'_>> {
             Vec::new()
         }
 
+        /// Reports weights mut.
+        ///
+        /// # Returns
+        ///
+        /// - `Vec<WeightMut<'_>>` - The named write views of the layer arrays.
         fn weights_mut(&mut self) -> Vec<$crate::neural_network::traits::WeightMut<'_>> {
             Vec::new()
         }
@@ -263,12 +278,9 @@ pub(in crate::neural_network::layers) use no_trainable_parameters_layer_function
 /// the kernel alone, so its checkpoint holds 1 path. An optional entry moves no other entry,
 /// because a checkpoint addresses an array by name and never by position
 ///
-/// Give an array the same name that [`LayerBase::parameters_mut`] gives it. The compiler binds
-/// neither the name nor the storage. A parameter and the array of 1 name must be 1 storage,
-/// because an optimizer writes through the parameter and a checkpoint reads the array. Some
-/// tests hold that rule for 1 layer at a time, such as
-/// `dropping_gamma_does_not_give_beta_the_optimizer_state_of_gamma` of
-/// `tests/neural_network/optional_parameters.rs`. No test holds it for every layer type
+/// Give each array the same name that [`LayerBase::parameters_mut`] gives it. Both views must
+/// refer to the same storage. An optimizer writes through the parameter view, and a checkpoint
+/// reads through the weight view.
 ///
 /// It is path-exported like `no_trainable_parameters_layer_functions`:
 /// `use crate::neural_network::layers::named_weight_layer_functions;`
@@ -277,6 +289,11 @@ pub(in crate::neural_network::layers) use no_trainable_parameters_layer_function
 /// [`LayerBase::sublayers`]: crate::neural_network::traits::LayerBase::sublayers
 macro_rules! named_weight_layer_functions {
     ($($kind:ident $name:literal => $($field:ident).+ $(if $flag:ident)?),+ $(,)?) => {
+        /// Reports weights.
+        ///
+        /// # Returns
+        ///
+        /// - `Vec<WeightRef<'_>>` - The named read views of the layer arrays.
         fn weights(&self) -> Vec<$crate::neural_network::traits::WeightRef<'_>> {
             [$($crate::neural_network::layers::optional_named_weight!(
                 $crate::neural_network::traits::WeightRef::$kind(
@@ -290,6 +307,11 @@ macro_rules! named_weight_layer_functions {
                 .collect()
         }
 
+        /// Reports weights mut.
+        ///
+        /// # Returns
+        ///
+        /// - `Vec<WeightMut<'_>>` - The named write views of the layer arrays.
         fn weights_mut(&mut self) -> Vec<$crate::neural_network::traits::WeightMut<'_>> {
             [$($crate::neural_network::layers::optional_named_weight!(
                 $crate::neural_network::traits::WeightMut::$kind(
@@ -320,6 +342,11 @@ pub(in crate::neural_network::layers) use named_weight_layer_functions;
 /// [`LayerBase::build_config`]: crate::neural_network::traits::LayerBase::build_config
 macro_rules! built_layer_shape_functions {
     () => {
+        /// Reports known input shapes.
+        ///
+        /// # Returns
+        ///
+        /// - `Option<Vec<Shape>>` - The recorded input shape with a free batch axis.
         fn known_input_shapes(&self) -> Option<Vec<$crate::neural_network::Shape>> {
             self.built
                 .as_ref()
@@ -339,10 +366,20 @@ pub(in crate::neural_network::layers) use built_layer_shape_functions;
 /// [`LayerBase::build_config`]: crate::neural_network::traits::LayerBase::build_config
 macro_rules! build_config_function {
     () => {
+        /// Reports is built.
+        ///
+        /// # Returns
+        ///
+        /// - `bool` - Whether the layer has a recorded build shape.
         fn is_built(&self) -> bool {
             self.built.is_some()
         }
 
+        /// Reports build config.
+        ///
+        /// # Returns
+        ///
+        /// - `Option<BuildConfig>` - The recorded build shape for a checkpoint.
         fn build_config(&self) -> Option<$crate::neural_network::layers::checkpoint::BuildConfig> {
             self.built
                 .as_ref()

@@ -1,5 +1,5 @@
 //! Integration tests for `normalize`: L1/L2/Max/Lp norms across Row, Column,
-//! and Global axes, plus zero-lane preservation and error paths
+//! and Global axes, plus preservation of lanes filled with 0 and error paths
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array2, Array3, IxDyn, array};
@@ -7,8 +7,6 @@ use rustyml::error::Error;
 use rustyml::utils::normalize::{NormalizationAxis, NormalizationOrder, normalize};
 
 use crate::common::assert_allclose;
-
-// L2 / Row
 
 /// Row [3, 4] under L2 normalizes to [0.6, 0.8]
 #[test]
@@ -28,7 +26,7 @@ fn test_l2_row_two_rows() {
     assert_allclose(&result, &expected, 1e-12);
 }
 
-/// A zero row stays all-zeros under L2 (no NaN/Inf introduced)
+/// A row filled with 0 stays all 0 under L2 (no NaN/Inf introduced)
 #[test]
 fn test_l2_row_zero_row_preserved() {
     let data: Array2<f64> = array![[3.0, 4.0], [0.0, 0.0]];
@@ -46,7 +44,7 @@ fn test_l2_row_negative_values_keep_sign() {
     assert_allclose(&result, &expected, 1e-12);
 }
 
-/// After L2 row normalization each non-zero row has unit norm
+/// After L2 row normalization each row with values other than 0 has unit norm
 #[test]
 fn test_l2_row_each_row_has_unit_norm() {
     let data: Array2<f64> = array![[3.0, 4.0], [5.0, 12.0], [8.0, 6.0]];
@@ -56,8 +54,6 @@ fn test_l2_row_each_row_has_unit_norm() {
         assert_abs_diff_eq!(norm_sq, 1.0, epsilon = 1e-12);
     }
 }
-
-// L1 / Row
 
 /// Row [3, 4] under L1 normalizes to [3/7, 4/7]
 #[test]
@@ -88,7 +84,7 @@ fn test_l1_row_each_row_unit_l1_norm() {
     }
 }
 
-/// An L1 zero lane stays all-zeros
+/// An L1 lane filled with 0 stays all 0
 #[test]
 fn test_l1_row_zero_row_preserved() {
     let data: Array2<f64> = array![[1.0, 2.0], [0.0, 0.0]];
@@ -98,8 +94,6 @@ fn test_l1_row_zero_row_preserved() {
     assert_abs_diff_eq!(result[[1, 0]], 0.0, epsilon = 1e-15);
     assert_abs_diff_eq!(result[[1, 1]], 0.0, epsilon = 1e-15);
 }
-
-// Max / Row
 
 /// Row [3, 4] under Max normalizes to [0.75, 1.0]
 #[test]
@@ -133,7 +127,7 @@ fn test_max_row_each_row_max_is_one() {
     }
 }
 
-/// A Max zero lane stays all-zeros
+/// A Max lane filled with 0 stays all 0
 #[test]
 fn test_max_row_zero_row_preserved() {
     let data: Array2<f64> = array![[2.0, 4.0], [0.0, 0.0]];
@@ -141,8 +135,6 @@ fn test_max_row_zero_row_preserved() {
     let expected: Array2<f64> = array![[0.5, 1.0], [0.0, 0.0]];
     assert_allclose(&result, &expected, 1e-12);
 }
-
-// Lp / Row
 
 /// Lp(3) of row [2, 4] normalizes by norm = 72^(1/3)
 #[test]
@@ -182,9 +174,9 @@ fn test_lp_half_row_1_4() {
     assert_allclose(&result, &expected, 1e-12);
 }
 
-// Column axis: for a 2-D array of shape (m,n) it operates along Axis(0), so
-// each lane is a column-vector
-
+/// Column axis: for a 2-D array of shape (m,n) it operates along Axis(0), so
+/// each lane is a column-vector
+///
 /// L2 Column-normalizes each column of [[1,2],[3,4]] to unit norm
 #[test]
 fn test_l2_column_2x2() {
@@ -266,7 +258,7 @@ fn test_lp3_column_2x2() {
     assert_allclose(&result, &expected, 1e-12);
 }
 
-/// A zero column stays all-zeros under L2 (no NaN produced)
+/// A column filled with 0 stays all 0 under L2 (no NaN produced)
 #[test]
 fn test_column_zero_column_preserved() {
     let data: Array2<f64> = array![[1.0, 0.0], [2.0, 0.0]];
@@ -275,8 +267,6 @@ fn test_column_zero_column_preserved() {
     let expected: Array2<f64> = array![[1.0 / sqrt5, 0.0], [2.0 / sqrt5, 0.0]];
     assert_allclose(&result, &expected, 1e-12);
 }
-
-// Global axis
 
 /// L2 Global divides every element of [[1,2],[3,4]] by sqrt(30)
 #[test]
@@ -288,8 +278,8 @@ fn test_l2_global_2x2() {
     assert_allclose(&result, &expected, 1e-12);
 }
 
-/// A global all-zero array stays all-zeros, with no division by zero. This matches the
-/// per-lane path, which also leaves an effectively zero lane untouched
+/// A global array filled with 0 stays all 0, with no division by 0. This matches the
+/// per-lane path, which also leaves an lane with a norm near 0 untouched
 #[test]
 fn test_l2_global_zero_array_preserved() {
     let data: Array2<f64> = array![[0.0, 0.0], [0.0, 0.0]];
@@ -341,7 +331,7 @@ fn test_lp3_global_2x2() {
     assert_allclose(&result, &expected, 1e-12);
 }
 
-/// L2 Global on an all-zero array leaves every element at 0
+/// L2 Global on an array filled with 0 leaves every element at 0
 #[test]
 fn test_l2_global_all_zeros_preserved() {
     let data: Array2<f64> = Array2::zeros((3, 3));
@@ -350,7 +340,7 @@ fn test_l2_global_all_zeros_preserved() {
     assert_allclose(&result, &expected, 1e-15);
 }
 
-/// The global L2 norm of the result equals 1 for non-zero input
+/// The global L2 norm of the result equals 1 for input with values other than 0
 #[test]
 fn test_l2_global_result_has_unit_norm() {
     let data: Array2<f64> = array![[3.0, 1.0], [4.0, 0.0]];
@@ -358,8 +348,6 @@ fn test_l2_global_result_has_unit_norm() {
     let norm_sq: f64 = result.iter().map(|x| x * x).sum();
     assert_abs_diff_eq!(norm_sq, 1.0, epsilon = 1e-12);
 }
-
-// 3-D array (Row normalizes along the last axis)
 
 /// For a 3-D array of shape (2,2,2), Row L2-normalizes lanes along Axis(2)
 #[test]
@@ -389,8 +377,6 @@ fn test_l2_column_3d_normalizes_second_to_last_axis() {
     assert_allclose(&result, &expected, 1e-12);
 }
 
-// Original array is not mutated
-
 /// normalize returns a new array and leaves the input unchanged
 #[test]
 fn test_normalize_does_not_mutate_original() {
@@ -408,8 +394,6 @@ fn test_normalize_global_does_not_mutate_original() {
     let _result = normalize(&original, NormalizationAxis::Global, NormalizationOrder::L1).unwrap();
     assert_allclose(&original, &snapshot, 1e-15);
 }
-
-// Error paths
 
 /// An empty array returns EmptyInput
 #[test]
@@ -460,8 +444,6 @@ fn test_1d_lane_axis_returns_invalid_input() {
         );
     }
 }
-
-// Dynamic-dimension array (IxDyn)
 
 /// normalize accepts dynamic arrays: L2 global on [3, 4] normalizes to [0.6, 0.8]
 #[test]

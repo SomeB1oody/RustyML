@@ -9,12 +9,13 @@
 //! - noise injection: [`GaussianNoise`] and [`GaussianDropout`]
 //! - normalization: [`BatchNormalization`], [`LayerNormalization`], [`GroupNormalization`],
 //!   [`InstanceNormalization`], and [`UnitNormalization`]
+//!
 //! Every dropout layer, every noise layer, and `BatchNormalization` change what forward computes
 //! between training and inference. `LayerNormalization`, `GroupNormalization`,
-//! `InstanceNormalization`, and `UnitNormalization` give the same output either way. Each one
-//! takes its statistic from a single sample, never from the batch. The mode is not a field of a
-//! layer. It is the training flag of the [`Ctx`] that the pass carries, and every layer of this
-//! module reads it with [`Ctx::is_training`]
+//! `InstanceNormalization`, and `UnitNormalization` give the same output either way. Group and
+//! instance normalization compute statistics per sample. Layer and unit normalization use the
+//! configured axes, which can include the batch axis. The [`Ctx`] training flag selects the mode
+//! for layers whose behavior depends on it
 //!
 //! [`Dropout`]: crate::neural_network::layers::Dropout
 //! [`SpatialDropout1D`]: crate::neural_network::layers::SpatialDropout1D

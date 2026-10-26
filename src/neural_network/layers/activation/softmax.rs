@@ -39,22 +39,22 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array2;
 ///
-/// // Create a 2D input tensor with logits
+/// // Create a 2D input tensor with logits.
 /// let x = Array2::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
 ///     .unwrap()
 ///     .into_dyn();
 ///
-/// // Build a model with Softmax activation
+/// // Build a model with Softmax activation.
 /// let mut model = SequentialBuilder::new()
 ///     .add(Softmax::new())
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 ///
-/// // Forward propagation
+/// // Forward propagation.
 /// let output = model.predict(&x);
 ///
-/// // Output is a probability distribution that sums to 1.0 for each batch
+/// // Output is a probability distribution that sums to 1.0 for each batch.
 /// ```
 ///
 /// Normalize a different axis with the builder:
@@ -65,7 +65,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::Ctx;
 /// use ndarray::Array3;
 ///
-/// // Each of the 3 channels of a position becomes a distribution over the 2 batch items
+/// // Each of the 3 channels of a position becomes a distribution over the 2 batch items.
 /// let x = Array3::<f32>::zeros((2, 4, 3)).into_dyn();
 /// let mut layer = Softmax::new().with_axis(0);
 /// let mut ctx = Ctx::inference();
@@ -114,6 +114,15 @@ impl Softmax {
 }
 
 impl Default for Softmax {
+    /// Creates the default Softmax layer.
+    ///
+    /// # Default Values
+    ///
+    /// Uses the configuration from [`Self::new`].
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The default layer.
     fn default() -> Self {
         Self::new()
     }

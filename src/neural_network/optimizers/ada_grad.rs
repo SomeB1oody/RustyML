@@ -71,10 +71,10 @@ impl AdaGrad {
         })
     }
 
-    /// Enables clip-by-global-norm gradient clipping (disabled by default)
+    /// Enables a global gradient norm limit (disabled by default)
     ///
-    /// `global_clipnorm` scales every gradient so the global L2 norm never exceeds it, preserving
-    /// the gradient direction
+    /// The training loop scales gradients when their finite global L2 norm exceeds the
+    /// threshold. A non-finite norm leaves gradients unchanged.
     ///
     /// # Parameters
     ///
@@ -84,6 +84,10 @@ impl AdaGrad {
     ///
     /// - `Result<Self, Error>` - the updated optimizer, or an error if `global_clipnorm` is not
     ///   positive and finite
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If the threshold is not positive and finite.
     pub fn with_global_clipnorm(mut self, global_clipnorm: f32) -> Result<Self, Error> {
         validate_global_clipnorm(Some(global_clipnorm))?;
         self.global_clipnorm = Some(global_clipnorm);

@@ -20,7 +20,7 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// elementwise and keeps the original shape. Common inputs include 2D tensors for dense layers
 /// and 4D tensors for convolutional layers
 ///
-/// Unlike [`Activation::ReLU`], the negative side keeps a non-zero gradient. A unit whose
+/// Unlike [`Activation::ReLU`], the negative side keeps a gradient other than 0. A unit whose
 /// pre-activation stays negative for the whole batch still receives gradient, so it can
 /// recover. This is the standard answer to the dead-unit failure mode of ReLU
 ///
@@ -37,22 +37,22 @@ use crate::neural_network::{Ctx, Shape, Tensor};
 /// use rustyml::neural_network::losses::MeanSquaredError;
 /// use ndarray::Array2;
 ///
-/// // Create a 2D input tensor
+/// // Create a 2D input tensor.
 /// let x = Array2::from_shape_vec((2, 3), vec![-1.0, 2.0, -3.0, 4.0, -5.0, 6.0])
 ///     .unwrap()
 ///     .into_dyn();
 ///
-/// // Build a model with Leaky ReLU activation
+/// // Build a model with Leaky ReLU activation.
 /// let mut model = SequentialBuilder::new()
 ///     .add(LeakyReLU::new(0.3).unwrap())
 ///     .build(&Shape::known(x.shape()))
 ///     .unwrap();
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Forward propagation
+/// // Forward propagation.
 /// let output = model.predict(&x);
 ///
-/// // Output will be: [[-0.3, 2.0, -0.9], [4.0, -1.5, 6.0]]
+/// // Output will be: [[-0.3, 2.0, -0.9], [4.0, -1.5, 6.0]].
 /// ```
 #[derive(Debug)]
 pub struct LeakyReLU {

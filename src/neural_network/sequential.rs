@@ -63,11 +63,11 @@ use std::io::{BufWriter, Write};
 /// };
 /// use ndarray::Array;
 ///
-/// // Create training data
+/// // Create training data.
 /// let x = Array::ones((32, 784)).into_dyn(); // 32 samples, 784 features
 /// let y = Array::ones((32, 10)).into_dyn();  // 32 samples, 10 classes
 ///
-/// // Build a neural network
+/// // Build a neural network.
 /// let mut model = SequentialBuilder::new()
 ///     .add(Dense::new(128, Activation::ReLU).unwrap())
 ///     .add(Dense::new(64, Activation::ReLU).unwrap())
@@ -76,21 +76,21 @@ use std::io::{BufWriter, Write};
 ///     .unwrap();
 /// model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 ///
-/// // Display model structure
+/// // Display model structure.
 /// model.summary();
 ///
-/// // Train the model. History holds 1 loss value per epoch, each measured while that
-/// // epoch ran, rather than after it
+/// // Train the model. History holds 1 loss value per epoch, each measured while that.
+/// // epoch ran, rather than after it.
 /// let history = model.fit(&x, &y, 10).unwrap();
 /// println!("Per-epoch loss: {:?}", history.loss());
 ///
-/// // Score the weights the model is holding now: an inference-mode pass that updates nothing
+/// // Score the weights the model is holding now: an inference-mode pass that updates nothing.
 /// println!("Loss after training: {}", model.evaluate(&x, &y).unwrap());
 ///
-/// // Save model weights to file
+/// // Save model weights to file.
 /// model.save_to_path("model.bin").unwrap();
 ///
-/// // Create a new model with the same architecture, built for the same input shape
+/// // Create a new model with the same architecture, built for the same input shape.
 /// let mut new_model = SequentialBuilder::new()
 ///     .add(Dense::new(128, Activation::ReLU).unwrap())
 ///     .add(Dense::new(64, Activation::ReLU).unwrap())
@@ -98,17 +98,17 @@ use std::io::{BufWriter, Write};
 ///     .build(&Shape::known(&[32, 784]))
 ///     .unwrap();
 ///
-/// // Load weights from file
+/// // Load weights from file.
 /// new_model.load_from_path("model.bin").unwrap();
 ///
 /// // Compile before using (required for training, optional for prediction)
 /// new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 ///
-/// // Make predictions with loaded model
+/// // Make predictions with loaded model.
 /// let predictions = new_model.predict(&x).unwrap();
 /// println!("Predictions shape: {:?}", predictions.shape());
 ///
-/// // Clean up: remove the created file
+/// // Clean up: remove the created file.
 /// std::fs::remove_file("model.bin").unwrap();
 /// ```
 pub struct Sequential {
@@ -134,8 +134,8 @@ pub struct Sequential {
 ///
 /// This is the only way to reach a [`Sequential`]. [`add`](SequentialBuilder::add) never fails
 /// and chains, so a whole stack reads as 1 expression.
-/// [`build`](SequentialBuilder::build) takes the shape of the input, gives every layer the
-/// shape that reaches it, and threads each output shape into the next layer
+/// [`build`](SequentialBuilder::build) takes the input shape. It builds each layer for that
+/// shape and passes the output shape to the next layer.
 ///
 /// A layer allocates its arrays in
 /// [`UnaryLayer::build`](crate::neural_network::traits::UnaryLayer::build), so a model that
@@ -156,7 +156,7 @@ pub struct Sequential {
 ///     .build(&Shape::known(&[4, 3]))
 ///     .unwrap();
 ///
-/// // Every layer now holds its arrays
+/// // Every layer holds its arrays.
 /// assert_eq!(model.weight_paths(), vec!["0.kernel", "0.bias", "1.kernel", "1.bias"]);
 /// ```
 ///
@@ -232,9 +232,9 @@ impl SequentialBuilder {
     /// # Returns
     ///
     /// - `Self` - The builder, for chaining
-    // The name matches the usual word for appending a layer, and the signature is what a
-    // chained builder needs. `std::ops::Add` takes 2 values of 1 type and this takes a layer,
-    // so the 2 share only the word
+    ///   The name matches the usual word for appending a layer, and the signature is what a
+    ///   chained builder needs. `std::ops::Add` takes 2 values of 1 type and this takes a layer,
+    ///   so the 2 share only the word
     #[allow(clippy::should_implement_trait)]
     pub fn add<L: 'static + Layer>(mut self, layer: L) -> Self {
         self.layers.push(Box::new(layer));
@@ -243,9 +243,8 @@ impl SequentialBuilder {
 
     /// Builds every layer against `input_shape`, and gives back the model
     ///
-    /// The walk runs from the input. Each layer is built for the shape that reaches it, and
-    /// [`UnaryLayer::compute_output_shape`](super::traits::UnaryLayer::compute_output_shape)
-    /// gives the shape that reaches the next one. A layer that refuses the shape stops the
+    /// The walk runs from the input. Each layer builds for the shape that reaches it. Its shape method computes the input
+    /// shape of the next layer. A layer that refuses the shape stops the
     /// walk, and the message names the position of the layer and its type. Nothing is
     /// allocated past that position
     ///
@@ -264,16 +263,16 @@ impl SequentialBuilder {
     /// - `Error::InvalidInput` - If a layer refuses the shape that reaches it. The message
     ///   names the position of the layer and its type
     /// - `Error::InvalidInput` - If a layer tree breaks an address rule. The rules refuse 2
-    ///   arrays or 2 sublayers of 1 layer with 1 name. They also refuse an empty name, a name
-    ///   that holds a `.`, 2 sublayer rosters that disagree, and 1 layer at 2 nodes of 1 tree.
+    ///   arrays or 2 sublayers of 1 layer with 1 name. They also reject empty names and names with a `.`. Sublayer rosters must agree, and a
+    ///   layer cannot occupy 2 tree nodes.
     ///   The message names the layer path
     pub fn build(mut self, input_shape: &Shape) -> Result<Sequential, Error> {
         if self.layers.is_empty() {
             return Err(Error::NeuralNetwork(NnError::EmptyModel));
         }
 
-        // Axis 0 is exempt, because `fit` and `predict` already refuse a batch of 0 as an empty
-        // dataset, and every other validator in this module skips axis 0 for the same reason
+        // Skip axis 0 because the model accepts different batch sizes. The data checks reject
+        // empty tensors before a pass.
         if let Some(axis) = input_shape
             .axes()
             .iter()
@@ -308,8 +307,7 @@ impl SequentialBuilder {
             shape = output;
         }
 
-        // The arrays are real now, so every roster is the one the model will address. The check
-        // refuses a layer tree that gives 2 things 1 address, before the model computes anything
+        // The build has allocated the arrays. Reject duplicate addresses before the model runs.
         for (index, layer) in self.layers.iter_mut().enumerate() {
             check_addresses(index, &mut **layer)?;
         }
@@ -335,30 +333,14 @@ fn build_refusal(index: usize, layer_type: &str, input: &Shape, source: Error) -
     ))
 }
 
-/// The per-epoch training loss that [`Sequential::fit`] and [`Sequential::fit_with_batches`]
-/// record
+/// Loss values from the training epochs of a sequential or graph model.
 ///
-/// It holds 1 entry per epoch, in epoch order, so `loss()[e]` is epoch `e`'s loss.
-/// `loss().len()` is the number of epochs that actually ran. Training for 0 epochs yields an
-/// empty slice
+/// Each entry records the loss before the parameter updates for that epoch finish.
+/// [`Sequential::evaluate`] scores the current parameters after training.
 ///
-/// # Notes
-///
-/// Each entry is the mean per-sample loss **measured during** the epoch, not after it. Every
-/// batch contributes the loss from the forward pass that preceded that batch's own weight
-/// update. The value therefore describes the weights the model held while the epoch ran, never
-/// the weights the epoch ends with. Read the final entry as the trained model's loss, and you
-/// will be wrong in either direction. It reads **above** the truth while training converges,
-/// because the epoch's own updates improved on the weights it measured. It reads **below** the
-/// truth once the step size starts overshooting and those updates make things worse.
-/// [`evaluate`](Sequential::evaluate) is the call that scores the weights the model currently
-/// holds
-///
-/// Batches contribute in proportion to their sample count. So the short trailing batch that
-/// [`fit_with_batches`](Sequential::fit_with_batches) produces, when `batch_size` does not
-/// divide the dataset, pulls the epoch mean less than a full batch does. That makes the entry
-/// exactly the dataset-wide mean per-sample loss: each batch accumulates with a weight equal
-/// to its sample count, rather than an unweighted mean over batches
+/// [`Sequential::fit_with_batches`] weights batch losses by sample count.
+/// [`Graph::fit_with_batches`](crate::neural_network::graph::Graph::fit_with_batches) uses an unweighted mean of batch losses.
+/// A short final batch therefore has a different contribution in the 2 model types.
 #[derive(Debug, Clone, PartialEq)]
 pub struct History {
     /// 1 loss value per epoch, in epoch order
@@ -432,7 +414,7 @@ impl Sequential {
     /// The compiled optimizer's current learning rate
     ///
     /// The read half of [`set_learning_rate`](Self::set_learning_rate), so a schedule can derive
-    /// the next step size from the current one instead of tracking its own copy
+    /// the next step size from the current rate
     ///
     /// # Returns
     ///
@@ -551,8 +533,8 @@ impl Sequential {
     /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::DimensionMismatch` - If the
     ///   tensors are empty, rank-0, or disagree on the batch size
     /// - `Error::Computation` - If a layer fails during forward or backward pass
-    /// - `Error::Computation` - If a gradient lands at an address that no parameter reads, or
-    ///   if a state value stays in the context because no layer takes it back
+    /// - `Error::Computation` - If a gradient has no parameter, or a layer leaves proposed
+    ///   state in the context.
     /// - `Error::Computation` - If a layer calls a sublayer under a name that its roster gives
     ///   to another layer
     pub fn train_batch(&mut self, x: &Tensor, y: &Tensor) -> Result<f32, Error> {
@@ -570,11 +552,8 @@ impl Sequential {
             let input = output.as_ref().unwrap_or(x);
             let next = self.layers[scope].forward_many(&[input], &mut ctx)?;
             // The running statistics of a normalization layer and the random stream of a
-            // dropout layer reach the layer here, because the forward pass took `&self`. The
-            // walk reaches every sublayer of the position, and a value that no node takes back
-            // stops the step
-            // A state value moves only into the sublayer that its path names, so every call of
-            // the forward pass must reach that sublayer
+            // dropout layer reach the layer here, because the forward pass took `&self`. The walk reaches every sublayer. Each call must match its recorded path before
+            // the state moves into the layer. Unclaimed state stops the step.
             check_sublayer_calls(&self.layers[..=scope], &ctx)?;
             apply_state_tree(&mut *self.layers[scope], &LayerPath::root(scope), &mut ctx);
             check_state_taken(&ctx, scope)?;
@@ -603,10 +582,8 @@ impl Sequential {
             })?;
         }
 
-        // Every gradient of the pass must reach a parameter. The optimizer walk below skips an
-        // address that holds no gradient, so a gradient at an address no parameter reads would
-        // otherwise be dropped without a word
-        // Every sublayer call of the backward pass must reach the sublayer that its path names
+        // Every gradient of the pass must reach a parameter. The optimizer skips parameters without gradients. Reject unclaimed gradients and
+        // sublayer calls that do not match their paths.
         check_sublayer_calls(&self.layers, &ctx)?;
         check_every_gradient_is_claimed(&mut self.layers, ctx.grads())?;
 
@@ -627,9 +604,8 @@ impl Sequential {
         };
 
         // Parameter updates walk the canonical order of the model, from the input: the same
-        // order that `global_grad_norm` uses. The model position is the root of the parameter
-        // address that the optimizer keys its state on, so it must count from the input, never
-        // the output
+        // order that `global_grad_norm` uses. The model position is the root of each parameter address. Count positions from the
+        // input to keep optimizer state at the correct address.
         if let Some(ref mut optimizer) = self.optimizer {
             update_model(&mut **optimizer, &mut self.layers, ctx.grads(), grad_scale);
         }
@@ -668,8 +644,8 @@ impl Sequential {
     /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::DimensionMismatch` - If inputs
     ///   are empty, rank-0, or batch sizes disagree
     /// - `Error::Computation` - If a layer fails during forward or backward pass
-    /// - `Error::Computation` - If a gradient lands at an address that no parameter reads, or
-    ///   if a state value stays in the context because no layer takes it back
+    /// - `Error::Computation` - If a gradient has no parameter, or a layer leaves proposed
+    ///   state in the context.
     /// - `Error::Computation` - If a layer calls a sublayer under a name that its roster gives
     ///   to another layer
     pub fn fit(&mut self, x: &Tensor, y: &Tensor, epochs: u32) -> Result<History, Error> {
@@ -734,8 +710,8 @@ impl Sequential {
     ///   are empty, rank-0, or batch sizes disagree
     /// - `Error::InvalidParameter` - If `batch_size` is 0 or larger than the dataset
     /// - `Error::Computation` - If a layer fails during forward or backward pass
-    /// - `Error::Computation` - If a gradient lands at an address that no parameter reads, or
-    ///   if a state value stays in the context because no layer takes it back
+    /// - `Error::Computation` - If a gradient has no parameter, or a layer leaves proposed
+    ///   state in the context.
     /// - `Error::Computation` - If a layer calls a sublayer under a name that its roster gives
     ///   to another layer
     pub fn fit_with_batches(
@@ -816,7 +792,7 @@ impl Sequential {
                 }
             }
 
-            // `samples_seen` is `n_samples`, which validation proved non-zero
+            // `samples_seen` is `n_samples`, which validation proved greater than 0
             loss.push((weighted_loss / samples_seen as f64) as f32);
 
             #[cfg(not(feature = "show_progress"))]
@@ -841,8 +817,8 @@ impl Sequential {
     /// Layers behave exactly as in [`predict`](Self::predict): dropout and noise layers are the
     /// identity, and batch normalization reads its running statistics. On a model that contains
     /// 1 of these layers, this number is therefore *not* the number [`fit`](Self::fit) records
-    /// for the same data. Training-mode dropout inflates that number. `evaluate`'s number is the
-    /// more accurate of the 2
+    /// for the same data. Training and inference modes can produce different loss values. Neither mode guarantees
+    /// a higher loss.
     ///
     /// # Parameters
     ///
@@ -1063,11 +1039,7 @@ impl Sequential {
 
     /// Writes a named checkpoint of every array of the model to a binary file
     ///
-    /// The file holds the layer type of each position, and every array that the layer at that
-    /// position holds, under the name that the layer gives it. It holds the non-trainable
-    /// state next to the trainable parameters, so the running statistics of
-    /// [`BatchNormalization`](crate::neural_network::layers::BatchNormalization) go in it as
-    /// well. postcard writes the bytes. See
+    /// The file records each layer type and each named array at that position. The file also stores non-trainable arrays, such as batch normalization statistics. postcard writes the bytes. See
     /// [`checkpoint`](crate::neural_network::layers::checkpoint)
     ///
     /// The file carries no architecture and no layer configuration. A load therefore needs a
@@ -1108,18 +1080,15 @@ impl Sequential {
     /// Loads model weights from a binary file and applies them to the current model
     ///
     /// Reads a checkpoint that [`save_to_path`](Sequential::save_to_path) wrote and applies
-    /// every array of it to the layer that holds the matching path. The load is strict: the
-    /// file and the model must agree on the layer count, on the layer type of every position,
-    /// and on the name, the kind, and the shape of every array. A disagreement is an error
+    /// every array of it to the layer that holds the matching path. The file and model must have the same layer count and layer types. Each array must have
+    /// the same name, kind, and shape. A disagreement is an error
     /// that names the checkpoint path, and no lenient rule replaces it. Use
     /// [`load_partial_from_path`](Sequential::load_partial_from_path) to load what matches and
     /// read a report of the rest
     ///
     /// The model is already built, because [`SequentialBuilder::build`] is the only way to
-    /// reach this type. Every array therefore exists before the load writes into it. The file
-    /// carries the shape each layer was built for, and the load refuses a file whose build
-    /// shape differs from the model, so a checkpoint never lands in a model shaped for another
-    /// input. After loading, call `compile()` to set the optimizer and loss function
+    /// reach this type. Every array therefore exists before the load writes into it. The file records each layer build shape with a free batch axis. The load rejects a file
+    /// with different build shapes. After loading, call `compile()` to set the optimizer and loss function
     ///
     /// # Parameters
     ///
@@ -1135,7 +1104,7 @@ impl Sequential {
     ///
     /// - `Error::Io(IoError::Std)` - File not found or read operation failed
     /// - `Error::Io(IoError::UnsupportedModelFormat)` - The file is not a RustyML model, or a
-    ///   release whose on-disk format version differs from this one wrote it
+    ///   release with a different file format version wrote it
     /// - `Error::Io(IoError::Serialization)` - Deserialization failed
     /// - `Error::Io(IoError::ModelStructureMismatch)` - The file and the model disagree. The
     ///   message names the checkpoint path, or the layer path for a whole-layer
@@ -1151,9 +1120,7 @@ impl Sequential {
 
     /// Loads what the file and the model agree on, and reports the rest
     ///
-    /// This is the lenient load, and a caller asks for it by name. It writes an array when the
-    /// position holds the same layer type and the file holds the same name, the same kind, and
-    /// the same shape. Every other path of the model, and every path of the file that reached
+    /// This is the lenient load, and a caller asks for it by name. It writes an array when the layer type, array name, kind, and shape match. Every other path of the model, and every path of the file that reached
     /// no array, goes into the report. Nothing about the layer roster fails
     ///
     /// The header is still checked, because a file of another format version carries bytes
@@ -1165,14 +1132,14 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// - `crate::error::RustymlResult<LoadReport>` - The paths that took a value, the paths of
-    ///   the model that got none, and the paths of the file that reached no array
+    /// - `crate::error::RustymlResult<LoadReport>` - The applied, missing, and unused
+    ///   checkpoint paths.
     ///
     /// # Errors
     ///
     /// - `Error::Io(IoError::Std)` - File not found or read operation failed
     /// - `Error::Io(IoError::UnsupportedModelFormat)` - The file is not a RustyML model, or a
-    ///   release whose on-disk format version differs from this one wrote it
+    ///   release with a different file format version wrote it
     /// - `Error::Io(IoError::Serialization)` - Deserialization failed
     pub fn load_partial_from_path(
         &mut self,
@@ -1239,10 +1206,8 @@ mod tests {
     use super::Sequential;
 
     /// A forward pass takes `&self`, so a built model serves inference through a shared
-    /// reference. That holds only while every part of the model is `Send` and `Sync`, which
-    /// is why [`Layer`](crate::neural_network::traits::LayerBase),
-    /// [`Loss`](crate::neural_network::traits::Loss) and
-    /// [`Optimizer`](crate::neural_network::traits::Optimizer) all carry those bounds. This
+    /// reference. Every model component must be `Send` and `Sync`. The layer, loss, and optimizer traits
+    /// require these bounds. This
     /// test fails to compile if any of the 3 loses 1
     #[test]
     fn a_built_model_is_send_and_sync() {

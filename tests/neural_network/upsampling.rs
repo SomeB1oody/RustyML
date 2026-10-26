@@ -23,8 +23,6 @@ use rustyml::neural_network::traits::{Layer, UnaryLayer};
 
 use super::common::assert_allclose;
 
-// helpers
-
 /// Build a 3D Tensor from row-major data
 fn t3(a: usize, b: usize, c: usize, data: Vec<f32>) -> Tensor {
     Array3::from_shape_vec((a, b, c), data)
@@ -61,8 +59,6 @@ const MODES: [Interpolation; 5] = [
     Interpolation::Lanczos3,
     Interpolation::Lanczos5,
 ];
-
-// Shapes and value placement
 
 /// The layer repeats each step `size` times, in place, and the features stay together
 #[test]
@@ -151,8 +147,6 @@ fn up_sampling_3d_integer_grows_every_axis_equally() {
     assert_eq!(out.shape(), &[2, 4, 6, 2, 2]);
 }
 
-// Interpolation modes
-
 /// The interpolated modes match reference values for the same input
 #[test]
 fn up_sampling_2d_interpolated_modes_match_reference() {
@@ -239,8 +233,6 @@ fn up_sampling_2d_only_the_wide_kernels_overshoot() {
         }
     }
 }
-
-// Backward pass
 
 /// The repeat mode sends every output gradient back to the position the forward pass copied it
 /// from
@@ -333,8 +325,6 @@ fn up_sampling_rejects_a_factor_that_overflows_the_output() {
     }
 }
 
-// Layout
-
 /// An input whose memory is not in C order still gives the right values, in C order
 #[test]
 fn up_sampling_2d_accepts_an_input_that_is_not_in_c_order() {
@@ -382,8 +372,6 @@ fn up_sampling_layers_emit_gradients_in_c_order() {
         .unwrap();
     assert!(third.backward(&out, &mut ctx).unwrap().is_standard_layout());
 }
-
-// Serial and parallel agreement
 
 /// The repeat mode above the parallel gate gives the same bits as the same work below it
 ///
@@ -489,8 +477,6 @@ fn up_sampling_weighted_parallel_path_matches_the_serial_path() {
     );
 }
 
-// Error paths
-
 /// A factor of 0 would empty the tensor, so the constructor rejects it
 #[test]
 fn up_sampling_rejects_a_factor_of_zero() {
@@ -524,8 +510,8 @@ fn up_sampling_rejects_the_wrong_rank() {
     for (mut layer, x) in cases {
         let mut ctx = Ctx::training();
         match layer.forward_many_mut(&[&x], &mut ctx).unwrap_err() {
-            // The build of an unbuilt layer runs first and refuses the rank through the
-            // shared shape algebra, which names the layer, the rank it takes, and the shape
+            // The initial build rejects the rank through the shared shape checks. The error
+            // names the layer, the required rank, and the input shape.
             Error::InvalidInput(message) => {
                 assert!(message.contains("rank"), "unexpected message {message}")
             }
@@ -566,8 +552,6 @@ fn up_sampling_backward_checks_the_gradient_shape() {
     }
 }
 
-// Layer trait surface
-
 /// No layer of the family holds a parameter, and each one names itself for `summary()`
 #[test]
 fn up_sampling_layers_hold_no_parameter() {
@@ -604,8 +588,6 @@ fn up_sampling_output_shape_reports_the_enlarged_shape() {
         .unwrap();
     assert_eq!(volume.output_shape(), "(None, 2, 6, 12, 1)");
 }
-
-// Model integration
 
 /// A pooling stage and an upsampling stage of the same factor restore the original shape
 #[test]

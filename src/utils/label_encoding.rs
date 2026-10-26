@@ -16,8 +16,8 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 ///
 /// # Parameters
 ///
-/// - `labels` - A 1D array of integer labels (e.g. \[0, 1, 2, 1, 0\])
-/// - `num_classes` - Optional class count. If `None`, this is the maximum label value plus 1
+/// - `labels` - A 1D array of integer labels (for example \[0, 1, 2, 1, 0\])
+/// - `num_classes` - Optional class count. The default is the maximum label plus 1, or 1 for empty input
 ///
 /// # Returns
 ///
@@ -176,9 +176,9 @@ where
 
 /// Converts one-hot encoded format back to sparse categorical labels
 ///
-/// Inverse of `to_categorical`. Each row is reduced to the index of its highest
-/// value, which turns model predictions back into class labels. Ties resolve to
-/// the first (lowest) index, matching NumPy's `argmax`
+/// For one-hot input, this reverses `to_categorical`. Each row is reduced to the index of its highest
+/// value, which turns model predictions back into class labels.
+/// Ties select the lowest index. A row with no columns produces label 0.
 ///
 /// # Parameters
 ///

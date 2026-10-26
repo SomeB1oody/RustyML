@@ -18,22 +18,17 @@ use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix1, Ix2};
 
 /// Optimization strategy for fitting [`LinearRegression`], carrying that strategy's own settings
 ///
-/// Each variant owns exactly the knobs it uses. The closed form takes no learning rate. The
-/// iterative path cannot leave one unset. Validate a variant by passing it to
-/// [`LinearRegression::with_solver`], which rejects an unusable configuration
+/// Each variant stores its required settings. [`LinearRegression::with_solver`] validates those settings.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize, Serialize)]
 pub enum LeastSquaresSolver {
     /// Closed-form normal-equation / ridge solution via SVD least squares
     ///
-    /// The default, and the analogue of scikit-learn's `LinearRegression()`. Exact and
-    /// hyperparameter-free, but it supports only no regularization or L2 (L1 has no closed form)
+    /// This default solver supports no penalty or an L2 penalty. It solves an augmented least-squares system with SVD.
     #[default]
     Normal,
     /// Iterative gradient descent, supporting L1, L2, or no regularization
     ///
-    /// The analogue of scikit-learn's `SGDRegressor`, which also fits by gradient steps under an
-    /// L1 or L2 penalty. Needed for L1, since [`Normal`](LeastSquaresSolver::Normal) cannot
-    /// express it
+    /// Use this solver for an L1 penalty. Each iteration updates all coefficients from the full training set.
     GradientDescent {
         /// Step size applied to each gradient update. Must be positive and finite
         learning_rate: f64,
@@ -61,42 +56,42 @@ pub enum LeastSquaresSolver {
 ///
 /// // Create a linear regression model.
 /// // `LeastSquaresSolver::GradientDescent` carries the settings only it uses.
-/// // `LinearRegression::new(true)` alone gives the closed-form `LeastSquaresSolver::Normal`
+/// // `LinearRegression::new(true)` alone gives the closed-form `LeastSquaresSolver::Normal`.
 /// let mut model = LinearRegression::new(true)
 ///     .with_solver(LeastSquaresSolver::GradientDescent { learning_rate: 0.01, max_iter: 1000, tol: 1e-6 })
 ///     .unwrap();
 ///
-/// // Prepare training data
+/// // Prepare training data.
 /// let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];
 /// let raw_y = vec![6.0, 9.0, 12.0];
 ///
-/// // Convert Vec to ndarray types
+/// // Convert Vec to ndarray types.
 /// let x = Array2::from_shape_vec((3, 2), raw_x.into_iter().flatten().collect()).unwrap();
 /// let y = Array1::from_vec(raw_y);
 ///
-/// // Train the model
+/// // Train the model.
 /// model.fit(&x, &y).unwrap();
 ///
-/// // Make predictions
+/// // Make predictions.
 /// let new_data = Array2::from_shape_vec((1, 2), vec![4.0, 5.0]).unwrap();
 /// let predictions = model.predict(&new_data);
 ///
-/// // Save the trained model to a file
+/// // Save the trained model to a file.
 /// model.save_to_path("linear_regression_model.bin").unwrap();
 ///
-/// // Load the model from the file
+/// // Load the model from the file.
 /// let loaded_model = LinearRegression::load_from_path("linear_regression_model.bin").unwrap();
 ///
-/// // Use the loaded model for predictions
+/// // Use the loaded model for predictions.
 /// let loaded_predictions = loaded_model.predict(&new_data);
 ///
-/// // LinearRegression derives Clone, so this copies the model
+/// // LinearRegression derives Clone, so this copies the model.
 /// let model_copy = model.clone();
 ///
-/// // LinearRegression derives Debug, so this prints the model details
+/// // LinearRegression derives Debug, so this prints the model details.
 /// println!("{:?}", model);
 ///
-/// // Clean up the created file
+/// // Clean up the created file.
 /// std::fs::remove_file("linear_regression_model.bin").unwrap();
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -131,10 +126,9 @@ impl Default for LinearRegression {
     ///
     /// - `LinearRegression` - a new instance with default parameters
     ///
-    /// # scikit-learn Parity
+    /// # Notes
     ///
-    /// The analogue of Python's `LinearRegression()`, which is exact OLS, so the default here
-    /// uses [`LeastSquaresSolver::Normal`]
+    /// The default solver computes an ordinary least-squares solution without a penalty.
     fn default() -> Self {
         Self::new(true)
     }
@@ -255,8 +249,11 @@ impl LinearRegression {
     ///
     /// # Errors
     ///
-    /// - `Error::NonFinite` - if numerical issues like NaN or infinity occur during training
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - if input dimensions are inconsistent
+    /// - `Error::EmptyInput` - If the feature matrix has no rows or the target is empty.
+    /// - `Error::DimensionMismatch` - If the target length differs from the sample count.
+    /// - `Error::NonFinite` - If features or intermediate numerical results are not finite.
+    /// - `Error::InvalidInput` - If the normal solver receives an L1 penalty.
+    /// - `Error::Computation` - If the SVD factors cannot supply the least-squares solution.
     ///
     /// # Performance
     ///
@@ -397,10 +394,7 @@ impl LinearRegression {
 
             // Add regularization terms to gradients
             //
-            // L1 is absent here. The proximal operator below applies it after the gradient step.
-            // Folding `alpha * sign(w)` into the gradient only lets a weight approach zero
-            // asymptotically. A sub-gradient Lasso never reaches the exact zeros that make L1 a
-            // feature selector.
+            // The L1 proximal step follows the gradient update. Only the L2 penalty contributes to this gradient.
             match &self.regularization_type {
                 None | Some(RegularizationType::L1(_)) => {}
                 Some(RegularizationType::L2(alpha)) => {
@@ -415,10 +409,8 @@ impl LinearRegression {
                 intercept -= learning_rate * intercept_gradient;
             }
 
-            // Proximal step for L1 (ISTA). Soft-thresholding by `learning_rate * alpha` is the
-            // exact minimizer of `0.5 * ||w - v||^2 + learning_rate * alpha * ||w||_1`. A weight
-            // the data cannot justify lands on exactly 0.0 and stays there. This step leaves the
-            // intercept alone, since it carries no penalty.
+            // Apply the L1 proximal step with threshold `learning_rate * alpha`.
+            // Leave the intercept without a penalty.
             if let Some(RegularizationType::L1(alpha)) = &self.regularization_type {
                 let shrink = learning_rate * alpha;
                 weights.mapv_inplace(|w| {
@@ -474,14 +466,8 @@ impl LinearRegression {
 
     /// Fits the model with the closed-form normal-equation (ridge) solution
     ///
-    /// Minimizes the same objective as the gradient-descent path,
-    /// `(1/2n)||Xw + b - y||^2 + (alpha/2)||w||^2`. Its minimizer satisfies the ridge normal
-    /// equations with effective penalty `lambda = n * alpha`. When `fit_intercept` is set, this
-    /// method centers the features and target on their means. This keeps the intercept
-    /// unpenalized. It then recovers the intercept as `mean(y)` minus the dot product of
-    /// `mean(x)` and `w`. It solves the system with an SVD least squares on the augmented design
-    /// `[Xc; sqrt(lambda) I]`. This gives the minimum-norm solution even when `X^T X` is
-    /// singular, for example with collinear or wide data
+    /// The solver stacks centered features above `sqrt(lambda)` times the identity matrix.
+    /// SVD returns the minimum-norm solution when this design is rank deficient.
     fn fit_normal<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -595,8 +581,10 @@ impl LinearRegression {
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - if input data is invalid
-    /// - `Error::NonFinite` - if an error occurs during fitting or prediction
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If training data is empty or target lengths differ.
+    /// - `Error::NonFinite` - If features, intermediate results, or predictions are not finite.
+    /// - `Error::InvalidInput` - If the normal solver receives an L1 penalty.
+    /// - `Error::Computation` - If the SVD factors cannot supply the least-squares solution.
     pub fn fit_predict<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -674,10 +662,9 @@ impl LinearRegression {
 
 /// Solves the ridge least-squares problem `min ||x w - y||^2 + ridge_lambda ||w||^2`
 ///
-/// Stacks the design as `[x; sqrt(ridge_lambda) I]` with target `[y; 0]`. It solves the
-/// resulting least-squares system with an SVD, which yields the minimum-norm solution even
-/// when `x` is rank-deficient, for example collinear or wide data. `ridge_lambda == 0` reduces
-/// to ordinary least squares
+/// The design stacks `x` above `sqrt(ridge_lambda)` times the identity matrix.
+/// The target stacks `y` above 0 values. SVD solves this augmented system.
+/// A penalty of 0 gives ordinary least squares.
 fn solve_ridge_lstsq(
     x: &Array2<f64>,
     y: &Array1<f64>,

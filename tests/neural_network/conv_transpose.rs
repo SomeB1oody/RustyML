@@ -30,8 +30,6 @@ use rustyml::neural_network::{NnError, Tensor};
 
 use super::common::{assert_allclose, named};
 
-// helpers
-
 /// A rank-3 tensor from a flat row-major list
 fn t3(shape: (usize, usize, usize), data: Vec<f32>) -> Tensor {
     Array::from_shape_vec(shape, data).unwrap().into_dyn()
@@ -48,8 +46,6 @@ fn ramp_of(shape: &[usize]) -> Tensor {
     let data: Vec<f32> = (0..n).map(|v| 0.25 * v as f32 - 1.0).collect();
     Array::from_shape_vec(IxDyn(shape), data).unwrap()
 }
-
-// Conv1DTranspose - forward with known weights
 
 /// Every input position writes its value times the whole kernel, and the writes accumulate where
 /// they overlap
@@ -180,8 +176,6 @@ fn conv1d_transpose_filter_axis_is_innermost() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-// Conv1DTranspose - output length rules
-
 /// Valid output length is `input * stride + max(kernel - stride, 0)` across parameterized cases
 #[test]
 fn conv1d_transpose_valid_output_length_cases() {
@@ -233,8 +227,6 @@ fn conv1d_transpose_same_output_length_cases() {
     }
 }
 
-// Conv1DTranspose - Layer trait surface
-
 /// param_count is `kernel * filters * channels + filters`
 #[test]
 fn conv1d_transpose_param_count_formula() {
@@ -266,8 +258,6 @@ fn conv1d_transpose_reports_its_type_and_output_shape() {
     // Same: 5 * 2 = 10
     assert_eq!(same.output_shape(), "(None, 10, 3)");
 }
-
-// Conv2DTranspose - forward with known weights
 
 /// A 2x2 input under a 2x2 kernel at stride 1 grows to 3x3, and the 4 windows overlap in the
 /// middle
@@ -364,8 +354,6 @@ fn conv2d_transpose_same_padding_doubles_both_axes() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-// Conv2DTranspose - output shape rules
-
 /// Each axis applies its own rule, so a mixed kernel and a mixed stride do not interfere
 #[test]
 fn conv2d_transpose_output_shape_cases() {
@@ -398,8 +386,6 @@ fn conv2d_transpose_output_shape_cases() {
         );
     }
 }
-
-// Conv2DTranspose - Layer trait surface
 
 /// param_count is `kh * kw * filters * channels + filters`
 #[test]
@@ -452,8 +438,6 @@ fn conv2d_transpose_with_random_state_is_reproducible() {
         "every weight must stay inside the Xavier bound {bound}"
     );
 }
-
-// Conv3DTranspose
 
 /// A single voxel under a 2x2x2 kernel scales the whole kernel into a 2x2x2 block
 #[test]
@@ -524,8 +508,6 @@ fn conv3d_transpose_weights_and_param_count() {
     assert_eq!(named(&layer, "kernel").shape(), &[2, 3, 2, 2, 2]);
     assert_eq!(named(&layer, "bias").shape(), &[2]);
 }
-
-// Round trip against the plain convolution
 
 /// A transposed convolution returns to the shape the matching convolution consumed
 ///
@@ -675,8 +657,6 @@ fn conv2d_transpose_forward_equals_the_convolution_input_gradient() {
         assert_allclose(&from_forward, &from_backward, 0.0f32);
     }
 }
-
-// Error paths
 
 /// Each invalid scalar hyperparameter makes the constructor return InvalidParameter
 #[test]
@@ -946,8 +926,6 @@ fn conv3d_transpose_with_random_state_is_reproducible() {
     assert_eq!(first.output_shape(), "(None, 7, 10, 12, 3)");
 }
 
-// Layout
-
 /// An input that is not in C order gives the same values as the same data in C order. The
 /// output is in C order either way
 #[test]
@@ -1048,8 +1026,6 @@ fn conv2d_transpose_backward_accepts_a_gradient_that_is_not_in_c_order() {
 
     assert_eq!(from_view, from_contiguous);
 }
-
-// Serial and parallel agreement
 
 /// The parallel path gives the same bits as the serial path
 ///
@@ -1164,8 +1140,6 @@ fn conv2d_transpose_parallel_gradient_counts_are_constant() {
         assert_abs_diff_eq!(v, (batch * out_side * out_side) as f32, epsilon = 1e-1f32);
     }
 }
-
-// Model integration
 
 /// A transposed convolution trains inside a model, and the loss falls
 #[test]

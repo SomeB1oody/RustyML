@@ -45,10 +45,10 @@ pub use up_sampling_3d::UpSampling3D;
 /// ```rust
 /// use rustyml::neural_network::layers::{Interpolation, UpSampling2D};
 ///
-/// // Repeat each pixel into a 2x2 block
+/// // Repeat each pixel into a 2x2 block.
 /// let blocky = UpSampling2D::new(2, Interpolation::Nearest).unwrap();
 ///
-/// // Blend each new pixel from its neighbors instead
+/// // Blend each new pixel from its neighbors instead.
 /// let smooth = UpSampling2D::new(2, Interpolation::Bilinear).unwrap();
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -78,14 +78,17 @@ pub enum Interpolation {
 /// ```rust
 /// use rustyml::neural_network::layers::{Interpolation, UpSampling2D};
 ///
-/// // Twice the height and twice the width
+/// // Twice the height and twice the width.
 /// let square = UpSampling2D::new(2, Interpolation::Nearest).unwrap();
 ///
-/// // Twice the height and 3 times the width
+/// // Twice the height and 3 times the width.
 /// let uneven = UpSampling2D::new((2, 3), Interpolation::Nearest).unwrap();
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Factor2D([usize; 2]);
+pub struct Factor2D(
+    /// Scale factors in spatial axis order.
+    [usize; 2],
+);
 
 impl From<usize> for Factor2D {
     fn from(factor: usize) -> Self {
@@ -111,14 +114,17 @@ impl From<(usize, usize)> for Factor2D {
 /// ```rust
 /// use rustyml::neural_network::layers::UpSampling3D;
 ///
-/// // Twice the extent on all 3 spatial axes
+/// // Twice the extent on all 3 spatial axes.
 /// let cube = UpSampling3D::new(2).unwrap();
 ///
-/// // A different factor on each axis
+/// // A different factor on each axis.
 /// let uneven = UpSampling3D::new((1, 2, 4)).unwrap();
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Factor3D([usize; 3]);
+pub struct Factor3D(
+    /// Scale factors in spatial axis order.
+    [usize; 3],
+);
 
 impl From<usize> for Factor3D {
     fn from(factor: usize) -> Self {

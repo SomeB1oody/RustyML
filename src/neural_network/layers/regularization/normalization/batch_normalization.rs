@@ -51,13 +51,13 @@ tunable_gate! {
 /// use rustyml::neural_network::Ctx;
 /// use ndarray::Array2;
 ///
-/// // Create a BatchNormalization layer
+/// // Create a BatchNormalization layer.
 /// let mut bn = BatchNormalization::new(0.99, 1e-5).unwrap();
 ///
-/// // Create input tensor
+/// // Create input tensor.
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
-/// // During training, normalizes the input
+/// // During training, normalizes the input.
 /// let mut ctx = Ctx::training();
 /// let output = bn.forward_mut(&input, &mut ctx).unwrap();
 /// ```
@@ -78,7 +78,7 @@ pub struct BatchNormalization {
     /// Shift parameter (trainable)
     ///
     /// The array stays allocated and holds every element at 0 when `center` is false. A shift
-    /// of 0 changes every value except a negative zero, which it turns into a positive zero.
+    /// of 0 changes every value except a negative 0, which it turns into a positive 0.
     /// `weights` hides the array and `parameters_mut` never yields it
     beta: Tensor,
     /// Running mean for inference
@@ -183,7 +183,14 @@ impl BatchNormalization {
     /// - `moving_mean` - Running mean for inference
     /// - `moving_variance` - Running variance for inference
     ///
+    /// # Returns
+    ///
+    /// - `Result<(), Error>` - `Ok(())` after all supplied weights are assigned.
+    ///
     /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::NotBuilt)` - If the layer has not been built.
+    /// - `Error::InvalidParameter` - If an optional array conflicts with its scale or center flag.
     ///
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any provided weight does not match the
     ///   layer's expected shape
@@ -347,8 +354,8 @@ impl UnaryLayer for BatchNormalization {
 
         if ctx.is_training() {
             let total_elements = input.len();
-            // Every buffer derived from `input` below is either a fresh `Tensor::zeros` or an
-            // owned ndarray result, so the rank >= 2 arms below can take the slice directly
+            // Buffers derived from `input` are fresh `Tensor::zeros` arrays or owned ndarray
+            // results. The rank >= 2 paths can access their slices directly
             let use_col_fold = input.ndim() >= 2;
             let channels = if use_col_fold {
                 input.shape()[input.ndim() - 1]
@@ -657,6 +664,7 @@ impl UnaryLayer for BatchNormalization {
 }
 
 /// Unit tests for the batch-normalization layer and its column-fold kernels
+/// Tests for this module.
 #[cfg(test)]
 mod tests {
     use super::super::folds::rows_per_block;
@@ -764,10 +772,10 @@ mod tests {
 
     /// A rank-4 input normalizes per channel over batch and every spatial position
     ///
-    /// Channel 0 holds 1..4 and channel 1 holds 5..8 across the 4 spatial positions, so each
-    /// channel has mean `2.5`/`6.5` and variance `1.25`. Deriving those by hand is what makes
-    /// this a layout test. If the channel axis were read anywhere but last, the 2 channels
-    /// would mix, and neither number would come out
+    /// Channel 0 holds 1..4, and channel 1 holds 5..8. Their means are `2.5` and `6.5`, and
+    /// both variances are `1.25`. Deriving those by hand is what makes this a layout test. If
+    /// the channel axis were read anywhere but last, the 2 channels would mix, and neither
+    /// number would come out
     #[test]
     fn spatial_forward_normalizes_per_channel_hand_derived() {
         let mut layer = BatchNormalization::new(0.9, 1e-5).unwrap();
