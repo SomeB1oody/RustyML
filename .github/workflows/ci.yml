@@ -67,3 +67,29 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Build documentation
         run: cargo doc --all-features --no-deps
+
+  guide-examples:
+    name: Guide examples (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      CARGO_TARGET_DIR: target/guide-check
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target/guide-check"
+      - name: Test output comparison
+        run: python3 -m unittest discover -s guide -p 'test_check_examples.py'
+      - name: Check guide examples
+        run: python3 guide/check_examples.py

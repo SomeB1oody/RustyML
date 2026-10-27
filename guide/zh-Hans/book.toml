@@ -1,7 +1,7 @@
 [book]
 title = "RustyML 使用指南"
 authors = ["SomeB1oody"]
-description = "RustyML 上手指南：用纯 Rust 做机器学习与深度学习。"
+description = "RustyML 模型、数据工具和评估指标的使用说明。"
 language = "zh-Hans"
 src = "src"
 

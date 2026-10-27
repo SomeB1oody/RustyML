@@ -1,0 +1,61 @@
+[package]
+name = "rustyml-guide-examples"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+rustyml = { path = "../.." }
+ndarray = "=0.17.2"
+
+[[bin]]
+name = "data_labels"
+path = "data_labels.rs"
+
+[[bin]]
+name = "data_prepare"
+path = "data_prepare.rs"
+
+[[bin]]
+name = "errors"
+path = "errors.rs"
+
+[[bin]]
+name = "first_model"
+path = "first_model.rs"
+
+[[bin]]
+name = "metrics_clusters"
+path = "metrics_clusters.rs"
+
+[[bin]]
+name = "metrics_scores"
+path = "metrics_scores.rs"
+
+[[bin]]
+name = "ml_logistic"
+path = "ml_logistic.rs"
+
+[[bin]]
+name = "ml_model_files"
+path = "ml_model_files.rs"
+
+[[bin]]
+name = "ml_supervised"
+path = "ml_supervised.rs"
+
+[[bin]]
+name = "ml_unsupervised"
+path = "ml_unsupervised.rs"
+
+[[bin]]
+name = "nn_regression"
+path = "nn_regression.rs"
+
+[[bin]]
+name = "nn_shapes"
+path = "nn_shapes.rs"
+
+[[bin]]
+name = "seeds"
+path = "seeds.rs"
