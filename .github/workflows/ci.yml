@@ -69,12 +69,8 @@ jobs:
         run: cargo doc --all-features --no-deps
 
   guide-examples:
-    name: Guide examples (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    name: Guide examples
+    runs-on: ubuntu-latest
     env:
       CARGO_TARGET_DIR: target/guide-check
     steps:

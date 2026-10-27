@@ -1,7 +1,7 @@
 # RustyML 使用指南
 
 RustyML 为 Rust 提供机器学习模型、神经网络、数据工具和评估指标。
-本书介绍 RustyML 0.16.0 中主要公开 API 的使用方法。
+本书介绍 RustyML 0.17.0 中主要公开 API 的使用方法。
 阅读本书需要基本的 Rust 和 Cargo 知识。
 
 先阅读[安装](installation.md)，再运行[第一个模型](first-model.md)。
@@ -21,4 +21,4 @@ RustyML 为 Rust 提供机器学习模型、神经网络、数据工具和评估
 
 示例使用小型数组说明 API 的用法。
 示例中的分数不代表模型在实际数据集上的表现。
-完整的类型和方法说明见 [API 文档](https://docs.rs/rustyml/0.16.0/rustyml/)。
+完整的类型和方法说明见 [API 文档](https://docs.rs/rustyml/0.17.0/rustyml/)。

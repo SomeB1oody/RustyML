@@ -1,6 +1,6 @@
 # Installation
 
-RustyML 0.16.0 requires Rust 1.89.0 or later.
+RustyML 0.17.0 requires Rust 1.89.0 or later.
 The examples use Rust edition 2024 and ndarray 0.17.2.
 
 ## Create a project
@@ -21,7 +21,7 @@ The examples use Rust edition 2024 and ndarray 0.17.2.
 
    ```toml
    [dependencies]
-   rustyml = "=0.16.0"
+   rustyml = "=0.17.0"
    ndarray = "=0.17.2"
    ```
 
@@ -43,7 +43,7 @@ For example, this dependency supports classical models, data utilities, and eval
 
 ```toml
 [dependencies]
-rustyml = { version = "=0.16.0", default-features = false, features = ["machine_learning", "utils", "metrics"] }
+rustyml = { version = "=0.17.0", default-features = false, features = ["machine_learning", "utils", "metrics"] }
 ndarray = "=0.17.2"
 ```
 

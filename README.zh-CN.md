@@ -36,7 +36,7 @@ RustyML 提供数据预处理、机器学习模型、神经网络和评估指标
 
 ```toml
 [dependencies]
-rustyml = "*"
+rustyml = "0.17.0"
 ndarray = "0.17"
 ```
 
@@ -44,16 +44,16 @@ ndarray = "0.17"
 
 ```toml,ignore
 # Everything (ml, nn, utils, metrics, math)
-rustyml = "*"
+rustyml = "0.17.0"
 
 # Just the neural-network framework
-rustyml = { version = "*", default-features = false, features = ["neural_network"] }
+rustyml = { version = "0.17.0", default-features = false, features = ["neural_network"] }
 
 # Just the evaluation metrics
-rustyml = { version = "*", default-features = false, features = ["metrics"] }
+rustyml = { version = "0.17.0", default-features = false, features = ["metrics"] }
 
 # Show training progress bars in the terminal
-rustyml = { version = "*", features = ["show_progress"] }
+rustyml = { version = "0.17.0", features = ["show_progress"] }
 ```
 
 **最低支持 Rust 版本（MSRV）：** Rust 1.89+（edition 2024）。

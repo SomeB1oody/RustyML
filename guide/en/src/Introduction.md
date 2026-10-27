@@ -1,7 +1,7 @@
 # RustyML User Guide
 
 RustyML provides machine learning models, neural networks, data utilities, and evaluation metrics for Rust.
-This book explains the main public APIs in RustyML 0.16.0.
+This book explains the main public APIs in RustyML 0.17.0.
 It assumes basic Rust and Cargo knowledge.
 
 Start with [Installation](installation.md), then run [Your first model](first-model.md).
@@ -21,4 +21,4 @@ Read the other chapters when you need their APIs.
 
 The examples use small arrays to show API use.
 Their scores do not measure performance on real datasets.
-For complete type and method details, use the [API reference](https://docs.rs/rustyml/0.16.0/rustyml/).
+For complete type and method details, use the [API reference](https://docs.rs/rustyml/0.17.0/rustyml/).

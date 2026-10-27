@@ -4,11 +4,10 @@ This file records significant changes by version after 2025-3-24.
 
 See [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more information.
 
-## [Unreleased]
+## [v0.17.0] - 2026-10-27
 
 ### Added
 - **A layer can hold other layers, and each sublayer gets its own parameter address.** `LayerBase::sublayers` and `sublayers_mut` list the sublayers of a layer by name, through the new `Sublayer` and `SublayerMut` views. Both return an empty list by default. A layer calls each sublayer inside `Ctx::sublayer(name, &sublayer, f)`. For repeated sublayer calls in 1 pass, use `Ctx::sublayer_call(name, call, &sublayer, f)`.
-
   Each call number gets its own cache stack. Every channel of the context then keys on the sublayer. 2 sublayers of 1 type therefore never share a gradient, an optimizer buffer, a state value, or a cache. The frame of a sublayer call leaves the context on a normal return, on an error, and on a panic.
   - A layer that holds other layers lists them in `sublayers`. It does not pass their arrays on as its own under a prefixed name.
   - Optimizer updates, global gradient norms, state application, checkpoints, and `weight_paths` walk each layer tree in pre-order. They visit the layer before its sublayers, in roster order.
@@ -21,6 +20,9 @@ See [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more informa
 - **`ActivationInput` and `ActivationCache` name the tensor that the backward pass of an activation reads.** `Activation::saves()` returns `ActivationInput::PreActivation` for GELU, SiLU, and Mish, and `ActivationInput::Output` for every other variant. `Activation::forward_train(z)` returns the activated output and an `ActivationCache` that holds the saved tensor. `Activation::output_of(&cache)` gives the activated output that a cache stands for. A host layer caches 1 activation tensor, never both.
 
 ### Changed
+
+- Enable `indicatif` only with `show_progress`, so neural-network builds without progress bars do not pull in the progress-bar dependency.
+- Update `thiserror` from 2.0.20 to 2.0.21 and refresh transitive dependencies within the Rust 1.89 minimum supported version.
 
 - **Breaking: `ParamId` is `{ layer: LayerPath, name }` in place of `{ scope, name }`, and it is no longer `Copy`.** `ParamId::new(scope, name)` still addresses the layer at a model position. `ParamId::at(path, name)` and `LayerPath::param(name)` address a sublayer. `ParamId` implements `Display` and prints its checkpoint path.
 - **Breaking: `Grads::get` takes `&ParamId`, and `Grads::iter` yields `(&ParamId, &Tensor)`.**

@@ -1,6 +1,6 @@
 # 安装
 
-RustyML 0.16.0 要求 Rust 1.89.0 或更高版本。
+RustyML 0.17.0 要求 Rust 1.89.0 或更高版本。
 示例使用 Rust 2024 edition 和 ndarray 0.17.2。
 
 ## 创建项目
@@ -21,7 +21,7 @@ RustyML 0.16.0 要求 Rust 1.89.0 或更高版本。
 
    ```toml
    [dependencies]
-   rustyml = "=0.16.0"
+   rustyml = "=0.17.0"
    ndarray = "=0.17.2"
    ```
 
@@ -43,7 +43,7 @@ RustyML 默认启用全部公开模块。
 
 ```toml
 [dependencies]
-rustyml = { version = "=0.16.0", default-features = false, features = ["machine_learning", "utils", "metrics"] }
+rustyml = { version = "=0.17.0", default-features = false, features = ["machine_learning", "utils", "metrics"] }
 ndarray = "=0.17.2"
 ```
 

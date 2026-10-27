@@ -11,7 +11,7 @@
 //! Add RustyML to your `Cargo.toml`:
 //! ```toml
 //! [dependencies]
-//! rustyml = "*"
+//! rustyml = "0.17.0"
 //! # The default feature set is `full`. To slim the build, set `default-features = false` and
 //! # list the features you need, for example `features = ["machine_learning"]`
 //! # Add `"show_progress"` to show progress bars during training
@@ -62,7 +62,7 @@
 //! Add RustyML to your `Cargo.toml`:
 //! ```toml
 //! [dependencies]
-//! rustyml = "*"
+//! rustyml = "0.17.0"
 //! # The default feature set is `full`. To slim the build, set `default-features = false` and
 //! # list the features you need, for example `features = ["neural_network"]`
 //! # Add `"show_progress"` to show progress bars during training
